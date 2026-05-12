@@ -37,3 +37,4 @@ Thumbs.db
 
 # Local model cache (downloaded GGUFs — large, machine-specific)
 .samantha/
+.superpowers/
