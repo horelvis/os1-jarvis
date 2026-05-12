@@ -1,0 +1,43 @@
+[project]
+name = "samantha-backend"
+version = "0.1.0"
+description = "Samantha backend — FastAPI server (mock for development, real models in production)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "python-multipart>=0.0.20",  # para uploads de audio
+    "loguru>=0.7",                # logging legible
+]
+
+[project.optional-dependencies]
+# Dependencias que SOLO se necesitan cuando integremos modelos reales.
+# Durante desarrollo con el mock, no las instalamos.
+real = [
+    "vllm>=0.6.0",
+    "faster-whisper>=1.0.3",
+    "piper-tts>=1.2.0",
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0",
+    "silero-vad>=5.1",
+    "sounddevice>=0.4.7",
+    "numpy>=2.0",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",  # cliente HTTP para tests
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["samantha*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

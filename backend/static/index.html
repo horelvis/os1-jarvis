@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Samantha</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #d1684e;
+    color: white;
+    font-family: -apple-system, system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    user-select: none;
+  }
+  h1 {
+    font-weight: 200;
+    letter-spacing: 0.1em;
+    font-size: 3rem;
+    margin: 0 0 2rem;
+  }
+  .status {
+    background: rgba(255,255,255,0.1);
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.85rem;
+    width: min(560px, 90vw);
+    text-align: left;
+    line-height: 1.8;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  .ok { color: #c8f5d8; }
+  .err { color: #f5b0a0; }
+  button {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.4);
+    color: white;
+    padding: 12px 28px;
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+    border-radius: 999px;
+    margin: 0.5rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-family: inherit;
+  }
+  button:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: white;
+  }
+  .actions { margin-top: 2rem; display: flex; flex-wrap: wrap; justify-content: center; max-width: 600px; }
+  .subtitle {
+    opacity: 0.6;
+    font-size: 0.8rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 2rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>Samantha</h1>
+<div class="subtitle">tauri skeleton — fase 1</div>
+
+<div class="status" id="status">
+  Esperando inicializacion...
+</div>
+
+<div class="actions">
+  <button onclick="testHello()">hello (sin backend)</button>
+  <button onclick="testBackend()">ping backend</button>
+  <button onclick="testChat()">test chat</button>
+  <button onclick="testInfo()">system info</button>
+  <button onclick="clearLog()">clear</button>
+</div>
+
+<script>
+const { invoke } = window.__TAURI__.core;
+const statusEl = document.getElementById('status');
+
+function log(msg, kind) {
+  const time = new Date().toLocaleTimeString();
+  const cls = kind === 'ok' ? 'ok' : kind === 'err' ? 'err' : '';
+  statusEl.innerHTML = '<span class="' + cls + '">[' + time + '] ' + msg + '</span><br>' + statusEl.innerHTML;
+}
+
+function clearLog() {
+  statusEl.innerHTML = '';
+}
+
+async function testHello() {
+  try {
+    const reply = await invoke('hello', { name: 'tester' });
+    log(reply, 'ok');
+  } catch (e) {
+    log('hello failed: ' + e, 'err');
+  }
+}
+
+async function testBackend() {
+  try {
+    const reply = await invoke('ping_backend');
+    log(reply, 'ok');
+  } catch (e) {
+    log('backend ping failed: ' + e, 'err');
+  }
+}
+
+async function testChat() {
+  try {
+    const reply = await invoke('send_message', {
+      message: 'Hola Samantha',
+      userId: 'tester'
+    });
+    log('Samantha: ' + reply, 'ok');
+  } catch (e) {
+    log('chat failed: ' + e, 'err');
+  }
+}
+
+async function testInfo() {
+  try {
+    const info = await invoke('system_info');
+    log('System: ' + JSON.stringify(info), 'ok');
+  } catch (e) {
+    log('info failed: ' + e, 'err');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  log('Tauri frontend cargado');
+  setTimeout(testInfo, 200);
+});
+</script>
+</body>
+</html>
