@@ -72,7 +72,7 @@ class ShortTermBuffer:
             self._conn.execute(
                 "DELETE FROM short_term WHERE id IN ("
                 "  SELECT id FROM short_term WHERE user_id = ? "
-                "  ORDER BY timestamp ASC, id ASC "
+                "  ORDER BY rowid ASC "
                 "  LIMIT MAX(0, ("
                 "    SELECT COUNT(*) FROM short_term WHERE user_id = ?"
                 "  ) - ?)"
@@ -85,7 +85,7 @@ class ShortTermBuffer:
         cur = self._conn.execute(
             "SELECT id, role, text, timestamp, user_id "
             "FROM short_term WHERE user_id = ? "
-            "ORDER BY timestamp ASC, id ASC",
+            "ORDER BY rowid ASC",
             (user_id,),
         )
         return [
