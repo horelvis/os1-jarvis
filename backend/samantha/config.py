@@ -45,6 +45,10 @@ class Config:
     memory_enabled: bool = True
     memory_persist_dir: str = "~/.samantha/memory"
     memory_top_k: int = 5  # how many past chunks to inject before each LLM call
+    memory_short_term_capacity: int = 20  # last N turns kept verbatim in SQLite ring
+    memory_embedder_model: str = (
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
 
     # === Logging ===
     log_level: str = "INFO"
@@ -78,6 +82,12 @@ class Config:
             memory_enabled=_get("MEMORY_ENABLED", cls.memory_enabled),
             memory_persist_dir=_get("MEMORY_PERSIST_DIR", cls.memory_persist_dir),
             memory_top_k=_get("MEMORY_TOP_K", cls.memory_top_k),
+            memory_short_term_capacity=_get(
+                "MEMORY_SHORT_TERM_CAPACITY", cls.memory_short_term_capacity
+            ),
+            memory_embedder_model=_get(
+                "MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model
+            ),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 
