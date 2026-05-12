@@ -1,0 +1,69 @@
+# Samantha LLM runtime — llama-server (llama.cpp)
+#
+# Install (production):
+#   1. Build/install llama.cpp so `llama-server` is in PATH.
+#      The model auto-downloads on first launch via the `-hf` flag below
+#      (cached under ~/.cache/llama.cpp/).
+#   2. Copy this file to ~/.config/systemd/user/, then:
+#        systemctl --user daemon-reload
+#        systemctl --user enable --now samantha-llamacpp.service
+#
+# Override defaults without editing this file:
+#   systemctl --user edit samantha-llamacpp.service
+# and set Environment= lines in the override.
+#
+# Sampling defaults are Qwen3-recommended (temp 0.6, top-k 20, top-p 0.95,
+# min-p 0, presence-penalty 1.5). Backend (Samantha) never overrides them,
+# so this file is the single source of truth for model behavior.
+
+[Unit]
+Description=Samantha LLM runtime (llama-server, llama.cpp)
+After=network.target
+
+[Service]
+Type=simple
+
+# Model source: HuggingFace repo + quant tag. llama-server auto-downloads
+# on first run and caches under ~/.cache/llama.cpp/.
+Environment=SAMANTHA_LLAMA_HF=Qwen/Qwen3-8B-GGUF:Q8_0
+
+# Server bind. Default localhost; override to 0.0.0.0 if the backend
+# runs on a different host on the LAN.
+Environment=SAMANTHA_LLAMA_HOST=127.0.0.1
+Environment=SAMANTHA_LLAMA_PORT=8000
+
+# Offload as many transformer layers to GPU as fit. 99 = "all of them";
+# llama.cpp clamps automatically if the model has fewer.
+Environment=SAMANTHA_LLAMA_NGL=99
+
+# Context window. Qwen3 supports up to 40K natively; generous headroom
+# for Phase 6 memory injection.
+Environment=SAMANTHA_LLAMA_CTX=40960
+
+ExecStart=/usr/bin/env llama-server \
+    -hf ${SAMANTHA_LLAMA_HF} \
+    --host ${SAMANTHA_LLAMA_HOST} \
+    --port ${SAMANTHA_LLAMA_PORT} \
+    --n-gpu-layers ${SAMANTHA_LLAMA_NGL} \
+    --ctx-size ${SAMANTHA_LLAMA_CTX} \
+    --jinja \
+    --flash-attn auto \
+    --split-mode row \
+    --temp 0.6 \
+    --top-k 20 \
+    --top-p 0.95 \
+    --min-p 0 \
+    --presence-penalty 1.5 \
+    --no-context-shift \
+    --metrics
+
+Restart=on-failure
+RestartSec=5
+# Give the model time to mmap at startup before the watchdog complains.
+TimeoutStartSec=120
+
+# Resource hygiene — don't let a runaway llama eat the whole machine.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

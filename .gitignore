@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editable install metadata
+*.egg-info/
+*.egg
+
+# Build artifacts
+build/
+dist/
+*.whl
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs and pids (development-time only)
+*.log
+*.pid
+
+# Local model cache (downloaded GGUFs — large, machine-specific)
+.samantha/

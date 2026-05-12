@@ -2,143 +2,156 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#d1684e">
 <title>Samantha</title>
-<style>
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background: #d1684e;
-    color: white;
-    font-family: -apple-system, system-ui, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-    user-select: none;
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter+Tight:wght@200;300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
   }
-  h1 {
-    font-weight: 200;
-    letter-spacing: 0.1em;
-    font-size: 3rem;
-    margin: 0 0 2rem;
-  }
-  .status {
-    background: rgba(255,255,255,0.1);
-    padding: 1rem 2rem;
-    border-radius: 8px;
-    font-family: 'SF Mono', Monaco, monospace;
-    font-size: 0.85rem;
-    width: min(560px, 90vw);
-    text-align: left;
-    line-height: 1.8;
-    max-height: 40vh;
-    overflow-y: auto;
-  }
-  .ok { color: #c8f5d8; }
-  .err { color: #f5b0a0; }
-  button {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.4);
-    color: white;
-    padding: 12px 28px;
-    font-size: 0.9rem;
-    letter-spacing: 0.1em;
-    border-radius: 999px;
-    margin: 0.5rem;
-    cursor: pointer;
-    transition: all 0.3s;
-    font-family: inherit;
-  }
-  button:hover {
-    background: rgba(255,255,255,0.1);
-    border-color: white;
-  }
-  .actions { margin-top: 2rem; display: flex; flex-wrap: wrap; justify-content: center; max-width: 600px; }
-  .subtitle {
-    opacity: 0.6;
-    font-size: 0.8rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    margin-bottom: 2rem;
-  }
-</style>
+}
+</script>
 </head>
 <body>
 
-<h1>Samantha</h1>
-<div class="subtitle">tauri skeleton — fase 1</div>
+<div class="flash" id="flash"></div>
 
-<div class="status" id="status">
-  Esperando inicializacion...
+<!-- ============ BOOT ============ -->
+<div class="screen" id="screen-boot">
+  <div class="loader-wrap show">
+    <div class="os1-loader small" data-loader="boot"></div>
+  </div>
+  <div class="boot-label">samantha</div>
 </div>
 
-<div class="actions">
-  <button onclick="testHello()">hello (sin backend)</button>
-  <button onclick="testBackend()">ping backend</button>
-  <button onclick="testChat()">test chat</button>
-  <button onclick="testInfo()">system info</button>
-  <button onclick="clearLog()">clear</button>
+<!-- ============ CALIBRATION ============ -->
+<div class="screen" id="screen-calibration">
+  <div class="meet-content">
+    <div class="system-label" id="cal-stage-label">primer encuentro</div>
+    <div class="meet-title" id="cal-stage-title">déjame escucharte</div>
+
+    <div class="meet-loader-area">
+      <div class="loader-wrap show">
+        <div class="os1-loader medium" data-loader="calibration"></div>
+      </div>
+    </div>
+
+    <div class="meet-status" id="cal-status">
+      Pulsa para empezar
+    </div>
+
+    <canvas class="audio-viz" id="cal-viz" width="960" height="120"></canvas>
+
+    <button class="btn primary" style="margin-top: 2rem;" id="cal-btn" onclick="beginCalibration()">empezar</button>
+  </div>
 </div>
 
-<script>
-const { invoke } = window.__TAURI__.core;
-const statusEl = document.getElementById('status');
+<!-- ============ VOICEPRINT ============ -->
+<div class="screen" id="screen-voiceprint">
+  <div class="meet-content">
+    <div class="system-label">reconocimiento</div>
+    <div class="meet-title">para reconocerte después</div>
 
-function log(msg, kind) {
-  const time = new Date().toLocaleTimeString();
-  const cls = kind === 'ok' ? 'ok' : kind === 'err' ? 'err' : '';
-  statusEl.innerHTML = '<span class="' + cls + '">[' + time + '] ' + msg + '</span><br>' + statusEl.innerHTML;
-}
+    <div class="voiceprint-phrase" id="vp-phrase">
+      <span class="quote">«</span>Hola Samantha, soy yo<span class="quote">»</span>
+    </div>
 
-function clearLog() {
-  statusEl.innerHTML = '';
-}
+    <div class="meet-loader-area">
+      <div class="loader-wrap show">
+        <div class="os1-loader medium" data-loader="voiceprint"></div>
+      </div>
+    </div>
 
-async function testHello() {
-  try {
-    const reply = await invoke('hello', { name: 'tester' });
-    log(reply, 'ok');
-  } catch (e) {
-    log('hello failed: ' + e, 'err');
-  }
-}
+    <div class="recording-indicator" id="vp-rec">
+      <div class="rec-dot"></div>
+      <span>grabando</span>
+    </div>
 
-async function testBackend() {
-  try {
-    const reply = await invoke('ping_backend');
-    log(reply, 'ok');
-  } catch (e) {
-    log('backend ping failed: ' + e, 'err');
-  }
-}
+    <div class="meet-status" id="vp-status">
+      Di la frase con tu voz natural
+    </div>
 
-async function testChat() {
-  try {
-    const reply = await invoke('send_message', {
-      message: 'Hola Samantha',
-      userId: 'tester'
-    });
-    log('Samantha: ' + reply, 'ok');
-  } catch (e) {
-    log('chat failed: ' + e, 'err');
-  }
-}
+    <canvas class="audio-viz" id="vp-viz" width="960" height="120"></canvas>
 
-async function testInfo() {
-  try {
-    const info = await invoke('system_info');
-    log('System: ' + JSON.stringify(info), 'ok');
-  } catch (e) {
-    log('info failed: ' + e, 'err');
-  }
-}
+    <button class="btn primary" style="margin-top: 2rem;" id="vp-btn" onclick="beginVoiceprint()">grabar mi voz</button>
+  </div>
+</div>
 
-window.addEventListener('DOMContentLoaded', () => {
-  log('Tauri frontend cargado');
-  setTimeout(testInfo, 200);
-});
-</script>
+<!-- ============ GREETING ============ -->
+<div class="screen" id="screen-greet">
+  <div class="samantha-wave"><canvas data-wave="greet"></canvas></div>
+  <div class="samantha-text" style="position: relative; z-index: 2; margin-top: 0;">Hola.<br>Estoy aquí.</div>
+  <button class="btn" style="margin-top: 4rem; opacity: 0; transition: opacity 1s 3s; position: relative; z-index: 2;" id="greet-continue" onclick="startOnboarding()">empezar</button>
+</div>
+
+<!-- ============ QUESTIONS ============ -->
+<div class="screen question-screen" id="screen-question">
+  <div class="question-progress" id="progress">
+    <div class="progress-dot"></div><div class="progress-dot"></div><div class="progress-dot"></div>
+    <div class="progress-dot"></div><div class="progress-dot"></div><div class="progress-dot"></div>
+  </div>
+  <div class="question-content">
+    <div class="samantha-text" id="question-text">—</div>
+  </div>
+  <div class="input-area">
+    <div class="voice-prompt" id="voice-prompt">&nbsp;</div>
+    <input type="text" class="text-input" id="answer-input" placeholder="escribe o pulsa el micro" autocomplete="off">
+    <div class="btn-row">
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()" aria-label="micrófono">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+      </button>
+      <button class="btn primary" onclick="submitAnswer()">continuar</button>
+    </div>
+    <div class="hint" onclick="skipQuestion()">saltar pregunta</div>
+  </div>
+</div>
+
+<!-- ============ GENERATING ============ -->
+<div class="screen" id="screen-generating">
+  <div class="loader-wrap show">
+    <div class="os1-loader large" data-loader="generating"></div>
+  </div>
+  <div class="system-text" id="generating-text">Procesando lo que me has contado</div>
+</div>
+
+<!-- ============ WELCOME ============ -->
+<div class="screen" id="screen-welcome">
+  <div class="samantha-wave"><canvas data-wave="welcome"></canvas></div>
+  <div class="samantha-text" id="welcome-text" style="position: relative; z-index: 2; margin-top: 0;">Hola.</div>
+  <button class="btn primary" style="margin-top: 4rem; opacity: 0; transition: opacity 1s 2s; position: relative; z-index: 2;" id="welcome-continue" onclick="goto('screen-conversation'); startConversation();">conversar</button>
+</div>
+
+<!-- ============ CONVERSATION ============ -->
+<div class="screen" id="screen-conversation">
+  <div class="conv-container">
+    <div class="conv-header">
+      <span id="time-now">--:--</span>
+      <span id="conv-state">disponible</span>
+    </div>
+    <div class="conv-orb-wrap" style="position: relative; height: 200px;">
+      <div class="samantha-wave"><canvas data-wave="conv"></canvas></div>
+    </div>
+    <div class="conv-transcript" id="transcript"></div>
+    <div class="conv-input">
+      <input type="text" id="conv-input" placeholder="dile algo a samantha..." autocomplete="off">
+      <button class="mic-btn" id="conv-mic" onclick="toggleConvMic()" aria-label="micrófono">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="debug-panel">
+  <span id="state-label">estado: arranque</span>
+  <button onclick="restart()">↻ reiniciar</button>
+  <button onclick="skipToConv()">→ conversación</button>
+</div>
+
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>

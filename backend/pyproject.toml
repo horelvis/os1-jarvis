@@ -7,21 +7,25 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
-    "python-multipart>=0.0.20",  # para uploads de audio
+    "python-multipart>=0.0.20",  # uploads de audio
     "loguru>=0.7",                # logging legible
+    "httpx>=0.27",                # cliente OpenAI-compat para llama-server (real mode)
+    "chromadb>=0.5.0",            # memoria semántica persistente (Phase 6)
 ]
 
 [project.optional-dependencies]
 # Dependencias que SOLO se necesitan cuando integremos modelos reales.
 # Durante desarrollo con el mock, no las instalamos.
+#
+# Nota: llama.cpp corre como binario separado (llama-server), no como
+# dependencia de Python. Aquí sólo viven las cosas Python-side de fases
+# posteriores (STT, TTS).
 real = [
-    "vllm>=0.6.0",
-    "faster-whisper>=1.0.3",
-    "piper-tts>=1.2.0",
-    "chromadb>=0.5.0",
-    "sentence-transformers>=3.0",
-    "silero-vad>=5.1",
-    "sounddevice>=0.4.7",
+    "faster-whisper>=1.0.3",       # Phase 5 — STT
+    "piper-tts>=1.2.0",            # Phase 5 — TTS
+    "sentence-transformers>=3.0",  # better Spanish embeddings (swap-in for memoria)
+    "silero-vad>=5.1",             # Phase 5 — VAD
+    "sounddevice>=0.4.7",          # Phase 5 — captura de audio
     "numpy>=2.0",
 ]
 dev = [

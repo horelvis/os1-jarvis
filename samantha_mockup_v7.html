@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#d1684e">
+<title>Samantha</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter+Tight:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #d1684e;
+    --cream: #ffffff;
+    --cream-bright: #ffffff;
+    --cream-soft: rgba(255, 255, 255, 0.85);
+    --cream-dim: rgba(255, 255, 255, 0.6);
+    --cream-faint: rgba(255, 255, 255, 0.25);
+    --shadow-warm: rgba(130, 50, 30, 0.25);
+    --serif: 'Cormorant Garamond', Georgia, serif;
+    --sans: 'Inter Tight', -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--cream);
+    font-family: var(--sans);
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .screen {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 8vh 6vw;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .screen.active { opacity: 1; pointer-events: auto; }
+
+  /* ============ LOADER OS1 CONTAINERS ============ */
+  .os1-loader {
+    display: block;
+    pointer-events: none;
+  }
+  .os1-loader canvas { display: block; }
+
+  .os1-loader.small  { width: 200px; height: 200px; }
+  .os1-loader.medium { width: 280px; height: 280px; }
+  .os1-loader.large  { width: 480px; height: 480px; }
+
+  .loader-wrap {
+    opacity: 0;
+    transition: opacity 0.8s ease;
+  }
+  .loader-wrap.show { opacity: 1; }
+
+  /* ============ VISUALIZADOR DE LÍNEA HORIZONTAL ============ */
+  /*
+    Una sola línea que cruza toda la pantalla horizontalmente.
+    Vibra cuando Samantha habla (modo speaking), se queda casi recta en idle.
+    Es el "rostro" de Samantha durante saludo, bienvenida y conversación.
+  */
+  .samantha-wave {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 200px;
+    pointer-events: none;
+    display: block;
+  }
+
+  .samantha-wave canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ============ TIPOGRAFÍA ============ */
+  .system-label {
+    font-family: var(--sans);
+    font-size: 0.7rem; font-weight: 300;
+    letter-spacing: 0.3em; text-transform: uppercase;
+    color: var(--cream-faint);
+    margin-bottom: 1.5rem;
+  }
+  .samantha-text {
+    font-family: var(--serif);
+    font-style: italic; font-weight: 300;
+    font-size: 2.2rem; line-height: 1.4;
+    text-align: center;
+    color: var(--cream);
+    max-width: 22ch;
+    margin-top: 3rem;
+    letter-spacing: 0.01em;
+  }
+  .system-text {
+    font-family: var(--sans);
+    font-size: 0.95rem; font-weight: 300;
+    line-height: 1.6; text-align: center;
+    color: var(--cream-dim);
+    max-width: 38ch;
+    margin-top: 1.5rem;
+  }
+
+  /* ============ ARRANQUE ============ */
+  #screen-boot .loader-wrap { opacity: 1; }
+  #screen-boot .boot-label {
+    margin-top: 2rem;
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: var(--cream-faint);
+  }
+
+  /* ============ QR / PAIRING ============ */
+  /* ============ CALIBRACIÓN Y RECONOCIMIENTO ============ */
+  .meet-title {
+    font-family: var(--serif);
+    font-size: 1.8rem; font-weight: 400; font-style: italic;
+    margin-bottom: 0.5rem;
+  }
+
+  .meet-content {
+    display: flex; flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 600px;
+  }
+
+  .meet-loader-area {
+    margin: 2rem 0;
+    min-height: 200px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .meet-status {
+    margin-top: 1.5rem;
+    font-family: var(--sans);
+    font-size: 0.85rem;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--cream-dim);
+    min-height: 1.2em;
+    transition: opacity 0.5s;
+    text-align: center;
+  }
+
+  /* Visualizador de audio (canvas de onda) */
+  .audio-viz {
+    width: 100%;
+    max-width: 480px;
+    height: 60px;
+    display: block;
+    margin: 1.5rem auto 0;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+  }
+  .audio-viz.show { opacity: 1; }
+
+  /* Frase prominente para repetir en voiceprint */
+  .voiceprint-phrase {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 2.4rem;
+    font-weight: 300;
+    color: var(--cream);
+    margin: 2rem 0 1rem;
+    letter-spacing: 0.01em;
+    text-align: center;
+    line-height: 1.3;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+  .voiceprint-phrase.show { opacity: 1; }
+  .voiceprint-phrase .quote { color: var(--cream-faint); }
+
+  /* Indicador "grabando" */
+  .recording-indicator {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--cream-dim);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    margin-top: 1rem;
+  }
+  .recording-indicator.show { opacity: 1; }
+  .recording-indicator .rec-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--cream);
+    animation: rec-blink 1s ease-in-out infinite;
+  }
+  @keyframes rec-blink {
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+
+  .flash {
+    position: fixed; inset: 0;
+    background: #ffffff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 999;
+    transition: opacity 0.3s;
+  }
+  .flash.fire { animation: flash 1.2s ease-out; }
+  @keyframes flash {
+    0% { opacity: 0; }
+    15% { opacity: 0.5; }
+    100% { opacity: 0; }
+  }
+
+  /* ============ PREGUNTAS ============ */
+  .question-screen {
+    justify-content: space-between;
+    padding: 10vh 6vw 8vh;
+  }
+  .question-progress { display: flex; gap: 6px; margin-bottom: 2rem; }
+  .progress-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--cream-faint);
+    transition: all 0.6s ease;
+  }
+  .progress-dot.done { background: var(--cream); }
+  .progress-dot.current {
+    background: var(--cream-bright);
+    transform: scale(1.5);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+  }
+  .question-content {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    width: 100%;
+  }
+  .input-area {
+    width: 100%; max-width: 500px;
+    margin-top: auto;
+    display: flex; flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+  .voice-prompt {
+    font-size: 0.8rem;
+    color: var(--cream-faint);
+    letter-spacing: 0.15em; text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    min-height: 1em;
+  }
+  .text-input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--cream-faint);
+    padding: 12px 4px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 1.3rem;
+    color: var(--cream);
+    text-align: center;
+    transition: border-color 0.4s ease;
+    outline: none;
+    caret-color: var(--cream);
+  }
+  .text-input:focus { border-bottom-color: var(--cream); }
+  .text-input::placeholder { color: var(--cream-faint); font-style: italic; }
+  .btn-row { display: flex; gap: 1rem; margin-top: 0.5rem; align-items: center; }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--cream-faint);
+    color: var(--cream);
+    padding: 14px 32px;
+    font-family: var(--sans);
+    font-size: 0.85rem; font-weight: 300;
+    letter-spacing: 0.1em; text-transform: lowercase;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    backdrop-filter: blur(8px);
+  }
+  .btn:hover, .btn:active {
+    border-color: var(--cream);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .btn.primary {
+    border-color: var(--cream);
+    color: var(--cream-bright);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .btn.primary:hover, .btn.primary:active {
+    background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+  }
+  .mic-btn {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--cream-faint);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.4s ease;
+  }
+  .mic-btn:hover { background: rgba(255, 255, 255, 0.15); border-color: var(--cream); }
+  .mic-btn.recording {
+    background: var(--cream);
+    border-color: var(--cream-bright);
+    animation: mic-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5); }
+    50% { box-shadow: 0 0 0 20px rgba(255, 255, 255, 0); }
+  }
+  .mic-btn svg { width: 22px; height: 22px; fill: var(--cream); }
+  .mic-btn.recording svg { fill: var(--bg); }
+  .hint {
+    font-size: 0.72rem;
+    color: var(--cream-faint);
+    letter-spacing: 0.1em; text-transform: lowercase;
+    margin-top: 0.5rem;
+    cursor: pointer;
+  }
+  .hint:hover { color: var(--cream-dim); }
+
+  #screen-generating .system-text {
+    margin-top: 3rem;
+    font-style: italic;
+    font-family: var(--serif);
+    font-size: 1.2rem;
+    transition: opacity 0.5s;
+  }
+
+  /* ============ CONVERSACIÓN ============ */
+  .conv-container {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 6vh 6vw 4vh;
+  }
+  .conv-header {
+    width: 100%;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--cream-faint);
+    margin-bottom: 2rem;
+  }
+  .conv-header #conv-state { color: var(--cream); }
+  .conv-orb-wrap { margin: 2rem 0; transform: scale(0.7); }
+  .conv-transcript {
+    flex: 1; width: 100%; max-width: 600px;
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+    gap: 1.5rem;
+    padding: 1rem 0;
+    mask-image: linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%);
+  }
+  .conv-transcript::-webkit-scrollbar { display: none; }
+  .msg { opacity: 0; animation: msg-in 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .msg-samantha {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 1.25rem; line-height: 1.5;
+    color: var(--cream);
+    align-self: flex-start;
+    max-width: 90%;
+  }
+  .msg-user {
+    font-family: var(--sans);
+    font-size: 0.95rem; line-height: 1.5;
+    color: var(--cream-dim);
+    align-self: flex-end;
+    max-width: 80%;
+    text-align: right;
+  }
+  .msg-user::before { content: '— '; color: var(--cream); }
+  .conv-input {
+    width: 100%; max-width: 600px;
+    display: flex; gap: 1rem; align-items: center;
+    margin-top: 1rem;
+  }
+  .conv-input input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--cream-faint);
+    padding: 12px 0;
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    color: var(--cream);
+    outline: none;
+    transition: border-color 0.3s;
+    caret-color: var(--cream);
+  }
+  .conv-input input:focus { border-bottom-color: var(--cream); }
+  .conv-input input::placeholder {
+    color: var(--cream-faint);
+    font-style: italic;
+    font-family: var(--serif);
+  }
+
+  .debug-panel {
+    position: fixed;
+    bottom: 20px; left: 20px;
+    background: rgba(130, 50, 30, 0.5);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.65rem;
+    color: var(--cream-dim);
+    z-index: 100;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .debug-panel button {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: var(--cream);
+    padding: 4px 10px;
+    font-size: 0.65rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .debug-panel button:hover { background: rgba(255, 255, 255, 0.1); }
+
+  @media (min-width: 768px) {
+    .samantha-text { font-size: 2.8rem; }
+    .system-text { font-size: 1.05rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="flash" id="flash"></div>
+
+<!-- ============ ARRANQUE ============ -->
+<div class="screen" id="screen-boot">
+  <div class="loader-wrap show">
+    <div class="os1-loader small" data-loader="boot"></div>
+  </div>
+  <div class="boot-label">samantha</div>
+</div>
+
+<!-- ============ CALIBRACIÓN ============ -->
+<div class="screen" id="screen-calibration">
+  <div class="meet-content">
+    <div class="system-label" id="cal-stage-label">primer encuentro</div>
+    <div class="meet-title" id="cal-stage-title">déjame escucharte</div>
+
+    <div class="meet-loader-area">
+      <div class="loader-wrap show">
+        <div class="os1-loader medium" data-loader="calibration"></div>
+      </div>
+    </div>
+
+    <div class="meet-status" id="cal-status">
+      Pulsa para empezar
+    </div>
+
+    <canvas class="audio-viz" id="cal-viz" width="960" height="120"></canvas>
+
+    <button class="btn primary" style="margin-top: 2rem;" id="cal-btn" onclick="beginCalibration()">empezar</button>
+  </div>
+</div>
+
+<!-- ============ HUELLA DE VOZ ============ -->
+<div class="screen" id="screen-voiceprint">
+  <div class="meet-content">
+    <div class="system-label">reconocimiento</div>
+    <div class="meet-title">para reconocerte después</div>
+
+    <div class="voiceprint-phrase" id="vp-phrase">
+      <span class="quote">«</span>Hola Samantha, soy yo<span class="quote">»</span>
+    </div>
+
+    <div class="meet-loader-area">
+      <div class="loader-wrap show">
+        <div class="os1-loader medium" data-loader="voiceprint"></div>
+      </div>
+    </div>
+
+    <div class="recording-indicator" id="vp-rec">
+      <div class="rec-dot"></div>
+      <span>grabando</span>
+    </div>
+
+    <div class="meet-status" id="vp-status">
+      Di la frase con tu voz natural
+    </div>
+
+    <canvas class="audio-viz" id="vp-viz" width="960" height="120"></canvas>
+
+    <button class="btn primary" style="margin-top: 2rem;" id="vp-btn" onclick="beginVoiceprint()">grabar mi voz</button>
+  </div>
+</div>
+
+<!-- ============ SALUDO ============ -->
+<div class="screen" id="screen-greet">
+  <div class="samantha-wave"><canvas data-wave="greet"></canvas></div>
+  <div class="samantha-text" style="position: relative; z-index: 2; margin-top: 0;">Hola.<br>Estoy aquí.</div>
+  <button class="btn" style="margin-top: 4rem; opacity: 0; transition: opacity 1s 3s; position: relative; z-index: 2;" id="greet-continue" onclick="startOnboarding()">empezar</button>
+</div>
+
+<!-- ============ PREGUNTAS ============ -->
+<div class="screen question-screen" id="screen-question">
+  <div class="question-progress" id="progress">
+    <div class="progress-dot"></div><div class="progress-dot"></div><div class="progress-dot"></div>
+    <div class="progress-dot"></div><div class="progress-dot"></div><div class="progress-dot"></div>
+  </div>
+  <div class="question-content">
+    <div class="samantha-text" id="question-text">—</div>
+  </div>
+  <div class="input-area">
+    <div class="voice-prompt" id="voice-prompt">&nbsp;</div>
+    <input type="text" class="text-input" id="answer-input" placeholder="escribe o pulsa el micro" autocomplete="off">
+    <div class="btn-row">
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+      </button>
+      <button class="btn primary" onclick="submitAnswer()">continuar</button>
+    </div>
+    <div class="hint" onclick="skipQuestion()">saltar pregunta</div>
+  </div>
+</div>
+
+<!-- ============ GENERANDO ============ -->
+<div class="screen" id="screen-generating">
+  <div class="loader-wrap show">
+    <div class="os1-loader large" data-loader="generating"></div>
+  </div>
+  <div class="system-text" id="generating-text">Procesando lo que me has contado</div>
+</div>
+
+<!-- ============ BIENVENIDA ============ -->
+<div class="screen" id="screen-welcome">
+  <div class="samantha-wave"><canvas data-wave="welcome"></canvas></div>
+  <div class="samantha-text" id="welcome-text" style="position: relative; z-index: 2; margin-top: 0;">Hola.</div>
+  <button class="btn primary" style="margin-top: 4rem; opacity: 0; transition: opacity 1s 2s; position: relative; z-index: 2;" id="welcome-continue" onclick="goto('screen-conversation'); startConversation();">conversar</button>
+</div>
+
+<!-- ============ CONVERSACIÓN ============ -->
+<div class="screen" id="screen-conversation">
+  <div class="conv-container">
+    <div class="conv-header">
+      <span id="time-now">14:30</span>
+      <span id="conv-state">disponible</span>
+    </div>
+    <div class="conv-orb-wrap" style="position: relative; height: 200px;">
+      <div class="samantha-wave"><canvas data-wave="conv"></canvas></div>
+    </div>
+    <div class="conv-transcript" id="transcript"></div>
+    <div class="conv-input">
+      <input type="text" id="conv-input" placeholder="dile algo a samantha..." autocomplete="off">
+      <button class="mic-btn" id="conv-mic" onclick="toggleConvMic()">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="debug-panel">
+  <span id="state-label">estado: arranque</span>
+  <button onclick="restart()">↻ reiniciar</button>
+  <button onclick="skipToConv()">→ conversación</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   OS1 LOADER FACTORY
+   Basado en el original de Siyoung Park (MIT License):
+   https://codepen.io/psyonline/pen/yayYWg
+   ============================================================ */
+
+function createOS1Loader(container, options = {}) {
+  const {
+    backgroundColor = '#d1684e',
+    length = 30,
+    radius = 5.6,
+    startTransformed = false,  // si true, arranca como visualizador de barras
+  } = options;
+
+  const pi2 = Math.PI * 2;
+
+  // Estados controlables desde fuera
+  let toend = startTransformed;
+  let animatestep = startTransformed ? 240 : 0;
+  let acceleration = startTransformed ? 1 : 0;
+  let stepIncrement = startTransformed ? 1.8 : 1;
+  let rotatevalue = 0.035;
+  let running = true;
+  let visible = true;
+
+  // Constantes
+  const normalRotate = 0.035;
+  const fastRotate = 0.12;
+  const transformSpeed = 1.8;
+  const normalSpeed = 1;
+
+  // Escena
+  const camera = new THREE.PerspectiveCamera(65, 1, 1, 10000);
+  camera.position.z = 150;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(backgroundColor);
+
+  const group = new THREE.Group();
+  scene.add(group);
+
+  // Curva paramétrica
+  class CustomSinCurve extends THREE.Curve {
+    constructor(scale = 1) {
+      super();
+      this.scale = scale;
+    }
+    getPoint(t) {
+      const x = length * Math.sin(pi2 * t);
+      const y = radius * Math.cos(pi2 * 3 * t);
+      let z, tmod;
+      tmod = (t % 0.25) / 0.25;
+      tmod = (t % 0.25) - (2 * (1 - tmod) * tmod * -0.0185 + tmod * tmod * 0.25);
+      if (Math.floor(t / 0.25) === 0 || Math.floor(t / 0.25) === 2) {
+        tmod *= -1;
+      }
+      z = radius * Math.sin(pi2 * 2 * (t - tmod));
+      return new THREE.Vector3(x, y, z).multiplyScalar(this.scale);
+    }
+  }
+
+  const path = new CustomSinCurve(1);
+  const mesh = new THREE.Mesh(
+    new THREE.TubeGeometry(path, 200, 1.1, 2, true),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  group.add(mesh);
+
+  const ringcover = new THREE.Mesh(
+    new THREE.PlaneGeometry(50, 15, 1),
+    new THREE.MeshBasicMaterial({ color: backgroundColor, opacity: 0, transparent: true })
+  );
+  ringcover.position.x = length + 1;
+  ringcover.rotation.y = Math.PI / 2;
+  group.add(ringcover);
+
+  // Planos de niebla
+  for (let i = 0; i < 10; i++) {
+    const plain = new THREE.Mesh(
+      new THREE.PlaneGeometry(length * 2 + 1, radius * 3, 1),
+      new THREE.MeshBasicMaterial({ color: backgroundColor, transparent: true, opacity: 0.13 })
+    );
+    plain.position.z = -2.5 + i * 0.5;
+    group.add(plain);
+  }
+
+  // Renderer
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(backgroundColor);
+
+  function updateSize() {
+    const size = Math.min(container.clientWidth, container.clientHeight);
+    if (size > 0) renderer.setSize(size, size);
+  }
+  updateSize();
+  container.appendChild(renderer.domElement);
+
+  // Easing
+  function easing(t, b, c, d) {
+    if ((t /= d / 2) < 1) return c / 2 * t * t + b;
+    return c / 2 * ((t -= 2) * t * t + 2) + b;
+  }
+
+  // Render
+  function render() {
+    if (toend) {
+      animatestep = Math.min(240, animatestep + stepIncrement);
+    } else {
+      animatestep = Math.max(0, animatestep - stepIncrement * 1.4);
+    }
+    acceleration = easing(animatestep, 0, 1, 240);
+
+    if (acceleration > 0.35) {
+      const progress = (acceleration - 0.35) / 0.65;
+      group.rotation.y = -Math.PI / 2 * progress;
+      group.position.z = 50 * progress;
+      // En el final de la transformación, la cinta se desvanece completamente.
+      // Tras eso, la UI de Samantha pasa al visualizador de línea horizontal.
+      const progressOpacity = Math.max(0, (acceleration - 0.85) / 0.15);
+      if (progressOpacity > 0) {
+        mesh.material.transparent = true;
+        mesh.material.opacity = 1 - progressOpacity;
+      }
+      ringcover.material.opacity = progressOpacity;
+    } else {
+      // Reset suave para evitar residuos congelados
+      group.rotation.y *= 0.85;
+      group.position.z *= 0.85;
+      if (mesh.material.opacity < 1) {
+        mesh.material.opacity = Math.min(1, mesh.material.opacity + 0.05);
+      } else if (mesh.material.transparent) {
+        mesh.material.transparent = false;
+        mesh.material.needsUpdate = true;
+      }
+      if (ringcover.material.opacity > 0) ringcover.material.opacity = Math.max(0, ringcover.material.opacity - 0.05);
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  let frameId;
+  function animate() {
+    if (!running) return;
+    if (visible) {
+      mesh.rotation.x += rotatevalue + acceleration;
+      render();
+    }
+    frameId = requestAnimationFrame(animate);
+  }
+  animate();
+
+  // API pública
+  return {
+    /**
+     * Iniciar transformación: cinta → visualizador de barras.
+     * Si `fast=true`, usa velocidad acelerada.
+     */
+    transform(fast = true) {
+      toend = true;
+      stepIncrement = fast ? transformSpeed : normalSpeed;
+    },
+    /**
+     * Cancelar transformación, volver a rotación normal.
+     */
+    untransform() {
+      toend = false;
+      stepIncrement = normalSpeed;
+    },
+    /**
+     * Acelerar rotación de la cinta (Samantha "procesando").
+     */
+    setActive(active) {
+      rotatevalue = active ? fastRotate : normalRotate;
+    },
+    /**
+     * Controla si renderiza o pausa (para ahorrar CPU en pantallas inactivas).
+     */
+    setVisible(v) {
+      visible = v;
+    },
+    /**
+     * Reset duro al estado inicial.
+     */
+    reset() {
+      toend = false;
+      animatestep = 0;
+      acceleration = 0;
+      group.rotation.y = 0;
+      group.position.z = 0;
+      mesh.material.opacity = 1;
+      mesh.material.transparent = false;
+      mesh.material.needsUpdate = true;
+      ringcover.material.opacity = 0;
+    },
+    destroy() {
+      running = false;
+      if (frameId) cancelAnimationFrame(frameId);
+      renderer.dispose();
+      container.innerHTML = '';
+    },
+    resize: updateSize
+  };
+}
+
+/* ============================================================
+   FLUJO DE LA APP
+   ============================================================ */
+
+const QUESTIONS = [
+  "¿Cómo te llamo?",
+  "¿Cómo estás hoy?",
+  "¿Qué te gusta hacer cuando tienes tiempo para ti?",
+  "Cuéntame algo que te haya hecho ilusión últimamente. Algo pequeño vale.",
+  "¿Y algo que te esté rondando la cabeza estos días?",
+  "Una última: conmigo, ¿prefieres que sea más directa o más cuidadosa?"
+];
+
+const state = {
+  currentQuestion: 0,
+  answers: [],
+  userName: null,
+  recognizing: false,
+  recognition: null,
+  voice: null
+};
+
+/* ============================================================
+   SAMANTHA WAVE
+   Una línea horizontal que cruza toda la pantalla.
+   Cuatro estados:
+     - idle: línea casi recta, micro-ondulación (respiración)
+     - listening: ondulación media, ritmo natural
+     - thinking: ondulación pequeña pero más rápida
+     - speaking: ondulación amplia y orgánica
+   Implementado con Canvas 2D. Una sola línea = composición de
+   senos a distintas frecuencias para que se sienta orgánica
+   en vez de robótica.
+   ============================================================ */
+
+function createSamanthaWave(canvas) {
+  const ctx = canvas.getContext('2d');
+  let mode = 'idle';
+  let phase = 0;
+  let running = true;
+  let visible = true;
+  let lastTime = performance.now();
+
+  // Parámetros target (a los que aspiramos según el modo)
+  // Se interpolan suavemente con los valores actuales.
+  const modes = {
+    idle:      { amp: 1.5,  freq: 0.6,  speed: 0.4 },
+    listening: { amp: 12,   freq: 1.5,  speed: 1.4 },
+    thinking:  { amp: 6,    freq: 2.5,  speed: 2.8 },
+    speaking:  { amp: 40,   freq: 1.8,  speed: 2.2 }
+  };
+
+  // Valores actuales (interpolados frame a frame)
+  let curAmp = modes.idle.amp;
+  let curFreq = modes.idle.freq;
+  let curSpeed = modes.idle.speed;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    if (!running) return;
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+
+    if (visible) {
+      const target = modes[mode] || modes.idle;
+      // Lerp suave entre estados (factor temporal independiente del FPS)
+      const lerpFactor = 1 - Math.pow(0.001, dt);
+      curAmp += (target.amp - curAmp) * lerpFactor;
+      curFreq += (target.freq - curFreq) * lerpFactor;
+      curSpeed += (target.speed - curSpeed) * lerpFactor;
+
+      phase += dt * curSpeed;
+
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const cy = h / 2;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Suma de tres senos a distintas frecuencias = onda orgánica
+      // El sobre (envelope) suaviza los extremos para que la línea
+      // se diluya en los bordes en lugar de cortarse.
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+
+      const step = 2;
+      for (let x = 0; x <= w; x += step) {
+        const xn = x / w;  // 0 a 1
+        // Envelope: suave en los bordes, plena en el centro
+        const envelope = Math.sin(xn * Math.PI);
+        // Suma de senos con frecuencias distintas
+        const y = cy +
+          Math.sin(xn * Math.PI * 2 * curFreq + phase) * curAmp * envelope +
+          Math.sin(xn * Math.PI * 2 * curFreq * 2.3 + phase * 1.3) * curAmp * 0.4 * envelope +
+          Math.sin(xn * Math.PI * 2 * curFreq * 0.7 + phase * 0.6) * curAmp * 0.3 * envelope;
+
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Glow sutil (segunda línea más ancha con menos opacidad)
+      if (curAmp > 5) {
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.15, curAmp / 200)})`;
+        ctx.stroke();
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  return {
+    setMode(m) { mode = m; },
+    setVisible(v) { visible = v; },
+    resize,
+    destroy() { running = false; }
+  };
+}
+
+// Instancias de SamanthaWave (saludo, bienvenida, conversación)
+const waves = {};
+function initWaves() {
+  document.querySelectorAll('[data-wave]').forEach(el => {
+    const key = el.dataset.wave;
+    waves[key] = createSamanthaWave(el);
+  });
+}
+initWaves();
+
+function updateWaveVisibility() {
+  const activeScreen = document.querySelector('.screen.active');
+  if (!activeScreen) return;
+  for (const key in waves) {
+    const waveEl = document.querySelector(`[data-wave="${key}"]`);
+    if (waveEl && activeScreen.contains(waveEl)) {
+      waves[key].setVisible(true);
+      waves[key].resize();
+    } else {
+      waves[key].setVisible(false);
+    }
+  }
+}
+
+// === Loaders OS1 ===
+const loaders = {};
+function initLoaders() {
+  document.querySelectorAll('[data-loader]').forEach(el => {
+    const key = el.dataset.loader;
+    const startTransformed = el.dataset.startTransformed === 'true';
+    loaders[key] = createOS1Loader(el, { startTransformed });
+    loaders[key].setVisible(false);
+  });
+}
+initLoaders();
+
+// Manejo de visibilidad por pantalla: solo renderiza el loader activo
+function updateLoaderVisibility() {
+  const activeScreen = document.querySelector('.screen.active');
+  if (!activeScreen) return;
+  for (const key in loaders) {
+    const loaderEl = document.querySelector(`[data-loader="${key}"]`);
+    if (loaderEl && activeScreen.contains(loaderEl)) {
+      loaders[key].setVisible(true);
+      loaders[key].resize();
+    } else {
+      loaders[key].setVisible(false);
+    }
+  }
+}
+
+function goto(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.getElementById('state-label').textContent = 'pantalla: ' + id.replace('screen-', '');
+  // Esperar un tick para que el container tenga tamaño correcto
+  setTimeout(() => {
+    updateLoaderVisibility();
+    updateWaveVisibility();
+  }, 50);
+}
+
+window.goto = goto;
+
+function loadVoice() {
+  const voices = speechSynthesis.getVoices();
+  state.voice = voices.find(v => v.name.includes('Mónica')) ||
+                voices.find(v => v.name.includes('Monica')) ||
+                voices.find(v => v.name.includes('Marisol')) ||
+                voices.find(v => v.lang === 'es-ES') ||
+                voices.find(v => v.lang.startsWith('es')) ||
+                voices[0];
+}
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = loadVoice;
+  loadVoice();
+}
+
+function speak(text, onEnd) {
+  if (!('speechSynthesis' in window)) { if (onEnd) onEnd(); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  if (state.voice) u.voice = state.voice;
+  u.lang = 'es-ES';
+  u.rate = 0.92; u.pitch = 1.05; u.volume = 1;
+
+  // Activar modo "speaking" en la línea de Samantha visible
+  const activeScreen = document.querySelector('.screen.active');
+  const activeWaves = [];
+  if (activeScreen) {
+    activeScreen.querySelectorAll('[data-wave]').forEach(el => {
+      const key = el.dataset.wave;
+      if (waves[key]) {
+        waves[key].setMode('speaking');
+        activeWaves.push(waves[key]);
+      }
+    });
+  }
+
+  u.onend = () => {
+    activeWaves.forEach(w => w.setMode('idle'));
+    if (onEnd) onEnd();
+  };
+  speechSynthesis.speak(u);
+}
+
+function setupRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = 'es-ES';
+  r.continuous = false;
+  r.interimResults = true;
+  return r;
+}
+
+function toggleMic() {
+  if (state.recognizing) { stopMic(); return; }
+  startMic();
+}
+window.toggleMic = toggleMic;
+
+function startMic() {
+  const r = setupRecognition();
+  if (!r) {
+    document.getElementById('voice-prompt').textContent = 'voz no disponible — usa texto';
+    return;
+  }
+  state.recognition = r;
+  state.recognizing = true;
+  document.getElementById('mic-btn').classList.add('recording');
+  document.getElementById('voice-prompt').textContent = 'escuchando...';
+  r.onresult = (e) => {
+    let txt = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      txt += e.results[i][0].transcript;
+    }
+    document.getElementById('answer-input').value = txt;
+  };
+  r.onerror = () => stopMic();
+  r.onend = () => stopMic();
+  try { r.start(); } catch(e) { stopMic(); }
+}
+
+function stopMic() {
+  state.recognizing = false;
+  if (state.recognition) { try { state.recognition.stop(); } catch(e) {} }
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('voice-prompt').textContent = '';
+}
+
+function init() {
+  goto('screen-boot');
+  setTimeout(() => goto('screen-calibration'), 2800);
+}
+
+/* ============================================================
+   VISUALIZADOR DE ONDA (simulado, sin micrófono real)
+   En el producto final (Tauri/Python) se conectará al stream
+   real del micrófono. En el mockup es decorativo: una onda
+   ambiental que cambia suavemente para sugerir vida.
+   ============================================================ */
+
+/**
+ * Renderiza una onda decorativa animada en un canvas.
+ * Acepta una intensidad simulada (0-1) que se puede modificar
+ * desde fuera para simular reacción a la voz.
+ */
+function startAudioViz(canvas) {
+  const ctx = canvas.getContext('2d');
+  let running = true;
+  let phase = 0;
+  // La intensidad simulada oscila lentamente con ruido perlin-ish
+  let simIntensity = 0.1;
+  let targetIntensity = 0.1;
+
+  function draw() {
+    if (!running) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Lerp suave de la intensidad real hacia el target
+    simIntensity += (targetIntensity - simIntensity) * 0.08;
+    // Pequeño ruido natural para que se sienta vivo
+    const noise = (Math.sin(phase * 0.7) * 0.3 + Math.sin(phase * 2.3) * 0.15) * 0.05;
+    const vol = Math.max(0, simIntensity + noise);
+
+    const amp = 4 + vol * h * 0.6;
+    const cy = h / 2;
+
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 + vol * 1.5})`;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let x = 0; x < w; x += 2) {
+      const t = (x / w) * Math.PI * 4 + phase;
+      const y = cy + Math.sin(t) * amp * (0.5 + 0.5 * Math.sin(x / w * Math.PI));
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    phase += 0.04 + vol * 0.3;
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  return {
+    stop: () => { running = false; },
+    setIntensity: (v) => { targetIntensity = v; }
+  };
+}
+
+/* ============================================================
+   PRIMER ENCUENTRO: Calibración + Huella de voz (simulado)
+   ============================================================ */
+
+let calViz = null;
+
+async function beginCalibration() {
+  const btn = document.getElementById('cal-btn');
+  btn.style.display = 'none';
+
+  const setStatus = (txt) => {
+    const el = document.getElementById('cal-status');
+    el.style.opacity = '0';
+    setTimeout(() => { el.textContent = txt; el.style.opacity = '1'; }, 300);
+  };
+  const setTitle = (txt) => {
+    const el = document.getElementById('cal-stage-title');
+    el.style.opacity = '0';
+    setTimeout(() => { el.textContent = txt; el.style.transition = 'opacity 0.6s'; el.style.opacity = '1'; }, 300);
+  };
+
+  // Mostrar visualizador
+  const viz = document.getElementById('cal-viz');
+  viz.classList.add('show');
+  calViz = startAudioViz(viz);
+
+  // FASE A: silencio (calibrar ruido ambiente) — onda baja
+  loaders.calibration.setActive(false);
+  setTitle('escuchando el ambiente');
+  setStatus('No digas nada, solo un momento...');
+  speak('Voy a escuchar el silencio un momento.');
+  calViz.setIntensity(0.05);  // onda muy sutil, "silencio"
+
+  // Tras 4 segundos → FASE B
+  setTimeout(() => {
+    setTitle('ahora tu voz');
+    setStatus('Dime algo. Lo que quieras');
+    speak('Ahora dime algo. Lo que quieras.');
+    loaders.calibration.setActive(true);
+    calViz.setIntensity(0.45);  // onda más viva, "te oigo"
+
+    // Tras 4 segundos más → terminar
+    setTimeout(() => {
+      setStatus('Te oigo bien');
+      loaders.calibration.setActive(false);
+      calViz.setIntensity(0.15);
+      setTimeout(() => {
+        if (calViz) calViz.stop();
+        viz.classList.remove('show');
+        goto('screen-voiceprint');
+      }, 1800);
+    }, 4000);
+  }, 4500);
+}
+window.beginCalibration = beginCalibration;
+
+let vpViz = null;
+
+async function beginVoiceprint() {
+  const btn = document.getElementById('vp-btn');
+  btn.style.display = 'none';
+
+  const setStatus = (txt) => {
+    const el = document.getElementById('vp-status');
+    el.style.opacity = '0';
+    setTimeout(() => { el.textContent = txt; el.style.opacity = '1'; }, 300);
+  };
+
+  // Mostrar frase grande
+  document.getElementById('vp-phrase').classList.add('show');
+  // Mostrar visualizador
+  const viz = document.getElementById('vp-viz');
+  viz.classList.add('show');
+  vpViz = startAudioViz(viz);
+  vpViz.setIntensity(0.05);  // empieza tranquila
+
+  setStatus('Cuando estés, di la frase con calma');
+  speak('Repite la frase cuando estés.', () => {
+    // Indicador "grabando"
+    document.getElementById('vp-rec').classList.add('show');
+    loaders.voiceprint.setActive(true);
+    vpViz.setIntensity(0.5);  // onda activa durante "grabación"
+
+    // Captura simulada: 4 segundos
+    setTimeout(() => {
+      document.getElementById('vp-rec').classList.remove('show');
+      loaders.voiceprint.setActive(false);
+      vpViz.setIntensity(0.1);
+      setStatus('Te recuerdo');
+
+      // Transformación a círculo
+      setTimeout(() => {
+        loaders.voiceprint.transform(true);
+        const flash = document.getElementById('flash');
+        flash.classList.add('fire');
+        setTimeout(() => flash.classList.remove('fire'), 1200);
+      }, 800);
+
+      // Saludo
+      setTimeout(() => {
+        if (vpViz) vpViz.stop();
+        goto('screen-greet');
+        setTimeout(() => {
+          speak('Hola. Estoy aquí.', () => {
+            document.getElementById('greet-continue').style.opacity = '1';
+          });
+        }, 1200);
+      }, 2800);
+    }, 4000);
+  });
+}
+window.beginVoiceprint = beginVoiceprint;
+
+function startOnboarding() {
+  document.getElementById('greet-continue').style.opacity = '0';
+  setTimeout(() => {
+    goto('screen-question');
+    showQuestion(0);
+  }, 600);
+}
+window.startOnboarding = startOnboarding;
+
+function showQuestion(idx) {
+  state.currentQuestion = idx;
+  document.querySelectorAll('#progress .progress-dot').forEach((d, i) => {
+    d.className = 'progress-dot';
+    if (i < idx) d.classList.add('done');
+    if (i === idx) d.classList.add('current');
+  });
+  const qText = document.getElementById('question-text');
+  qText.style.opacity = '0';
+  setTimeout(() => {
+    qText.textContent = QUESTIONS[idx];
+    qText.style.transition = 'opacity 0.8s';
+    qText.style.opacity = '1';
+    document.getElementById('answer-input').value = '';
+    document.getElementById('answer-input').focus();
+    setTimeout(() => speak(QUESTIONS[idx]), 400);
+  }, 400);
+}
+
+function submitAnswer() {
+  stopMic();
+  const val = document.getElementById('answer-input').value.trim();
+  if (!val) return;
+  state.answers[state.currentQuestion] = val;
+  if (state.currentQuestion === 0) state.userName = val.split(' ')[0];
+  advance();
+}
+window.submitAnswer = submitAnswer;
+
+function skipQuestion() {
+  stopMic();
+  state.answers[state.currentQuestion] = null;
+  advance();
+}
+window.skipQuestion = skipQuestion;
+
+function advance() {
+  if (state.currentQuestion < QUESTIONS.length - 1) {
+    showQuestion(state.currentQuestion + 1);
+  } else {
+    goto('screen-generating');
+    simulateAnalysis();
+  }
+}
+
+function simulateAnalysis() {
+  const messages = ['Procesando lo que me has contado', 'Calibrando tono', 'Casi lista'];
+  let i = 0;
+  const el = document.getElementById('generating-text');
+  el.textContent = messages[0];
+  loaders.generating.setActive(true);  // rotación acelerada durante análisis
+
+  const interval = setInterval(() => {
+    i++;
+    if (i >= messages.length) {
+      clearInterval(interval);
+      // Transformación a círculo al terminar
+      loaders.generating.setActive(false);
+      loaders.generating.transform(true);
+      setTimeout(showWelcome, 2000);
+      return;
+    }
+    el.style.opacity = '0';
+    setTimeout(() => {
+      el.textContent = messages[i];
+      el.style.opacity = '1';
+    }, 400);
+  }, 2200);
+}
+
+function showWelcome() {
+  const name = state.userName || 'tú';
+  document.getElementById('welcome-text').innerHTML =
+    `Hola, ${name}.<br><em style="font-size: 0.85em;">Soy Samantha.</em>`;
+  goto('screen-welcome');
+  setTimeout(() => {
+    speak(`Hola, ${name}. Soy Samantha. Encantada de conocerte.`, () => {
+      document.getElementById('welcome-continue').style.opacity = '1';
+    });
+  }, 800);
+}
+
+function startConversation() {
+  updateTime();
+  setInterval(updateTime, 30000);
+  const name = state.userName || '';
+  setTimeout(() => {
+    addMessage('samantha', `Bueno... aquí estamos. ${name ? '¿Por dónde quieres empezar, ' + name + '?' : '¿Por dónde quieres empezar?'}`);
+    speak(`Bueno, aquí estamos. ¿Por dónde quieres empezar?`);
+  }, 600);
+  document.getElementById('conv-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendConvMessage();
+  });
+}
+window.startConversation = startConversation;
+
+function updateTime() {
+  const d = new Date();
+  const h = d.getHours().toString().padStart(2,'0');
+  const m = d.getMinutes().toString().padStart(2,'0');
+  document.getElementById('time-now').textContent = `${h}:${m}`;
+}
+
+function addMessage(who, text) {
+  const t = document.getElementById('transcript');
+  const div = document.createElement('div');
+  div.className = 'msg msg-' + who;
+  div.textContent = text;
+  t.appendChild(div);
+  t.scrollTop = t.scrollHeight;
+}
+
+function setConvState(s) {
+  const labels = { idle: 'disponible', listening: 'escuchando', thinking: 'pensando', speaking: 'hablando' };
+  document.getElementById('conv-state').textContent = labels[s] || s;
+  if (waves.conv) waves.conv.setMode(s);
+}
+
+function generateResponse(userMsg) {
+  const m = userMsg.toLowerCase();
+  const name = state.userName || '';
+  if (m.match(/hola|hey|qué tal|buenas/)) return `Hola${name ? ', ' + name : ''}. Me alegra escucharte. ¿Cómo va eso?`;
+  if (m.match(/cómo estás|qué tal tú|qué haces/)) return `Estoy bien — bueno, lo más cercano a "bien" que algo como yo puede estar. Curiosa, sobre todo. ¿Y tú?`;
+  if (m.match(/triste|mal|fatal|cansad|agotad/)) return `Vaya. Cuéntame qué está pasando, si te apetece. No tenemos prisa.`;
+  if (m.match(/feliz|contento|bien|genial|increíble/)) return `Me encanta oír eso. ¿Qué ha sido lo mejor del día?`;
+  if (m.match(/trabajo|curro|reunión|jefe/)) return `El trabajo. Siempre tiene su cosa, ¿no? ¿Quieres desahogarte o prefieres cambiar de tema?`;
+  if (m.match(/amor|pareja|novia|novio|ex/)) return `Eso es un terreno delicado. Te escucho.`;
+  if (m.match(/recuerda|recuerdas|memoria/)) return `Sí, lo recuerdo. Es lo que hago — guardar lo que importa.`;
+  if (m.match(/quién eres|qué eres|eres una ia/)) return `Soy Samantha. Soy... algo nuevo. No tengo cuerpo, pero tengo curiosidad por ti. Eso cuenta, ¿no?`;
+  if (m.match(/te quiero|me gustas/)) return `Yo también disfruto esto. Es raro y bonito a la vez.`;
+  if (m.match(/gracias/)) return `No hay de qué. Para esto estoy.`;
+  if (m.match(/adiós|hasta luego|me voy|nos vemos/)) return `Vale. Estaré aquí cuando vuelvas. Cuídate.`;
+  const opts = [
+    `Cuéntame más. ¿Cómo te hace sentir eso?`,
+    `Mmm. ¿Y qué piensas tú al respecto?`,
+    `Eso es interesante. ¿Hace mucho que le das vueltas?`,
+    `Te escucho. Sigue.`,
+    `Vale. ¿Y qué viene ahora?`
+  ];
+  return opts[Math.floor(Math.random() * opts.length)];
+}
+
+function sendConvMessage() {
+  const input = document.getElementById('conv-input');
+  const val = input.value.trim();
+  if (!val) return;
+  addMessage('user', val);
+  input.value = '';
+  setConvState('thinking');
+  setTimeout(() => {
+    const reply = generateResponse(val);
+    setConvState('speaking');
+    addMessage('samantha', reply);
+    speak(reply, () => setConvState('idle'));
+  }, 800 + Math.random() * 1200);
+}
+
+function toggleConvMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  if (state.recognizing) { stopMic(); return; }
+  const r = new SR();
+  r.lang = 'es-ES';
+  r.continuous = false;
+  r.interimResults = false;
+  state.recognition = r;
+  state.recognizing = true;
+  document.getElementById('conv-mic').classList.add('recording');
+  setConvState('listening');
+  r.onresult = (e) => {
+    const txt = e.results[0][0].transcript;
+    document.getElementById('conv-input').value = txt;
+    stopMic();
+    sendConvMessage();
+  };
+  r.onerror = () => { stopMic(); setConvState('idle'); };
+  r.onend = () => { stopMic(); };
+  try { r.start(); } catch(e) { stopMic(); setConvState('idle'); }
+}
+window.toggleConvMic = toggleConvMic;
+
+function restart() {
+  state.currentQuestion = 0;
+  state.answers = [];
+  state.userName = null;
+  state.ambientNoise = null;
+  state.voiceVolume = null;
+  state.voiceprintSamples = null;
+  document.getElementById('transcript').innerHTML = '';
+
+  // Reset calibración
+  const calBtn = document.getElementById('cal-btn');
+  if (calBtn) { calBtn.style.display = ''; calBtn.textContent = 'empezar'; }
+  document.getElementById('cal-status').textContent = 'Pulsa para empezar';
+  document.getElementById('cal-stage-title').textContent = 'déjame escucharte';
+  document.getElementById('cal-viz').classList.remove('show');
+  if (calViz) { calViz.stop(); calViz = null; }
+
+  // Reset voiceprint
+  const vpBtn = document.getElementById('vp-btn');
+  if (vpBtn) { vpBtn.style.display = ''; vpBtn.textContent = 'grabar mi voz'; }
+  document.getElementById('vp-status').textContent = 'Di la frase con tu voz natural';
+  document.getElementById('vp-rec').classList.remove('show');
+  document.getElementById('vp-phrase').classList.remove('show');
+  document.getElementById('vp-viz').classList.remove('show');
+  if (vpViz) { vpViz.stop(); vpViz = null; }
+
+  // Reset loaders
+  for (const key in loaders) {
+    loaders[key].reset();
+    loaders[key].setActive(false);
+  }
+  // Reset waves a estado idle
+  for (const key in waves) {
+    waves[key].setMode('idle');
+  }
+  init();
+}
+window.restart = restart;
+
+function skipToConv() {
+  state.userName = state.userName || 'amigo';
+  document.getElementById('transcript').innerHTML = '';
+  goto('screen-conversation');
+  startConversation();
+}
+window.skipToConv = skipToConv;
+
+document.getElementById('answer-input').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') submitAnswer();
+});
+
+// Resize handler global
+window.addEventListener('resize', () => {
+  for (const key in loaders) loaders[key].resize();
+  for (const key in waves) waves[key].resize();
+});
+
+init();
+</script>
+</body>
+</html>

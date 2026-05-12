@@ -28,13 +28,23 @@ class Config:
     mock_streaming_delay_s: float = 0.04  # Pausa entre tokens (simula generación)
 
     # === LLM (cuando mode=real) ===
-    vllm_url: str = "http://127.0.0.1:8000"
-    llm_model: str = "Qwen/Qwen3.5-9B-Instruct"  # Candidato actual; ajustable
-    llm_max_tokens: int = 512
-    llm_temperature: float = 0.7
+    # OpenAI-compatible server. Default points at a local llama-server
+    # (llama.cpp). Same URL pattern works for vLLM or LM Studio if you
+    # ever swap engines.
+    llm_server_url: str = "http://127.0.0.1:8000"
+    llm_model: str = "qwen3-8b"  # informational; llama-server typically ignores
+    llm_request_timeout_s: float = 60.0
+    # Sampling parameters (temperature, top_k, top_p, min_p, presence_penalty,
+    # max_tokens) intentionally live on the LLM server side via flags. The
+    # backend stays agnostic of the model.
 
-    # === Memoria (cuando mode=real) ===
-    chroma_persist_dir: str = "~/.samantha/memory"
+    # === Memoria persistente (ChromaDB) ===
+    # Memory works in both mock and real mode. Disable in tests via
+    # SAMANTHA_MEMORY_ENABLED=false so chroma's index isn't created
+    # under the user's home for every pytest run.
+    memory_enabled: bool = True
+    memory_persist_dir: str = "~/.samantha/memory"
+    memory_top_k: int = 5  # how many past chunks to inject before each LLM call
 
     # === Logging ===
     log_level: str = "INFO"
@@ -62,11 +72,12 @@ class Config:
             mock_min_latency_s=_get("MOCK_MIN_LATENCY", cls.mock_min_latency_s),
             mock_max_latency_s=_get("MOCK_MAX_LATENCY", cls.mock_max_latency_s),
             mock_streaming_delay_s=_get("MOCK_STREAM_DELAY", cls.mock_streaming_delay_s),
-            vllm_url=_get("VLLM_URL", cls.vllm_url),
+            llm_server_url=_get("LLM_SERVER_URL", cls.llm_server_url),
             llm_model=_get("LLM_MODEL", cls.llm_model),
-            llm_max_tokens=_get("LLM_MAX_TOKENS", cls.llm_max_tokens),
-            llm_temperature=_get("LLM_TEMPERATURE", cls.llm_temperature),
-            chroma_persist_dir=_get("CHROMA_DIR", cls.chroma_persist_dir),
+            llm_request_timeout_s=_get("LLM_REQUEST_TIMEOUT_S", cls.llm_request_timeout_s),
+            memory_enabled=_get("MEMORY_ENABLED", cls.memory_enabled),
+            memory_persist_dir=_get("MEMORY_PERSIST_DIR", cls.memory_persist_dir),
+            memory_top_k=_get("MEMORY_TOP_K", cls.memory_top_k),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 

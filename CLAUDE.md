@@ -222,21 +222,34 @@ When WPE WebKit visits `http://127.0.0.1:7777/`, it gets `index.html`.
 That HTML loads `/static/app.js`, which connects to `/ws` via WebSocket
 for streaming conversation.
 
-### 2.5 LLM: Qwen 3.5-9B (with room to upgrade)
+### 2.5 LLM Runtime + Model
 
-**Decision:** Default to **Qwen 3.5-9B-Instruct** in AWQ 4-bit. Final
-model TBD after first run on real hardware.
+**Decision:**
+- **Runtime:** llama.cpp via `llama-server` (OpenAI-compatible HTTP API).
+- **Model:** Qwen 3.5-9B-Instruct in GGUF Q4_K_M (~5.5 GB). Final model
+  TBD after first run on real hardware.
 
 **Rationale:**
-- Fits comfortably in 8GB VRAM (~6-7GB) with room for KV cache
-- Expected ~30 tok/s on RTX 4070 Mobile
-- Multilingual, strong in Spanish
-- Apache 2.0 license
+- Samantha is single-user, single-stream. The "horsepower" pitch of
+  vLLM (batched parallel requests) and the convenience layer of Ollama
+  add nothing here — they're optimizing for problems we don't have.
+- llama.cpp runs natively on both Mac (Metal) for dev AND Linux (CUDA)
+  for production — same code path, same model file. vLLM is CUDA-only
+  and would block all Mac-side development.
+- llama-server exposes a standard OpenAI-compatible `/v1/chat/completions`
+  endpoint, so the Python client is runtime-agnostic. Swapping engines
+  later (vLLM, LM Studio, etc.) is a config change, not a code change.
+- Qwen 3.5-9B Q4_K_M fits in ~6 GB VRAM with room for KV cache. Expected
+  ~25-30 tok/s on RTX 4070 Mobile.
+- Apache 2.0 license. Strong in Spanish.
 
 **Rejected alternatives:**
-- Qwen 3.6-27B: needs 16.8GB VRAM at Q4_K_M
-- Qwen 2.5-14B: superseded by 3.5 generation
-- Llama 3.3-70B: needs ~40GB VRAM
+- **vLLM:** Faster on multi-stream GPU workloads but CUDA-only. The
+  batching engine that makes it shine doesn't help a single-user kiosk.
+- **Ollama:** Wraps llama.cpp behind a daemon; the daemon is extra
+  surface area we don't need. Direct `llama-server` in systemd is simpler.
+- Qwen 3.6-27B: needs 16+ GB VRAM at Q4_K_M
+- Llama 3.3-70B: needs ~40 GB VRAM
 - GPT/Claude API: violates "fully local" principle
 
 ### 2.6 STT/TTS
@@ -249,8 +262,23 @@ model TBD after first run on real hardware.
 
 ### 2.7 Memory: ChromaDB
 
-**Decision:** ChromaDB with `nomic-embed-text` embeddings via Ollama,
-persisted in `~/.samantha/memory/`.
+**Decision:** ChromaDB with the default ONNX MiniLM embedder (later
+swappable to `paraphrase-multilingual-MiniLM-L12-v2` via
+sentence-transformers for better Spanish quality), persisted in
+`~/.samantha/memory/`.
+
+**Design principle:** **Samantha never forgets anything** (user
+directive 2026-05-12). The store is append-only from the user's
+perspective. `Memory.forget()` and `Memory.clear()` exist as admin /
+test tools but are NOT wired to user input. If the person asks Samantha
+to forget something, the LLM replies in character ("yo no olvido…")
+and the chunks stay.
+
+**Why not Ollama for embeddings:** we removed Ollama as a runtime (see
+§2.5). Adding it back just for nomic-embed-text would mean running a
+second daemon for one model. ChromaDB's default embedder ships in-
+process; sentence-transformers is the upgrade path when we want better
+Spanish recall.
 
 ### 2.8 Audio I/O: sounddevice (Python, native)
 
@@ -320,7 +348,7 @@ samantha/
 │
 ├── systemd/                    ← Service files for kiosk deployment
 │   ├── samantha-backend.service    ← Python backend
-│   ├── samantha-vllm.service       ← vLLM (Phase 4)
+│   ├── samantha-llamacpp.service   ← llama-server (Phase 4)
 │   └── samantha-ui.service         ← Chromium kiosk launcher
 │
 └── docs/
@@ -397,14 +425,14 @@ to call the backend via fetch + WebSocket.
 - Boot/calibration/voiceprint timings still feel natural
 
 #### Phase 4: Real LLM integration
-Replace `mock_llm.py` with `real_llm.py` that calls a local vLLM server
+Replace `mock_llm.py` with `real_llm.py` that calls a local llama-server
 (launched separately via systemd). Apply the Samantha system prompt.
 
 **Deliverables:**
-- `backend/samantha/real_llm.py` with vLLM client (OpenAI-compatible API)
+- `backend/samantha/real_llm.py` — OpenAI-compatible client for `llama-server`
 - `backend/samantha/personality.py` with finalized system prompt
 - Config switch via `SAMANTHA_MODE=real`
-- systemd unit for vLLM in `systemd/`
+- systemd unit `samantha-llamacpp.service` in `systemd/`
 - Streaming response via WebSocket preserved
 
 #### Phase 5: STT + TTS + audio capture
@@ -420,14 +448,18 @@ Real voice in and out, all in Python.
 - Frontend plays TTS audio via `<audio>` element
 
 #### Phase 6: Memory with ChromaDB
-Persistent memory across sessions.
+Persistent memory across sessions. Append-only from the user's
+perspective — Samantha never forgets (§2.7).
 
 **Deliverables:**
 - `backend/samantha/memory.py` with ChromaDB wrapper
-- Embeddings via local nomic-embed-text (Ollama or sentence-transformers)
+- Embeddings via ChromaDB's default ONNX MiniLM (swap-in:
+  sentence-transformers `paraphrase-multilingual-MiniLM-L12-v2`)
 - On every user message: store as memory chunk
+- On every Samantha reply: store as memory chunk
 - Before every LLM call: retrieve top-k relevant memories, inject into prompt
-- "Forget X" command support
+- Admin-only `Memory.forget()` / `Memory.clear()` for tests + future
+  maintenance flows (NOT wired to user input)
 
 #### Phase 7: Kiosk deployment
 Boot directly into Samantha on the mini-PC. No login screen, no
@@ -472,7 +504,7 @@ python -m samantha.api
 
 # Then open http://localhost:7777/ in any browser to see the UI
 
-# Run in real mode (requires vLLM server on :8000)
+# Run in real mode (requires llama-server on :8000)
 SAMANTHA_MODE=real python -m samantha.api
 
 # Run tests
@@ -503,7 +535,7 @@ cd backend && pip install -e .
 
 # 3. Install systemd services
 cp systemd/*.service ~/.config/systemd/user/
-systemctl --user enable samantha-vllm.service
+systemctl --user enable samantha-llamacpp.service
 systemctl --user enable samantha-backend.service
 systemctl --user enable samantha-ui.service
 loginctl enable-linger samantha    # Services start without login
@@ -741,6 +773,21 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-05-12 — vLLM → llama.cpp
+**Decision:** Use llama.cpp (`llama-server`) as the LLM runtime instead
+of vLLM. Model stays Qwen 3.5-9B Q4_K_M (GGUF).
+**Rationale:** Samantha is single-user, single-stream — vLLM's batching
+engine, Ollama's daemon layer, both optimize for problems we don't
+have. vLLM is also CUDA-only, which blocks all Mac-side development.
+llama.cpp runs natively on Mac (Metal) and Linux (CUDA) with the same
+model file and the same OpenAI-compatible HTTP API, so the Python
+client is runtime-agnostic.
+**Cost:** None (Phase 4 not yet implemented when changed). Phase 7
+systemd unit becomes `samantha-llamacpp.service` instead of
+`samantha-vllm.service`. Pydeps lose `vllm`; gain only `httpx`.
+**Lessons:** Pick the runtime that's cheapest to develop against;
+optimize for production throughput only when there's a real workload.
 
 ### 2026-05 — Ubuntu Frame → Chromium kiosk
 **Decision:** Replace Ubuntu Frame + WPE WebKit + snap (v2) with

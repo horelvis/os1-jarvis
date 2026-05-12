@@ -1,35 +1,46 @@
-"""Servidor FastAPI principal de Samantha.
+"""Samantha FastAPI server.
 
-Endpoints:
-  - GET  /ping        → health check
-  - POST /chat        → conversación (mock o real)
-  - POST /chat/stream → conversación con SSE (streaming)
-  - POST /transcribe  → audio → texto (mock por ahora)
-  - POST /speak       → texto → audio (mock por ahora)
+Serves BOTH the static frontend (HTML/CSS/JS) and the API on a single
+port. The frontend is loaded by Chromium in --kiosk mode at boot.
 
-Para arrancar:
-    uvicorn samantha.api:app --host 127.0.0.1 --port 7777
+HTTP endpoints:
+  - GET  /              → frontend (static/index.html)
+  - GET  /static/*      → frontend assets (CSS, JS)
+  - GET  /ping          → health check
+  - POST /chat          → conversation (mock or real)
+  - POST /transcribe    → audio → text (mock)
+  - POST /speak         → text → audio (mock)
 
-O usar el helper:
+WebSocket:
+  - /ws                 → streaming conversation + (placeholder) listen
+
+Run with:
     python -m samantha.api
+
+Or with hot reload during development:
+    uvicorn samantha.api:app --host 127.0.0.1 --port 7777 --reload
 """
 
 import asyncio
 import io
+import json
 import math
+import os
 import random
 import struct
 import time
 import wave
+from pathlib import Path
+from typing import TYPE_CHECKING, AsyncIterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from . import __version__
 from .config import config
-from .mock_llm import generate_reply, tokenize_for_streaming
+from .mock_llm import generate_reply as mock_generate_reply, tokenize_for_streaming
 from .schemas import (
     ChatRequest,
     ChatResponse,
@@ -38,10 +49,77 @@ from .schemas import (
     TranscribeResponse,
 )
 
+if TYPE_CHECKING:
+    from .memory import Memory, MemoryChunk
+
+
+# ============================================================
+# Memory singleton (lazy)
+# ============================================================
+
+_memory: "Memory | None" = None
+_memory_init_failed: bool = False
+
+
+def get_memory() -> "Memory | None":
+    """Lazily initialize the persistent memory store.
+
+    Returns None if memory is disabled (config.memory_enabled=False) or
+    if initialization fails — never raise into the request path.
+    """
+    global _memory, _memory_init_failed
+    if not config.memory_enabled or _memory_init_failed:
+        return None
+    if _memory is None:
+        try:
+            from .memory import Memory
+
+            persist = os.path.expanduser(config.memory_persist_dir)
+            _memory = Memory(persist_dir=persist)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.error(f"memory: failed to initialize, disabling: {e}")
+            _memory_init_failed = True
+            return None
+    return _memory
+
+
+# ============================================================
+# Token streaming (dispatches on config.mode)
+# ============================================================
+
+
+async def _stream_tokens(
+    message: str, memories: "list[MemoryChunk] | None" = None
+) -> AsyncIterator[str]:
+    """Yield reply tokens, dispatching on `config.mode`.
+
+    - "real": pulls a live stream from `real_llm` (llama-server, etc.),
+      injecting `memories` into the system prompt.
+    - "mock": tokenizes the canned reply and emits chunks with a small
+      inter-token delay. Memory injection is a no-op in mock — the mock
+      LLM is keyword-based and ignores extra context.
+    """
+    if config.mode == "real":
+        from .real_llm import stream_reply as real_stream_reply
+
+        async for tok in real_stream_reply(message, memories):
+            yield tok
+        return
+
+    # Mock path: brief "thinking" pause, then drip tokens.
+    await asyncio.sleep(random.uniform(0.2, 0.6))
+    reply = mock_generate_reply(message)
+    for token in tokenize_for_streaming(reply):
+        await asyncio.sleep(config.mock_streaming_delay_s)
+        yield token
+
 
 # ========================================================================
 # APP SETUP
 # ========================================================================
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+INDEX_FILE = STATIC_DIR / "index.html"
 
 app = FastAPI(
     title="Samantha Backend",
@@ -49,29 +127,41 @@ app = FastAPI(
     description="Backend local para Samantha. Solo accesible desde localhost.",
 )
 
-# CORS: Tauri webview puede tener origin "tauri://localhost" en producción
-# y "http://localhost:1420" durante desarrollo. Permitimos ambos.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "tauri://localhost",
-        "http://tauri.localhost",
-        "http://localhost:1420",
-        "http://127.0.0.1:1420",
-    ],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+# Frontend served from same origin → no CORS needed.
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# Placeholder transcriptions used by /transcribe and the WS `listen`
+# turn. Phase 5 replaces this with faster-whisper.
+FAKE_TRANSCRIPTS: list[str] = [
+    "Hola Samantha, ¿qué tal?",
+    "Cuéntame algo interesante.",
+    "Estoy un poco cansado hoy.",
+    "¿Te acuerdas de lo que hablamos ayer?",
+    "Tengo una pregunta para ti.",
+    "Me apetece charlar un rato.",
+]
+
+
+# ========================================================================
+# GET / → frontend
+# ========================================================================
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    """Serve the SPA. Chromium in kiosk mode lands here at boot."""
+    return FileResponse(INDEX_FILE)
 
 
 # ========================================================================
 # /ping
 # ========================================================================
 
+
 @app.get("/ping", response_model=PingResponse)
 async def ping() -> PingResponse:
-    """Health check. Tauri lo llama al arrancar para esperar al backend."""
+    """Health check used by the kiosk to wait for the backend at boot."""
     return PingResponse(
         status="ok",
         version=__version__,
@@ -81,24 +171,42 @@ async def ping() -> PingResponse:
 
 
 # ========================================================================
-# /chat (no streaming)
+# /chat
 # ========================================================================
+
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
-    """Endpoint principal de conversación.
+    """Non-streaming chat endpoint. The frontend uses /ws for streaming;
+    /chat is retained for tests and one-shot integrations.
 
-    En mock, devuelve respuesta plausible tras latencia simulada.
-    En real (futuro), llama a vLLM y devuelve la respuesta completa.
+    Memory: every user msg is stored and every reply too; recall happens
+    against the user msg before generation. Samantha never forgets, so
+    there is no "forget" path — "olvida X" goes to the LLM like any
+    other message and Samantha declines in character (system prompt).
     """
     start = time.perf_counter()
     logger.info(f"chat: user_id={req.user_id} message='{req.message[:60]}'")
 
-    # Simular latencia de "pensamiento" antes de responder
-    latency = random.uniform(config.mock_min_latency_s, config.mock_max_latency_s)
-    await asyncio.sleep(latency)
+    mem = get_memory()
+    memories: list = []
+    if mem is not None:
+        mem.remember("user", req.message, user_id=req.user_id)
+        memories = mem.recall(
+            req.message, k=config.memory_top_k, user_id=req.user_id
+        )
 
-    reply = generate_reply(req.message)
+    if config.mode == "real":
+        from .real_llm import generate_reply as real_generate_reply
+
+        reply = await real_generate_reply(req.message, memories)
+    else:
+        latency = random.uniform(config.mock_min_latency_s, config.mock_max_latency_s)
+        await asyncio.sleep(latency)
+        reply = mock_generate_reply(req.message)
+
+    if mem is not None and reply:
+        mem.remember("samantha", reply, user_id=req.user_id)
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     logger.info(f"chat: replied in {elapsed_ms}ms — '{reply[:60]}'")
@@ -111,82 +219,26 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 # ========================================================================
-# /chat/stream — Server-Sent Events
-# ========================================================================
-
-@app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
-    """Variante streaming del /chat. Devuelve tokens en formato SSE.
-
-    Formato de cada evento:
-        data: {"token": "Hola "}\\n\\n
-
-    Al finalizar:
-        data: {"done": true, "thinking_ms": 1234}\\n\\n
-    """
-    start = time.perf_counter()
-    logger.info(f"chat/stream: '{req.message[:60]}'")
-
-    reply = generate_reply(req.message)
-    tokens = tokenize_for_streaming(reply)
-
-    async def event_generator():
-        # Pequeña pausa inicial (como "pensando")
-        await asyncio.sleep(random.uniform(0.2, 0.6))
-
-        for token in tokens:
-            await asyncio.sleep(config.mock_streaming_delay_s)
-            # Escape simple para JSON
-            safe = token.replace("\\", "\\\\").replace('"', '\\"')
-            yield f'data: {{"token": "{safe}"}}\n\n'
-
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        yield f'data: {{"done": true, "thinking_ms": {elapsed_ms}}}\n\n'
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # nginx no buffer (si algún día hay proxy)
-        },
-    )
-
-
-# ========================================================================
 # /transcribe — STT (mock)
 # ========================================================================
 
+
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
-    """Mock de transcripción de audio.
-
-    En el real (faster-whisper), recibirá los bytes, los pasará al modelo
-    y devolverá el texto detectado. Aquí simulamos.
-    """
+    """Mock transcription. Phase 5 swaps in faster-whisper."""
     contents = await audio.read()
     size = len(contents)
     logger.info(f"transcribe: received {size} bytes")
 
-    # Simulación: latencia proporcional al tamaño (~50KB por segundo de audio)
+    # Simulate latency proportional to audio size (~50KB/s of audio)
     await asyncio.sleep(0.3 + size / 1_000_000)
 
-    # Frases plausibles que podría haber dicho el usuario
-    fake_transcripts = [
-        "Hola Samantha, ¿qué tal?",
-        "Cuéntame algo interesante.",
-        "Estoy un poco cansado hoy.",
-        "¿Te acuerdas de lo que hablamos ayer?",
-        "Tengo una pregunta para ti.",
-        "Me apetece charlar un rato.",
-    ]
-
-    fake_text = random.choice(fake_transcripts)
+    fake_text = random.choice(FAKE_TRANSCRIPTS)
 
     return TranscribeResponse(
         text=fake_text,
         language="es",
-        duration_s=size / 32000.0,  # estimación aprox a 16kHz 16-bit mono
+        duration_s=size / 32000.0,
         confidence=random.uniform(0.85, 0.98),
     )
 
@@ -195,21 +247,22 @@ async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
 # /speak — TTS (mock)
 # ========================================================================
 
+
 @app.post("/speak")
 async def speak(req: SpeakRequest) -> Response:
-    """Mock de síntesis de voz.
-
-    Devuelve un WAV con un tono breve generado proceduralmente.
-    En real (Piper), generará la voz real de Samantha.
+    """Mock TTS. Returns a WAV whose duration scales with text length so
+    the frontend wave can animate for a realistic amount of time. Phase 5
+    swaps this for Piper, where audio length is naturally text-proportional.
     """
     logger.info(f"speak: voice={req.voice} text='{req.text[:60]}'")
 
-    # Simular latencia de síntesis (~10ms por carácter)
+    # Simulate synthesis latency (~10ms per character)
     await asyncio.sleep(len(req.text) * 0.01)
 
-    # Generar un WAV breve con un tono suave
-    # En real: Piper devolvería el audio sintetizado
-    wav_bytes = _generate_tone_wav(duration_s=0.4, freq=440)
+    # Estimated playback duration: ~13 chars/sec is typical Spanish TTS.
+    # Clamp so short replies still get a tail, long ones don't drag forever.
+    duration_s = max(0.6, min(7.0, len(req.text) / 13.0))
+    wav_bytes = _generate_tone_wav(duration_s=duration_s, freq=440)
 
     return Response(
         content=wav_bytes,
@@ -219,28 +272,35 @@ async def speak(req: SpeakRequest) -> Response:
 
 
 def _generate_tone_wav(duration_s: float, freq: float = 440.0) -> bytes:
-    """Genera un WAV mono 16-bit con un tono senoidal con fade in/out."""
+    """Build a mono 16-bit WAV.
+
+    The waveform is a soft fade-in/out tone for the first ~250 ms (just
+    enough to confirm audio is playing), then silence for the rest. This
+    keeps `audio.ended` firing at `duration_s` so the frontend can drive
+    state transitions on it, without subjecting the listener to a multi-
+    second pitch.
+    """
     sample_rate = 16000
     n_samples = int(duration_s * sample_rate)
-    fade_samples = int(0.05 * sample_rate)  # 50ms de fade
+    tone_samples = min(n_samples, int(0.25 * sample_rate))
+    fade_samples = int(0.05 * sample_rate)
+    amplitude = 0.12  # quieter than before; mock cue, not a beep
 
-    samples = []
-    for i in range(n_samples):
-        # Envelope con fade in/out
+    samples = [0] * n_samples
+    for i in range(tone_samples):
         if i < fade_samples:
             envelope = i / fade_samples
-        elif i > n_samples - fade_samples:
-            envelope = (n_samples - i) / fade_samples
+        elif i > tone_samples - fade_samples:
+            envelope = (tone_samples - i) / fade_samples
         else:
             envelope = 1.0
-        # Onda senoidal con amplitud moderada
-        value = envelope * 0.3 * math.sin(2 * math.pi * freq * i / sample_rate)
-        samples.append(int(value * 32767))
+        value = envelope * amplitude * math.sin(2 * math.pi * freq * i / sample_rate)
+        samples[i] = int(value * 32767)
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
-        wf.setsampwidth(2)  # 16-bit
+        wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(struct.pack(f"<{n_samples}h", *samples))
 
@@ -248,8 +308,114 @@ def _generate_tone_wav(duration_s: float, freq: float = 440.0) -> bytes:
 
 
 # ========================================================================
-# Manejo de errores
+# /ws — WebSocket: streaming chat + listen placeholder
 # ========================================================================
+
+
+async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> None:
+    """Stream a reply over the WebSocket, token by token.
+
+    Dispatches to mock or real via `_stream_tokens` so the on-wire
+    protocol is identical regardless of backend. Memory wiring: every
+    user msg is stored, top-k similar past chunks are retrieved and
+    injected into the system prompt, the reply is streamed back, and
+    the full reply is stored too. Samantha never forgets — "olvida X"
+    messages go through the LLM normally; the system prompt makes her
+    decline in character.
+    """
+    start = time.perf_counter()
+    logger.info(
+        f"ws chat: user_id={user_id} mode={config.mode} "
+        f"message='{message[:60]}'"
+    )
+
+    mem = get_memory()
+    memories: list = []
+    if mem is not None:
+        mem.remember("user", message, user_id=user_id)
+        memories = mem.recall(
+            message, k=config.memory_top_k, user_id=user_id
+        )
+
+    reply_chunks: list[str] = []
+    async for token in _stream_tokens(message, memories=memories):
+        reply_chunks.append(token)
+        await websocket.send_text(
+            json.dumps({"type": "token", "token": token})
+        )
+
+    if mem is not None and reply_chunks:
+        full_reply = "".join(reply_chunks).strip()
+        if full_reply:
+            mem.remember("samantha", full_reply, user_id=user_id)
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    await websocket.send_text(
+        json.dumps({"type": "done", "thinking_ms": elapsed_ms})
+    )
+
+
+async def _ws_handle_listen(websocket: WebSocket) -> None:
+    """Placeholder for the future audio-driven listen turn (Phase 5).
+
+    For now: simulate a short capture, then send back a fake transcription.
+    The frontend's mic button drives this; it never opens the browser mic.
+    """
+    await asyncio.sleep(random.uniform(0.8, 1.6))
+    text = random.choice(FAKE_TRANSCRIPTS)
+    logger.info(f"ws listen: returning fake transcription '{text}'")
+    await websocket.send_text(json.dumps({"type": "transcription", "text": text}))
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    """Single bidirectional channel for the conversation UI.
+
+    Client → Server messages:
+      {"type": "chat",   "message": str, "user_id": str}
+      {"type": "listen"}
+
+    Server → Client messages:
+      {"type": "token", "token": str}
+      {"type": "done", "thinking_ms": int}
+      {"type": "transcription", "text": str}
+      {"type": "error", "error": str}
+    """
+    await websocket.accept()
+    logger.info("ws: client connected")
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({"type": "error", "error": "invalid_json"}))
+                continue
+
+            msg_type = msg.get("type")
+            if msg_type == "chat":
+                message = (msg.get("message") or "").strip()
+                if not message:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "error": "empty_message"})
+                    )
+                    continue
+                user_id = msg.get("user_id", "primary")
+                await _ws_stream_chat(websocket, message, user_id)
+            elif msg_type == "listen":
+                await _ws_handle_listen(websocket)
+            else:
+                await websocket.send_text(
+                    json.dumps({"type": "error", "error": f"unknown_type:{msg_type}"})
+                )
+    except WebSocketDisconnect:
+        logger.info("ws: client disconnected")
+
+
+# ========================================================================
+# Error handling
+# ========================================================================
+
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
@@ -258,21 +424,18 @@ async def generic_exception_handler(request, exc):
 
 
 # ========================================================================
-# Entry point para ejecución directa
+# Entry point
 # ========================================================================
 
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info(
-        f"Samantha backend starting on {config.host}:{config.port} "
-        f"(mode={config.mode})"
-    )
+    logger.info(f"Samantha backend starting on {config.host}:{config.port} (mode={config.mode})")
 
     uvicorn.run(
         "samantha.api:app",
         host=config.host,
         port=config.port,
         log_level=config.log_level.lower(),
-        reload=False,  # Producción: no reload
+        reload=False,
     )
