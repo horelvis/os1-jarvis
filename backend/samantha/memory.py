@@ -30,6 +30,7 @@ once we've validated retrieval quality in real conversation.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -225,12 +226,142 @@ class Memory:
         res = self._collection.query(
             query_texts=[query.strip()],
             n_results=n_results,
-            where={"user_id": user_id},
+            where={
+                "$and": [
+                    {"user_id": user_id},
+                    {"role": {"$ne": "fact"}},
+                ]
+            },
         )
         chunks = self._unpack_query_result(res, user_id)
         short_ids = self._short_term.ids(user_id=user_id)
         chunks = [c for c in chunks if c.id not in short_ids]
         return chunks[:k]
+
+    # ------------- facts (structured knowledge) -------------
+
+    def set_fact(
+        self,
+        kind: str,
+        value: Any,
+        *,
+        text: str | None = None,
+        user_id: str = "primary",
+    ) -> str:
+        """Append a fact chunk (role='fact').
+
+        Facts are append-only — older entries with the same `kind` are
+        NOT deleted. `get_fact` returns the newest one. This preserves
+        history (per "Samantha never forgets") while letting the
+        prompt-assembly read the current value.
+        """
+        if not kind:
+            raise ValueError("kind is required")
+        chunk_id = str(uuid.uuid4())
+        ts = int(time.time())
+        doc = text or f"{kind} = {value}"
+        if not isinstance(value, (str, int, float, bool)):
+            value_serialized = json.dumps(value)
+            value_kind = "json"
+        else:
+            value_serialized = value
+            value_kind = "scalar"
+        self._collection.add(
+            ids=[chunk_id],
+            documents=[doc],
+            metadatas=[{
+                "role": "fact",
+                "kind": kind,
+                "value": value_serialized,
+                "value_kind": value_kind,
+                "timestamp": ts,
+                "user_id": user_id,
+            }],
+        )
+        return chunk_id
+
+    def get_fact(
+        self, kind: str, *, user_id: str = "primary"
+    ) -> dict | None:
+        """Return the newest fact for `kind`, or None."""
+        res = self._collection.get(
+            where={
+                "$and": [
+                    {"user_id": user_id},
+                    {"role": "fact"},
+                    {"kind": kind},
+                ]
+            },
+            include=["documents", "metadatas"],
+        )
+        ids = res.get("ids") or []
+        if not ids:
+            return None
+        metas = res.get("metadatas") or []
+        docs = res.get("documents") or []
+        candidates = []
+        for i, fid in enumerate(ids):
+            m = metas[i] or {}
+            candidates.append({
+                "id": fid,
+                "kind": m.get("kind"),
+                "value": self._deserialize_fact_value(m),
+                "text": docs[i] if i < len(docs) else "",
+                "timestamp": int(m.get("timestamp", 0)),
+            })
+        candidates.sort(key=lambda c: c["timestamp"], reverse=True)
+        return candidates[0]
+
+    def all_facts(
+        self,
+        kind: str | None = None,
+        *,
+        user_id: str = "primary",
+    ) -> list[dict]:
+        """Return all facts for `user_id`, newest first. Filter by `kind`
+        if given. Returns the latest entry per (kind,) — older overwrites
+        of the same kind are dropped."""
+        where: dict[str, Any] = {
+            "$and": [
+                {"user_id": user_id},
+                {"role": "fact"},
+            ]
+        }
+        if kind is not None:
+            where["$and"].append({"kind": kind})
+        res = self._collection.get(where=where, include=["documents", "metadatas"])
+        ids = res.get("ids") or []
+        metas = res.get("metadatas") or []
+        docs = res.get("documents") or []
+        # Group by kind and keep only the newest per kind.
+        latest_by_kind: dict[str, dict] = {}
+        for i, fid in enumerate(ids):
+            m = metas[i] or {}
+            entry_kind = str(m.get("kind", ""))
+            entry = {
+                "id": fid,
+                "kind": entry_kind,
+                "value": self._deserialize_fact_value(m),
+                "text": docs[i] if i < len(docs) else "",
+                "timestamp": int(m.get("timestamp", 0)),
+            }
+            existing = latest_by_kind.get(entry_kind)
+            if existing is None or entry["timestamp"] > existing["timestamp"]:
+                latest_by_kind[entry_kind] = entry
+        out = list(latest_by_kind.values())
+        out.sort(key=lambda c: c["timestamp"], reverse=True)
+        return out
+
+    @staticmethod
+    def _deserialize_fact_value(metadata: dict) -> Any:
+        v = metadata.get("value")
+        vk = metadata.get("value_kind", "scalar")
+        if vk == "json" and isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return v
+        return v
 
     def all(
         self,

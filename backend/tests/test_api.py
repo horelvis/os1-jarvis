@@ -494,6 +494,51 @@ def test_memory_recall_excludes_short_term_entries(tmp_path):
         "recall should exclude short-term entries"
 
 
+def test_memory_set_and_get_fact(tmp_path):
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    fact_id = mem.set_fact("name", "Horelvis", user_id="u1")
+    assert fact_id
+    fact = mem.get_fact("name", user_id="u1")
+    assert fact is not None
+    assert fact["value"] == "Horelvis"
+    assert fact["kind"] == "name"
+
+
+def test_memory_get_fact_returns_newest(tmp_path):
+    import time
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem.set_fact("name", "Old Name", user_id="u1")
+    time.sleep(1.1)
+    mem.set_fact("name", "New Name", user_id="u1")
+    fact = mem.get_fact("name", user_id="u1")
+    assert fact["value"] == "New Name"
+
+
+def test_memory_facts_excluded_from_conversational_recall(tmp_path):
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
+    mem.set_fact("name", "Horelvis", user_id="u1",
+                 text="El usuario se llama Horelvis")
+    mem.remember("user", "Me encanta el café por la mañana", user_id="u1")
+    results = mem.recall("Horelvis", k=5, user_id="u1")
+    for r in results:
+        assert r.role != "fact"
+
+
+def test_memory_all_facts_filters_by_kind(tmp_path):
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem.set_fact("name", "Alice", user_id="u1")
+    mem.set_fact("preferred_tone", "direct", user_id="u1")
+    names = mem.all_facts(kind="name", user_id="u1")
+    assert len(names) == 1
+    assert names[0]["value"] == "Alice"
+    everything = mem.all_facts(user_id="u1")
+    assert len(everything) == 2
+
+
 def test_real_llm_injects_memories_into_system_prompt():
     """When memories are passed, they appear as a system-prompt addendum."""
     from samantha import real_llm
