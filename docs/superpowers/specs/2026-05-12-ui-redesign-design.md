@@ -393,72 +393,151 @@ In Phase 7 the kiosk script must run `cd frontend && npm install && npm run buil
 
 The mini-PC needs Node only at deploy/build time. Runtime requires just the backend Python + Chromium. To avoid Node on the kiosk entirely, a future iteration can build on a dev machine and rsync `frontend/dist/` to the kiosk — but v2 does not optimize for this yet.
 
-## 9. User state in memory (no separate profile file)
+## 9. Memory architecture
 
-The "profile" concept is **not** a parallel file. Everything Samantha knows about the user lives in her ChromaDB memory at `~/.samantha/memory/`. The directive "Samantha never forgets" applies uniformly: onboarding state, the user's name, the 6 answers, and future preferences are all **append-only memory facts**.
+Two layers + structured facts, all anchored in `~/.samantha/memory/`. No separate `profile.json` — everything Samantha knows about the user lives in her memory ("el profile va dentro del conocimiento de Samantha").
 
-There is no `profile.json`, no `backend/samantha/profile.py` as a standalone module.
+Informed by the Mem0 spike (`docs/superpowers/specs/mem0-spike/REPORT.md`): we keep ChromaDB but adopt a short/long term distinction and swap the embedder to a multilingual model.
 
-### 9.1 Memory chunk roles
+### 9.1 Three components
 
-A memory chunk's `role` field acquires a third value:
+**Short-term memory** — the last N turns, verbatim.
 
-| Role | What it is | Surfaced in conversational recall? |
-|---|---|---|
-| `"user"` | Something the user said | Yes (semantic similarity) |
-| `"samantha"` | Something Samantha said | Yes |
-| `"fact"` | Structured fact about the user (name, onboarding completion, future preferences) | **No** (excluded from `recall()` by default) |
+- Storage: SQLite table `short_term` in `~/.samantha/memory/state.db`.
+- Capacity: ring buffer, 20 entries (configurable).
+- Inserted into every LLM call under "# Conversación reciente" — regardless of similarity to the current turn.
+- Solves the "previous exchange was about something unrelated" problem that pure-similarity retrieval has.
 
-The exclusion of `role: "fact"` from `recall()` is important: when the user asks Samantha about coffee, we don't want "name = Horelvis" coming up as a top-k match. Facts are retrieved by explicit metadata query, not by similarity.
+**Long-term memory** — everything else, retrieved by semantic similarity.
 
-### 9.2 Fact chunk schema
+- Storage: ChromaDB at `~/.samantha/memory/chroma/`.
+- Same chunks short-term has (everything written to short-term is ALSO written to long-term — eviction from the ring buffer doesn't remove from long-term).
+- Embedder: **fastembed** (ONNX runtime) with `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`. Multilingual, Spanish-strong, ~80 MB cached.
+- Recall: top-k by cosine similarity, k=5 default. Excludes `role: "fact"` chunks AND any chunks already in the current short-term buffer.
 
-A fact chunk's metadata carries a structured `kind` + `value` pair:
+**Structured facts** — append-only key/value pairs.
 
-| Field | Type | Example |
-|---|---|---|
-| `kind` | string | `"name"`, `"onboarding_completed_at"`, `"preferred_tone"` |
-| `value` | JSON-serializable scalar | `"Horelvis"`, `1778595500`, `"direct"` |
-| `role` | string (constant) | `"fact"` |
-| `timestamp` | int (unix s) | when the fact was set |
-| `user_id` | string | `"primary"` |
+- Storage: ChromaDB, same collection, marked with `role: "fact"`.
+- Used for: user's name, onboarding completion timestamp, future preferences.
+- Excluded from conversational recall (would be noise — we don't want "name = Horelvis" coming up when chatting about coffee).
+- Retrieved by explicit `kind` filter on metadata.
 
-The `document` text of a fact chunk is a human-readable sentence (e.g., `"El usuario se llama Horelvis"`). The structured `value` lives in metadata for fast retrieval.
+### 9.2 Why two layers (not one)
 
-**Why both text and metadata?** The text makes the chunk inspectable and admin-friendly; the metadata is what code reads. If we ever want a fact to show up in conversational recall (e.g., Samantha proactively says "te llamas Horelvis, ¿no?"), we can change the role on insert and it'll start appearing in similarity queries.
+Pure-similarity retrieval has a well-known failure mode: the LAST EXCHANGE may not be semantically similar to the new message, so it doesn't come back in top-k. The conversation feels discontinuous.
 
-### 9.3 New `Memory` methods
+Short-term holds the recent context verbatim regardless of similarity. Long-term holds everything older and only surfaces when relevant. This is the pattern used by ChatGPT Memory, Mem0, Claude Projects.
 
-`backend/samantha/memory.py` gains:
+### 9.3 Storage layout
 
-```python
-def set_fact(self, kind: str, value: Any, *, text: str | None = None,
-             user_id: str = "primary") -> str:
-    """Append a fact chunk. Returns its id. Older facts with the same
-    `kind` are NOT deleted — they remain in the store. `get_fact` always
-    returns the most recent."""
-
-def get_fact(self, kind: str, *, user_id: str = "primary") -> dict | None:
-    """Return the newest fact for (kind, user_id), or None if absent.
-    Result includes `{value, text, timestamp, id}`."""
-
-def all_facts(self, kind: str | None = None, *,
-              user_id: str = "primary") -> list[dict]:
-    """All facts for the user, optionally filtered by kind, newest first."""
+```
+~/.samantha/memory/
+├── state.db                  ← SQLite. Short-term ring buffer.
+└── chroma/                   ← ChromaDB persistent client + fastembed embeddings
+    ├── chroma.sqlite3
+    └── <segments>/
 ```
 
-`recall()` is updated to filter out `role: "fact"` from results by default. A new kwarg `include_facts: bool = False` allows opting in.
+### 9.4 Chunk schema (unified across both layers)
 
-### 9.4 Endpoints
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUIDv4 string | |
+| `role` | `"user" \| "samantha" \| "fact"` | controls how recall treats it |
+| `text` | string | raw turn ("qué tal el día?") or fact sentence ("El usuario se llama Horelvis") |
+| `timestamp` | int (unix seconds) | |
+| `user_id` | string | always `"primary"` today |
+| `kind` (facts only) | string in metadata | `"name"`, `"onboarding_completed_at"`, ... |
+| `value` (facts only) | JSON scalar in metadata | `"Horelvis"`, `1778595500`, ... |
 
-The public surface keeps the `/profile` prefix for clarity (the frontend doesn't need to know about the internal memory representation), but the implementation routes everything to `Memory`.
+### 9.5 `Memory` API
+
+`backend/samantha/memory.py` is restructured:
+
+```python
+class Memory:
+    def __init__(self, persist_dir: str, *,
+                 embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                 short_term_capacity: int = 20): ...
+
+    # ---- Write (writes to BOTH layers) ----
+    def remember(self, role: str, text: str, *, user_id: str = "primary") -> str:
+        """Append a chunk to short-term (ring) AND long-term (vector store)."""
+
+    def set_fact(self, kind: str, value: Any, *,
+                 text: str | None = None, user_id: str = "primary") -> str:
+        """Append a fact (role='fact'). Stored long-term only — facts are
+        not part of conversational continuity, no point in the ring."""
+
+    # ---- Read ----
+    def short_term(self, *, user_id: str = "primary") -> list[Chunk]:
+        """All entries currently in the ring, oldest-first."""
+
+    def recall(self, query: str, *,
+               k: int = 5,
+               user_id: str = "primary",
+               include_facts: bool = False) -> list[Chunk]:
+        """Top-k similar from long-term. Excludes role='fact' and any
+        chunks already in the short-term buffer (no duplication in prompt)."""
+
+    def get_fact(self, kind: str, *, user_id: str = "primary") -> dict | None:
+        """Newest fact for (kind, user_id), or None."""
+
+    def all_facts(self, kind: str | None = None, *,
+                  user_id: str = "primary") -> list[dict]: ...
+
+    # ---- Admin (NOT wired to user input) ----
+    def clear_facts(self, *, user_id: str = "primary") -> int: ...
+    def clear_long_term(self, *, user_id: str = "primary") -> int: ...
+```
+
+`remember()` writes to both layers atomically. The short-term ring evicts its oldest entry when capacity is reached, but that entry remains in long-term forever (per "Samantha nunca olvida").
+
+`recall()` filters out short-term entries from its results so the LLM doesn't see the same text twice (once in "Conversación reciente", once in "Recuerdas").
+
+### 9.6 Prompt assembly
+
+For every chat turn, the system prompt becomes:
+
+```
+{SYSTEM_PROMPT}                                ← personality.py v2
+
+# Lo que sabes de ella
+- el usuario se llama {name}                   ← from get_fact("name")
+- te conocisteis el {date}                     ← from get_fact("onboarding_completed_at")
+
+# Lo que recuerdas relevante
+- 2026-03-15 (ella): Trabajo en una agencia    ← top-k from long-term,
+- 2026-04-20 (ella): Toby ha cumplido 8 años     excluding short-term
+
+# Conversación reciente
+ella: ¿qué tal el día?                         ← short-term verbatim,
+tú:   bien, sólo cansado                         in chronological order
+ella: ¿algo concreto?
+```
+
+The user's current message is the final `user` message in the OpenAI-style `messages` array — separate from the system prompt above.
+
+### 9.7 Embedder details
+
+- Library: `fastembed` (Python). Pulls only `onnxruntime` + numpy, NOT PyTorch.
+- Model: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
+- Dimension: 384 (matches the index built by ChromaDB).
+- First-use download: ~80 MB to `~/.cache/fastembed/`. One-time per machine.
+- Inference: ~10 ms per text on CPU (no GPU needed).
+
+Why fastembed not sentence-transformers directly: avoids pulling PyTorch (~600 MB). ONNX runtime + a single model file is the whole stack.
+
+Why multilingual: ChromaDB's default `all-MiniLM-L6-v2` was trained primarily on English. Recall quality on Spanish drops noticeably (~15-20% on benchmarks). The multilingual variant is the same architecture trained on 50 languages including strong Spanish coverage.
+
+### 9.8 Endpoints (unchanged in shape)
 
 | Method/path | Behaviour |
 |---|---|
-| `GET /profile` | 200 + `{name, onboarding_completed_at, answers}` synthesized from facts + role-"user" chunks. **404** if `Memory.get_fact("onboarding_completed_at")` is `None`. |
-| `POST /profile` | See request schema below. Calls `Memory.set_fact("name", req.name)`, `Memory.set_fact("onboarding_completed_at", now)`, then for each non-null `answers[i]` calls `Memory.remember("user", f"[Q] {q} → [A] {a}")`. |
-| `GET /ping` (modified) | Adds `has_profile: bool` derived from `Memory.get_fact("onboarding_completed_at") is not None`. |
-| `DELETE /profile` | Admin-only. Removes the `onboarding_completed_at` fact AND the `name` fact, but **never touches conversational chunks** (the 6 answers stay; per "Samantha never forgets"). |
+| `GET /profile` | 200 + `{name, onboarding_completed_at, answers}` if onboarded. 404 if `Memory.get_fact("onboarding_completed_at")` is None. |
+| `POST /profile` | Body `{name, answers}` (see schema below). Calls `set_fact("name", ...)`, then `remember("user", ...)` for each answer, then `set_fact("onboarding_completed_at", now)`. |
+| `GET /ping` (modified) | Adds `has_profile: bool` from `get_fact("onboarding_completed_at") is not None`. |
+| `DELETE /profile` | Admin-only. Clears the `name` and `onboarding_completed_at` facts. **Never touches conversational chunks** — the 6 answers stay; per "Samantha never forgets". |
 
 **`POST /profile` request schema (Pydantic):**
 
@@ -472,19 +551,25 @@ class ProfileAnswer(BaseModel):
     a: str | None = Field(default=None, max_length=2000)  # None = user skipped
 ```
 
-The response is `{name, onboarding_completed_at, answers}`. If `name` is empty after trim, the backend rejects with `422`; the frontend must pass a non-empty name even if Q1 was skipped (fallback: see §13 criterion 2).
+Response is `{name, onboarding_completed_at, answers}`. Empty `name` after trim → 422; frontend must pass non-empty even if Q1 skipped (see §13 criterion 2 for the fallback rule).
 
-### 9.5 Backend module
+### 9.9 Backend module structure
 
-`backend/samantha/profile.py` exists but is a **thin facade** (~30 lines) over `Memory`:
+```
+backend/samantha/memory.py     ← Memory class with short/long/facts (extended)
+backend/samantha/profile.py    ← thin facade (~30 LoC), routes /profile to Memory
+backend/samantha/api.py        ← /profile endpoints, prompt assembly for /ws and /chat
+```
+
+`profile.py` (illustrative):
 
 ```python
-# pseudocode
 def is_onboarded(mem: Memory, user_id: str = "primary") -> bool:
     return mem.get_fact("onboarding_completed_at", user_id=user_id) is not None
 
 def get_profile(mem: Memory, user_id: str = "primary") -> dict | None:
-    if not is_onboarded(mem, user_id): return None
+    if not is_onboarded(mem, user_id):
+        return None
     name = mem.get_fact("name", user_id=user_id)
     ts = mem.get_fact("onboarding_completed_at", user_id=user_id)
     answers = _recover_answers_from_memory(mem, user_id)
@@ -493,20 +578,23 @@ def get_profile(mem: Memory, user_id: str = "primary") -> dict | None:
 def complete_onboarding(mem: Memory, name: str, answers: list[dict],
                         user_id: str = "primary") -> dict:
     mem.set_fact("name", name, text=f"El usuario se llama {name}", user_id=user_id)
-    for entry in answers:
-        if entry["a"]:
-            mem.remember("user", f"[Q] {entry['q']} → [A] {entry['a']}",
-                         user_id=user_id)
+    for a in answers:
+        if a["a"]:
+            mem.remember("user", f"[Q] {a['q']} → [A] {a['a']}", user_id=user_id)
     mem.set_fact("onboarding_completed_at", int(time.time()), user_id=user_id)
     return get_profile(mem, user_id)
 ```
 
-### 9.6 Edge cases
+The `/chat` and `/ws` handlers in `api.py` build the prompt per §9.6 every turn: `Memory.get_fact` for facts, `Memory.short_term` for the buffer, `Memory.recall(query, k=5)` for similarity.
 
-- **Corrupt memory** → ChromaDB's PersistentClient handles its own recovery; if the store can't open at all, the backend logs an error and treats the user as not-onboarded. Onboarding runs again; new chunks are written. Lost facts are not recovered (acceptable trade-off — alternative is a parallel file we just argued against).
-- **Multiple `name` facts** → `get_fact` returns the most recent by timestamp. If the user later corrects their name via a future settings flow, the old name is preserved in memory but stops surfacing.
-- **Concurrent writes** — single-process backend, not a concern.
-- **Recovery of `answers` from memory** → done by querying `role: "user"` chunks created within ±5 s of the `onboarding_completed_at` timestamp, in the order they were inserted. Simple and bulletproof.
+### 9.10 Edge cases
+
+- **Short-term ring fills:** oldest entry evicted from ring, stays in long-term. Recall can still surface it by similarity if relevant.
+- **Corrupt SQLite/ChromaDB:** logs error; treats user as not-onboarded. Onboarding repeats. New chunks overwrite the corrupt store on re-save. Lost facts are not recovered.
+- **First-run model download:** ~30 s on first boot for fastembed to fetch the multilingual ONNX model. Either tolerate it on first launch or pre-download as part of kiosk deployment.
+- **Concurrent writes:** single-process backend, not a concern. SQLite and ChromaDB both handle internal locking.
+- **Recovery of `answers` from memory:** `_recover_answers_from_memory` queries `role: "user"` chunks created within ±5 s of `onboarding_completed_at`, in insertion order.
+- **Mem0 future migration:** the architecture stays compatible. `Memory` could become a façade over Mem0 if v3 needs automatic fact extraction — the public API (`remember`, `recall`, `get_fact`) doesn't change.
 
 ## 10. CLAUDE.md changes required
 
@@ -515,6 +603,7 @@ This redesign requires updates to several CLAUDE.md sections. The changes are do
 ### 10.1 §2 Architecture Decisions
 
 - **§2.4 Backend stack**: append "The frontend lives in `frontend/` separate from `backend/`. Vite builds to `frontend/dist/`, which FastAPI's `StaticFiles` mounts at `/`."
+- **§2.7 Memory**: update to reflect short/long-term architecture and fastembed multilingual embedder (see §9 of this spec). Drop the "swappable later" language — multilingual is the chosen default now.
 - **§2.10 (new) Frontend stack**:
   > **Decision:** React 18 + Vite + TypeScript.
   >
@@ -594,7 +683,7 @@ The redesign is complete when:
 7. Toggling history (`H` key or `≡` icon) shows the full transcript, then back to immersive (`H` or `×`).
 8. `Esc` from Conversation returns to Ambient.
 9. 5 min idle in Conversation auto-returns to Ambient.
-10. The 6 onboarding answers are queryable from memory (manual check: query for one of them and confirm recall). `memory.get_fact("name")` returns the user's name; `memory.get_fact("onboarding_completed_at")` returns the timestamp.
+10. **Memory works as designed:** the 6 onboarding answers are queryable via `Memory.recall()` (similarity hit). `Memory.get_fact("name")` returns the user's name and `Memory.get_fact("onboarding_completed_at")` returns the timestamp. `Memory.short_term()` returns the last 20 conversation turns in chronological order. Recall on a Spanish query (e.g., "qué mascota tiene") returns the relevant Spanish chunk among top-5 (multilingual embedder works).
 11. No debug panel visible.
 12. `cd frontend && npm run typecheck` passes.
 13. `cd backend && pytest tests/` passes (existing tests + new ones for `/profile`).
