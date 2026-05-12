@@ -10,7 +10,7 @@
 
 The Phase 3 frontend was a faithful migration of `samantha_mockup_v7.html` into modular vanilla-JS files. It works but reads as a prototype:
 
-- **Onboarding repeats on every page reload** — no persistence layer.
+- **Onboarding repeats on every page reload** — no way to know "this user already met Samantha". (The fix lives in Samantha's memory itself, not in a parallel file — see §9.)
 - **Conversation screen lacks "presence"** between turns — just a wave with a small transcript and an input bar.
 - **No idle/ambient state** — when the user isn't actively chatting, there's no screen that says "she's still here".
 - **No way to view or interact with memory** — ChromaDB stores chunks but they're invisible to the user.
@@ -23,7 +23,7 @@ This redesign addresses all of the above plus introduces a structural change: th
 
 ## 2. Goals
 
-1. Eliminate onboarding-repeats-on-reload by persisting a `profile.json` and gating onboarding on its presence.
+1. Eliminate onboarding-repeats-on-reload by storing the onboarding-complete marker as a fact in Samantha's memory and gating onboarding on its presence. No separate profile file.
 2. Introduce an **Ambient** screen as the default landing post-onboarding — minimal but alive, communicates "she's here".
 3. Redesign **Conversation** as immersive (wave centered behind text, no chrome) with a one-tap/one-key toggle to the message history.
 4. Replace the wave model with a **traveling wave packet** (oscillation pulses that propagate through the line like waves on a taut string).
@@ -292,8 +292,9 @@ The vanilla-JS architecture from Phase 3 is replaced.
 os1-samantha/
 ├── backend/                       (unchanged structurally)
 │   ├── samantha/
-│   │   ├── api.py                 ← Mounts frontend/dist/ at "/"
-│   │   ├── profile.py             ← NEW. GET/POST /profile
+│   │   ├── api.py                 ← Mounts frontend/dist/ at "/", adds /profile routes
+│   │   ├── memory.py              ← Extended with set_fact/get_fact (§9.3)
+│   │   ├── profile.py             ← NEW thin facade (~30 LoC). All state lives in memory.
 │   │   └── …
 │   └── tests/
 │
@@ -392,41 +393,72 @@ In Phase 7 the kiosk script must run `cd frontend && npm install && npm run buil
 
 The mini-PC needs Node only at deploy/build time. Runtime requires just the backend Python + Chromium. To avoid Node on the kiosk entirely, a future iteration can build on a dev machine and rsync `frontend/dist/` to the kiosk — but v2 does not optimize for this yet.
 
-## 9. Persistence
+## 9. User state in memory (no separate profile file)
 
-### 9.1 `profile.json` schema
+The "profile" concept is **not** a parallel file. Everything Samantha knows about the user lives in her ChromaDB memory at `~/.samantha/memory/`. The directive "Samantha never forgets" applies uniformly: onboarding state, the user's name, the 6 answers, and future preferences are all **append-only memory facts**.
 
-Stored at `~/.samantha/profile.json`. JSON, versioned.
+There is no `profile.json`, no `backend/samantha/profile.py` as a standalone module.
 
-```json
-{
-  "version": 1,
-  "user_id": "primary",
-  "name": "Horelvis",
-  "created_at": 1778595000,
-  "onboarding_completed_at": 1778595500,
-  "answers": [
-    {"q": "¿Cómo te llamo?",                                  "a": "Horelvis"},
-    {"q": "¿Cómo estás hoy?",                                  "a": "..."},
-    {"q": "¿Qué te gusta hacer cuando tienes tiempo para ti?", "a": "..."},
-    {"q": "Cuéntame algo que te haya hecho ilusión…",          "a": "..."},
-    {"q": "¿Y algo que te esté rondando la cabeza…?",          "a": "..."},
-    {"q": "¿Prefieres que sea más directa o más cuidadosa?",   "a": "..."}
-  ]
-}
+### 9.1 Memory chunk roles
+
+A memory chunk's `role` field acquires a third value:
+
+| Role | What it is | Surfaced in conversational recall? |
+|---|---|---|
+| `"user"` | Something the user said | Yes (semantic similarity) |
+| `"samantha"` | Something Samantha said | Yes |
+| `"fact"` | Structured fact about the user (name, onboarding completion, future preferences) | **No** (excluded from `recall()` by default) |
+
+The exclusion of `role: "fact"` from `recall()` is important: when the user asks Samantha about coffee, we don't want "name = Horelvis" coming up as a top-k match. Facts are retrieved by explicit metadata query, not by similarity.
+
+### 9.2 Fact chunk schema
+
+A fact chunk's metadata carries a structured `kind` + `value` pair:
+
+| Field | Type | Example |
+|---|---|---|
+| `kind` | string | `"name"`, `"onboarding_completed_at"`, `"preferred_tone"` |
+| `value` | JSON-serializable scalar | `"Horelvis"`, `1778595500`, `"direct"` |
+| `role` | string (constant) | `"fact"` |
+| `timestamp` | int (unix s) | when the fact was set |
+| `user_id` | string | `"primary"` |
+
+The `document` text of a fact chunk is a human-readable sentence (e.g., `"El usuario se llama Horelvis"`). The structured `value` lives in metadata for fast retrieval.
+
+**Why both text and metadata?** The text makes the chunk inspectable and admin-friendly; the metadata is what code reads. If we ever want a fact to show up in conversational recall (e.g., Samantha proactively says "te llamas Horelvis, ¿no?"), we can change the role on insert and it'll start appearing in similarity queries.
+
+### 9.3 New `Memory` methods
+
+`backend/samantha/memory.py` gains:
+
+```python
+def set_fact(self, kind: str, value: Any, *, text: str | None = None,
+             user_id: str = "primary") -> str:
+    """Append a fact chunk. Returns its id. Older facts with the same
+    `kind` are NOT deleted — they remain in the store. `get_fact` always
+    returns the most recent."""
+
+def get_fact(self, kind: str, *, user_id: str = "primary") -> dict | None:
+    """Return the newest fact for (kind, user_id), or None if absent.
+    Result includes `{value, text, timestamp, id}`."""
+
+def all_facts(self, kind: str | None = None, *,
+              user_id: str = "primary") -> list[dict]:
+    """All facts for the user, optionally filtered by kind, newest first."""
 ```
 
-- `name` is extracted from the first answer (split on space, take first word).
-- `onboarding_completed_at` being present means onboarding is complete.
+`recall()` is updated to filter out `role: "fact"` from results by default. A new kwarg `include_facts: bool = False` allows opting in.
 
-### 9.2 Endpoints
+### 9.4 Endpoints
+
+The public surface keeps the `/profile` prefix for clarity (the frontend doesn't need to know about the internal memory representation), but the implementation routes everything to `Memory`.
 
 | Method/path | Behaviour |
 |---|---|
-| `GET /profile` | 200 + JSON if exists. 404 if missing. |
-| `POST /profile` | See request schema below. Server fills version, user_id, timestamps. Atomic write (temp file + rename). On success, also inserts the answers into ChromaDB as `role: "user"` memory chunks. |
-| `GET /ping` (modified) | Adds `has_profile: bool` to the response so the boot can decide without a second request. |
-| `DELETE /profile` | Admin-only (not called from UI). Removes profile but **never touches memory** (per "Samantha never forgets" directive). Useful for testing or a future "factory reset". |
+| `GET /profile` | 200 + `{name, onboarding_completed_at, answers}` synthesized from facts + role-"user" chunks. **404** if `Memory.get_fact("onboarding_completed_at")` is `None`. |
+| `POST /profile` | See request schema below. Calls `Memory.set_fact("name", req.name)`, `Memory.set_fact("onboarding_completed_at", now)`, then for each non-null `answers[i]` calls `Memory.remember("user", f"[Q] {q} → [A] {a}")`. |
+| `GET /ping` (modified) | Adds `has_profile: bool` derived from `Memory.get_fact("onboarding_completed_at") is not None`. |
+| `DELETE /profile` | Admin-only. Removes the `onboarding_completed_at` fact AND the `name` fact, but **never touches conversational chunks** (the 6 answers stay; per "Samantha never forgets"). |
 
 **`POST /profile` request schema (Pydantic):**
 
@@ -440,19 +472,41 @@ class ProfileAnswer(BaseModel):
     a: str | None = Field(default=None, max_length=2000)  # None = user skipped
 ```
 
-The response is the saved profile (`Profile` schema, §9.1). If `name` is empty after trim, the backend rejects with `422`; the frontend must pass a non-empty name even if Q1 was skipped (fallback: see §13 criterion 2).
+The response is `{name, onboarding_completed_at, answers}`. If `name` is empty after trim, the backend rejects with `422`; the frontend must pass a non-empty name even if Q1 was skipped (fallback: see §13 criterion 2).
 
-### 9.3 Backend module
+### 9.5 Backend module
 
-`backend/samantha/profile.py` provides `load()`, `save(name, answers)`, `delete()`. Uses atomic temp-file + rename for writes. Treats corrupt JSON as missing.
+`backend/samantha/profile.py` exists but is a **thin facade** (~30 lines) over `Memory`:
 
-The `POST /profile` handler in `api.py` also calls `memory.remember("user", a)` for each non-null answer after saving.
+```python
+# pseudocode
+def is_onboarded(mem: Memory, user_id: str = "primary") -> bool:
+    return mem.get_fact("onboarding_completed_at", user_id=user_id) is not None
 
-### 9.4 Edge cases
+def get_profile(mem: Memory, user_id: str = "primary") -> dict | None:
+    if not is_onboarded(mem, user_id): return None
+    name = mem.get_fact("name", user_id=user_id)
+    ts = mem.get_fact("onboarding_completed_at", user_id=user_id)
+    answers = _recover_answers_from_memory(mem, user_id)
+    return {"name": name["value"], "onboarding_completed_at": ts["value"], "answers": answers}
 
-- **Corrupt JSON** → backend's `load()` returns `None`; backend treats as missing; UI runs onboarding again. The user re-types their answers; the new save replaces the corrupt file.
-- **Schema migration (v1 → v2)** → handled by `load()` when it lands. v2 (e.g., adds preferences field) would migrate v1 in-place.
-- **Concurrent writes** — not a concern since backend is single-process, but the atomic temp-file-and-rename pattern is used anyway.
+def complete_onboarding(mem: Memory, name: str, answers: list[dict],
+                        user_id: str = "primary") -> dict:
+    mem.set_fact("name", name, text=f"El usuario se llama {name}", user_id=user_id)
+    for entry in answers:
+        if entry["a"]:
+            mem.remember("user", f"[Q] {entry['q']} → [A] {entry['a']}",
+                         user_id=user_id)
+    mem.set_fact("onboarding_completed_at", int(time.time()), user_id=user_id)
+    return get_profile(mem, user_id)
+```
+
+### 9.6 Edge cases
+
+- **Corrupt memory** → ChromaDB's PersistentClient handles its own recovery; if the store can't open at all, the backend logs an error and treats the user as not-onboarded. Onboarding runs again; new chunks are written. Lost facts are not recovered (acceptable trade-off — alternative is a parallel file we just argued against).
+- **Multiple `name` facts** → `get_fact` returns the most recent by timestamp. If the user later corrects their name via a future settings flow, the old name is preserved in memory but stops surfacing.
+- **Concurrent writes** — single-process backend, not a concern.
+- **Recovery of `answers` from memory** → done by querying `role: "user"` chunks created within ±5 s of the `onboarding_completed_at` timestamp, in the order they were inserted. Simple and bulletproof.
 
 ## 10. CLAUDE.md changes required
 
@@ -540,7 +594,7 @@ The redesign is complete when:
 7. Toggling history (`H` key or `≡` icon) shows the full transcript, then back to immersive (`H` or `×`).
 8. `Esc` from Conversation returns to Ambient.
 9. 5 min idle in Conversation auto-returns to Ambient.
-10. The 6 onboarding answers are queryable from memory (manual check: query for one of them and confirm recall).
+10. The 6 onboarding answers are queryable from memory (manual check: query for one of them and confirm recall). `memory.get_fact("name")` returns the user's name; `memory.get_fact("onboarding_completed_at")` returns the timestamp.
 11. No debug panel visible.
 12. `cd frontend && npm run typecheck` passes.
 13. `cd backend && pytest tests/` passes (existing tests + new ones for `/profile`).
