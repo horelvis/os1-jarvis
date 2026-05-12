@@ -55,12 +55,63 @@ class MemoryChunk:
 
 
 # ============================================================
+# Embedding function builder
+# ============================================================
+
+
+def _make_fastembed_embedding_fn(model_name: str):
+    """Build a Chroma-compatible embedding function backed by fastembed.
+
+    fastembed runs ONNX models locally with no Python ML stack heft.
+    `paraphrase-multilingual-MiniLM-L12-v2` outperforms the chroma
+    default (English MiniLM-L6-v2) on Spanish, our primary language.
+    """
+    from fastembed import TextEmbedding
+
+    embedder = TextEmbedding(model_name=model_name)
+
+    class _FastembedFn:
+        def __init__(self, model_name: str) -> None:
+            self._name = model_name
+
+        def name(self) -> str:
+            return f"fastembed::{self._name}"
+
+        def _embed(self, texts: list[str]) -> list[list[float]]:
+            return [list(v) for v in embedder.embed(texts)]
+
+        def __call__(self, input):  # noqa: A002 — chroma's required arg name
+            texts = input if isinstance(input, list) else [input]
+            return self._embed(texts)
+
+        # Chroma's EmbeddingFunction protocol (chromadb/api/types.py:826)
+        # expects both methods to return Embeddings (= list[list[float]]),
+        # not a single vector.
+        def embed_documents(self, input):  # noqa: A002
+            texts = input if isinstance(input, list) else [input]
+            return self._embed(texts)
+
+        def embed_query(self, input):  # noqa: A002
+            texts = input if isinstance(input, list) else [input]
+            return self._embed(texts)
+
+    return _FastembedFn(model_name)
+
+
+# ============================================================
 # Memory store
 # ============================================================
 
 
 class Memory:
     """Persistent semantic memory store.
+
+    Two layers backed by the same chunk ids:
+      - long-term: ChromaDB (HNSW, semantic recall)
+      - short-term: SQLite ring buffer (last N turns verbatim)
+    `remember` writes to both. `recall` queries long-term but excludes
+    any chunk currently in the short-term ring (those entries already
+    appear in the conversation window the LLM sees).
 
     ChromaDB's PersistentClient is process-local. Our backend is a
     single process so concurrent-writer concerns don't apply.
@@ -74,11 +125,17 @@ class Memory:
         *,
         collection_name: str | None = None,
         embedding_function: Any | None = None,
+        embedder_model: str = (
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        ),
+        short_term_capacity: int = 20,
     ) -> None:
         # Lazy import — chromadb is heavy. Importing it inside __init__
         # means tests that don't touch memory pay nothing.
         import chromadb
         from chromadb.config import Settings
+
+        from .short_term import ShortTermBuffer
 
         path = Path(persist_dir).expanduser()
         path.mkdir(parents=True, exist_ok=True)
@@ -86,20 +143,25 @@ class Memory:
         self._collection_name = collection_name or self.COLLECTION_NAME
 
         self._client = chromadb.PersistentClient(
-            path=self._persist_dir,
+            path=str(path / "chroma"),
             settings=Settings(anonymized_telemetry=False, allow_reset=True),
         )
-        kwargs: dict[str, Any] = {
-            "name": self._collection_name,
-            "metadata": {"hnsw:space": "cosine"},
-        }
-        if embedding_function is not None:
-            kwargs["embedding_function"] = embedding_function
-        self._collection = self._client.get_or_create_collection(**kwargs)
+        if embedding_function is None:
+            embedding_function = _make_fastembed_embedding_fn(embedder_model)
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+            embedding_function=embedding_function,
+        )
+
+        self._short_term = ShortTermBuffer(
+            path / "state.db", capacity=short_term_capacity
+        )
 
         logger.info(
             f"memory: opened {self._persist_dir} "
-            f"({self._collection.count()} chunks)"
+            f"({self._collection.count()} long-term chunks, "
+            f"{len(self._short_term.list())} short-term entries)"
         )
 
     # ------------- write -------------
@@ -107,24 +169,35 @@ class Memory:
     def remember(
         self, role: str, text: str, *, user_id: str = "primary"
     ) -> str:
-        """Store a chunk. Returns the chunk id (empty string if skipped)."""
+        """Store a chunk in both long-term and short-term layers.
+
+        Returns the chunk id (empty string if skipped).
+        """
         if not text or not text.strip():
             return ""
         if role not in ("user", "samantha"):
             raise ValueError(f"role must be 'user' or 'samantha', got {role!r}")
         chunk_id = str(uuid.uuid4())
+        ts = int(time.time())
         self._collection.add(
             ids=[chunk_id],
             documents=[text.strip()],
             metadatas=[{
                 "role": role,
-                "timestamp": int(time.time()),
+                "timestamp": ts,
                 "user_id": user_id,
             }],
         )
+        # Mirror into short-term ring with the SAME id so recall can
+        # dedupe without a cross-store lookup.
+        self._short_term.append_with_id(chunk_id, role, text, user_id=user_id)
         return chunk_id
 
     # ------------- read -------------
+
+    def short_term(self, *, user_id: str = "primary") -> list:
+        """Last N conversation entries (oldest-first) from short-term ring."""
+        return self._short_term.list(user_id=user_id)
 
     def recall(
         self,
@@ -135,6 +208,10 @@ class Memory:
     ) -> list[MemoryChunk]:
         """Return up to `k` chunks most similar to `query`.
 
+        Excludes anything currently in the short-term ring — those
+        entries are already part of the conversation window the LLM
+        sees, so re-injecting them via recall would be redundant.
+
         Returns an empty list if the store is empty or the query is blank.
         """
         if not query or not query.strip():
@@ -142,13 +219,18 @@ class Memory:
         total = self._collection.count()
         if total == 0:
             return []
-        n_results = min(k, total)
+        # Over-fetch by the short-term ring size so we still return k
+        # after dropping ring entries.
+        n_results = min(k + self._short_term.capacity, total)
         res = self._collection.query(
             query_texts=[query.strip()],
             n_results=n_results,
             where={"user_id": user_id},
         )
-        return self._unpack_query_result(res, user_id)
+        chunks = self._unpack_query_result(res, user_id)
+        short_ids = self._short_term.ids(user_id=user_id)
+        chunks = [c for c in chunks if c.id not in short_ids]
+        return chunks[:k]
 
     def all(
         self,

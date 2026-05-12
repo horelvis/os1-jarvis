@@ -57,11 +57,23 @@ class ShortTermBuffer:
     def append(
         self, role: str, text: str, *, user_id: str = "primary"
     ) -> str:
+        return self.append_with_id(
+            str(uuid.uuid4()), role, text, user_id=user_id
+        )
+
+    def append_with_id(
+        self, entry_id: str, role: str, text: str, *, user_id: str = "primary"
+    ) -> str:
+        """Append an entry with a caller-supplied id (e.g., the chroma chunk id).
+
+        Useful when the short-term ring and a long-term store share ids so
+        the long-term recall can dedupe against the short-term buffer
+        without a join.
+        """
         if role not in _VALID_ROLES:
             raise ValueError(f"role must be in {_VALID_ROLES}, got {role!r}")
         if not text or not text.strip():
             return ""
-        entry_id = str(uuid.uuid4())
         ts = int(time.time())
         with self._conn:
             self._conn.execute(

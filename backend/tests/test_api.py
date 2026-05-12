@@ -344,10 +344,14 @@ def test_personality_system_prompt_loaded():
 
 def test_memory_remember_and_recall(tmp_path):
     """Storing chunks and querying by semantic similarity returns the
-    relevant ones near the top."""
+    relevant ones near the top.
+
+    short_term_capacity=0 isolates the long-term path so recall doesn't
+    filter our chunks out as 'already-in-the-conversation-window'.
+    """
     from samantha.memory import Memory
 
-    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
     mem.remember("user", "Me gusta tomarme un café por la mañana", user_id="u1")
     mem.remember("user", "Mi perro se llama Toby, es un labrador", user_id="u1")
     mem.remember("user", "Trabajo en una agencia de publicidad", user_id="u1")
@@ -363,7 +367,7 @@ def test_memory_remember_and_recall(tmp_path):
 def test_memory_isolates_by_user_id(tmp_path):
     from samantha.memory import Memory
 
-    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
     mem.remember("user", "Vivo en Madrid", user_id="alice")
     mem.remember("user", "Vivo en Barcelona", user_id="bob")
 
@@ -381,7 +385,7 @@ def test_memory_admin_forget_deletes_similar_chunks(tmp_path):
     the admin tool still works for tests / future maintenance flows."""
     from samantha.memory import Memory
 
-    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
     mem.remember("user", "Tengo un perro labrador llamado Toby", user_id="u1")
     mem.remember("user", "Mi color favorito es el azul", user_id="u1")
     mem.remember("user", "Toby siempre me espera en la puerta", user_id="u1")
@@ -399,11 +403,11 @@ def test_memory_persists_across_reopen(tmp_path):
 
     persist = str(tmp_path / "mem")
 
-    mem1 = Memory(persist_dir=persist)
+    mem1 = Memory(persist_dir=persist, short_term_capacity=0)
     mem1.remember("user", "Mi cumpleaños es el 12 de mayo", user_id="u1")
     del mem1  # drop the reference
 
-    mem2 = Memory(persist_dir=persist)
+    mem2 = Memory(persist_dir=persist, short_term_capacity=0)
     results = mem2.recall("cuándo nací", k=3, user_id="u1")
     assert len(results) >= 1
     assert "cumpleaños" in results[0].text.lower() or "12 de mayo" in results[0].text
@@ -448,6 +452,46 @@ def test_memory_module_does_not_expose_forget_intent():
 
     assert not hasattr(memory_mod, "detect_forget_intent")
     assert not hasattr(memory_mod, "_FORGET_PATTERNS")
+
+
+def test_memory_uses_fastembed_multilingual_by_default(tmp_path):
+    """The embedder swap to fastembed multilingual is the default.
+
+    short_term_capacity=0 isolates the long-term semantic path so the
+    test validates the embedder rather than the recall/short-term
+    interaction (covered separately).
+    """
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
+    mem.remember("user", "Mi mascota se llama Toby, es un labrador.", user_id="u1")
+    mem.remember("user", "Mi color favorito es el azul cobalto.", user_id="u1")
+    mem.remember("user", "Trabajo en una agencia de publicidad.", user_id="u1")
+    results = mem.recall("¿qué mascota tiene?", k=2, user_id="u1")
+    assert results, "expected at least one result"
+    top_text = results[0].text.lower()
+    assert "toby" in top_text or "labrador" in top_text or "mascota" in top_text
+
+
+def test_memory_remember_writes_to_short_term(tmp_path):
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=3)
+    mem.remember("user", "uno", user_id="u1")
+    mem.remember("samantha", "dos", user_id="u1")
+    short = mem.short_term(user_id="u1")
+    assert [e.text for e in short] == ["uno", "dos"]
+    assert short[0].role == "user"
+    assert short[1].role == "samantha"
+
+
+def test_memory_recall_excludes_short_term_entries(tmp_path):
+    from samantha.memory import Memory
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=10)
+    mem.remember("user", "hablamos del café por la mañana", user_id="u1")
+    short_ids = {e.id for e in mem.short_term(user_id="u1")}
+    results = mem.recall("café por la mañana", k=5, user_id="u1")
+    result_ids = {r.id for r in results}
+    assert not (result_ids & short_ids), \
+        "recall should exclude short-term entries"
 
 
 def test_real_llm_injects_memories_into_system_prompt():
