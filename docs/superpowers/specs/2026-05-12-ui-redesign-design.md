@@ -659,6 +659,7 @@ New entry at top:
 ### Deferred
 
 - **Samantha proactiva** (initiative engine). Architecture leaves the door open: the Ambient screen has a designated state for "she has something", and the backend has space to add an initiative loop later. v2 ships without any spontaneous emission.
+- **Agentic Samantha (v3 territory)** — managing emails, calendar, taking initiatives like in the film. CLAUDE.md §1's "not an agent" framing is a v1 scope restriction, not an identity claim. v3 will revisit this. A scoped evaluation of NousResearch's **Hermes-Agent** as a possible foundation is parked at `docs/superpowers/specs/2026-05-12-hermes-agent-spike-scope.md` (to be executed in parallel with or after v2 implementation).
 - **Real STT (faster-whisper)** and **real TTS (Piper)** — Phase 5.
 - **Memory browser UI** — viewing/editing what Samantha remembers from inside the app. The `Memory` admin API exists but no UI surface is built yet.
 - **Notifications surface** — if Samantha ever needs to alert the user outside conversation (e.g., system events), there's no UI for it yet.
