@@ -4,6 +4,7 @@ import "./styles/components.css";
 import { useScreen } from "./core/router";
 import { AmbientScreen } from "./screens/AmbientScreen";
 import { BootScreen } from "./screens/BootScreen";
+import { ConversationScreen } from "./screens/ConversationScreen";
 
 function Placeholder({ label }: { label: string }) {
   return (
@@ -19,6 +20,6 @@ export default function App() {
     case "boot":         return <BootScreen />;
     case "onboarding":   return <Placeholder label="onboarding" />;
     case "ambient":      return <AmbientScreen />;
-    case "conversation": return <Placeholder label="conversation" />;
+    case "conversation": return <ConversationScreen />;
   }
 }
