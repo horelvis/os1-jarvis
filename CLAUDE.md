@@ -222,6 +222,12 @@ When WPE WebKit visits `http://127.0.0.1:7777/`, it gets `index.html`.
 That HTML loads `/static/app.js`, which connects to `/ws` via WebSocket
 for streaming conversation.
 
+**Implications (v2 redesign, 2026-05-12):**
+- The frontend lives in `frontend/` separate from `backend/`. Vite builds to
+  `frontend/dist/`, which FastAPI's `StaticFiles` mounts at `/`.
+- Phase 7 deployment now requires `cd frontend && npm install && npm run build`
+  before starting the systemd services.
+
 ### 2.5 LLM Runtime + Model
 
 **Decision:**
@@ -260,25 +266,31 @@ for streaming conversation.
 - **TTS:** Piper with voice `es_ES-davefx-medium` (~40MB, CPU-only,
   ~200ms latency)
 
-### 2.7 Memory: ChromaDB
+### 2.7 Memory: ChromaDB + SQLite ring + facts (v2)
 
-**Decision:** ChromaDB with the default ONNX MiniLM embedder (later
-swappable to `paraphrase-multilingual-MiniLM-L12-v2` via
-sentence-transformers for better Spanish quality), persisted in
-`~/.samantha/memory/`.
+**Decision:** ChromaDB at `~/.samantha/memory/chroma/` for long-term
+semantic memory, paired with a SQLite ring buffer at
+`~/.samantha/memory/state.db` for short-term (last N turns verbatim)
+memory. Embedder: fastembed (ONNX runtime) with
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
 
 **Design principle:** **Samantha never forgets anything** (user
 directive 2026-05-12). The store is append-only from the user's
-perspective. `Memory.forget()` and `Memory.clear()` exist as admin /
-test tools but are NOT wired to user input. If the person asks Samantha
-to forget something, the LLM replies in character ("yo no olvido…")
-and the chunks stay.
+perspective. `Memory.forget()` and `Memory.clear()` exist as admin/
+test tools but are NOT wired to user input. Short-term ring eviction
+removes from the buffer but the chunk remains in long-term forever.
 
-**Why not Ollama for embeddings:** we removed Ollama as a runtime (see
-§2.5). Adding it back just for nomic-embed-text would mean running a
-second daemon for one model. ChromaDB's default embedder ships in-
-process; sentence-transformers is the upgrade path when we want better
-Spanish recall.
+**Structured facts** (`name`, `onboarding_completed_at`, future
+preferences) are stored as `role: "fact"` chunks with `kind`/`value`
+metadata. Excluded from conversational recall by default. Replaces
+the `profile.json` concept — there is no parallel file. `profile.py`
+is a thin facade over Memory that synthesizes a profile view from
+the latest facts plus the 6 onboarding answer chunks.
+
+**Why fastembed:** ChromaDB's default ONNX MiniLM is English-leaning
+and Samantha is Spanish-first. fastembed runs the multilingual
+MiniLM-L12-v2 model in-process (no extra daemon, no torch). Cost:
+~130 MB deps + a one-time ~30s model download on first launch.
 
 ### 2.8 Audio I/O: sounddevice (Python, native)
 
@@ -310,6 +322,22 @@ Spanish from Spain (peninsular).
 - Code identifiers, comments, commit messages: **English**
 - User-facing strings: **Spanish**
 - Documentation: **English** (this file, READMEs)
+
+### 2.10 Frontend Stack: React + Vite + TypeScript
+
+**Decision:** React 18 + Vite + TypeScript in a separate `frontend/`
+directory.
+
+**Rationale:** The UI grew beyond what vanilla DOM manipulation
+handles cleanly (4 screens with state, a wave canvas, a toggleable
+history, a router). Component model + types + HMR pay back the
+build-step cost quickly. The original vanilla-JS decision (§12,
+2026-05) was correct for the original scope; that scope changed with
+the v2 redesign.
+
+**Cost:** Node.js as a dev dependency. Production deploy needs
+`npm install && npm run build` once during install. Runtime on the
+kiosk still needs only Python + Chromium.
 
 ---
 
@@ -358,8 +386,6 @@ samantha/
 ```
 
 **Rules:**
-- **MUST NOT** add a frontend framework (React, Vue, Svelte, etc.)
-- **MUST NOT** add a JS build step (webpack, vite, esbuild, etc.)
 - **MUST NOT** introduce Rust, Tauri, or snap packaging (all rejected in
   prior versions; see Decision Log §12)
 - **MUST NOT** add new top-level directories without asking
@@ -514,12 +540,33 @@ pytest tests/ -v
 ruff check . && ruff format .
 ```
 
+### Frontend (Vite + React + TS)
+
+```bash
+cd frontend
+
+# One time
+npm install
+
+# Dev server with HMR on :5173, proxies API to :7777
+npm run dev
+
+# Production build to frontend/dist/ (consumed by backend)
+npm run build
+
+# Type checking only
+npm run typecheck
+```
+
 ### Development workflow
 
 ```bash
-# Edit files in backend/static/ → just refresh the browser
-# Edit Python → uvicorn --reload picks up changes
-uvicorn samantha.api:app --host 127.0.0.1 --port 7777 --reload
+# Backend hot reload — edit Python and uvicorn picks it up
+cd backend && uvicorn samantha.api:app --host 127.0.0.1 --port 7777 --reload
+
+# Frontend HMR — edit anything under frontend/src/ and the browser updates
+cd frontend && npm run dev
+# then open http://localhost:5173/ (NOT :7777 during dev — Vite proxies the API)
 ```
 
 ### Deployment (Phase 7, on the mini-PC)
@@ -533,7 +580,10 @@ sudo ubuntu-drivers autoinstall   # NVIDIA drivers
 # 2. Install Samantha backend
 cd backend && pip install -e .
 
-# 3. Install systemd services
+# 3. Build the frontend (Node required at install time, not at runtime)
+cd ../frontend && npm install && npm run build && cd ..
+
+# 4. Install systemd services
 cp systemd/*.service ~/.config/systemd/user/
 systemctl --user enable samantha-llamacpp.service
 systemctl --user enable samantha-backend.service
@@ -773,6 +823,43 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-05-13 — Vanilla JS → React + Vite + TypeScript
+
+**Decision:** Replace the vanilla-JS-no-build frontend with React +
+Vite + TypeScript in a separate `frontend/` directory.
+**Rationale:** v2 UI redesign expanded scope (Ambient screen added,
+immersive Conversation with history toggle, traveling wave packet,
+persistence layer). The "UI scope is small" rationale of the
+original vanilla decision no longer applies.
+**Cost:** Node.js required for dev and build. `node_modules/` adds
+~100 MB to the dev environment. Production kiosk runs only Python +
+Chromium.
+**Lessons:** "Familiar tools first, exotic only when justified"
+still holds — but "familiar" includes React for a four-screen
+stateful UI, not just because it's the JS default.
+
+### 2026-05-13 — Memory architecture: short/long-term + facts + fastembed
+
+**Decision:** Restructure memory into three layers — short-term
+(SQLite ring buffer for the last 20 turns), long-term (ChromaDB for
+semantic recall), and structured facts (`role: "fact"` chunks in
+long-term). Swap the embedder to
+`paraphrase-multilingual-MiniLM-L12-v2` via fastembed (ONNX). No
+parallel `profile.json` file.
+**Rationale:** Pure-similarity recall has a continuity gap (the
+previous turn isn't always similar to the new one). Short-term
+solves that. Facts give structured access to name, onboarding
+marker, future preferences without polluting conversational recall.
+The multilingual embedder fixes weak Spanish recall.
+**Cost:** +130 MB deps (fastembed + ONNX model). One-time model
+download on first launch (~30 s).
+**Alternatives rejected:**
+- **Mem0** (NousResearch): 5 s/turn latency for fact extraction,
+  English-leaning output. See `docs/superpowers/specs/mem0-spike/`.
+- **Hermes-Agent** (NousResearch): full task-agent runtime, optimizes
+  a problem we don't have in v2. Parked for v3 at
+  `docs/superpowers/specs/2026-05-12-hermes-agent-spike-scope.md`.
 
 ### 2026-05-12 — vLLM → llama.cpp
 **Decision:** Use llama.cpp (`llama-server`) as the LLM runtime instead
