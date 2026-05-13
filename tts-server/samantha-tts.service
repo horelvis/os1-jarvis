@@ -22,12 +22,12 @@ User=samantha
 Group=samantha
 WorkingDirectory=/home/samantha/os1-samantha/tts-server
 
-# Bind to all interfaces on port 9000. Restrict with `ufw` instead of
+# Bind to all interfaces on port 9876. Restrict with `ufw` instead of
 # binding to a single address — that keeps the service reachable from
 # the mini-PC at 192.168.100.58 itself and from other LAN devices if
 # you ever need to debug from a laptop.
 Environment="TTS_HOST=0.0.0.0"
-Environment="TTS_PORT=9000"
+Environment="TTS_PORT=9876"
 Environment="TTS_MODEL_PATH=/home/samantha/.samantha/qwen3-tts/1.7B-CustomVoice"
 Environment="TTS_DEFAULT_SPEAKER=serena"
 Environment="TTS_DEFAULT_LANGUAGE=spanish"

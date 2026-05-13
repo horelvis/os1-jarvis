@@ -14,7 +14,7 @@ Why a separate process:
 
 Config via environment:
   TTS_HOST          (default 0.0.0.0)
-  TTS_PORT          (default 9000)
+  TTS_PORT          (default 9876)
   TTS_MODEL_PATH    (default ~/.samantha/qwen3-tts/1.7B-CustomVoice)
   TTS_DEFAULT_SPEAKER  (default serena)
   TTS_DEFAULT_LANGUAGE (default spanish)
@@ -30,7 +30,7 @@ Endpoints:
 Run:
   python -m server
 or:
-  uvicorn server:app --host 0.0.0.0 --port 9000
+  uvicorn server:app --host 0.0.0.0 --port 9876
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from pydantic import BaseModel, Field
 # ──────────────────────────────────────────────────────────────────
 
 HOST = os.environ.get("TTS_HOST", "0.0.0.0")
-PORT = int(os.environ.get("TTS_PORT", "9000"))
+PORT = int(os.environ.get("TTS_PORT", "9876"))
 MODEL_PATH = os.environ.get(
     "TTS_MODEL_PATH",
     str(Path.home() / ".samantha" / "qwen3-tts" / "1.7B-CustomVoice"),

@@ -210,21 +210,21 @@ You can keep both on disk and switch via `TTS_MODEL_PATH`.
 ```bash
 cd ~/os1-samantha/tts-server
 source .venv/bin/activate
-TTS_PORT=9000 python server.py
+TTS_PORT=9876 python server.py
 ```
 
 Logs should show:
 ```
-INFO  Samantha TTS server starting on 0.0.0.0:9000
+INFO  Samantha TTS server starting on 0.0.0.0:9876
 INFO  Model: /home/<user>/.samantha/qwen3-tts/1.7B-CustomVoice
 INFO  Default speaker: serena (spanish)
-INFO  Uvicorn running on http://0.0.0.0:9000
+INFO  Uvicorn running on http://0.0.0.0:9876
 ```
 
 In a second terminal:
 
 ```bash
-curl http://localhost:9000/ping | python3 -m json.tool
+curl http://localhost:9876/ping | python3 -m json.tool
 ```
 
 Expected (first call cold-loads the model, ~3-10 s):
@@ -243,7 +243,7 @@ Expected (first call cold-loads the model, ~3-10 s):
 And a full synth:
 
 ```bash
-curl -X POST http://localhost:9000/speak \
+curl -X POST http://localhost:9876/speak \
   -H 'Content-Type: application/json' \
   -d '{"text":"Hola. Soy Samantha. Es bonito hablar contigo."}' \
   -D - -o /tmp/sam.wav | grep -i x-tts
@@ -288,22 +288,22 @@ systemctl status samantha-tts.service
 journalctl -u samantha-tts.service -f
 ```
 
-On reboot the service auto-starts and listens on port 9000.
+On reboot the service auto-starts and listens on port 9876.
 
 ---
 
 ## 9. Open the port (LAN only)
 
-The server listens on `0.0.0.0:9000`. Restrict it to the LAN with
+The server listens on `0.0.0.0:9876`. Restrict it to the LAN with
 `ufw`:
 
 ```bash
 # Assume your LAN is 192.168.100.0/24
-sudo ufw allow from 192.168.100.0/24 to any port 9000 proto tcp
+sudo ufw allow from 192.168.100.0/24 to any port 9876 proto tcp
 sudo ufw status
 ```
 
-Don't expose 9000 to the internet — there's no auth.
+Don't expose 9876 to the internet — there's no auth.
 
 ---
 
@@ -313,7 +313,7 @@ On the **mini-PC** (where the Samantha backend runs):
 
 ```bash
 export SAMANTHA_TTS_BACKEND=qwen3_remote
-export SAMANTHA_QWEN3_TTS_URL=http://192.168.100.58:9000
+export SAMANTHA_QWEN3_TTS_URL=http://192.168.100.58:9876
 export SAMANTHA_QWEN3_SPEAKER=serena       # or vivian / sohee / ...
 # Optional style steering:
 # export SAMANTHA_QWEN3_INSTRUCT="Soft, warm voice."
@@ -353,7 +353,7 @@ To audition them, hit `/speak` with each speaker name:
 
 ```bash
 for s in serena vivian sohee ono_anna; do
-  curl -s -X POST http://localhost:9000/speak \
+  curl -s -X POST http://localhost:9876/speak \
     -H 'Content-Type: application/json' \
     -d "{\"text\":\"Hola, soy Samantha.\", \"speaker\":\"$s\"}" \
     -o /tmp/voice-$s.wav

@@ -85,8 +85,8 @@ echo "  source .venv/bin/activate"
 echo "  TTS_MODEL_PATH=$TARGET python server.py"
 echo
 echo "In another shell:"
-echo "  curl http://localhost:9000/ping | python3 -m json.tool"
-echo "  curl -X POST http://localhost:9000/speak -H 'Content-Type: application/json' \\"
+echo "  curl http://localhost:9876/ping | python3 -m json.tool"
+echo "  curl -X POST http://localhost:9876/speak -H 'Content-Type: application/json' \\"
 echo "       -d '{\"text\":\"Hola. Soy Samantha.\"}' -o /tmp/sam.wav"
 echo
 echo "For permanent install, see README §8 (systemd)."
