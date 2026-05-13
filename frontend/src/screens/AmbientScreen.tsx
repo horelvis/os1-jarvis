@@ -35,7 +35,7 @@ export function AmbientScreen() {
     <div
       className="screen"
       onClick={() => route("conversation")}
-      style={{ cursor: "pointer", position: "relative" }}
+      style={{ cursor: "pointer" }}
     >
       <div style={{ position: "absolute", top: "5vh", left: "6vw" }}>
         <span className="label">{DAYS[now.getDay()]}</span>

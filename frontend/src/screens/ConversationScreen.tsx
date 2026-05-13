@@ -103,7 +103,7 @@ export function ConversationScreen() {
   const lastSamantha = [...transcript].reverse().find((m) => m.role === "samantha");
 
   return (
-    <div className="screen" style={{ position: "relative" }} onClick={bump}>
+    <div className="screen" onClick={bump}>
       <div style={{ position: "absolute", top: "3vh", left: "5vw" }}>
         <button
           aria-label="ambient"

@@ -89,7 +89,7 @@ export function OnboardingScreen() {
   };
 
   return (
-    <div className="screen" style={{ position: "relative" }}>
+    <div className="screen">
       <div style={{ position: "absolute", inset: "5vh 0", height: 100 }}>
         <Wave mode="listening" />
       </div>
