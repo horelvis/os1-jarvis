@@ -20,6 +20,8 @@ Config via environment:
   TTS_DEFAULT_LANGUAGE (default spanish)
   TTS_DEFAULT_INSTRUCT (default empty — pass-through to Qwen3 style
                        prompt; e.g. "Whispering, very soft voice.")
+  TTS_DEVICE        (default cuda if torch.cuda.is_available() else cpu)
+  TTS_DTYPE         (default float16 on cuda, float32 on cpu)
 
 Endpoints:
   GET  /ping         → {status, model, speaker, languages, speakers}
@@ -62,6 +64,13 @@ DEFAULT_SPEAKER = os.environ.get("TTS_DEFAULT_SPEAKER", "serena")
 DEFAULT_LANGUAGE = os.environ.get("TTS_DEFAULT_LANGUAGE", "spanish")
 DEFAULT_INSTRUCT = os.environ.get("TTS_DEFAULT_INSTRUCT", "").strip() or None
 
+# Device override. If unset, picks CUDA when available, else CPU.
+DEVICE = os.environ.get("TTS_DEVICE", "").strip() or None
+# Precision. fp16 is the sweet spot on Ada/Hopper (4090, A100): same
+# perceived quality, ~2× faster, ~2× less VRAM. CPU runs in fp32 by
+# default — fp16 on CPU is actually slower because of emulation.
+DTYPE = os.environ.get("TTS_DTYPE", "").strip() or None
+
 
 # ──────────────────────────────────────────────────────────────────
 # Model singleton (lazy)
@@ -70,17 +79,54 @@ DEFAULT_INSTRUCT = os.environ.get("TTS_DEFAULT_INSTRUCT", "").strip() or None
 _model = None
 
 
+def _resolve_device_dtype() -> tuple[str, "object"]:
+    """Pick the right device + dtype.
+
+    Without this the qwen-tts default initialization lands on CPU
+    even when a CUDA device is available — and the user sees RTF
+    ~2.5 on a 4090 instead of ~0.2.
+    """
+    import torch  # local import — only needed when actually loading
+
+    if DEVICE:
+        device = DEVICE
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if DTYPE:
+        dtype = getattr(torch, DTYPE)
+    else:
+        # fp16 on GPU, fp32 on CPU. Mixed precision on CPU is slower.
+        dtype = torch.float16 if device.startswith("cuda") else torch.float32
+
+    return device, dtype
+
+
 def get_model():
-    """Lazy-load Qwen3-TTS. Cached for process lifetime."""
+    """Lazy-load Qwen3-TTS. Cached for process lifetime.
+
+    The qwen-tts `Qwen3TTSModel.from_pretrained` forwards **kwargs
+    straight to `AutoModel.from_pretrained`, so we pass HuggingFace's
+    canonical `device_map` + `torch_dtype` here. Without explicit
+    kwargs the model lands on CPU even on a 4090 (RTF ~2.5 instead
+    of ~0.2).
+    """
     global _model
     if _model is not None:
         return _model
 
     from qwen_tts import Qwen3TTSModel  # heavy import — kept lazy
 
-    logger.info(f"loading Qwen3-TTS from {MODEL_PATH}")
+    device, dtype = _resolve_device_dtype()
+    logger.info(
+        f"loading Qwen3-TTS from {MODEL_PATH} (device_map={device}, dtype={dtype})"
+    )
     t0 = time.perf_counter()
-    _model = Qwen3TTSModel.from_pretrained(MODEL_PATH)
+    _model = Qwen3TTSModel.from_pretrained(
+        MODEL_PATH,
+        device_map=device,
+        torch_dtype=dtype,
+    )
     logger.info(f"Qwen3-TTS ready in {time.perf_counter() - t0:.1f}s")
     return _model
 
