@@ -101,6 +101,21 @@ def test_speak_returns_wav():
     # WAV magic bytes
     assert response.content[:4] == b"RIFF"
     assert response.content[8:12] == b"WAVE"
+    # Identifies which TTS path served the response. Either "piper"
+    # (real synth, model on disk) or "mock" (tone fallback).
+    assert response.headers.get("X-TTS-Mode") in {"piper", "mock"}
+
+
+def test_speak_falls_back_to_mock_when_voice_missing(monkeypatch):
+    """If Piper's voice model is absent, /speak returns the tone WAV
+    rather than failing the request."""
+    from samantha import tts as tts_mod
+
+    monkeypatch.setattr(tts_mod, "is_available", lambda: False)
+    response = client.post("/speak", json={"text": "Hola", "voice": "default"})
+    assert response.status_code == 200
+    assert response.headers.get("X-TTS-Mode") == "mock"
+    assert response.content[:4] == b"RIFF"
 
 
 def test_speak_validates_empty():

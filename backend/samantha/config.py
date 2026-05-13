@@ -50,6 +50,13 @@ class Config:
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
+    # === TTS (Piper, Phase 5) ===
+    # Voice files live outside the repo (~60 MB each). If the model
+    # isn't on disk the backend falls back to the mock tone WAV — no
+    # hard dependency at runtime.
+    tts_voices_dir: str = "~/.samantha/voices"
+    tts_voice: str = "es_ES-davefx-medium"
+
     # === Logging ===
     log_level: str = "INFO"
 
@@ -88,6 +95,8 @@ class Config:
             memory_embedder_model=_get(
                 "MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model
             ),
+            tts_voices_dir=_get("TTS_VOICES_DIR", cls.tts_voices_dir),
+            tts_voice=_get("TTS_VOICE", cls.tts_voice),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 

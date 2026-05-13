@@ -377,24 +377,43 @@ async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
 
 @app.post("/speak")
 async def speak(req: SpeakRequest) -> Response:
-    """Mock TTS. Returns a WAV whose duration scales with text length so
-    the frontend wave can animate for a realistic amount of time. Phase 5
-    swaps this for Piper, where audio length is naturally text-proportional.
+    """Synthesize speech.
+
+    Real path (Phase 5): Piper TTS with the voice file at
+    `~/.samantha/voices/{config.tts_voice}.onnx`. Synth runs on the
+    event-loop thread; for the 5-50 word replies Samantha produces
+    this is ~50-300 ms, fast enough to keep streaming UX snappy.
+
+    Fallback: if the voice model isn't on disk (fresh install before
+    the user has downloaded it), the endpoint returns the mock tone
+    WAV so the UI never hangs. The `X-TTS-Mode` header tells the
+    frontend / dev tools which path served the request.
     """
     logger.info(f"speak: voice={req.voice} text='{req.text[:60]}'")
 
-    # Simulate synthesis latency (~10ms per character)
-    await asyncio.sleep(len(req.text) * 0.01)
+    from . import tts
 
-    # Estimated playback duration: ~13 chars/sec is typical Spanish TTS.
-    # Clamp so short replies still get a tail, long ones don't drag forever.
+    if tts.is_available():
+        try:
+            wav_bytes = await asyncio.to_thread(tts.synth, req.text)
+            return Response(
+                content=wav_bytes,
+                media_type="audio/wav",
+                headers={"X-TTS-Mode": "piper"},
+            )
+        except Exception as e:  # pragma: no cover — runtime safety net
+            logger.error(f"speak: piper failed, falling back to tone: {e}")
+
+    # Mock path (or piper failure). Duration scales with text length so
+    # the wave still animates for a realistic time.
+    await asyncio.sleep(len(req.text) * 0.01)
     duration_s = max(0.6, min(7.0, len(req.text) / 13.0))
     wav_bytes = _generate_tone_wav(duration_s=duration_s, freq=440)
 
     return Response(
         content=wav_bytes,
         media_type="audio/wav",
-        headers={"X-Mock-Mode": "true"},
+        headers={"X-TTS-Mode": "mock"},
     )
 
 
