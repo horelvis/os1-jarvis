@@ -1,34 +1,55 @@
 import { useEffect, useRef } from "react";
 import type { WaveMode } from "../core/types";
 
-// Each pulse is a gaussian-windowed cosine that travels horizontally
-// from x=0.5 outward. Multiple modes change the emission rate /
-// amplitude / propagation speed / lifetime — the formula is identical.
-
-interface Pulse {
-  tEmit: number;
-  dir: 1 | -1;
-  amp0: number;
-  sigma: number;
-  freq: number;
-}
+// Voice bars visualizer. 40 vertical capsules arranged along a single
+// horizontal centerline. Each bar's height = base envelope (gaussian
+// across the bar index, so the middle bars are taller) modulated by
+// a per-mode oscillation + a per-bar phase jitter. This is the
+// "Siri/Alexa voice" idiom — instantly readable as voice presence.
+//
+// Mode parameters:
+//   amp          peak height fraction of canvas height
+//   speed        how fast the oscillation phase advances
+//   jitter       per-bar phase chaos (higher = more lively / fragmented)
+//   stroke       global alpha of the bar fill
+//   envSigma     bell-curve width (smaller = sharper center peak)
+//   baseHeight   minimum height fraction so bars never disappear
+//
+// Voice playback can later drive the bars via Web Audio AnalyserNode —
+// the same `mode` prop will keep working, but `speaking` will get
+// replaced with a real-amplitude path. For now the deterministic
+// patterns read clearly as "thinking" / "speaking" without that wiring.
 
 interface ModeParams {
-  pulseRatePerSec: number;
-  amp0: number;
-  sigma: number;
-  freq: number;
-  speedWidthsPerSec: number;
-  lifetimeSec: number;
-  strokeOpacity: number;
+  amp: number;
+  speed: number;
+  jitter: number;
+  stroke: number;
+  envSigma: number;
+  baseHeight: number;
 }
 
 const MODES: Record<WaveMode, ModeParams> = {
-  idle:      { pulseRatePerSec: 0.1, amp0: 0.04, sigma: 0.10, freq: 3,  speedWidthsPerSec: 0.15, lifetimeSec: 1.5, strokeOpacity: 0.85 },
-  listening: { pulseRatePerSec: 0.5, amp0: 0.30, sigma: 0.20, freq: 7,  speedWidthsPerSec: 0.25, lifetimeSec: 1.5, strokeOpacity: 0.95 },
-  thinking:  { pulseRatePerSec: 2.0, amp0: 0.20, sigma: 0.15, freq: 10, speedWidthsPerSec: 0.25, lifetimeSec: 0.8, strokeOpacity: 0.95 },
-  speaking:  { pulseRatePerSec: 4.0, amp0: 0.80, sigma: 0.20, freq: 10, speedWidthsPerSec: 0.25, lifetimeSec: 1.2, strokeOpacity: 0.95 },
+  idle:      { amp: 0.10, speed: 0.6, jitter: 0.25, stroke: 0.55, envSigma: 0.30, baseHeight: 0.05 },
+  listening: { amp: 0.35, speed: 1.0, jitter: 0.50, stroke: 0.85, envSigma: 0.40, baseHeight: 0.08 },
+  thinking:  { amp: 0.45, speed: 1.4, jitter: 0.55, stroke: 0.90, envSigma: 0.32, baseHeight: 0.08 },
+  speaking:  { amp: 0.85, speed: 2.2, jitter: 0.75, stroke: 0.95, envSigma: 0.45, baseHeight: 0.10 },
 };
+
+const N_BARS = 40;
+
+// Pre-computed per-bar phase offsets — deterministic but irrational
+// step (~0.47 * 2π) so neighbouring bars don't oscillate in lockstep.
+const PHASES: number[] = Array.from(
+  { length: N_BARS },
+  (_, i) => (i * 2.95) % (2 * Math.PI),
+);
+
+// Bell envelope across bar index: centre bars taller.
+function envelope(i: number, sigma: number): number {
+  const x = (i / (N_BARS - 1) - 0.5) * 2; // -1..1
+  return Math.exp(-(x * x) / (2 * sigma * sigma));
+}
 
 interface WaveProps {
   mode: WaveMode;
@@ -39,9 +60,8 @@ export function Wave({ mode, className }: WaveProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef = useRef<WaveMode>(mode);
 
-  // Refresh the live mode without re-running the animation effect —
-  // tearing down requestAnimationFrame on every mode change would drop
-  // in-flight pulses mid-flight.
+  // Update mode without re-running the effect (which would tear down
+  // the animation and re-create the canvas).
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
   useEffect(() => {
@@ -61,67 +81,61 @@ export function Wave({ mode, className }: WaveProps) {
     resize();
     window.addEventListener("resize", resize);
 
-    const pulses: Pulse[] = [];
-    let lastEmit = performance.now();
     let frameId = 0;
     let running = true;
 
     const frame = () => {
       if (!running) return;
-      const now = performance.now();
       const params = MODES[modeRef.current];
-
-      const interval = 1000 / params.pulseRatePerSec;
-      if (now - lastEmit >= interval) {
-        for (const dir of [-1, 1] as const) {
-          pulses.push({
-            tEmit: now,
-            dir,
-            amp0: params.amp0 * (0.85 + Math.random() * 0.3),
-            sigma: params.sigma,
-            freq: params.freq,
-          });
-        }
-        lastEmit = now;
-      }
-
-      for (let i = pulses.length - 1; i >= 0; i--) {
-        const age = (now - pulses[i].tEmit) / 1000;
-        if (age > params.lifetimeSec) pulses.splice(i, 1);
-      }
+      const t = performance.now() / 1000;
 
       const rect = canvas.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
       const baseline = h / 2;
-      const maxAmpPx = h * 0.45;
+      const maxAmpPx = h * 0.46;
+
+      // Bars span ~80% of the width, edges leave breathing room.
+      const span = w * 0.82;
+      const barWidth = Math.max(2, span * 0.012);
+      const step = span / N_BARS;
+      const startX = (w - span) / 2 + step / 2;
 
       ctx.clearRect(0, 0, w, h);
-      ctx.strokeStyle = `rgba(255,255,255,${params.strokeOpacity})`;
-      ctx.lineWidth = 0.6;
+      ctx.strokeStyle = `rgba(255,255,255,${params.stroke})`;
+      ctx.lineWidth = barWidth;
       ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
 
-      const samples = Math.max(120, Math.floor(w * 0.6));
-      for (let i = 0; i <= samples; i++) {
-        const xn = i / samples;
-        let y = baseline;
-        for (const p of pulses) {
-          const age = (now - p.tEmit) / 1000;
-          const center = 0.5 + p.dir * age * params.speedWidthsPerSec;
-          const ampScale = Math.max(0, 1 - age / params.lifetimeSec);
-          const amp = p.amp0 * ampScale * maxAmpPx;
-          const dx = xn - center;
-          const env = Math.exp(-(dx * dx) / (p.sigma * p.sigma));
-          const osc = Math.cos(2 * Math.PI * p.freq * dx);
-          y -= amp * env * osc;
-        }
-        const px = xn * w;
-        if (i === 0) ctx.moveTo(px, y);
-        else ctx.lineTo(px, y);
+      for (let i = 0; i < N_BARS; i++) {
+        const env = envelope(i, params.envSigma);
+        const phase = PHASES[i];
+
+        // Slow primary oscillation (0..1 via |sin|).
+        const wave = Math.abs(
+          Math.sin(t * params.speed * Math.PI + phase),
+        );
+        // Fast jitter — secondary sine at a different freq + phase
+        // so bars don't sync into a single peak.
+        const jit =
+          params.jitter *
+          (0.5 + 0.5 * Math.sin(t * (params.speed * 3.7) + phase * 1.9));
+
+        // Combine: envelope-weighted amp + a non-zero baseline so the
+        // bar never collapses to a point (looks alive even at idle).
+        const norm =
+          params.baseHeight +
+          env * params.amp * (0.4 * wave + 0.6 * jit);
+
+        const barHeight = Math.min(1, norm) * maxAmpPx * 2;
+        // Account for round caps adding lineWidth/2 at each end.
+        const half = Math.max(0, barHeight / 2 - barWidth / 2);
+        const x = startX + i * step;
+
+        ctx.beginPath();
+        ctx.moveTo(x, baseline - half);
+        ctx.lineTo(x, baseline + half);
+        ctx.stroke();
       }
-      ctx.stroke();
 
       frameId = requestAnimationFrame(frame);
     };
@@ -138,7 +152,12 @@ export function Wave({ mode, className }: WaveProps) {
     <canvas
       ref={canvasRef}
       className={className}
-      style={{ width: "100%", height: "100%", display: "block" }}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "block",
+        pointerEvents: "none",
+      }}
     />
   );
 }
