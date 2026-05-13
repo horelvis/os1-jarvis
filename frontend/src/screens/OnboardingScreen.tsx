@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
@@ -36,6 +36,14 @@ export function OnboardingScreen() {
   const [answers, setAnswers] = useState<(string | null)[]>(Array(6).fill(""));
   const [submitting, setSubmitting] = useState(false);
   const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Force focus on every question transition. autoFocus only fires on
+  // first mount; idx changes don't remount the input. Without this,
+  // the user has to click the field after each answer to keep typing.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [idx]);
 
   // Question 0 is the name. Per the pairing-must-finalize directive,
   // it cannot be skipped and the form blocks "continuar" until the
@@ -118,14 +126,21 @@ export function OnboardingScreen() {
         }}
       >
         <input
+          ref={inputRef}
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="escribe y pulsa enter"
           disabled={submitting}
+          // Click anywhere on the form area should still get the
+          // caret onto the input — kiosk users can't always rely on
+          // taps landing on a 1-px underline.
+          onClick={() => inputRef.current?.focus()}
           style={{
             width: "100%", background: "transparent", border: 0,
-            borderBottom: "1px solid var(--ink-trace)",
+            // Brighter underline so the field is unmistakably visible
+            // against the terracotta. Previous 20% white was too faint.
+            borderBottom: "1px solid var(--ink-soft)",
             padding: "10px 4px", color: "var(--ink)",
             fontFamily: "var(--serif)", fontStyle: "italic",
             fontSize: "1.2rem", outline: "none", textAlign: "center",
