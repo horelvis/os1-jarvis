@@ -139,26 +139,15 @@ def test_generate_reply_with_accents():
 # ========================================================================
 
 
-def test_index_serves_html():
+def test_index_serves_frontend_html():
+    """The root route serves frontend/dist/index.html (built by Vite)."""
+    import pytest
+
     response = client.get("/")
+    if response.status_code == 404:
+        pytest.skip("frontend not built (frontend/dist/ missing)")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    body = response.text
-    # The SPA must reference the modular CSS and JS extracted in Phase 3
-    assert "/static/style.css" in body
-    assert "/static/app.js" in body
-
-
-def test_static_css_served():
-    response = client.get("/static/style.css")
-    assert response.status_code == 200
-    assert "text/css" in response.headers["content-type"]
-
-
-def test_static_js_modules_served():
-    for name in ("app.js", "samantha-wave.js", "os1-loader.js", "ws-client.js"):
-        response = client.get(f"/static/{name}")
-        assert response.status_code == 200, f"{name} should be served"
 
 
 # ========================================================================
