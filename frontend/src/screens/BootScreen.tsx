@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { OS1Loader } from "../components/OS1Loader";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
 import { fetchProfile } from "../net/profile";
@@ -34,7 +35,8 @@ export function BootScreen() {
   }, [route, setName]);
 
   return (
-    <div className="screen">
+    <div className="screen" style={{ gap: 32 }}>
+      <OS1Loader size="small" />
       <div className="brand">samantha</div>
     </div>
   );
