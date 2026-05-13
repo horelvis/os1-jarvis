@@ -235,14 +235,33 @@ async def get_profile_endpoint() -> ProfileResponse:
 
 @app.post("/profile", response_model=ProfileResponse)
 async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
-    """Complete onboarding: stores name + the 6 answers in Memory."""
+    """Complete onboarding: stores name + the 6 answers in Memory.
+
+    Pairing is irreversible from the UI: once `is_onboarded` returns
+    True the device is bound to its user. Re-pairing requires DELETE
+    /profile from an admin terminal — Samantha herself cannot reach it.
+
+    The first answer carries the name (per the onboarding flow). An
+    empty / whitespace `answers[0].a` is rejected so we never persist
+    a degenerate "tú" profile.
+    """
     mem = get_memory()
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
+    if _is_onboarded(mem):
+        raise HTTPException(status_code=409, detail="already_paired")
+
+    first_answer = (req.answers[0].a or "").strip() if req.answers else ""
+    if not first_answer:
+        raise HTTPException(status_code=422, detail="name_answer_required")
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name_required")
+
     try:
         profile = _complete_onboarding(
             mem,
-            name=req.name,
+            name=name,
             answers=[a.model_dump() for a in req.answers],
         )
     except ValueError as e:

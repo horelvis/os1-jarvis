@@ -678,3 +678,63 @@ def test_profile_post_rejects_short_answers():
         "answers": [{"q": "q", "a": "a"}],
     })
     assert r.status_code == 422
+
+
+def test_profile_post_rejects_empty_first_answer(tmp_path, monkeypatch):
+    """Spec: pairing must yield a real name — answers[0].a cannot be blank."""
+    from samantha import api as api_mod
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
+    monkeypatch.setattr(api_mod, "_memory", mem)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+    api_mod._memory_init_failed = False
+
+    body = {
+        "name": "tú",  # frontend fallback we must reject
+        "answers": [
+            {"q": "¿Cómo te llamo?", "a": None},
+            {"q": "¿Cómo estás hoy?", "a": "bien"},
+            {"q": "¿Qué te gusta?", "a": "leer"},
+            {"q": "¿Algo que te ilusione?", "a": "viaje"},
+            {"q": "¿Algo que te ronde?", "a": "trabajo"},
+            {"q": "¿Directa o cuidadosa?", "a": "directa"},
+        ],
+    }
+    r = client.post("/profile", json=body)
+    assert r.status_code == 422
+    assert "name_answer_required" in r.text
+
+
+def test_profile_post_rejects_re_pairing(tmp_path, monkeypatch):
+    """Spec: once paired, the device is bound. Re-pairing returns 409."""
+    from samantha import api as api_mod
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
+    monkeypatch.setattr(api_mod, "_memory", mem)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+    api_mod._memory_init_failed = False
+
+    body = {
+        "name": "Alice",
+        "answers": [
+            {"q": "¿Cómo te llamo?", "a": "Alice"},
+            {"q": "¿Cómo estás hoy?", "a": "bien"},
+            {"q": "¿Qué te gusta?", "a": "leer"},
+            {"q": "¿Algo que te ilusione?", "a": "viaje"},
+            {"q": "¿Algo que te ronde?", "a": "trabajo"},
+            {"q": "¿Directa o cuidadosa?", "a": "directa"},
+        ],
+    }
+    r1 = client.post("/profile", json=body)
+    assert r1.status_code == 200
+
+    r2 = client.post("/profile", json={**body, "name": "Bob"})
+    assert r2.status_code == 409
+    assert "already_paired" in r2.text
+
+    # DELETE clears the pairing → POST works again (admin-only escape).
+    client.delete("/profile")
+    r3 = client.post("/profile", json={**body, "name": "Bob"})
+    assert r3.status_code == 200

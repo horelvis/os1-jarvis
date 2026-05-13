@@ -26,9 +26,18 @@ export function OnboardingScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [value, setValue] = useState("");
 
+  // Question 0 is the name. Per the pairing-must-finalize directive,
+  // it cannot be skipped and the form blocks "continuar" until the
+  // user has typed something. Questions 1-5 can be skipped (null).
+  const nameRequired = idx === 0;
+  const canContinue = value.trim().length > 0;
+  const canSkip = !nameRequired;
+
   const submitCurrent = (skip: boolean) => {
+    if (skip && nameRequired) return;          // safety net
+    if (!skip && !canContinue) return;         // safety net
     const next = [...answers];
-    next[idx] = skip ? null : value.trim() || null;
+    next[idx] = skip ? null : value.trim();
     setAnswers(next);
     setValue("");
     if (idx < QUESTIONS.length - 1) setIdx(idx + 1);
@@ -37,14 +46,18 @@ export function OnboardingScreen() {
 
   const finalize = async (final: (string | null)[]) => {
     setSubmitting(true);
-    const firstAnswer = final[0];
-    const name =
-      firstAnswer && firstAnswer.trim().length > 0
-        ? firstAnswer.trim().split(/\s+/)[0]
-        : "tú";
+    const firstAnswer = (final[0] ?? "").trim();
+    // Should never happen — nameRequired blocks the submit path — but
+    // bail loudly rather than POST a "tú" placeholder if it does.
+    if (!firstAnswer) {
+      setSubmitting(false);
+      setIdx(0);
+      return;
+    }
+    const name = firstAnswer.split(/\s+/)[0];
     const payload: ProfileAnswer[] = QUESTIONS.map((q, i) => ({
       q,
-      a: final[i] ?? null,
+      a: final[i],
     }));
     try {
       const profile = await createProfile(name, payload);
@@ -108,27 +121,34 @@ export function OnboardingScreen() {
           }}
         />
         <div style={{ display: "flex", gap: 16 }}>
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => submitCurrent(true)}
-            className="label"
-            style={{
-              background: "none", border: 0,
-              color: "var(--ink-faint)", cursor: "pointer",
-            }}
-          >
-            saltar
-          </button>
+          {canSkip && (
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => submitCurrent(true)}
+              className="label"
+              style={{
+                background: "none", border: 0,
+                color: "var(--ink-faint)", cursor: "pointer",
+              }}
+            >
+              saltar
+            </button>
+          )}
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !canContinue}
             className="label"
             style={{
-              background: "rgba(255,255,255,0.08)",
+              background: canContinue
+                ? "rgba(255,255,255,0.08)"
+                : "rgba(255,255,255,0.02)",
               border: "1px solid var(--ink-trace)",
               padding: "10px 24px", borderRadius: 999,
-              color: "var(--ink)", cursor: "pointer",
+              color: canContinue ? "var(--ink)" : "var(--ink-faint)",
+              cursor: canContinue ? "pointer" : "not-allowed",
+              opacity: canContinue ? 1 : 0.5,
+              transition: "all 0.2s",
             }}
           >
             continuar
