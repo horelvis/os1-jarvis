@@ -398,11 +398,14 @@ async def speak(req: SpeakRequest) -> Response:
 
     if tts.is_available():
         try:
-            wav_bytes = await asyncio.to_thread(tts.synth, req.text)
+            wav_bytes, mode_used = await asyncio.to_thread(tts.synth, req.text)
             return Response(
                 content=wav_bytes,
                 media_type="audio/wav",
-                headers={"X-TTS-Mode": config.tts_backend},
+                # Reports the backend that ACTUALLY served — important
+                # when the requested backend fell back (e.g. qwen3 →
+                # piper). Without this the header would lie.
+                headers={"X-TTS-Mode": mode_used},
             )
         except Exception as e:  # pragma: no cover — runtime safety net
             logger.error(f"speak: tts failed, falling back to tone: {e}")

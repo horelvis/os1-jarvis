@@ -20,9 +20,14 @@ def test_is_available_reflects_disk_state():
 
 def test_synth_empty_text_returns_empty_bytes():
     """Blank inputs short-circuit before loading the voice — useful
-    for not paying piper startup on no-op calls."""
-    assert tts.synth("") == b""
-    assert tts.synth("   ") == b""
+    for not paying piper startup on no-op calls. Returns (b"",
+    "empty") so the route layer can still set a sensible header."""
+    data, mode = tts.synth("")
+    assert data == b""
+    assert mode == "empty"
+    data, mode = tts.synth("   ")
+    assert data == b""
+    assert mode == "empty"
 
 
 def test_synth_raises_when_voice_missing(monkeypatch, tmp_path):
@@ -42,9 +47,12 @@ def test_synth_raises_when_voice_missing(monkeypatch, tmp_path):
     not tts.is_available(),
     reason="piper voice model not on disk (~/.samantha/voices/) — skip real synth",
 )
-def test_synth_produces_riff_wave():
+def test_synth_produces_riff_wave(monkeypatch):
     """End-to-end: feed real text, get a parseable WAV back."""
-    data = tts.synth("Hola. Soy Samantha.")
+    # Force the piper path regardless of test env's tts_backend.
+    monkeypatch.setattr(tts.config, "tts_backend", "piper")
+    data, mode = tts.synth("Hola. Soy Samantha.")
+    assert mode == "piper"
     assert data[:4] == b"RIFF"
     assert data[8:12] == b"WAVE"
     # 22.05 kHz mono 16-bit → at least a few KB for a 2-second phrase.

@@ -122,10 +122,13 @@ def get_model():
         f"loading Qwen3-TTS from {MODEL_PATH} (device_map={device}, dtype={dtype})"
     )
     t0 = time.perf_counter()
+    # Note: transformers 4.57+ renamed `torch_dtype` → `dtype` in
+    # from_pretrained. Both still work but `torch_dtype` emits a
+    # DeprecationWarning. Use the new name.
     _model = Qwen3TTSModel.from_pretrained(
         MODEL_PATH,
         device_map=device,
-        torch_dtype=dtype,
+        dtype=dtype,
     )
     logger.info(f"Qwen3-TTS ready in {time.perf_counter() - t0:.1f}s")
     return _model

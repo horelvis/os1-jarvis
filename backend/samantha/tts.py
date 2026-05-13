@@ -63,31 +63,37 @@ def is_available() -> bool:
     return _piper_voice_available()
 
 
-def synth(text: str) -> bytes:
-    """Synthesize `text` to a WAV byte string.
+def synth(text: str) -> tuple[bytes, str]:
+    """Synthesize `text`.
 
-    Returns mono 16-bit PCM WAV with the backend's native sample rate
+    Returns (wav_bytes, backend_used). `backend_used` is the actual
+    backend that produced the audio — important when the requested
+    backend silently fell back (e.g. qwen3_remote unreachable →
+    piper). The /speak handler uses it for the X-TTS-Mode response
+    header so observability doesn't lie.
+
+    WAV is mono 16-bit PCM at the backend's native sample rate
     (22050 Hz for Piper, 24000 Hz for Qwen3-TTS). The frontend
     `<audio>` element plays both transparently.
 
     Raises VoiceMissingError if every configured backend fails.
     """
     if not text or not text.strip():
-        return b""
+        return b"", "empty"
 
     backend = (config.tts_backend or "piper").lower()
     clean = text.strip()
 
     if backend == "qwen3_remote":
         try:
-            return _synth_qwen3_remote(clean)
+            return _synth_qwen3_remote(clean), "qwen3_remote"
         except Exception as e:
             logger.warning(
                 f"tts: qwen3_remote failed ({e}); falling back to piper"
             )
             # Fall through to Piper below.
 
-    return _synth_piper(clean)
+    return _synth_piper(clean), "piper"
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -134,9 +134,12 @@ def test_qwen3_remote_falls_back_to_piper_on_http_error(monkeypatch):
         return b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 16
 
     monkeypatch.setattr(tts_mod, "_synth_piper", fake_piper)
-    out = tts_mod.synth("hola")
+    out, mode_used = tts_mod.synth("hola")
     assert out.startswith(b"RIFF")
     assert b"WAVE" in out[:12]
+    # When qwen3_remote fails, the response must reflect that Piper
+    # served — not the originally requested backend.
+    assert mode_used == "piper"
 
 
 def test_speak_validates_empty():
