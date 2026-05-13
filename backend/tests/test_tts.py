@@ -29,10 +29,11 @@ def test_synth_raises_when_voice_missing(monkeypatch, tmp_path):
     """If the model path doesn't exist, synth must raise rather than
     return a silent placeholder — the /speak fallback at the route
     layer is what makes the bad path UX-safe."""
+    monkeypatch.setattr(tts.config, "tts_backend", "piper")
     monkeypatch.setattr(tts.config, "tts_voices_dir", str(tmp_path))
     # Force re-load attempt on the next synth call.
     monkeypatch.setattr(tts, "_voice", None)
-    monkeypatch.setattr(tts, "_load_failed", False)
+    monkeypatch.setattr(tts, "_voice_load_failed", False)
     with pytest.raises(tts.VoiceMissingError):
         tts.synth("hola")
 

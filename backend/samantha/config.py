@@ -50,11 +50,18 @@ class Config:
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
-    # === TTS (Piper, Phase 5) ===
+    # === TTS — backend-pluggable (Phase 5) ===
+    # "piper"        → local Piper (default, fast on CPU, no GPU needed).
+    # "qwen3_remote" → HTTP to a Qwen3-TTS server (typically a GPU box
+    #                  like a 4090 running tts-server/server.py).
+    # If qwen3_remote fails (network / 5xx / timeout) the request
+    # automatically falls back to Piper so the kiosk stays usable.
+    tts_backend: str = "piper"
+
+    # ── Piper config ──
     # Voice files live outside the repo (~70 MB each). If the model
     # isn't on disk the backend falls back to the mock tone WAV — no
     # hard dependency at runtime.
-    #
     # Default: es_ES-sharvard-medium, speaker F (female). Samantha is
     # canonically a female voice (film reference, Scarlett Johansson).
     # The other sharvard speaker is M=0. Single-speaker voices like
@@ -62,6 +69,14 @@ class Config:
     tts_voices_dir: str = "~/.samantha/voices"
     tts_voice: str = "es_ES-sharvard-medium"
     tts_speaker_id: int | None = 1
+
+    # ── Qwen3-TTS remote config ──
+    # URL of the tts-server FastAPI ("/speak"). e.g. http://4090.local:9000
+    qwen3_tts_url: str = ""
+    qwen3_tts_timeout_s: float = 30.0
+    qwen3_speaker: str = "serena"          # female, warm, fits Samantha
+    qwen3_language: str = "spanish"        # Qwen3-TTS wants full language name
+    qwen3_instruct: str = ""               # optional style prompt ("Soft, warm voice.")
 
     # === Logging ===
     log_level: str = "INFO"
@@ -101,6 +116,7 @@ class Config:
             memory_embedder_model=_get(
                 "MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model
             ),
+            tts_backend=_get("TTS_BACKEND", cls.tts_backend),
             tts_voices_dir=_get("TTS_VOICES_DIR", cls.tts_voices_dir),
             tts_voice=_get("TTS_VOICE", cls.tts_voice),
             # speaker_id needs a custom path because the helper above
@@ -111,6 +127,13 @@ class Config:
                 if os.environ.get("SAMANTHA_TTS_SPEAKER_ID", "").strip()
                 else cls.tts_speaker_id
             ),
+            qwen3_tts_url=_get("QWEN3_TTS_URL", cls.qwen3_tts_url),
+            qwen3_tts_timeout_s=_get(
+                "QWEN3_TTS_TIMEOUT_S", cls.qwen3_tts_timeout_s
+            ),
+            qwen3_speaker=_get("QWEN3_SPEAKER", cls.qwen3_speaker),
+            qwen3_language=_get("QWEN3_LANGUAGE", cls.qwen3_language),
+            qwen3_instruct=_get("QWEN3_INSTRUCT", cls.qwen3_instruct),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 

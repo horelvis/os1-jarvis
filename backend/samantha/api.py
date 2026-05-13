@@ -377,19 +377,22 @@ async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
 
 @app.post("/speak")
 async def speak(req: SpeakRequest) -> Response:
-    """Synthesize speech.
+    """Synthesize speech via the configured TTS backend.
 
-    Real path (Phase 5): Piper TTS with the voice file at
-    `~/.samantha/voices/{config.tts_voice}.onnx`. Synth runs on the
-    event-loop thread; for the 5-50 word replies Samantha produces
-    this is ~50-300 ms, fast enough to keep streaming UX snappy.
+    Backends (config.tts_backend):
+      qwen3_remote → POST to a Qwen3-TTS server (e.g. 4090 box). Best
+                     quality, sub-second on a real GPU. On failure
+                     (network / 5xx / timeout) falls back to Piper.
+      piper        → Local Piper synth, ~50-300 ms on CPU. Default.
 
-    Fallback: if the voice model isn't on disk (fresh install before
-    the user has downloaded it), the endpoint returns the mock tone
-    WAV so the UI never hangs. The `X-TTS-Mode` header tells the
-    frontend / dev tools which path served the request.
+    On a missing model (Piper voice file absent before install) the
+    request degrades to the mock tone WAV so the UI never hangs.
+    The X-TTS-Mode header reports which path served.
     """
-    logger.info(f"speak: voice={req.voice} text='{req.text[:60]}'")
+    logger.info(
+        f"speak: voice={req.voice} backend={config.tts_backend} "
+        f"text='{req.text[:60]}'"
+    )
 
     from . import tts
 
@@ -399,10 +402,10 @@ async def speak(req: SpeakRequest) -> Response:
             return Response(
                 content=wav_bytes,
                 media_type="audio/wav",
-                headers={"X-TTS-Mode": "piper"},
+                headers={"X-TTS-Mode": config.tts_backend},
             )
         except Exception as e:  # pragma: no cover — runtime safety net
-            logger.error(f"speak: piper failed, falling back to tone: {e}")
+            logger.error(f"speak: tts failed, falling back to tone: {e}")
 
     # Mock path (or piper failure). Duration scales with text length so
     # the wave still animates for a realistic time.

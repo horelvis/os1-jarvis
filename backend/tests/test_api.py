@@ -101,14 +101,15 @@ def test_speak_returns_wav():
     # WAV magic bytes
     assert response.content[:4] == b"RIFF"
     assert response.content[8:12] == b"WAVE"
-    # Identifies which TTS path served the response. Either "piper"
-    # (real synth, model on disk) or "mock" (tone fallback).
-    assert response.headers.get("X-TTS-Mode") in {"piper", "mock"}
+    # X-TTS-Mode reports the backend that served. "mock" is the tone
+    # fallback when no backend is ready; "piper" / "qwen3_remote" are
+    # real synth.
+    assert response.headers.get("X-TTS-Mode") in {"piper", "qwen3_remote", "mock"}
 
 
-def test_speak_falls_back_to_mock_when_voice_missing(monkeypatch):
-    """If Piper's voice model is absent, /speak returns the tone WAV
-    rather than failing the request."""
+def test_speak_falls_back_to_mock_when_backend_unavailable(monkeypatch):
+    """When the TTS backend can't serve (model absent, remote unreachable),
+    /speak returns the tone WAV rather than failing the request."""
     from samantha import tts as tts_mod
 
     monkeypatch.setattr(tts_mod, "is_available", lambda: False)
@@ -116,6 +117,26 @@ def test_speak_falls_back_to_mock_when_voice_missing(monkeypatch):
     assert response.status_code == 200
     assert response.headers.get("X-TTS-Mode") == "mock"
     assert response.content[:4] == b"RIFF"
+
+
+def test_qwen3_remote_falls_back_to_piper_on_http_error(monkeypatch):
+    """If the remote Qwen3 server returns non-200 (or refuses connection),
+    synth() should silently fall through to Piper instead of bubbling."""
+    from samantha import tts as tts_mod
+    from samantha.config import config as cfg
+
+    monkeypatch.setattr(cfg, "tts_backend", "qwen3_remote")
+    monkeypatch.setattr(cfg, "qwen3_tts_url", "http://127.0.0.1:1")  # closed
+    # Pretend Piper is present so the fallback path returns something.
+    monkeypatch.setattr(tts_mod, "_piper_voice_available", lambda: True)
+
+    def fake_piper(text: str) -> bytes:
+        return b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 16
+
+    monkeypatch.setattr(tts_mod, "_synth_piper", fake_piper)
+    out = tts_mod.synth("hola")
+    assert out.startswith(b"RIFF")
+    assert b"WAVE" in out[:12]
 
 
 def test_speak_validates_empty():
