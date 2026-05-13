@@ -91,26 +91,48 @@ def get_memory() -> "Memory | None":
     return _memory
 
 
+def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
+    """Gather the facts surfaced into the system prompt.
+
+    Today: `name` and `onboarding_completed_at`. Future preference facts
+    (favorite drink, conversational style, etc.) land here too — keep
+    the list short so the prompt stays scannable for the LLM.
+    """
+    out: list[dict] = []
+    for kind in ("name", "onboarding_completed_at"):
+        f = mem.get_fact(kind, user_id=user_id)
+        if f is not None:
+            out.append(f)
+    return out
+
+
 # ============================================================
 # Token streaming (dispatches on config.mode)
 # ============================================================
 
 
 async def _stream_tokens(
-    message: str, memories: "list[MemoryChunk] | None" = None
+    message: str,
+    *,
+    facts: "list[dict] | None" = None,
+    recall: "list[MemoryChunk] | None" = None,
+    short_term: "list[MemoryChunk] | None" = None,
 ) -> AsyncIterator[str]:
     """Yield reply tokens, dispatching on `config.mode`.
 
     - "real": pulls a live stream from `real_llm` (llama-server, etc.),
-      injecting `memories` into the system prompt.
+      threading facts + recall + short-term into the system prompt
+      (spec §9.6 layout).
     - "mock": tokenizes the canned reply and emits chunks with a small
-      inter-token delay. Memory injection is a no-op in mock — the mock
-      LLM is keyword-based and ignores extra context.
+      inter-token delay. Context kwargs are accepted-and-ignored — the
+      mock LLM is keyword-based and doesn't read the system prompt.
     """
     if config.mode == "real":
         from .real_llm import stream_reply as real_stream_reply
 
-        async for tok in real_stream_reply(message, memories):
+        async for tok in real_stream_reply(
+            message, facts=facts, recall=recall, short_term=short_term
+        ):
             yield tok
         return
 
@@ -240,26 +262,34 @@ async def chat(req: ChatRequest) -> ChatResponse:
     """Non-streaming chat endpoint. The frontend uses /ws for streaming;
     /chat is retained for tests and one-shot integrations.
 
-    Memory: every user msg is stored and every reply too; recall happens
-    against the user msg before generation. Samantha never forgets, so
-    there is no "forget" path — "olvida X" goes to the LLM like any
-    other message and Samantha declines in character (system prompt).
+    Per spec §9.6 the system prompt is assembled from three layers:
+      facts        — name, onboarding date, future preferences
+      recall       — top-k semantically-similar past chunks
+      short_term   — the last N turns verbatim
+    Samantha never forgets — there is no "forget" path; "olvida X" goes
+    to the LLM like any other message and she declines in character.
     """
     start = time.perf_counter()
     logger.info(f"chat: user_id={req.user_id} message='{req.message[:60]}'")
 
     mem = get_memory()
-    memories: list = []
+    facts: list[dict] = []
+    recall: list = []
+    short: list = []
     if mem is not None:
         mem.remember("user", req.message, user_id=req.user_id)
-        memories = mem.recall(
+        facts = _collect_facts(mem, user_id=req.user_id)
+        recall = mem.recall(
             req.message, k=config.memory_top_k, user_id=req.user_id
         )
+        short = mem.short_term(user_id=req.user_id)
 
     if config.mode == "real":
         from .real_llm import generate_reply as real_generate_reply
 
-        reply = await real_generate_reply(req.message, memories)
+        reply = await real_generate_reply(
+            req.message, facts=facts, recall=recall, short_term=short
+        )
     else:
         latency = random.uniform(config.mock_min_latency_s, config.mock_max_latency_s)
         await asyncio.sleep(latency)
@@ -375,13 +405,10 @@ def _generate_tone_wav(duration_s: float, freq: float = 440.0) -> bytes:
 async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> None:
     """Stream a reply over the WebSocket, token by token.
 
-    Dispatches to mock or real via `_stream_tokens` so the on-wire
-    protocol is identical regardless of backend. Memory wiring: every
-    user msg is stored, top-k similar past chunks are retrieved and
-    injected into the system prompt, the reply is streamed back, and
-    the full reply is stored too. Samantha never forgets — "olvida X"
-    messages go through the LLM normally; the system prompt makes her
-    decline in character.
+    Mirrors the /chat handler's three-layer context assembly
+    (facts + recall + short_term per spec §9.6). The on-wire protocol
+    stays identical between mock and real because `_stream_tokens`
+    dispatches on `config.mode`. Samantha never forgets.
     """
     start = time.perf_counter()
     logger.info(
@@ -390,15 +417,21 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     )
 
     mem = get_memory()
-    memories: list = []
+    facts: list[dict] = []
+    recall: list = []
+    short: list = []
     if mem is not None:
         mem.remember("user", message, user_id=user_id)
-        memories = mem.recall(
+        facts = _collect_facts(mem, user_id=user_id)
+        recall = mem.recall(
             message, k=config.memory_top_k, user_id=user_id
         )
+        short = mem.short_term(user_id=user_id)
 
     reply_chunks: list[str] = []
-    async for token in _stream_tokens(message, memories=memories):
+    async for token in _stream_tokens(
+        message, facts=facts, recall=recall, short_term=short
+    ):
         reply_chunks.append(token)
         await websocket.send_text(
             json.dumps({"type": "token", "token": token})
