@@ -13,10 +13,12 @@
 
 ## 0. TL;DR
 
-Samantha is a **fully local, kiosk-style AI companion** inspired by the
-film *Her*. It runs entirely on a single mini-PC (no cloud, no remote,
-no external dependencies at runtime). The user interacts with it via
-voice and text through a fullscreen webview interface.
+Samantha is a **kiosk-style AI companion** inspired by the film *Her*.
+She runs on a single mini-PC and interacts with one user via voice and
+text through a fullscreen webview interface. Inference (LLM, TTS,
+optionally STT) is local; ancillary rendering pieces (fonts, browser
+STT) MAY use the network. Offline-only was a v1 principle that was
+relaxed on 2026-05-13.
 
 **Stack at a glance:**
 - **Hardware:** Minisforum AtomMan G7 Ti SE (RTX 4070 Mobile 8GB VRAM, 32GB RAM)
@@ -67,8 +69,11 @@ as the primary interaction mode.
 
 ### Product principles (in priority order)
 
-1. **Privacy first.** All inference is local. No telemetry, no cloud APIs,
-   no exfiltration. The user's data never leaves their machine.
+1. **Privacy first, pragmatically.** All *inference* (LLM, TTS, optionally
+   STT) is local — the conversation content and the model that interprets
+   it never leave the device. Ancillary rendering pieces MAY hit the
+   network (Google Fonts CDN, browser Web Speech API). No telemetry, no
+   cloud APIs for inference, no exfiltration of conversational state.
 
 2. **Conversational, not task-oriented.** Samantha is designed for the
    relationship, not for productivity. She remembers, she asks, she has
@@ -90,7 +95,7 @@ as the primary interaction mode.
 
 - ❌ A multi-user system (single user, always)
 - ❌ A productivity assistant (no calendar/email integration in v1)
-- ❌ A cloud-augmented anything (zero network dependency at runtime)
+- ❌ A cloud-LLM wrapper (conversational inference stays local — Qwen via llama-server)
 - ❌ A mobile app (desktop kiosk only)
 - ❌ A coding assistant
 - ❌ An agentic tool-using system (no function calling, no web search)
@@ -292,26 +297,41 @@ and Samantha is Spanish-first. fastembed runs the multilingual
 MiniLM-L12-v2 model in-process (no extra daemon, no torch). Cost:
 ~130 MB deps + a one-time ~30s model download on first launch.
 
-### 2.8 Audio I/O: sounddevice (Python, native)
+### 2.8 Audio I/O: browser Web Speech API for STT, Python for TTS
 
-**Decision:** Microphone capture and audio playback handled by Python
-via `sounddevice`. The browser layer does NOT touch the microphone.
+**Decision (revised 2026-05-13):** Microphone capture and speech
+recognition happen in the **browser** via the Web Speech API
+(`webkitSpeechRecognition`). TTS playback uses an HTMLAudioElement
+with WAV bytes produced by Python (Piper) and served by /speak.
 
-**Rationale:**
-- Browser audio APIs (`getUserMedia`) require permission prompts that
-  break the kiosk illusion (a dialog appears asking for mic access)
-- Python has direct access to ALSA/PulseAudio through sounddevice
-- Audio capture and STT happen in the same process (lower latency)
-- Same code works whether running in Chromium kiosk or a regular dev browser
+**Rationale (post-offline-relaxation):**
+- Web Speech API is built into Chromium with native Spanish (`es-ES`)
+  support and streams a transcript in real time. No model download,
+  no Python audio stack, no per-OS audio quirks.
+- Local Whisper (faster-whisper) remains an option for environments
+  that genuinely need offline STT, but the offline kiosk requirement
+  was relaxed on 2026-05-13 so the simpler path wins.
+- TTS stays Python-side because Piper is local, deterministic, and
+  the voice file (`es_ES-sharvard-medium`, ~73 MB) lives at
+  `~/.samantha/voices/`.
 
 **Implications:**
-- The frontend NEVER calls `navigator.mediaDevices.getUserMedia()`
-- Mic activation is triggered by frontend → WebSocket message → Python
-  starts capturing → Python streams transcription back via WebSocket
-- The mockup's audio visualizer is decorative; the real audio data
-  comes from Python, not the browser
-- Chromium does NOT need `--use-fake-ui-for-media-stream` or similar
-  flags since we don't use browser mic APIs at all
+- Frontend calls `new webkitSpeechRecognition()` (CLAUDE.md §6 marks
+  this as the one approved browser-side audio API). The previous WS
+  `listen` message path that delegated to Python is deprecated but
+  still wired in `backend/samantha/api.py:_ws_handle_listen` for the
+  mock fallback.
+- Chromium kiosk needs `--use-fake-ui-for-media-stream` (or pre-granted
+  mic permission via origin allowlist) so the kiosk illusion isn't
+  broken by a permission prompt at first use.
+- Audio playback (TTS) is an `<audio>` element fed by `/speak` (Piper).
+  See §2.6 and `backend/samantha/tts.py`.
+
+**v1 rationale (retained for reference):** Browser audio permission
+prompts were considered kiosk-breakers and Python had cleaner
+ALSA/PulseAudio access. Both arguments are real but smaller than the
+operational cost of a local STT stack. We absorbed the dialog (one-
+time) and the network dependency on Web Speech API.
 
 ### 2.9 Language: Spanish (Spain)
 
@@ -844,6 +864,30 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-05-13 — Offline-only requirement relaxed; STT moves to browser
+
+**Decision:** "Zero network dependency at runtime" is no longer a
+hard product principle. The kiosk runs with internet on by default;
+LLM and TTS still execute locally, but ancillary pieces (fonts,
+browser Web Speech API for STT) MAY hit the network.
+
+**Rationale:** Building+shipping a fully local stack for every piece
+(Whisper model ~1.5 GB, vendored fonts, etc.) was paying ongoing
+operational cost for a property the actual deployment doesn't
+require. Conversational *content* still never leaves the device via
+us — the LLM is local. The privacy boundary moves from "no network
+at all" to "no cloud LLM and no conversational data exfiltration".
+
+**Cost:** §2.8 was rewritten — browser mic is now the default STT
+path (was: Python via sounddevice). Local Whisper remains optional.
+Chromium kiosk needs `--use-fake-ui-for-media-stream` so the first-
+use permission prompt doesn't shatter the appliance feel.
+
+**Lessons:** Hard offline is a real engineering commitment, not just
+an architectural label. Removing the constraint cut hours of Whisper
++ model-download + audio-stack work that the actual product didn't
+benefit from.
 
 ### 2026-05-13 — npm → pnpm (corepack)
 
