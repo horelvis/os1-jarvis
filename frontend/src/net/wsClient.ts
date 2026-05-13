@@ -51,11 +51,35 @@ export class WSClient {
     return true;
   }
 
-  chat(
+  /** Resolve when the socket is OPEN, or reject after `timeoutMs` if
+   *  it never opens. Lets callers tolerate a transient disconnect
+   *  (the kiosk had STT running for several seconds, etc.) instead
+   *  of immediately failing with ws_not_connected. */
+  private async whenOpen(timeoutMs = 3000): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          resolve();
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          reject(new Error("ws_not_connected"));
+          return;
+        }
+        setTimeout(tick, 60);
+      };
+      tick();
+    });
+  }
+
+  async chat(
     message: string,
     onToken: (t: string) => void,
     userId = "primary",
   ): Promise<{ reply: string; thinkingMs: number }> {
+    await this.whenOpen();
     return new Promise((resolve, reject) => {
       let full = "";
       const restore = () => {
@@ -73,7 +97,8 @@ export class WSClient {
     });
   }
 
-  listen(): Promise<string> {
+  async listen(): Promise<string> {
+    await this.whenOpen();
     return new Promise((resolve, reject) => {
       this.on("transcription", (m) => {
         this.handlers.delete("transcription");

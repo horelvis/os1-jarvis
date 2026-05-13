@@ -61,7 +61,14 @@ export function isAvailable(): boolean {
   return getRecognitionCtor() !== null;
 }
 
-export function listen(): Promise<string> {
+export interface ListenOptions {
+  /** Called repeatedly with the in-progress (non-final) transcript. UI
+   *  should reflect it in real time so the user knows the mic is open
+   *  and what's being heard. */
+  onInterim?: (text: string) => void;
+}
+
+export function listen(opts: ListenOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const Ctor = getRecognitionCtor();
     if (!Ctor) {
@@ -70,8 +77,11 @@ export function listen(): Promise<string> {
     }
     const recog = new Ctor();
     recog.lang = "es-ES";
-    recog.continuous = false;       // stop after a single utterance
-    recog.interimResults = false;   // we only care about the final result
+    recog.continuous = false;        // stop after a single utterance
+    // Interim results give us a live preview that we feed back to the
+    // UI. Without this the user has no visible feedback the mic is
+    // actually capturing and tends to think it's broken.
+    recog.interimResults = true;
     recog.maxAlternatives = 1;
 
     let finalTranscript = "";
@@ -80,40 +90,65 @@ export function listen(): Promise<string> {
     const finish = (text: string) => {
       if (resolved) return;
       resolved = true;
+      try { recog.stop(); } catch { /* already stopped */ }
       resolve(text);
     };
     const fail = (err: Error) => {
       if (resolved) return;
       resolved = true;
+      try { recog.stop(); } catch { /* already stopped */ }
       reject(err);
     };
 
     recog.onresult = (ev: SpeechRecognitionEvent) => {
-      // We asked for a single utterance, so the only final result is
-      // results[0][0]. Concatenate just in case the engine returned
-      // multiple final chunks.
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      // Collect the latest interim+final across all results we have so
+      // far. SpeechRecognitionResultList grows as the engine refines.
+      let interim = "";
+      for (let i = 0; i < ev.results.length; i++) {
         const result = ev.results[i];
+        const text = result[0]?.transcript ?? "";
         if (result.isFinal) {
-          finalTranscript += result[0]?.transcript ?? "";
+          // Always append final segments to keep them stable.
+          if (!finalTranscript.includes(text)) {
+            finalTranscript += text;
+          }
+        } else {
+          interim += text;
         }
       }
+      if (interim && opts.onInterim) {
+        opts.onInterim((finalTranscript + interim).trim());
+      }
+      // If we already have a final result and the engine is winding
+      // down, resolve early. Helps responsiveness.
+      if (finalTranscript.trim()) {
+        finish(finalTranscript.trim());
+      }
     };
+
     recog.onerror = (ev: SpeechRecognitionErrorEvent) => {
-      // "no-speech", "aborted", "not-allowed", "service-not-allowed"
-      // are the common errors. We surface the raw code; callers can
-      // distinguish if they need to.
+      // Common error codes:
+      //   not-allowed         → user denied permission
+      //   service-not-allowed → blocked at browser/system level
+      //   no-speech           → silent / mic muted / nothing heard
+      //   aborted             → recog.stop() or page change
+      //   network             → STT cloud unreachable
+      //   audio-capture       → device unavailable / hardware issue
+      console.warn("[mic] speech recognition error:", ev.error);
       fail(new Error(ev.error || "speech_recognition_error"));
     };
+
     recog.onend = () => {
-      // Browser fires `end` after either a successful recognition or
-      // a silent timeout. Treat empty as no-speech.
+      // End fires after either a successful recognition (we'd have
+      // already resolved above) or a silent timeout. Last-chance
+      // resolve / reject path.
       const trimmed = finalTranscript.trim();
       if (trimmed) finish(trimmed);
       else fail(new Error("no-speech"));
     };
 
     try {
+      console.info("[mic] starting Web Speech API recognition (es-ES)");
       recog.start();
     } catch (e) {
       fail(e instanceof Error ? e : new Error("start_failed"));

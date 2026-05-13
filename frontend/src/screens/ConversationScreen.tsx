@@ -10,6 +10,30 @@ import type { WaveMode } from "../core/types";
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
+// Same catalog as OnboardingScreen — duplicated to keep screens
+// independent; if a third surface needs it, lift to core/i18n.
+function micErrorMessage(code: string): string {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "No tengo permiso. Permite el micrófono en el navegador.";
+    case "no-speech":
+      return "No te he oído. Vuelve a intentarlo.";
+    case "network":
+      return "Sin red — el reconocimiento de voz pasa por el navegador.";
+    case "audio-capture":
+      return "No encuentro el micrófono.";
+    case "aborted":
+      return "Captura cancelada.";
+    case "ws_not_connected":
+      return "Conexión perdida. Vuelvo a intentarlo en un segundo.";
+    case "speech_recognition_unavailable":
+      return "Tu navegador no soporta reconocimiento de voz.";
+    default:
+      return `Mic: ${code}`;
+  }
+}
+
 // Three input modes share the same surface:
 //   - mic (default): tap → backend captures → STT → send
 //   - text (T-key): typing fallback for noisy rooms / kiosk testing
@@ -25,6 +49,8 @@ export function ConversationScreen() {
   const [showTextInput, setShowTextInput] = useState(false);
   const [textValue, setTextValue] = useState("");
   const [waveMode, setWaveMode] = useState<WaveMode>("idle");
+  const [micError, setMicError] = useState<string | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState("");
   const lastActivityRef = useRef<number>(Date.now());
 
   const bump = () => { lastActivityRef.current = Date.now(); };
@@ -83,11 +109,18 @@ export function ConversationScreen() {
 
   const onMicClick = async () => {
     bump();
+    setMicError(null);
     setWaveMode("listening");
     try {
-      const text = await listen();
+      const text = await listen({
+        onInterim: (partial) => setLiveTranscript(partial),
+      });
+      setLiveTranscript("");
       await sendMessage(text);
-    } catch {
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "unknown";
+      setMicError(micErrorMessage(code));
+      setLiveTranscript("");
       setWaveMode("idle");
     }
   };
@@ -168,6 +201,23 @@ export function ConversationScreen() {
           padding: "0 6vw",
         }}>
           {lastSamantha?.text ?? ""}
+        </div>
+      )}
+
+      {/* Mic status — sits below Samantha's last line. Shown only when
+          the user is actively dictating or a mic error occurred. */}
+      {!showHistory && (liveTranscript || micError) && (
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: "10vh",
+          textAlign: "center",
+          fontSize: "var(--text-label)",
+          fontStyle: "italic",
+          letterSpacing: "0.08em",
+          color: micError ? "var(--ink-soft)" : "var(--ink-dim)",
+          padding: "0 8vw",
+          pointerEvents: "none",
+        }}>
+          {micError ?? `“${liveTranscript}”`}
         </div>
       )}
 

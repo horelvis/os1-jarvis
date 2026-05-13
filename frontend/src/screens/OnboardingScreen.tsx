@@ -7,6 +7,28 @@ import { createProfile } from "../net/profile";
 import type { ProfileAnswer } from "../core/types";
 import type { WaveMode } from "../core/types";
 
+// Translate Web Speech API error codes to short Spanish messages
+// the user can act on. See net/mic.ts for the catalog.
+function micErrorMessage(code: string): string {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "No tengo permiso. Permite el micrófono en el navegador.";
+    case "no-speech":
+      return "No te he oído. Vuelve a intentarlo.";
+    case "network":
+      return "Sin red — el reconocimiento de voz pasa por el navegador.";
+    case "audio-capture":
+      return "No encuentro el micrófono.";
+    case "aborted":
+      return "Captura cancelada.";
+    case "speech_recognition_unavailable":
+      return "Tu navegador no soporta reconocimiento de voz.";
+    default:
+      return `Mic: ${code}`;
+  }
+}
+
 // Six onboarding prompts. Question 0 is the identity anchor (name).
 // Questions 1-5 map 1:1 to the Big Five dimensions (TIPI ordering:
 // E / O / C / A / N). Backend promotes each answer to a
@@ -38,6 +60,7 @@ export function OnboardingScreen() {
   const [answers, setAnswers] = useState<(string | null)[]>(Array(6).fill(""));
   const [submitting, setSubmitting] = useState(false);
   const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -47,18 +70,22 @@ export function OnboardingScreen() {
 
   const onMicClick = async () => {
     if (listening || submitting) return;
+    setMicError(null);
     setListening(true);
     try {
-      // Backend captures + transcribes (CLAUDE.md §2.8 — browser never
-      // touches getUserMedia). User can review/edit the result in the
-      // input before submitting; mic populates, doesn't auto-send, so
-      // an STT misfire doesn't lock you into a wrong name.
-      const transcript = await listen();
+      // Web Speech API (CLAUDE.md §2.8). User can review/edit the
+      // result in the input before submitting; mic populates the
+      // value live via onInterim, so an STT misfire doesn't lock the
+      // user into a wrong name.
+      const transcript = await listen({
+        onInterim: (text) => setValue(text),
+      });
       if (transcript && transcript.trim()) {
         setValue(transcript.trim());
       }
     } catch (e) {
-      console.warn("listen failed", e);
+      const code = e instanceof Error ? e.message : "unknown";
+      setMicError(micErrorMessage(code));
     } finally {
       setListening(false);
       inputRef.current?.focus();
@@ -156,8 +183,8 @@ export function OnboardingScreen() {
           ref={inputRef}
           autoFocus
           value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="escribe y pulsa enter"
+          onChange={(e) => { setValue(e.target.value); if (micError) setMicError(null); }}
+          placeholder={listening ? "te escucho…" : "escribe y pulsa enter"}
           disabled={submitting}
           // Click anywhere on the form area should still get the
           // caret onto the input — kiosk users can't always rely on
@@ -173,6 +200,18 @@ export function OnboardingScreen() {
             fontSize: "1.2rem", outline: "none", textAlign: "center",
           }}
         />
+        {(micError || listening) && (
+          <div style={{
+            color: micError ? "var(--ink-soft)" : "var(--ink-dim)",
+            fontSize: "var(--text-label)",
+            fontStyle: "italic",
+            letterSpacing: "0.1em",
+            textAlign: "center",
+            minHeight: "1.2em",
+          }}>
+            {micError ?? "escuchando…"}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           {canSkip && (
             <button
