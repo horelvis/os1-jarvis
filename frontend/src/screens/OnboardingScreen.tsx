@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
-import { listen } from "../net/mic";
 import { createProfile } from "../net/profile";
 import type { ProfileAnswer } from "../core/types";
 import type { WaveMode } from "../core/types";
 
 // Translate Web Speech API error codes to short Spanish messages
-// the user can act on. See net/mic.ts for the catalog.
+// the user can act on. Same catalog as ConversationScreen.
 function micErrorMessage(code: string): string {
   switch (code) {
     case "not-allowed":
@@ -49,52 +49,81 @@ const QUESTIONS = [
   "Cuando algo pequeño sale mal por la mañana, ¿se te queda pegado al cuerpo, o pasas pronto a otra cosa?",
 ];
 
-// First-encounter flow. Six prompts one at a time. Empty / skipped
-// answers land as null and the backend keeps the question text in
-// the chunk anyway so Samantha can refer back to "you didn't answer
-// the third one" later if she wants.
+// First-encounter flow. Six prompts one at a time. The mic is
+// single-shot per question (continuous: false) — the user reviews
+// what landed in the input before clicking "continuar", so an STT
+// misfire doesn't lock the pairing onto a wrong name.
 export function OnboardingScreen() {
   const route = useRoute();
   const setName = useSamantha((s) => s.setName);
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<(string | null)[]>(Array(6).fill(""));
   const [submitting, setSubmitting] = useState(false);
-  const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const {
+    interimTranscript,
+    finalTranscript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition,
+  } = useSpeechRecognition();
 
   // The wave under the question reflects what the user is doing right
   // now: idle while reading, listening when the mic is active.
   const waveMode: WaveMode = listening ? "listening" : "idle";
 
-  const onMicClick = async () => {
+  const onMicClick = () => {
     if (listening || submitting) return;
     setMicError(null);
-    setListening(true);
+    if (!browserSupportsSpeechRecognition) {
+      setMicError(micErrorMessage("speech_recognition_unavailable"));
+      return;
+    }
+    resetTranscript();
+    setValue("");
     try {
-      // Web Speech API (CLAUDE.md §2.8). User can review/edit the
-      // result in the input before submitting; mic populates the
-      // value live via onInterim, so an STT misfire doesn't lock the
-      // user into a wrong name.
-      const transcript = await listen({
-        onInterim: (text) => setValue(text),
-      });
-      if (transcript && transcript.trim()) {
-        setValue(transcript.trim());
-      }
+      // Single-shot: continuous=false so the recognizer stops on the
+      // first natural pause. The user reviews + edits before pressing
+      // "continuar".
+      SpeechRecognition.startListening({ continuous: false, language: "es-ES" });
     } catch (e) {
       const code = e instanceof Error ? e.message : "unknown";
       setMicError(micErrorMessage(code));
-    } finally {
-      setListening(false);
-      inputRef.current?.focus();
     }
   };
 
+  // Mirror the recognizer's interim transcript into the input so the
+  // user sees their words appear as they speak. On a final result we
+  // copy the cumulative final into the field and stop.
+  useEffect(() => {
+    if (!listening) return;
+    if (finalTranscript) {
+      setValue(finalTranscript.trim());
+    } else if (interimTranscript) {
+      setValue(interimTranscript);
+    }
+  }, [interimTranscript, finalTranscript, listening]);
+
+  // When listening ends, focus the input so the user can edit / press
+  // Enter without clicking. resetTranscript so the next question
+  // starts clean.
+  useEffect(() => {
+    if (!listening && finalTranscript) {
+      inputRef.current?.focus();
+      resetTranscript();
+    }
+  }, [listening, finalTranscript, resetTranscript]);
+
+  // Stop listening if the user navigates away mid-capture.
+  useEffect(() => {
+    return () => { SpeechRecognition.stopListening(); };
+  }, []);
+
   // Force focus on every question transition. autoFocus only fires on
-  // first mount; idx changes don't remount the input. Without this,
-  // the user has to click the field after each answer to keep typing.
+  // first mount; idx changes don't remount the input.
   useEffect(() => {
     inputRef.current?.focus();
   }, [idx]);
@@ -113,15 +142,14 @@ export function OnboardingScreen() {
     next[idx] = skip ? null : value.trim();
     setAnswers(next);
     setValue("");
+    SpeechRecognition.stopListening();
     if (idx < QUESTIONS.length - 1) setIdx(idx + 1);
-    else finalize(next);
+    else void finalize(next);
   };
 
   const finalize = async (final: (string | null)[]) => {
     setSubmitting(true);
     const firstAnswer = (final[0] ?? "").trim();
-    // Should never happen — nameRequired blocks the submit path — but
-    // bail loudly rather than POST a "tú" placeholder if it does.
     if (!firstAnswer) {
       setSubmitting(false);
       setIdx(0);
@@ -186,14 +214,9 @@ export function OnboardingScreen() {
           onChange={(e) => { setValue(e.target.value); if (micError) setMicError(null); }}
           placeholder={listening ? "te escucho…" : "escribe y pulsa enter"}
           disabled={submitting}
-          // Click anywhere on the form area should still get the
-          // caret onto the input — kiosk users can't always rely on
-          // taps landing on a 1-px underline.
           onClick={() => inputRef.current?.focus()}
           style={{
             width: "100%", background: "transparent", border: 0,
-            // Brighter underline so the field is unmistakably visible
-            // against the terracotta. Previous 20% white was too faint.
             borderBottom: "1px solid var(--ink-soft)",
             padding: "10px 4px", color: "var(--ink)",
             fontFamily: "var(--serif)", fontStyle: "italic",
@@ -227,9 +250,10 @@ export function OnboardingScreen() {
               saltar
             </button>
           )}
-          {/* Mic populates the input — doesn't auto-submit. Lets the
-              user correct an STT mistake before committing the
-              pairing (especially critical for Q0, the name). */}
+          {/* Mic populates the input live (via the hook's interim
+              transcript) — doesn't auto-submit. Lets the user
+              correct an STT mistake before committing the pairing
+              (especially critical for Q0, the name). */}
           <button
             type="button"
             className="mic-btn"

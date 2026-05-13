@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
 import { useKeys } from "../core/useKeys";
-import { listen } from "../net/mic";
 import { speak } from "../net/tts";
 import { getWSClient } from "../net/wsClient";
 import type { WaveMode } from "../core/types";
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
-// Same catalog as OnboardingScreen — duplicated to keep screens
-// independent; if a third surface needs it, lift to core/i18n.
+// How long a user's pause has to be before we treat the utterance as
+// "complete" and ship it to the LLM. Web Speech API commits a final
+// segment on its own ~1.5s of silence, but it sometimes splits a long
+// sentence into multiple finals; this debounce stitches them.
+const TRANSCRIPT_DEBOUNCE_MS = 800;
+
+// Minimum characters before a punctuation mark is allowed to flush a
+// sentence to TTS. Without this, the very first token like "Sí." or
+// "Mmm." would get its own /speak round-trip, which is wasteful and
+// chops Samantha's cadence.
+const SENTENCE_MIN_CHARS = 20;
+
 function micErrorMessage(code: string): string {
   switch (code) {
     case "not-allowed":
@@ -34,10 +44,35 @@ function micErrorMessage(code: string): string {
   }
 }
 
+/** Pull every completed sentence off the front of `buffer`. A sentence
+ *  ends with `. ! ? \n` but only counts as complete if it has at least
+ *  `SENTENCE_MIN_CHARS` characters — otherwise the LLM is too early in
+ *  its reply and splitting hurts cadence.
+ *
+ *  Returns [ready, remainder]. */
+function flushSentences(buffer: string): [string[], string] {
+  const out: string[] = [];
+  let rest = buffer;
+  // Greedy: pull all complete sentences in one pass.
+  // Pattern: anything up to and including the next .!?\n followed by space.
+  const re = /^([\s\S]*?[.!?\n]+)\s*/;
+  while (rest.length >= SENTENCE_MIN_CHARS) {
+    const m = re.exec(rest);
+    if (!m) break;
+    const sentence = m[1].trim();
+    if (sentence.length < SENTENCE_MIN_CHARS) break;
+    out.push(sentence);
+    rest = rest.slice(m[0].length);
+  }
+  return [out, rest];
+}
+
 // Three input modes share the same surface:
-//   - mic (default): tap → backend captures → STT → send
-//   - text (T-key): typing fallback for noisy rooms / kiosk testing
-//   - history (H-key): scrollable transcript over a dimmed wave
+//   - mic (default): tap → start continuous conversation. Tap again
+//     to stop. Mic auto-pauses during Samantha's TTS so the wave
+//     doesn't echo back into the recognizer.
+//   - text (T-key): typing fallback for noisy rooms / kiosk testing.
+//   - history (H-key): scrollable transcript over a dimmed wave.
 // 5-min inactivity rolls back to Ambient.
 export function ConversationScreen() {
   const route = useRoute();
@@ -50,23 +85,56 @@ export function ConversationScreen() {
   const [textValue, setTextValue] = useState("");
   const [waveMode, setWaveMode] = useState<WaveMode>("idle");
   const [micError, setMicError] = useState<string | null>(null);
-  const [liveTranscript, setLiveTranscript] = useState("");
+  // Conversation mode = "we're in a phone call with Samantha". One tap
+  // enters, another exits. Auto-resumes listening after each TTS turn.
+  const [conversationActive, setConversationActive] = useState(false);
+  // While true, the mic must NOT be open — chat in flight or TTS playing.
+  const [busy, setBusy] = useState(false);
+
   const lastActivityRef = useRef<number>(Date.now());
+  const activeRef = useRef(false);
+  const busyRef = useRef(false);
+
+  const {
+    interimTranscript,
+    finalTranscript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition,
+  } = useSpeechRecognition();
+
+  useEffect(() => { activeRef.current = conversationActive; }, [conversationActive]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
 
   const bump = () => { lastActivityRef.current = Date.now(); };
 
+  // Idle → Ambient.
   useEffect(() => {
     const tick = setInterval(() => {
       if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT_MS) {
+        SpeechRecognition.stopListening();
         route("ambient");
       }
     }, 30_000);
     return () => clearInterval(tick);
   }, [route]);
 
+  // Stop the singleton listener if we unmount mid-conversation.
+  useEffect(() => {
+    return () => { SpeechRecognition.stopListening(); };
+  }, []);
+
+  // Reflect listening state on the wave when we aren't busy with a
+  // backend turn — busy turns take over the wave mode themselves.
+  useEffect(() => {
+    if (busy) return;
+    setWaveMode(listening ? "listening" : "idle");
+  }, [listening, busy]);
+
   useKeys({
     Escape: () => {
       if (showTextInput) setShowTextInput(false);
+      else if (conversationActive) toggleConversation();
       else route("ambient");
     },
     h: () => { bump(); setShowHistory((v) => !v); },
@@ -85,43 +153,119 @@ export function ConversationScreen() {
       text: trimmed,
       timestamp: Date.now(),
     });
+    setBusy(true);
     setWaveMode("thinking");
 
     const replyId = crypto.randomUUID();
     appendMessage({ id: replyId, role: "samantha", text: "", timestamp: Date.now() });
 
+    // ── Sentence-streaming TTS ───────────────────────────────────
+    // As LLM tokens arrive we look for sentence boundaries (.!?\n)
+    // and ship each completed sentence to /speak as soon as it's
+    // ready. A worker plays one WAV at a time, so the user hears
+    // Samantha's first sentence within ~500 ms of the LLM starting
+    // instead of waiting for the whole reply.
+    let buffer = "";
+    const speakQueue: string[] = [];
+    let workerRunning = false;
+    const runWorker = async (): Promise<void> => {
+      if (workerRunning) return;
+      workerRunning = true;
+      while (speakQueue.length > 0) {
+        const sentence = speakQueue.shift()!;
+        try { await speak(sentence); } catch (e) { console.warn("speak failed", e); }
+      }
+      workerRunning = false;
+    };
+
     try {
       let started = false;
-      let acc = "";
       const result = await getWSClient().chat(trimmed, (token) => {
         if (!started) { started = true; setWaveMode("speaking"); }
-        acc += token;
-        patchMessage(replyId, acc);
+        // Live transcript patch for the history view.
+        const current = useSamantha.getState().transcript.find((m) => m.id === replyId);
+        const next = (current?.text ?? "") + token;
+        patchMessage(replyId, next);
+
+        // Try to flush completed sentences.
+        buffer += token;
+        const [ready, rest] = flushSentences(buffer);
+        if (ready.length > 0) {
+          speakQueue.push(...ready);
+          buffer = rest;
+          void runWorker();
+        }
       });
       patchMessage(replyId, result.reply);
-      await speak(result.reply);
+
+      // Flush whatever trails the final period (or no period at all).
+      const tail = buffer.trim();
+      if (tail) {
+        speakQueue.push(tail);
+        void runWorker();
+      }
+      // Wait until everything has actually played out.
+      while (workerRunning || speakQueue.length > 0) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
     } catch (e) {
       console.warn("chat failed", e);
+      setMicError(micErrorMessage(e instanceof Error ? e.message : "unknown"));
     } finally {
+      setBusy(false);
       setWaveMode("idle");
     }
   };
 
-  const onMicClick = async () => {
+  // Debounced commit of the recognizer's final transcript. Web Speech
+  // API often emits multiple "final" chunks per utterance (one per
+  // pause); waiting TRANSCRIPT_DEBOUNCE_MS after the last update keeps
+  // them stitched into one user message.
+  useEffect(() => {
+    if (!finalTranscript) return;
+    if (busy) return;
+    const handle = setTimeout(() => {
+      const text = finalTranscript.trim();
+      resetTranscript();
+      if (!text) return;
+      // Mute the mic during chat + TTS so Samantha's voice doesn't
+      // get re-recognized as user speech (the echo-loop trap).
+      SpeechRecognition.stopListening();
+      void sendMessage(text).then(() => {
+        if (activeRef.current) {
+          // Conversation still active → resume listening.
+          SpeechRecognition.startListening({
+            continuous: true,
+            language: "es-ES",
+          });
+        }
+      });
+    }, TRANSCRIPT_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [finalTranscript, busy, resetTranscript]);
+
+  const toggleConversation = () => {
     bump();
     setMicError(null);
-    setWaveMode("listening");
-    try {
-      const text = await listen({
-        onInterim: (partial) => setLiveTranscript(partial),
-      });
-      setLiveTranscript("");
-      await sendMessage(text);
-    } catch (e) {
-      const code = e instanceof Error ? e.message : "unknown";
-      setMicError(micErrorMessage(code));
-      setLiveTranscript("");
-      setWaveMode("idle");
+    if (!browserSupportsSpeechRecognition) {
+      setMicError(micErrorMessage("speech_recognition_unavailable"));
+      return;
+    }
+    if (conversationActive) {
+      setConversationActive(false);
+      SpeechRecognition.stopListening();
+    } else {
+      setConversationActive(true);
+      try {
+        SpeechRecognition.startListening({
+          continuous: true,
+          language: "es-ES",
+        });
+      } catch (e) {
+        const code = e instanceof Error ? e.message : "unknown";
+        setMicError(micErrorMessage(code));
+        setConversationActive(false);
+      }
     }
   };
 
@@ -130,10 +274,13 @@ export function ConversationScreen() {
     const v = textValue;
     setTextValue("");
     setShowTextInput(false);
-    sendMessage(v);
+    void sendMessage(v);
   };
 
   const lastSamantha = [...transcript].reverse().find((m) => m.role === "samantha");
+  // What to show under Samantha's line: live interim transcript when
+  // listening, otherwise the error message if any.
+  const liveCaption = listening ? interimTranscript.trim() : "";
 
   return (
     <div className="screen" onClick={bump}>
@@ -204,9 +351,10 @@ export function ConversationScreen() {
         </div>
       )}
 
-      {/* Mic status — sits below Samantha's last line. Shown only when
-          the user is actively dictating or a mic error occurred. */}
-      {!showHistory && (liveTranscript || micError) && (
+      {/* Mic status — sits below Samantha's last line. Live interim
+          shows what the recognizer is currently hearing; errors
+          replace it when present. */}
+      {!showHistory && (liveCaption || micError) && (
         <div style={{
           position: "absolute", left: 0, right: 0, bottom: "10vh",
           textAlign: "center",
@@ -217,7 +365,7 @@ export function ConversationScreen() {
           padding: "0 8vw",
           pointerEvents: "none",
         }}>
-          {micError ?? `“${liveTranscript}”`}
+          {micError ?? `“${liveCaption}”`}
         </div>
       )}
 
@@ -244,12 +392,26 @@ export function ConversationScreen() {
 
       <button
         className="mic-btn"
-        aria-label="microphone"
-        style={{ position: "absolute", left: "50%", bottom: "5vh", transform: "translateX(-50%)" }}
-        onClick={(e) => { e.stopPropagation(); onMicClick(); }}
+        aria-label={conversationActive ? "terminar conversación" : "iniciar conversación"}
+        aria-pressed={conversationActive}
+        style={{
+          position: "absolute", left: "50%", bottom: "5vh", transform: "translateX(-50%)",
+          // When the mic is open, hint that with a subtle inset + pulse.
+          background: conversationActive ? "var(--ink-soft)" : "var(--mic-active)",
+          boxShadow: conversationActive
+            ? "0 0 0 6px rgba(255,255,255,0.18)"
+            : "none",
+          transition: "all 0.25s",
+        }}
+        onClick={(e) => { e.stopPropagation(); toggleConversation(); }}
       >
         <svg viewBox="0 0 24 24">
-          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z" />
+          {conversationActive ? (
+            // Stop square (clear "tap to hang up")
+            <rect x="7" y="7" width="10" height="10" rx="2" />
+          ) : (
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z" />
+          )}
         </svg>
       </button>
     </div>
