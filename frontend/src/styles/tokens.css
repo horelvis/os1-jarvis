@@ -1,0 +1,28 @@
+:root {
+  --bg: #d1684e;
+  --ink: rgba(255, 255, 255, 1);
+  --ink-label: rgba(255, 255, 255, 0.9);
+  --ink-soft: rgba(255, 255, 255, 0.85);
+  --ink-dim: rgba(255, 255, 255, 0.6);
+  --ink-faint: rgba(255, 255, 255, 0.4);
+  --ink-trace: rgba(255, 255, 255, 0.2);
+  --mic-active: #ffffff;
+
+  --serif: "Cormorant Garamond", Georgia, serif;
+  --sans: "Inter Tight", -apple-system, sans-serif;
+
+  --text-display: 2.4rem;
+  --text-ambient: 1.5rem;
+  --text-her-large: 1.2rem;
+  --text-her-history: 0.95rem;
+  --text-user: 0.95rem;
+  --text-brand: 0.82rem;
+  --text-input: 0.75rem;
+  --text-label: 0.68rem;
+
+  --space-xs: 8px;
+  --space-sm: 16px;
+  --space-md: 24px;
+  --space-lg: 40px;
+  --space-xl: 64px;
+}

@@ -1,0 +1,44 @@
+.label {
+  font-family: var(--sans);
+  font-size: var(--text-label);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+
+.brand {
+  font-family: var(--sans);
+  font-size: var(--text-brand);
+  font-weight: 400;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--ink-label);
+}
+
+.her-text {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 300;
+  color: var(--ink);
+}
+
+.user-text {
+  font-family: var(--sans);
+  font-size: var(--text-user);
+  font-weight: 300;
+  color: var(--ink-dim);
+}
+
+.mic-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--mic-active);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mic-btn svg { width: 22px; height: 22px; fill: var(--bg); }
