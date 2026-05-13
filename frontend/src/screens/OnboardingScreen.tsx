@@ -5,13 +5,24 @@ import { useSamantha } from "../core/store";
 import { createProfile } from "../net/profile";
 import type { ProfileAnswer } from "../core/types";
 
+// Six onboarding prompts. Question 0 is the identity anchor (name).
+// Questions 1-5 map 1:1 to the Big Five dimensions (TIPI ordering:
+// E / O / C / A / N). Backend promotes each answer to a
+// role=fact with kind=big5_{dim} so the personality signal is
+// always in the system prompt, not just when recall surfaces it.
 const QUESTIONS = [
+  // Q0 — identity (required, non-skippable)
   "¿Cómo te llamo?",
-  "¿Cómo estás hoy?",
-  "¿Qué te gusta hacer cuando tienes tiempo para ti?",
-  "Cuéntame algo que te haya hecho ilusión últimamente. Algo pequeño vale.",
-  "¿Y algo que te esté rondando la cabeza estos días?",
-  "Una última: conmigo, ¿prefieres que sea más directa o más cuidadosa?",
+  // Q1 — Extraversion: energy from solitude vs. company
+  "Cuando se te ha hecho largo el día, ¿te llena más estar a solas, o con gente que te importa?",
+  // Q2 — Openness: novelty-seeking vs. familiarity
+  "Si tuvieras una tarde libre y nadie te viera, ¿probarías algo nuevo, o volverías a algo conocido?",
+  // Q3 — Conscientiousness: planning vs. spontaneity
+  "Cuando empiezas algo importante, ¿lo planificas antes, o te lanzas y vas viendo?",
+  // Q4 — Agreeableness: voice it vs. swallow it
+  "Cuando alguien te molesta, ¿se nota en el momento, o te lo sueles guardar?",
+  // Q5 — Neuroticism: emotional reactivity / recovery speed
+  "Cuando algo pequeño sale mal por la mañana, ¿se te queda pegado al cuerpo, o pasas pronto a otra cosa?",
 ];
 
 // First-encounter flow. Six prompts one at a time. Empty / skipped

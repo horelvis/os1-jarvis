@@ -72,3 +72,29 @@ def test_delete_profile_removes_facts_only(tmp_path):
     assert is_onboarded(mem) is False
     results = mem.recall("color favorito", k=10)
     assert results, "user memory chunks must survive profile deletion"
+
+
+def test_complete_onboarding_writes_big_five_facts(tmp_path):
+    """Each Big Five answer (Q1..Q5) is promoted to a kind=big5_{dim} fact."""
+    from samantha.profile import BIG5_BY_INDEX
+
+    mem = _make_mem(tmp_path)
+    complete_onboarding(mem, name="Dana", answers=_six_answers())
+
+    for idx, dim in BIG5_BY_INDEX.items():
+        fact = mem.get_fact(f"big5_{dim}")
+        assert fact is not None, f"big5_{dim} (slot {idx}) should be set"
+        # value is the raw answer text
+        expected_answer = _six_answers()[idx]["a"]
+        assert fact["value"] == expected_answer.strip()
+
+
+def test_delete_profile_removes_big_five_facts(tmp_path):
+    """delete_profile must wipe every Big Five fact too — not just name."""
+    from samantha.profile import BIG5_FACT_KINDS
+
+    mem = _make_mem(tmp_path)
+    complete_onboarding(mem, name="Eli", answers=_six_answers())
+    delete_profile(mem)
+    for kind in BIG5_FACT_KINDS:
+        assert mem.get_fact(kind) is None, f"{kind} survived delete_profile"

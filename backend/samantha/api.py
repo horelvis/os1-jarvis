@@ -94,12 +94,20 @@ def get_memory() -> "Memory | None":
 def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
     """Gather the facts surfaced into the system prompt.
 
-    Today: `name` and `onboarding_completed_at`. Future preference facts
-    (favorite drink, conversational style, etc.) land here too — keep
-    the list short so the prompt stays scannable for the LLM.
+    Order matters for prompt readability:
+        1. name (identity anchor)
+        2. five Big-Five trait answers (E / O / C / A / N)
+        3. onboarding_completed_at (timestamp, last so it doesn't
+           crowd out the personality signal)
+
+    Future preference facts land here too — keep the list short so the
+    prompt stays scannable for the LLM.
     """
+    from .profile import BIG5_FACT_KINDS
+
+    kinds = ("name", *BIG5_FACT_KINDS, "onboarding_completed_at")
     out: list[dict] = []
-    for kind in ("name", "onboarding_completed_at"):
+    for kind in kinds:
         f = mem.get_fact(kind, user_id=user_id)
         if f is not None:
             out.append(f)
