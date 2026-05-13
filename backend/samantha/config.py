@@ -51,11 +51,17 @@ class Config:
     )
 
     # === TTS (Piper, Phase 5) ===
-    # Voice files live outside the repo (~60 MB each). If the model
+    # Voice files live outside the repo (~70 MB each). If the model
     # isn't on disk the backend falls back to the mock tone WAV — no
     # hard dependency at runtime.
+    #
+    # Default: es_ES-sharvard-medium, speaker F (female). Samantha is
+    # canonically a female voice (film reference, Scarlett Johansson).
+    # The other sharvard speaker is M=0. Single-speaker voices like
+    # es_ES-davefx-medium ignore tts_speaker_id (set it to None).
     tts_voices_dir: str = "~/.samantha/voices"
-    tts_voice: str = "es_ES-davefx-medium"
+    tts_voice: str = "es_ES-sharvard-medium"
+    tts_speaker_id: int | None = 1
 
     # === Logging ===
     log_level: str = "INFO"
@@ -97,6 +103,14 @@ class Config:
             ),
             tts_voices_dir=_get("TTS_VOICES_DIR", cls.tts_voices_dir),
             tts_voice=_get("TTS_VOICE", cls.tts_voice),
+            # speaker_id needs a custom path because the helper above
+            # can't tell "default int 1" from "user wants 1". `None`
+            # = single-speaker model, omit speaker_id from synth.
+            tts_speaker_id=(
+                int(os.environ["SAMANTHA_TTS_SPEAKER_ID"])
+                if os.environ.get("SAMANTHA_TTS_SPEAKER_ID", "").strip()
+                else cls.tts_speaker_id
+            ),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 

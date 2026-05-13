@@ -86,9 +86,13 @@ def synth(text: str) -> bytes:
     """Synthesize `text` to a WAV byte string.
 
     Output is mono 16-bit PCM at the voice's native sample rate
-    (22050 Hz for `es_ES-davefx-medium`). Wrapped in a standard
-    RIFF/WAVE header so the frontend `<audio>` element plays it
-    directly.
+    (22050 Hz for the medium-quality voices we ship). Wrapped in a
+    standard RIFF/WAVE header so the frontend `<audio>` element
+    plays it directly.
+
+    Multi-speaker voices (e.g. `es_ES-sharvard-medium` with
+    M=0, F=1) consume `config.tts_speaker_id`. Set it to None for
+    single-speaker voices like `es_ES-davefx-medium`.
 
     Raises:
       VoiceMissingError — if the model isn't on disk.
@@ -96,7 +100,17 @@ def synth(text: str) -> bytes:
     if not text or not text.strip():
         return b""
     voice = _get_voice()
+
+    # Build SynthesisConfig only when needed — `None` lets piper use
+    # the model's default speaker, which is the right behaviour for
+    # single-speaker voices.
+    syn_config = None
+    if config.tts_speaker_id is not None:
+        from piper import SynthesisConfig
+
+        syn_config = SynthesisConfig(speaker_id=config.tts_speaker_id)
+
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        voice.synthesize_wav(text.strip(), wf)
+        voice.synthesize_wav(text.strip(), wf, syn_config=syn_config)
     return buf.getvalue()
