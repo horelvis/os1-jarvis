@@ -17,6 +17,11 @@ other distros are similar.
   in ~6 GB.
 - **OS**: Linux (kernel 5.15+). The model and server work on Windows
   and macOS too, but the systemd unit at the end is Linux-only.
+- **Python**: 3.10 or 3.11 (3.11 recommended — torch wheel coverage is
+  best there). `qwen-tts` doesn't yet support 3.12+ at the time of
+  writing. The commands below use the generic `python3` alias; if your
+  system's `python3` is 3.12+, install 3.11 alongside and run setup.sh
+  with `PYTHON=python3.11 ./setup.sh`.
 - **Network**: the GPU host must be reachable from the mini-PC over
   LAN. Static IP recommended.
 - **Disk**: ~5 GB for the 1.7B model, ~2 GB for the 0.6B, plus
@@ -54,7 +59,7 @@ sudo reboot
 ```bash
 sudo apt update
 sudo apt install -y \
-  python3.11 python3.11-venv python3.11-dev \
+  python3 python3-venv python3-dev \
   build-essential git curl ffmpeg sox \
   libsndfile1
 ```
@@ -62,13 +67,14 @@ sudo apt install -y \
 `ffmpeg` and `sox` are runtime deps of `librosa` (which `qwen-tts`
 pulls in). `libsndfile1` is needed for `soundfile`.
 
-If `python3.11` isn't in your distro yet, add the deadsnakes PPA on
-Ubuntu:
+If your distro's `python3` is 3.12+ (qwen-tts doesn't ship wheels for
+that yet), pin to 3.11 via deadsnakes on Ubuntu:
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
 sudo apt install python3.11 python3.11-venv python3.11-dev
+# Then run setup.sh with: PYTHON=python3.11 ./setup.sh
 ```
 
 ---
@@ -107,7 +113,7 @@ broke. Then jump to step 7 (smoke test) below.
 If you'd rather do it by hand:
 
 ```bash
-python3.11 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```

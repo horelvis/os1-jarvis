@@ -11,6 +11,11 @@
 
 set -euo pipefail
 
+# Use `PYTHON=python3.11 ./setup.sh` to pin to a specific interpreter
+# when the system `python3` is 3.12+ (qwen-tts doesn't ship wheels for
+# 3.12 yet). Default = whatever the system `python3` resolves to.
+PYTHON="${PYTHON:-python3}"
+
 MODEL="${MODEL:-1.7B}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,12 +36,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
 echo "── 1/5 sanity ──"
-python3.11 --version
+"$PYTHON" --version
 nvidia-smi -L
 
 echo "── 2/5 venv ──"
 if [[ ! -d .venv ]]; then
-  python3.11 -m venv .venv
+  "$PYTHON" -m venv .venv
 fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
