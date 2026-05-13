@@ -42,3 +42,13 @@
   cursor: pointer;
 }
 .mic-btn svg { width: 22px; height: 22px; fill: var(--bg); }
+
+/* Placeholder text. Browsers default to ~grey which disappears
+   against terracotta. Use the design system's faint-white token and
+   force opacity:1 so Firefox/Safari don't double-fade it. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-faint);
+  opacity: 1;
+  font-style: italic;
+}
