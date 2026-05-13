@@ -13,6 +13,75 @@
 
 ---
 
+## 2026-05-13 — Phase 8: UI v2 redesign ✅
+
+Full redesign per `docs/superpowers/specs/2026-05-12-ui-redesign-design.md`
+and `docs/superpowers/plans/2026-05-12-ui-redesign-v2.md`.
+
+- **Frontend:** vanilla-JS in `backend/static/` deleted. New `frontend/`
+  with React 18 + Vite 5 + TypeScript 5.5 strict. 4 screens (Boot,
+  Onboarding, Ambient, Conversation immersive + history toggle). Design
+  tokens system in `frontend/src/styles/tokens.css`. State managed by
+  Zustand. Three.js OS1Loader ported to a `forwardRef` component with
+  imperative handle.
+- **Wave:** rewritten as a traveling wave packet — pulses propagate from
+  the center outward with gaussian envelope and per-mode parameters
+  (idle / listening / thinking / speaking) per spec §6. Stroke 0.6 px.
+- **Memory:** extended with short-term (SQLite ring buffer, last 20
+  turns, capacity-configurable), long-term (ChromaDB + fastembed
+  multilingual ONNX embedder `paraphrase-multilingual-MiniLM-L12-v2`),
+  and facts (`role: "fact"` chunks). `Memory.set_fact`, `get_fact`,
+  `all_facts` added. `recall()` excludes short-term entries AND
+  `role: "fact"` chunks.
+- **Persistence:** no `profile.json`. `profile.py` thin facade over
+  Memory. `/profile` endpoints (GET / POST / DELETE) routed through
+  facts. `/ping` includes `has_profile: bool`.
+- **Prompt assembly:** `real_llm._build_payload` accepts `facts`,
+  `recall`, `short_term` kwargs (keyword-only). System prompt assembled
+  per spec §9.6:
+  `SYSTEM_PROMPT + # Lo que sabes de ella + # Lo que recuerdas + # Conversación reciente + user-turn`.
+- **Backend serves frontend/dist:** `STATIC_DIR` removed,
+  `FRONTEND_DIST = ../../frontend/dist`, `/assets` mount guarded on
+  `dist/assets/` existing so backend-only test runs keep working.
+- **CLAUDE.md updated:** §2.4 (frontend lives separately), §2.7 (3-layer
+  memory architecture), §2.10 new (frontend stack), §3 (no-framework /
+  no-build-step rules removed), §5 (npm commands + vite dev workflow),
+  §7 (npm install && npm run build before systemd), §12 (two decision
+  log entries: frontend pivot + memory redesign).
+
+**Changed files (this redesign):**
+- Backend new: `samantha/short_term.py`, `samantha/profile.py`,
+  `tests/test_short_term.py`, `tests/test_profile.py`.
+- Backend modified: `samantha/memory.py` (fastembed + short-term + facts),
+  `samantha/real_llm.py` (three-layer prompt), `samantha/api.py`
+  (/profile endpoints, _collect_facts, frontend/dist serving),
+  `samantha/schemas.py` (ProfileAnswer / ProfileCreateRequest /
+  ProfileResponse, PingResponse.has_profile),
+  `samantha/config.py` (memory_short_term_capacity, memory_embedder_model),
+  `pyproject.toml` (fastembed → main deps).
+- Frontend new: 17 files under `frontend/`: package.json, tsconfig*,
+  vite.config.ts, index.html, .gitignore, plus 12 `src/**` files
+  (App.tsx, main.tsx, types.ts, store.ts, router.ts, useKeys.ts,
+  profile.ts, tts.ts, wsClient.ts, mic.ts, Wave.tsx, OS1Loader.tsx,
+  BootScreen.tsx, AmbientScreen.tsx, ConversationScreen.tsx,
+  OnboardingScreen.tsx, tokens.css, base.css, components.css).
+- Deleted: `backend/static/{index.html, style.css, app.js,
+  samantha-wave.js, os1-loader.js, ws-client.js}`.
+
+**Tests:** backend pytest 50 / 50 green. Frontend `npm run typecheck`
+clean, `npm run build` succeeds (608KB bundle, Three.js dominant).
+End-to-end smoke (mock mode): Boot → Onboarding → /profile POST →
+Ambient → tap → Conversation → WS chat token stream works.
+
+**Out of scope (deferred):**
+- Samantha proactiva (initiative engine) → v3
+- Agentic Samantha (emails, calendar, tools) → v3, scoped at
+  `docs/superpowers/specs/2026-05-12-hermes-agent-spike-scope.md`
+- Real STT (faster-whisper) + real TTS (Piper) → Phase 5 of v1 phase plan
+- Memory browser UI → future
+
+---
+
 ## 2026-05-12 — Phase 6: Persistent memory (ChromaDB) ✅ [out of order]
 
 Done out of spec order (Phase 5 STT/TTS deferred) because the user
