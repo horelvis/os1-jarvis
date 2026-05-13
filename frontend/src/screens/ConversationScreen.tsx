@@ -126,10 +126,16 @@ export function ConversationScreen() {
         {showHistory ? "× cerrar" : "≡ historial"}
       </button>
 
+      {/* Wave is a thin horizontal strip centered vertically — never
+          full-bleed, because the canvas amplitude is `h*0.45` and a
+          full-viewport canvas would paint chaos over the rest of the UI.
+          Mirrors AmbientScreen's 160px strip layout. */}
       <div style={{
-        position: "absolute", inset: 0,
+        position: "absolute", left: 0, right: 0, top: "50%",
+        transform: "translateY(-50%)", height: 160,
         opacity: showHistory ? 0.3 : 1,
         transition: "opacity 0.3s",
+        pointerEvents: "none",
       }}>
         <Wave mode={waveMode} />
       </div>
