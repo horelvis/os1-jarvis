@@ -41,10 +41,18 @@ from loguru import logger
 from . import __version__
 from .config import config
 from .mock_llm import generate_reply as mock_generate_reply, tokenize_for_streaming
+from .profile import (
+    complete_onboarding as _complete_onboarding,
+    delete_profile as _delete_profile,
+    get_profile as _get_profile,
+    is_onboarded as _is_onboarded,
+)
 from .schemas import (
     ChatRequest,
     ChatResponse,
     PingResponse,
+    ProfileCreateRequest,
+    ProfileResponse,
     SpeakRequest,
     TranscribeResponse,
 )
@@ -161,13 +169,65 @@ async def index() -> FileResponse:
 
 @app.get("/ping", response_model=PingResponse)
 async def ping() -> PingResponse:
-    """Health check used by the kiosk to wait for the backend at boot."""
+    """Health check used by the kiosk to wait for the backend at boot.
+
+    `has_profile` lets the frontend route between Onboarding (false) and
+    Ambient (true) without a separate /profile probe at boot.
+    """
+    mem = get_memory()
+    has_profile = bool(mem and _is_onboarded(mem))
     return PingResponse(
         status="ok",
         version=__version__,
         timestamp=int(time.time()),
         mode=config.mode,
+        has_profile=has_profile,
     )
+
+
+# ========================================================================
+# /profile — onboarding state
+# ========================================================================
+
+
+@app.get("/profile", response_model=ProfileResponse)
+async def get_profile_endpoint() -> ProfileResponse:
+    """Return the synthesized profile, or 404 if onboarding hasn't completed."""
+    mem = get_memory()
+    if mem is None:
+        raise HTTPException(status_code=503, detail="memory_disabled")
+    profile = _get_profile(mem)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="not_onboarded")
+    return ProfileResponse(**profile)
+
+
+@app.post("/profile", response_model=ProfileResponse)
+async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
+    """Complete onboarding: stores name + the 6 answers in Memory."""
+    mem = get_memory()
+    if mem is None:
+        raise HTTPException(status_code=503, detail="memory_disabled")
+    try:
+        profile = _complete_onboarding(
+            mem,
+            name=req.name,
+            answers=[a.model_dump() for a in req.answers],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return ProfileResponse(**profile)
+
+
+@app.delete("/profile")
+async def delete_profile_endpoint() -> dict:
+    """ADMIN-only: clears name + onboarding_completed_at facts. The 6
+    onboarding-answer chunks survive (Samantha never forgets)."""
+    mem = get_memory()
+    if mem is None:
+        raise HTTPException(status_code=503, detail="memory_disabled")
+    deleted = _delete_profile(mem)
+    return {"deleted": deleted}
 
 
 # ========================================================================

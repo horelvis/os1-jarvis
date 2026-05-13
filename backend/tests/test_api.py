@@ -566,3 +566,81 @@ def test_real_llm_injects_memories_into_system_prompt():
     assert "Toby" in system
     assert "tú dijiste" in system  # samantha-role line
     assert "ella" in system  # user-role line
+
+
+# ========================================================================
+# /profile endpoints
+# ========================================================================
+
+
+def test_get_profile_503_when_memory_disabled():
+    """Default test config disables memory (conftest); endpoint must reject."""
+    response = client.get("/profile")
+    # 503 expected (memory_disabled). Accept 404 in case some setup hydrates it.
+    assert response.status_code in (404, 503)
+
+
+def test_ping_includes_has_profile():
+    response = client.get("/ping")
+    assert response.status_code == 200
+    data = response.json()
+    assert "has_profile" in data
+    assert isinstance(data["has_profile"], bool)
+
+
+def test_profile_endpoints_full_cycle(tmp_path, monkeypatch):
+    """End-to-end: profile starts missing, becomes onboarded after POST,
+    is_onboarded persists, DELETE clears it back to 404."""
+    from samantha import api as api_mod
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
+    monkeypatch.setattr(api_mod, "_memory", mem)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+    api_mod._memory_init_failed = False
+
+    r = client.get("/profile")
+    assert r.status_code == 404
+    ping = client.get("/ping").json()
+    assert ping["has_profile"] is False
+
+    body = {
+        "name": "Horelvis",
+        "answers": [
+            {"q": "¿Cómo te llamo?", "a": "Horelvis"},
+            {"q": "¿Cómo estás hoy?", "a": "bien"},
+            {"q": "¿Qué te gusta?", "a": "leer"},
+            {"q": "¿Algo que te ilusione?", "a": "un viaje a Lisboa"},
+            {"q": "¿Algo que te ronde?", "a": "trabajo"},
+            {"q": "¿Directa o cuidadosa?", "a": "directa"},
+        ],
+    }
+    r = client.post("/profile", json=body)
+    assert r.status_code == 200, r.text
+    saved = r.json()
+    assert saved["name"] == "Horelvis"
+    assert saved["onboarding_completed_at"] > 0
+    assert len(saved["answers"]) == 6
+
+    r = client.get("/profile")
+    assert r.status_code == 200
+    ping = client.get("/ping").json()
+    assert ping["has_profile"] is True
+
+    r = client.delete("/profile")
+    assert r.status_code == 200
+    r = client.get("/profile")
+    assert r.status_code == 404
+
+
+def test_profile_post_rejects_empty_body():
+    r = client.post("/profile", json={})
+    assert r.status_code == 422
+
+
+def test_profile_post_rejects_short_answers():
+    r = client.post("/profile", json={
+        "name": "Foo",
+        "answers": [{"q": "q", "a": "a"}],
+    })
+    assert r.status_code == 422

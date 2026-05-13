@@ -18,6 +18,10 @@ class PingResponse(BaseModel):
     version: str = Field(description="Versión del backend")
     timestamp: int = Field(description="Unix timestamp en segundos")
     mode: str = Field(description="'mock' o 'real'")
+    has_profile: bool = Field(
+        default=False,
+        description="True si Samantha ya conoce a esta persona",
+    )
 
 
 # ========================================================================
@@ -85,6 +89,33 @@ class SpeakRequest(BaseModel):
 
 # La respuesta de /speak es audio binario (audio/wav), no JSON.
 # No necesita schema Pydantic.
+
+
+# ========================================================================
+# /profile — onboarding state synthesized from Memory
+# ========================================================================
+
+
+class ProfileAnswer(BaseModel):
+    """Una de las 6 respuestas del onboarding."""
+
+    q: str = Field(min_length=1, max_length=400)
+    a: str | None = Field(default=None, max_length=2000)
+
+
+class ProfileCreateRequest(BaseModel):
+    """Cuerpo de POST /profile cuando completa el onboarding."""
+
+    name: str = Field(min_length=1, max_length=80)
+    answers: list[ProfileAnswer] = Field(min_length=6, max_length=6)
+
+
+class ProfileResponse(BaseModel):
+    """Vista de perfil sintetizada desde Memory."""
+
+    name: str
+    onboarding_completed_at: int
+    answers: list[ProfileAnswer]
 
 
 # ========================================================================
