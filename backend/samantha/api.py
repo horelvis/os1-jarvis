@@ -178,15 +178,16 @@ if (FRONTEND_DIST / "assets").exists():
     )
 
 
-# Placeholder transcriptions used by /transcribe and the WS `listen`
-# turn. Phase 5 replaces this with faster-whisper.
+# Placeholder transcription used by /transcribe and the WS `listen`
+# turn while we run in mock mode. Phase 5 replaces this with
+# faster-whisper hitting the real microphone via sounddevice.
+#
+# Kept as a single, clearly-placeholder string so the user can tell
+# at a glance that this is not their actual voice. The previous
+# random pool of plausible-looking user phrases made the conversation
+# look like Samantha was talking to herself.
 FAKE_TRANSCRIPTS: list[str] = [
-    "Hola Samantha, ¿qué tal?",
-    "Cuéntame algo interesante.",
-    "Estoy un poco cansado hoy.",
-    "¿Te acuerdas de lo que hablamos ayer?",
-    "Tengo una pregunta para ti.",
-    "Me apetece charlar un rato.",
+    "hola (mic en modo mock — Phase 5 cablea Whisper)",
 ]
 
 
@@ -410,7 +411,9 @@ def _generate_tone_wav(duration_s: float, freq: float = 440.0) -> bytes:
     n_samples = int(duration_s * sample_rate)
     tone_samples = min(n_samples, int(0.25 * sample_rate))
     fade_samples = int(0.05 * sample_rate)
-    amplitude = 0.12  # quieter than before; mock cue, not a beep
+    # Audible-but-soft tap; the previous 0.12 was inaudible at normal
+    # system volume. Still just a placeholder — Phase 5 swaps Piper in.
+    amplitude = 0.45
 
     samples = [0] * n_samples
     for i in range(tone_samples):
