@@ -35,23 +35,55 @@ _FALLBACK_REPLY = (
 _client: httpx.AsyncClient | None = None
 
 
-def _format_memories(memories: "list[MemoryChunk]") -> str:
-    """Render a list of MemoryChunk into a system-prompt addendum.
+def _format_facts(facts: "list[dict]") -> str:
+    """Render structured facts ('# Lo que sabes de ella').
 
-    Format is intentionally terse so the model can scan it quickly:
-        # Lo que recuerdas de esta persona
-        - 2026-05-10  (ella): Tengo un perro llamado Toby.
-        - 2026-04-22  (tú dijiste): Eso es bonito, ¿qué edad tiene?
+    Facts carry stable knowledge about the user (name, onboarding date,
+    later: preferences). One bullet per fact, rendered text-first so
+    Samantha sees natural-language statements rather than k/v pairs.
     """
-    if not memories:
+    if not facts:
         return ""
-    lines = ["", "# Lo que recuerdas de esta persona (orden por relevancia)"]
-    for m in memories:
-        when = time.strftime("%Y-%m-%d", time.localtime(m.timestamp)) if m.timestamp else "?"
-        who = "tú dijiste" if m.role == "samantha" else "ella"
-        # Trim long chunks so the system prompt doesn't balloon
-        snippet = m.text if len(m.text) <= 280 else m.text[:277] + "..."
+    lines = ["", "# Lo que sabes de ella"]
+    for f in facts:
+        line = f.get("text") or f"{f.get('kind')} = {f.get('value')}"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
+def _format_recall(chunks: "list[MemoryChunk]") -> str:
+    """Render semantic-recall hits ('# Lo que recuerdas').
+
+    Past conversation chunks pulled by similarity to the current
+    message. Each gets a date, a 'who said it' marker, and a 280-char
+    snippet to keep the prompt bounded.
+    """
+    if not chunks:
+        return ""
+    lines = ["", "# Lo que recuerdas"]
+    for c in chunks:
+        when = (
+            time.strftime("%Y-%m-%d", time.localtime(c.timestamp))
+            if c.timestamp else "?"
+        )
+        who = "tú dijiste" if c.role == "samantha" else "ella"
+        snippet = c.text if len(c.text) <= 280 else c.text[:277] + "..."
         lines.append(f"- {when}  ({who}): {snippet}")
+    return "\n".join(lines)
+
+
+def _format_short_term(chunks: "list[MemoryChunk]") -> str:
+    """Render the short-term ring as the immediate conversation window.
+
+    Verbatim, oldest-first, no dates — this is the live thread the LLM
+    should treat as 'the current conversation', not as background.
+    """
+    if not chunks:
+        return ""
+    lines = ["", "# Conversación reciente"]
+    for c in chunks:
+        who = "tú" if c.role == "samantha" else "ella"
+        lines.append(f"{who}: {c.text}")
     return "\n".join(lines)
 
 
@@ -72,7 +104,11 @@ async def aclose() -> None:
 
 
 def _build_payload(
-    message: str, memories: "list[MemoryChunk] | None" = None
+    message: str,
+    *,
+    facts: "list[dict] | None" = None,
+    recall: "list[MemoryChunk] | None" = None,
+    short_term: "list[MemoryChunk] | None" = None,
 ) -> dict:
     """Build the OpenAI-compatible chat-completions payload.
 
@@ -82,27 +118,40 @@ def _build_payload(
     of the model and makes per-model tuning a config-file change instead
     of a code change.
 
+    System prompt assembly (spec §9.6):
+        SYSTEM_PROMPT
+        + facts (# Lo que sabes de ella)
+        + recall (# Lo que recuerdas)
+        + short_term (# Conversación reciente)
+
     `/no_think` is appended to the user message: Qwen3's "soft switch"
     that disables the `<think>` reasoning block. Samantha is a
     conversational presence, not a chain-of-thought tool — we want her
     final answer, not her internal monologue.
     """
     system = SYSTEM_PROMPT
-    if memories:
-        system = system + _format_memories(memories)
-    user_content = f"{message}\n/no_think"
+    if facts:
+        system += _format_facts(facts)
+    if recall:
+        system += _format_recall(recall)
+    if short_term:
+        system += _format_short_term(short_term)
     return {
         "model": config.llm_model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user_content},
+            {"role": "user", "content": f"{message}\n/no_think"},
         ],
         "stream": True,
     }
 
 
 async def stream_reply(
-    message: str, memories: "list[MemoryChunk] | None" = None
+    message: str,
+    *,
+    facts: "list[dict] | None" = None,
+    recall: "list[MemoryChunk] | None" = None,
+    short_term: "list[MemoryChunk] | None" = None,
 ) -> AsyncIterator[str]:
     """Yield token chunks as the LLM produces them.
 
@@ -111,12 +160,16 @@ async def stream_reply(
         data: [DONE]
     """
     url = f"{config.llm_server_url.rstrip('/')}/v1/chat/completions"
-    payload = _build_payload(message, memories)
+    payload = _build_payload(
+        message, facts=facts, recall=recall, short_term=short_term,
+    )
     client = _get_client()
 
     logger.debug(
         f"real_llm: POST {url} prompt_version={SYSTEM_PROMPT_VERSION} "
-        f"chars={len(message)} memories={len(memories) if memories else 0}"
+        f"chars={len(message)} facts={len(facts) if facts else 0} "
+        f"recall={len(recall) if recall else 0} "
+        f"short_term={len(short_term) if short_term else 0}"
     )
 
     try:
@@ -153,10 +206,16 @@ async def stream_reply(
 
 
 async def generate_reply(
-    message: str, memories: "list[MemoryChunk] | None" = None
+    message: str,
+    *,
+    facts: "list[dict] | None" = None,
+    recall: "list[MemoryChunk] | None" = None,
+    short_term: "list[MemoryChunk] | None" = None,
 ) -> str:
     """Non-streaming convenience: collect the full reply."""
     chunks: list[str] = []
-    async for tok in stream_reply(message, memories):
+    async for tok in stream_reply(
+        message, facts=facts, recall=recall, short_term=short_term
+    ):
         chunks.append(tok)
     return "".join(chunks).strip() or _FALLBACK_REPLY

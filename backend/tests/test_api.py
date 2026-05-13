@@ -539,8 +539,8 @@ def test_memory_all_facts_filters_by_kind(tmp_path):
     assert len(everything) == 2
 
 
-def test_real_llm_injects_memories_into_system_prompt():
-    """When memories are passed, they appear as a system-prompt addendum."""
+def test_real_llm_injects_recall_into_system_prompt():
+    """When recall chunks are passed, they appear under '# Lo que recuerdas'."""
     from samantha import real_llm
     from samantha.memory import MemoryChunk
 
@@ -560,12 +560,57 @@ def test_real_llm_injects_memories_into_system_prompt():
             user_id="primary",
         ),
     ]
-    payload = real_llm._build_payload("¿Cómo está Toby?", memories=memories)
+    payload = real_llm._build_payload("¿Cómo está Toby?", recall=memories)
     system = payload["messages"][0]["content"]
-    assert "Lo que recuerdas" in system
+    assert "# Lo que recuerdas" in system
     assert "Toby" in system
     assert "tú dijiste" in system  # samantha-role line
     assert "ella" in system  # user-role line
+    assert payload["messages"][-1]["content"] == "¿Cómo está Toby?\n/no_think"
+
+
+def test_real_llm_build_payload_includes_facts_recall_and_short_term():
+    """Spec §9.6 — the prompt has 3 labeled sections in order."""
+    from samantha import real_llm
+    from samantha.memory import MemoryChunk
+
+    facts = [
+        {"kind": "name", "value": "Horelvis",
+         "text": "El usuario se llama Horelvis"},
+        {"kind": "onboarding_completed_at", "value": 1778000000,
+         "text": "Onboarding completado en 1778000000"},
+    ]
+    recall = [
+        MemoryChunk(id="r1", role="user", text="Trabajo en una agencia",
+                    timestamp=1778001000, user_id="primary"),
+    ]
+    short_term = [
+        MemoryChunk(id="s1", role="user", text="¿qué tal el día?",
+                    timestamp=1778002000, user_id="primary"),
+        MemoryChunk(id="s2", role="samantha", text="Bien. ¿Y tú?",
+                    timestamp=1778002005, user_id="primary"),
+    ]
+
+    payload = real_llm._build_payload(
+        message="me siento perdido",
+        facts=facts,
+        recall=recall,
+        short_term=short_term,
+    )
+    system = payload["messages"][0]["content"]
+    assert "# Lo que sabes de ella" in system
+    assert "Horelvis" in system
+    assert "# Lo que recuerdas" in system
+    assert "agencia" in system
+    assert "# Conversación reciente" in system
+    assert "¿qué tal el día?" in system
+    assert (
+        system.find("# Lo que sabes")
+        < system.find("# Lo que recuerdas")
+        < system.find("# Conversación reciente")
+    )
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == "me siento perdido\n/no_think"
 
 
 # ========================================================================
