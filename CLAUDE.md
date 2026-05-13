@@ -542,21 +542,39 @@ ruff check . && ruff format .
 
 ### Frontend (Vite + React + TS)
 
+**Package manager: pnpm** (NOT npm). npm has had recurring supply-chain
+issues and we want stricter dep isolation. pnpm ships with Node via
+`corepack` — no extra install. Activate once on a new machine:
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+```
+
+Then in `frontend/`:
+
 ```bash
 cd frontend
 
 # One time
-npm install
+pnpm install
+# pnpm blocks postinstall scripts by default. esbuild needs its
+# postinstall to fetch its binary; the project's package.json already
+# whitelists it under "pnpm.onlyBuiltDependencies". If pnpm prompts:
+pnpm approve-builds esbuild
 
 # Dev server with HMR on :5173, proxies API to :7777
-npm run dev
+pnpm dev
 
 # Production build to frontend/dist/ (consumed by backend)
-npm run build
+pnpm build
 
 # Type checking only
-npm run typecheck
+pnpm typecheck
 ```
+
+**Do NOT run `npm install` in `frontend/`** — it would regenerate
+`package-lock.json` and pull deps without the pnpm isolation guarantees.
 
 ### Development workflow
 
@@ -581,7 +599,10 @@ sudo ubuntu-drivers autoinstall   # NVIDIA drivers
 cd backend && pip install -e .
 
 # 3. Build the frontend (Node required at install time, not at runtime)
-cd ../frontend && npm install && npm run build && cd ..
+#    pnpm via corepack — never use npm here (see §5 / decision log).
+corepack enable
+corepack prepare pnpm@latest --activate
+cd ../frontend && pnpm install && pnpm approve-builds esbuild --all && pnpm build && cd ..
 
 # 4. Install systemd services
 cp systemd/*.service ~/.config/systemd/user/
@@ -823,6 +844,31 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-05-13 — npm → pnpm (corepack)
+
+**Decision:** Frontend package manager is **pnpm**, not npm. Activated
+via `corepack` (ships with Node) so there's no extra install step
+during deployment.
+
+**Rationale:** npm has had a string of supply-chain incidents (worms
+spreading via postinstall, typosquats, maintainer compromises). pnpm's
+defaults are stricter:
+- Content-addressable global store + isolated symlinked `node_modules`
+  per project — lateral compromise across projects is much harder.
+- Postinstall scripts are *blocked by default*; each must be explicitly
+  approved via `pnpm.onlyBuiltDependencies` in package.json plus
+  `pnpm approve-builds`. Today only `esbuild` is approved.
+- Lockfile (`pnpm-lock.yaml`) is stricter and deterministic.
+
+**Cost:** Developer flow changes `npm` → `pnpm` everywhere. No runtime
+impact — production kiosk still runs only Python + Chromium against
+the static `frontend/dist/`.
+
+**Lessons:** The default package manager isn't always the right
+default. For a single-user appliance with no untrusted contributors,
+pnpm's stricter posture costs nothing and removes a real attack
+surface.
 
 ### 2026-05-13 — Vanilla JS → React + Vite + TypeScript
 
