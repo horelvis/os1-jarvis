@@ -148,8 +148,10 @@ async def _stream_tokens(
 # APP SETUP
 # ========================================================================
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-INDEX_FILE = STATIC_DIR / "index.html"
+FRONTEND_DIST = (
+    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+)
+INDEX_FILE = FRONTEND_DIST / "index.html"
 
 app = FastAPI(
     title="Samantha Backend",
@@ -158,7 +160,14 @@ app = FastAPI(
 )
 
 # Frontend served from same origin → no CORS needed.
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Vite emits to frontend/dist/assets — only mount it if the build has
+# run (test runs and pure-backend dev don't need it).
+if (FRONTEND_DIST / "assets").exists():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(FRONTEND_DIST / "assets")),
+        name="assets",
+    )
 
 
 # Placeholder transcriptions used by /transcribe and the WS `listen`
