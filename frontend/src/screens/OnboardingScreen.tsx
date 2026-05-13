@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
+import { listen } from "../net/mic";
 import { createProfile } from "../net/profile";
 import type { ProfileAnswer } from "../core/types";
+import type { WaveMode } from "../core/types";
 
 // Six onboarding prompts. Question 0 is the identity anchor (name).
 // Questions 1-5 map 1:1 to the Big Five dimensions (TIPI ordering:
@@ -35,8 +37,33 @@ export function OnboardingScreen() {
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<(string | null)[]>(Array(6).fill(""));
   const [submitting, setSubmitting] = useState(false);
+  const [listening, setListening] = useState(false);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // The wave under the question reflects what the user is doing right
+  // now: idle while reading, listening when the mic is active.
+  const waveMode: WaveMode = listening ? "listening" : "idle";
+
+  const onMicClick = async () => {
+    if (listening || submitting) return;
+    setListening(true);
+    try {
+      // Backend captures + transcribes (CLAUDE.md §2.8 — browser never
+      // touches getUserMedia). User can review/edit the result in the
+      // input before submitting; mic populates, doesn't auto-send, so
+      // an STT misfire doesn't lock you into a wrong name.
+      const transcript = await listen();
+      if (transcript && transcript.trim()) {
+        setValue(transcript.trim());
+      }
+    } catch (e) {
+      console.warn("listen failed", e);
+    } finally {
+      setListening(false);
+      inputRef.current?.focus();
+    }
+  };
 
   // Force focus on every question transition. autoFocus only fires on
   // first mount; idx changes don't remount the input. Without this,
@@ -91,7 +118,7 @@ export function OnboardingScreen() {
   return (
     <div className="screen">
       <div style={{ position: "absolute", inset: "5vh 0", height: 100 }}>
-        <Wave mode="listening" />
+        <Wave mode={waveMode} />
       </div>
 
       <div style={{
@@ -146,11 +173,11 @@ export function OnboardingScreen() {
             fontSize: "1.2rem", outline: "none", textAlign: "center",
           }}
         />
-        <div style={{ display: "flex", gap: 16 }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           {canSkip && (
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || listening}
               onClick={() => submitCurrent(true)}
               className="label"
               style={{
@@ -161,9 +188,28 @@ export function OnboardingScreen() {
               saltar
             </button>
           )}
+          {/* Mic populates the input — doesn't auto-submit. Lets the
+              user correct an STT mistake before committing the
+              pairing (especially critical for Q0, the name). */}
+          <button
+            type="button"
+            className="mic-btn"
+            aria-label="responder con la voz"
+            aria-pressed={listening}
+            disabled={submitting}
+            onClick={onMicClick}
+            style={{
+              opacity: listening ? 0.6 : 1,
+              transition: "opacity 0.2s",
+            }}
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z" />
+            </svg>
+          </button>
           <button
             type="submit"
-            disabled={submitting || !canContinue}
+            disabled={submitting || listening || !canContinue}
             className="label"
             style={{
               background: canContinue
