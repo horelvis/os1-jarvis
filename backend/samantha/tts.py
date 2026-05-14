@@ -1,33 +1,33 @@
 """TTS for Samantha — vllm-omni streaming primary, Piper local fallback.
 
-Two backends sit behind a single contract:
+Both backends emit through a single contract: 24 kHz mono int16 PCM
+chunks. Piper's native 22050 Hz output is resampled on the fly to
+keep the wire format uniform — the frontend only has to know one
+sample rate.
 
   config.tts_backend == "vllm_omni"  (default)
-      Streams 24 kHz mono int16 PCM chunks from a vllm-omni server's
-      OpenAI-compatible /v1/audio/speech endpoint. Voice cloning is
-      driven by `tts_remote_ref_audio` + `tts_remote_ref_text`
-      (Qwen3-TTS Base task_type). TTFA ~40 ms warm.
+      Streams PCM chunks from a vllm-omni server's OpenAI-compatible
+      /v1/audio/speech endpoint. Voice cloning driven by
+      `tts_remote_ref_audio` + `tts_remote_ref_text` (Qwen3-TTS Base
+      task_type). TTFA ~40 ms warm.
 
   config.tts_backend == "piper"
-      Local Piper synth. One-shot WAV, ~50-300 ms on CPU. Fallback
-      target when the remote is unreachable; can be selected
-      explicitly for offline/CPU-only environments.
+      Local Piper synth. One-shot WAV, ~50-300 ms on CPU. WAV header
+      stripped, PCM resampled 22050 → 24000 with linear interp, and
+      the whole thing yielded as a single chunk. Fallback target
+      when the remote is unreachable; can be selected explicitly for
+      offline/CPU-only environments.
 
 Public API:
 
-    stream(text)   → async generator yielding (chunk, backend_label).
-                     For vllm_omni chunks are header-less PCM. For
-                     piper the single yielded chunk is a complete WAV.
+    OUTPUT_SAMPLE_RATE: int = 24000 — the rate of every yielded chunk
+    stream(text)   → async generator yielding (pcm_chunk, backend).
+                     PCM is raw int16 little-endian at 24 kHz mono.
     synth(text)    → sync wrapper; collects the stream and returns
-                     (wav_bytes, backend_label). The WAV header is
-                     stamped with the right sample rate for the
-                     backend that served (24000 for vllm_omni,
-                     whatever Piper's voice config reports for piper).
+                     (wav_bytes, backend). WAV header stamped at
+                     24 kHz. Used by api.py /speak's fallback path.
     is_available() → True iff the configured backend has plausible
                      config to serve.
-
-The /speak handler in api.py keeps the sync `synth()` for now;
-Phase 2.2 will switch it to a StreamingResponse driven by `stream()`.
 """
 
 from __future__ import annotations
@@ -51,9 +51,9 @@ class VoiceMissingError(RuntimeError):
     """Raised when synth()/stream() can't find any usable backend."""
 
 
-# vllm-omni Qwen3-TTS native rate. Piper's rate is read from its
-# voice config (typically 22050) when wrapping its bytes back into WAV.
-VLLM_OMNI_SAMPLE_RATE = 24000
+# Uniform output rate. vllm-omni Qwen3-TTS emits 24 kHz natively;
+# Piper (22050) is resampled up to match before being yielded.
+OUTPUT_SAMPLE_RATE = 24000
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -74,14 +74,11 @@ def is_available() -> bool:
 
 
 async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
-    """Yield (chunk_bytes, backend_label) tuples.
+    """Yield (pcm_chunk, backend_label) tuples.
 
-    For backend=vllm_omni each chunk is raw 24 kHz mono int16 PCM
-    (header-less); multiple chunks arrive over the streamed response.
-
-    For backend=piper a single tuple is yielded whose `chunk_bytes`
-    is the complete Piper WAV (header included) — Piper does not
-    produce in-flight chunks.
+    Every chunk is raw 24 kHz mono int16 little-endian PCM, no header.
+    Multiple chunks for vllm_omni (real streaming); a single chunk
+    for piper (one-shot synth, resampled if needed).
 
     On vllm_omni failure the function silently falls back to Piper.
     Empty / whitespace input yields nothing.
@@ -94,6 +91,7 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
     if backend == "vllm_omni":
         try:
             async for chunk in _stream_vllm_omni(clean):
+                # vllm-omni already emits at OUTPUT_SAMPLE_RATE.
                 yield chunk, "vllm_omni"
             return
         except Exception as e:
@@ -101,10 +99,11 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
                 f"tts: vllm_omni failed ({e}); falling back to piper"
             )
 
-    # Piper path. The synth is sync; run it in a thread so we don't
-    # block the event loop.
-    wav = await asyncio.to_thread(_synth_piper, clean)
-    yield wav, "piper"
+    # Piper path. Sync — run in a thread. Returns a complete WAV
+    # which we strip + resample to match OUTPUT_SAMPLE_RATE before
+    # yielding so the frontend only sees one wire format.
+    pcm = await asyncio.to_thread(_piper_to_pcm, clean)
+    yield pcm, "piper"
 
 
 def synth(text: str) -> tuple[bytes, str]:
@@ -129,28 +128,28 @@ def synth(text: str) -> tuple[bytes, str]:
 
 
 async def _consolidate(text: str) -> tuple[bytes, str]:
-    """Collect the async stream into a single (wav_bytes, backend) tuple."""
+    """Collect the async stream into a single (wav_bytes, backend) tuple.
+
+    Both backends yield PCM at OUTPUT_SAMPLE_RATE, so wrapping is
+    uniform regardless of which served.
+    """
     chunks: list[bytes] = []
     backend: str = ""
     async for chunk, label in stream(text):
         chunks.append(chunk)
         backend = label
 
-    if backend == "piper":
-        # Piper already produced a complete WAV — pass through.
-        return (chunks[0] if chunks else b""), "piper"
+    if not backend:
+        return b"", "empty"
 
-    if backend == "vllm_omni":
-        pcm = b"".join(chunks)
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(VLLM_OMNI_SAMPLE_RATE)
-            wf.writeframes(pcm)
-        return buf.getvalue(), "vllm_omni"
-
-    return b"", "empty"
+    pcm = b"".join(chunks)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(OUTPUT_SAMPLE_RATE)
+        wf.writeframes(pcm)
+    return buf.getvalue(), backend
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -260,8 +259,9 @@ def _synth_piper(text: str) -> bytes:
     """Synthesize via local Piper. Returns a complete WAV (header included).
 
     Piper's native sample rate is whatever the voice model carries
-    (es_ES-sharvard-medium is 22050 Hz). The browser <audio> element
-    handles arbitrary rates via the WAV header so we don't resample.
+    (es_ES-sharvard-medium is 22050 Hz). _piper_to_pcm() below strips
+    the header and resamples to OUTPUT_SAMPLE_RATE so the public
+    stream() contract stays uniform.
     """
     voice = _get_piper_voice()
 
@@ -275,3 +275,34 @@ def _synth_piper(text: str) -> bytes:
     with wave.open(buf, "wb") as wf:
         voice.synthesize_wav(text, wf, syn_config=syn_config)
     return buf.getvalue()
+
+
+def _piper_to_pcm(text: str) -> bytes:
+    """Synth via Piper, strip the WAV header, and resample the PCM to
+    OUTPUT_SAMPLE_RATE.
+
+    Linear interpolation is good enough for a fallback (~50 ms of CPU
+    on a typical sentence). When/if the fallback becomes a regular
+    path, swap to scipy.signal.resample_poly for proper anti-aliasing.
+    """
+    import numpy as np
+
+    wav_bytes = _synth_piper(text)
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+        src_rate = wf.getframerate()
+        n_frames = wf.getnframes()
+        pcm = wf.readframes(n_frames)
+
+    if src_rate == OUTPUT_SAMPLE_RATE:
+        return pcm
+
+    src = np.frombuffer(pcm, dtype=np.int16)
+    ratio = OUTPUT_SAMPLE_RATE / src_rate
+    dst_len = int(len(src) * ratio)
+    # linspace endpoints over [0, len-1] keep amplitude scaling neutral.
+    dst = np.interp(
+        np.linspace(0, len(src) - 1, dst_len),
+        np.arange(len(src)),
+        src,
+    ).astype(np.int16)
+    return dst.tobytes()
