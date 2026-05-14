@@ -77,6 +77,16 @@ export function ConversationScreen() {
   useEffect(() => { activeRef.current = conversationActive; }, [conversationActive]);
   useEffect(() => { busyRef.current = busy; }, [busy]);
 
+  // Mic-feedback loop guard: react-speech-recognition keeps producing
+  // transcripts for a beat after `stopListening()` (the underlying
+  // webkitSpeechRecognition stream doesn't drop instantly). Anything
+  // captured DURING busy is Samantha's own voice echoing off the
+  // speakers. When busy flips false we wipe finalTranscript so the
+  // debounce useEffect can't fire it as a new user message.
+  useEffect(() => {
+    if (!busy) resetTranscript();
+  }, [busy, resetTranscript]);
+
   const bump = () => { lastActivityRef.current = Date.now(); };
 
   // Idle → Ambient.

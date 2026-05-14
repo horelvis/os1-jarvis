@@ -100,12 +100,21 @@ export async function speak(text: string): Promise<void> {
     lastSource = source;
   }
 
-  // Wait for the last scheduled chunk to actually finish playing so
-  // the caller's `await speak(...)` reflects real playback completion.
-  if (lastSource) {
-    await new Promise<void>((resolve) => {
-      lastSource!.addEventListener("ended", () => resolve(), { once: true });
-    });
+  // Wait for the scheduled playback to actually finish so the
+  // caller's `await speak(...)` reflects real playback completion.
+  // setTimeout against the accumulated scheduledEnd is more reliable
+  // than the "ended" event of the last source: the listener is
+  // registered after `source.start()` and can race with a very short
+  // final chunk that ends before the handler is attached.
+  const remainingS = Math.max(0, scheduledEnd - audioCtx.currentTime);
+  if (remainingS > 0) {
+    await new Promise<void>((resolve) =>
+      // Small +100 ms tail so the OS audio buffer fully drains before
+      // the caller restarts the mic (mic-feedback guard).
+      setTimeout(resolve, remainingS * 1000 + 100),
+    );
   }
+  // Keep lastSource referenced until close so it isn't GC'd mid-play.
+  void lastSource;
   await audioCtx.close();
 }
