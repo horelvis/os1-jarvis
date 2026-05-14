@@ -50,43 +50,55 @@ class Config:
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
-    # === TTS — backend-pluggable (Phase 5) ===
-    # "piper"        → local Piper (default, fast on CPU, no GPU needed).
-    # "qwen3_remote" → HTTP to a Qwen3-TTS server (typically a GPU box
-    #                  like a 4090 running tts-server/server.py).
-    # If qwen3_remote fails (network / 5xx / timeout) the request
-    # automatically falls back to Piper so the kiosk stays usable.
-    tts_backend: str = "piper"
+    # === TTS — backend-pluggable ===
+    # "vllm_omni" → HTTP to vllm-omni serving Qwen3-TTS Base with voice
+    #               cloning. Streaming PCM via OpenAI-compatible
+    #               /v1/audio/speech. Best quality, ~40 ms TTFA warm.
+    # "piper"     → local Piper synth (no GPU). Fast fallback when the
+    #               remote is unreachable. Different sample rate (22050
+    #               vs vllm-omni's 24000) but the browser <audio>
+    #               element handles either via the WAV header.
+    # On vllm_omni failure (network / 5xx / timeout) requests auto-fall
+    # back to Piper so the UI stays alive.
+    tts_backend: str = "vllm_omni"
 
-    # ── Piper config ──
+    # ── Piper config (local fallback) ──
     # Voice files live outside the repo (~70 MB each). If the model
-    # isn't on disk the backend falls back to the mock tone WAV — no
-    # hard dependency at runtime.
-    # Default: es_ES-sharvard-medium, speaker F (female). Samantha is
-    # canonically a female voice (film reference, Scarlett Johansson).
-    # The other sharvard speaker is M=0. Single-speaker voices like
+    # isn't on disk and vllm_omni is also down, /speak degrades to a
+    # tone WAV — no hard dependency at runtime.
+    # Default: es_ES-sharvard-medium, speaker F (female). The other
+    # sharvard speaker is M=0. Single-speaker voices like
     # es_ES-davefx-medium ignore tts_speaker_id (set it to None).
     tts_voices_dir: str = "~/.samantha/voices"
     tts_voice: str = "es_ES-sharvard-medium"
     tts_speaker_id: int | None = 1
 
-    # ── Qwen3-TTS remote config ──
-    # URL of the tts-server FastAPI ("/speak"). e.g. http://4090.local:9000
-    qwen3_tts_url: str = ""
-    qwen3_tts_timeout_s: float = 30.0
-    qwen3_speaker: str = "serena"          # female, warm, fits Samantha
-    # Qwen3-TTS wants the language name capitalized ("Spanish", not
-    # "spanish"). Lowercase reaches the model as an unknown token and
-    # the preset Chinese/English speakers fall back to their native
-    # phonemes — that's what causes the "metallic / foreign accent"
-    # complaint when synthesizing Spanish.
-    qwen3_language: str = "Spanish"
-    # Style prompt fed to Qwen3-TTS's controllable synthesis path.
-    # Writing it IN Spanish primes the model's phoneme distribution
-    # toward Spanish, which mitigates the residual English/Chinese
-    # accent the preset speakers bleed through when speaking Spanish.
-    # Override via SAMANTHA_QWEN3_INSTRUCT.
-    qwen3_instruct: str = (
+    # ── vllm-omni remote config ──
+    # URL of the vllm-omni HTTP server. e.g. http://192.168.100.58:8091
+    # Leave empty to disable the remote path (forces piper).
+    tts_remote_url: str = ""
+    tts_remote_timeout_s: float = 60.0  # generous: includes cold-load
+    # Model id as seen by the server. With our docker compose this is
+    # the in-container mount point of the Qwen3-TTS Base weights.
+    tts_remote_model: str = "/models/qwen3-tts-base"
+    # Voice clone reference: file URI as resolved INSIDE the vllm-omni
+    # container (the /refs mount in tts-server/docker-compose.yml maps
+    # to ~/.samantha/voices/ref on the host).
+    tts_remote_ref_audio: str = "file:///refs/samantha.wav"
+    # Transcript of the ref audio — required by Qwen3-TTS cloning for
+    # phoneme alignment. Default is the cand-01 line we picked from
+    # Common Voice ES.
+    tts_remote_ref_text: str = (
+        "viéndome ya en pie, huyó velozmente alborotando la casa "
+        "con sus trinos."
+    )
+    # Language name — Qwen3-TTS expects capitalized "Spanish", not
+    # "spanish" (the lowercase form drifts toward the preset speaker's
+    # native phonemes — see Qwen3-TTS discussion #230).
+    tts_remote_language: str = "Spanish"
+    # Style instruction. In voice_clone mode this still shapes prosody
+    # and clarity empirically — keeping it Spanish-primed.
+    tts_remote_instructions: str = (
         "Voz femenina, español nativo de España. "
         "Tono alegre y cercano."
     )
@@ -140,13 +152,23 @@ class Config:
                 if os.environ.get("SAMANTHA_TTS_SPEAKER_ID", "").strip()
                 else cls.tts_speaker_id
             ),
-            qwen3_tts_url=_get("QWEN3_TTS_URL", cls.qwen3_tts_url),
-            qwen3_tts_timeout_s=_get(
-                "QWEN3_TTS_TIMEOUT_S", cls.qwen3_tts_timeout_s
+            tts_remote_url=_get("TTS_REMOTE_URL", cls.tts_remote_url),
+            tts_remote_timeout_s=_get(
+                "TTS_REMOTE_TIMEOUT_S", cls.tts_remote_timeout_s
             ),
-            qwen3_speaker=_get("QWEN3_SPEAKER", cls.qwen3_speaker),
-            qwen3_language=_get("QWEN3_LANGUAGE", cls.qwen3_language),
-            qwen3_instruct=_get("QWEN3_INSTRUCT", cls.qwen3_instruct),
+            tts_remote_model=_get("TTS_REMOTE_MODEL", cls.tts_remote_model),
+            tts_remote_ref_audio=_get(
+                "TTS_REMOTE_REF_AUDIO", cls.tts_remote_ref_audio
+            ),
+            tts_remote_ref_text=_get(
+                "TTS_REMOTE_REF_TEXT", cls.tts_remote_ref_text
+            ),
+            tts_remote_language=_get(
+                "TTS_REMOTE_LANGUAGE", cls.tts_remote_language
+            ),
+            tts_remote_instructions=_get(
+                "TTS_REMOTE_INSTRUCTIONS", cls.tts_remote_instructions
+            ),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
 

@@ -371,7 +371,7 @@ async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
 
 
 # ========================================================================
-# /speak — TTS (mock)
+# /speak — TTS
 # ========================================================================
 
 
@@ -380,14 +380,18 @@ async def speak(req: SpeakRequest) -> Response:
     """Synthesize speech via the configured TTS backend.
 
     Backends (config.tts_backend):
-      qwen3_remote → POST to a Qwen3-TTS server (e.g. 4090 box). Best
-                     quality, sub-second on a real GPU. On failure
-                     (network / 5xx / timeout) falls back to Piper.
-      piper        → Local Piper synth, ~50-300 ms on CPU. Default.
+      vllm_omni → Stream from a vllm-omni server (typically the 4090
+                  box). Voice cloning via Qwen3-TTS Base. Best quality,
+                  ~40 ms TTFA warm. On failure falls back to Piper.
+      piper     → Local Piper synth, ~50-300 ms on CPU.
 
     On a missing model (Piper voice file absent before install) the
     request degrades to the mock tone WAV so the UI never hangs.
     The X-TTS-Mode header reports which path served.
+
+    Phase 2.1 collects the vllm-omni stream into a single WAV here so
+    the response shape stays the same. Phase 2.2 will switch this
+    handler to StreamingResponse driven by tts.stream() directly.
     """
     logger.info(
         f"speak: voice={req.voice} backend={config.tts_backend} "
