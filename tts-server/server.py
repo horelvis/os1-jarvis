@@ -15,19 +15,28 @@ Why a separate process:
 Config via environment:
   TTS_HOST          (default 0.0.0.0)
   TTS_PORT          (default 9876)
-  TTS_MODEL_PATH    (default ~/.samantha/qwen3-tts/1.7B-CustomVoice)
-  TTS_DEFAULT_SPEAKER  (default serena)
-  TTS_DEFAULT_LANGUAGE (default spanish)
-  TTS_DEFAULT_INSTRUCT (default empty — pass-through to Qwen3 style
-                       prompt; e.g. "Whispering, very soft voice.")
+  TTS_MODE          (default custom_voice; voice_clone for ref-audio cloning)
+  TTS_MODEL_PATH    (default depends on TTS_MODE — CustomVoice for
+                    custom_voice, Base for voice_clone)
+  TTS_DEFAULT_SPEAKER  (default serena; only used in custom_voice mode)
+  TTS_DEFAULT_LANGUAGE (default Spanish — capitalized; lowercase drifts
+                       toward English/Chinese phonemes on preset voices)
+  TTS_DEFAULT_INSTRUCT (default: a Spanish-priming instruction. Override
+                       for other styles, e.g. "Whispering, very soft voice.")
+  TTS_REF_AUDIO     (voice_clone only — path to the reference WAV;
+                    default ~/.samantha/voices/ref/samantha.wav)
+  TTS_REF_TEXT_FILE (voice_clone only — path to the reference transcript;
+                    default ~/.samantha/voices/ref/samantha.txt)
   TTS_DEVICE        (default cuda if torch.cuda.is_available() else cpu)
   TTS_DTYPE         (default float16 on cuda, float32 on cpu)
 
 Endpoints:
-  GET  /ping         → {status, model, speaker, languages, speakers}
+  GET  /ping         → {status, mode, model, languages, ...}
   POST /speak        → 24kHz mono 16-bit WAV.
                        Body: {"text": str, "speaker"?: str,
                               "language"?: str, "instruct"?: str}
+                       In voice_clone mode `speaker` and `instruct` are
+                       ignored (the voice is fixed by the ref audio).
 
 Run:
   python -m server
@@ -56,10 +65,41 @@ from pydantic import BaseModel, Field
 
 HOST = os.environ.get("TTS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("TTS_PORT", "9876"))
+
+# Two operating modes:
+#   custom_voice → preset speakers (serena, vivian, …). Fast to set up
+#                  but every preset is trained on Chinese/English/JP/KR
+#                  speech, so Spanish output carries a foreign accent.
+#   voice_clone  → clone the voice from a reference WAV + transcript.
+#                  Requires the Base model variant. Native Spanish is
+#                  achievable by pointing TTS_REF_AUDIO at a clean
+#                  native-speaker sample.
+TTS_MODE = os.environ.get("TTS_MODE", "custom_voice").strip().lower()
+if TTS_MODE not in ("custom_voice", "voice_clone"):
+    raise ValueError(
+        f"TTS_MODE must be 'custom_voice' or 'voice_clone', got {TTS_MODE!r}"
+    )
+
+# Default model dir flips with the mode. Voice cloning needs the Base
+# variant; the preset-speaker path needs the CustomVoice variant.
+_DEFAULT_MODEL_SUBDIR = (
+    "1.7B-Base" if TTS_MODE == "voice_clone" else "1.7B-CustomVoice"
+)
 MODEL_PATH = os.environ.get(
     "TTS_MODEL_PATH",
-    str(Path.home() / ".samantha" / "qwen3-tts" / "1.7B-CustomVoice"),
+    str(Path.home() / ".samantha" / "qwen3-tts" / _DEFAULT_MODEL_SUBDIR),
 )
+
+# Voice-cloning reference. Only meaningful when TTS_MODE=voice_clone.
+TTS_REF_AUDIO = os.environ.get(
+    "TTS_REF_AUDIO",
+    str(Path.home() / ".samantha" / "voices" / "ref" / "samantha.wav"),
+)
+TTS_REF_TEXT_FILE = os.environ.get(
+    "TTS_REF_TEXT_FILE",
+    str(Path.home() / ".samantha" / "voices" / "ref" / "samantha.txt"),
+)
+
 DEFAULT_SPEAKER = os.environ.get("TTS_DEFAULT_SPEAKER", "serena")
 # Capitalized language name — the model's tokenizer treats "Spanish"
 # and "spanish" as different tokens, and the lowercase form drifts
@@ -146,6 +186,27 @@ def get_model():
     return _model
 
 
+_ref_text: str | None = None
+
+
+def _get_ref_text() -> str:
+    """Load + cache the reference transcript (voice_clone mode only)."""
+    global _ref_text
+    if _ref_text is None:
+        path = Path(TTS_REF_TEXT_FILE)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"voice-clone ref text not found: {path}. "
+                "Set TTS_REF_TEXT_FILE or write the transcript to the "
+                "default path."
+            )
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            raise ValueError(f"voice-clone ref text at {path} is empty")
+        _ref_text = text
+    return _ref_text
+
+
 def _audio_to_wav(audio_chunks: list, sample_rate: int) -> bytes:
     """Concatenate float-32 chunks → 16-bit PCM WAV bytes."""
     wav_f32 = np.concatenate(audio_chunks).astype(np.float32)
@@ -195,35 +256,74 @@ async def ping() -> dict:
     """Health + capability probe. Loads the model on first hit so the
     first /speak isn't paying the cold-start tax."""
     model = get_model()
-    return {
+    out: dict = {
         "status": "ok",
+        "mode": TTS_MODE,
         "model": MODEL_PATH,
-        "default_speaker": DEFAULT_SPEAKER,
         "default_language": DEFAULT_LANGUAGE,
         "languages": model.get_supported_languages(),
-        "speakers": model.get_supported_speakers(),
     }
+    if TTS_MODE == "custom_voice":
+        out["default_speaker"] = DEFAULT_SPEAKER
+        try:
+            out["speakers"] = model.get_supported_speakers()
+        except Exception:  # Base model exposes no preset speakers.
+            out["speakers"] = []
+    else:
+        out["ref_audio"] = TTS_REF_AUDIO
+        out["ref_text_file"] = TTS_REF_TEXT_FILE
+        try:
+            out["ref_text_preview"] = _get_ref_text()[:120]
+        except Exception as e:
+            out["ref_text_preview"] = f"(error: {e})"
+    return out
 
 
 @app.post("/speak")
 async def speak(req: SpeakRequest) -> Response:
-    """Synthesize `text` to a 24 kHz mono WAV."""
+    """Synthesize `text` to a 24 kHz mono WAV.
+
+    In `custom_voice` mode the request's speaker/instruct steer the
+    output. In `voice_clone` mode those fields are ignored — the voice
+    is fixed by TTS_REF_AUDIO + TTS_REF_TEXT_FILE.
+    """
     model = get_model()
-    speaker = req.speaker or DEFAULT_SPEAKER
     language = req.language or DEFAULT_LANGUAGE
-    instruct = req.instruct if req.instruct is not None else DEFAULT_INSTRUCT
 
     t0 = time.perf_counter()
     try:
-        audio_chunks, sr = model.generate_custom_voice(
-            text=req.text,
-            speaker=speaker,
-            language=language,
-            instruct=instruct,
-        )
+        if TTS_MODE == "voice_clone":
+            ref_audio = Path(TTS_REF_AUDIO)
+            if not ref_audio.is_file():
+                raise FileNotFoundError(
+                    f"voice-clone ref audio not found: {ref_audio}. "
+                    "Set TTS_REF_AUDIO or put a WAV at the default path."
+                )
+            audio_chunks, sr = model.generate_voice_clone(
+                text=req.text,
+                language=language,
+                ref_audio=str(ref_audio),
+                ref_text=_get_ref_text(),
+            )
+            backend_label = "qwen3_clone"
+            speaker_label = "cloned"
+        else:
+            speaker_label = req.speaker or DEFAULT_SPEAKER
+            instruct = (
+                req.instruct if req.instruct is not None else DEFAULT_INSTRUCT
+            )
+            audio_chunks, sr = model.generate_custom_voice(
+                text=req.text,
+                speaker=speaker_label,
+                language=language,
+                instruct=instruct,
+            )
+            backend_label = "qwen3"
     except ValueError as e:
         # Speaker / language validation errors land here.
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:  # pragma: no cover — runtime safety net
         logger.exception("synth failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -234,15 +334,16 @@ async def speak(req: SpeakRequest) -> Response:
     rtf = elapsed / duration_s if duration_s > 0 else float("inf")
     logger.info(
         f"speak: {len(req.text)} chars → {duration_s:.2f}s audio "
-        f"in {elapsed * 1000:.0f}ms (RTF={rtf:.2f}) speaker={speaker}"
+        f"in {elapsed * 1000:.0f}ms (RTF={rtf:.2f}) "
+        f"mode={TTS_MODE} speaker={speaker_label}"
     )
 
     return Response(
         content=wav_bytes,
         media_type="audio/wav",
         headers={
-            "X-TTS-Backend": "qwen3",
-            "X-TTS-Speaker": speaker,
+            "X-TTS-Backend": backend_label,
+            "X-TTS-Speaker": speaker_label,
             "X-TTS-RTF": f"{rtf:.2f}",
             "X-TTS-Audio-Duration-S": f"{duration_s:.2f}",
         },
@@ -253,8 +354,13 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info(f"Samantha TTS server starting on {HOST}:{PORT}")
+    logger.info(f"Mode: {TTS_MODE}")
     logger.info(f"Model: {MODEL_PATH}")
-    logger.info(f"Default speaker: {DEFAULT_SPEAKER} ({DEFAULT_LANGUAGE})")
+    if TTS_MODE == "voice_clone":
+        logger.info(f"Ref audio: {TTS_REF_AUDIO}")
+        logger.info(f"Ref text file: {TTS_REF_TEXT_FILE}")
+    else:
+        logger.info(f"Default speaker: {DEFAULT_SPEAKER} ({DEFAULT_LANGUAGE})")
     uvicorn.run(
         "server:app",
         host=HOST,
