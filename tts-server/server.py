@@ -113,7 +113,7 @@ DEFAULT_INSTRUCT = (
     os.environ.get(
         "TTS_DEFAULT_INSTRUCT",
         "Voz femenina, español nativo de España. "
-        "Tono conversacional y cálido.",
+        "Tono alegre y cercano.",
     ).strip()
     or None
 )

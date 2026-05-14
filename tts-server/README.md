@@ -513,7 +513,7 @@ The Samantha backend on the mini-PC needs **no** change. In clone
 mode `speaker` is ignored (the voice is fixed by the reference audio)
 but `instruct` is still forwarded — and noticeably helps. With the
 default Spanish-priming instruct (`Voz femenina, español nativo de
-España. Tono conversacional y cálido.`) the cloned voice comes out
+España. Tono alegre y cercano.`) the cloned voice comes out
 clearer and more natural than without it.
 
 ### 13.5. Switching modes back

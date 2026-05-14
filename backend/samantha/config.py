@@ -88,7 +88,7 @@ class Config:
     # Override via SAMANTHA_QWEN3_INSTRUCT.
     qwen3_instruct: str = (
         "Voz femenina, español nativo de España. "
-        "Tono conversacional y cálido."
+        "Tono alegre y cercano."
     )
 
     # === Logging ===
