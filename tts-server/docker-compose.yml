@@ -43,6 +43,12 @@ services:
       - "8091"
       # Trust remote code for Qwen's custom model classes.
       - "--trust-remote-code"
+      # Whitelist the bind-mounted ref dir so voice cloning can read
+      # file:///refs/samantha.wav. Without this vLLM 400s on any
+      # local file URI ("Cannot load local files without
+      # --allowed-local-media-path").
+      - "--allowed-local-media-path"
+      - "/refs"
     ports:
       - "8091:8091"
     volumes:
