@@ -86,21 +86,26 @@ class Config:
     # to ~/.samantha/voices/ref on the host).
     tts_remote_ref_audio: str = "file:///refs/samantha.wav"
     # Transcript of the ref audio — required by Qwen3-TTS cloning for
-    # phoneme alignment. Default is the cand-01 line we picked from
-    # Common Voice ES.
+    # phoneme alignment. Must match the audio in samantha.wav verbatim.
+    # Default matches the Inés Blázquez dubbing-demo clip currently
+    # used as ref (conversational scene, not narrative).
     tts_remote_ref_text: str = (
-        "viéndome ya en pie, huyó velozmente alborotando la casa "
-        "con sus trinos."
+        "tengo que irme ya, la niñera se va a las 5:30, "
+        "he prometido a Emma que la ayudaría con su muñeco "
+        "de nieve para su proyecto de arte"
     )
     # Language name — Qwen3-TTS expects capitalized "Spanish", not
     # "spanish" (the lowercase form drifts toward the preset speaker's
     # native phonemes — see Qwen3-TTS discussion #230).
     tts_remote_language: str = "Spanish"
     # Style instruction. In voice_clone mode this still shapes prosody
-    # and clarity empirically — keeping it Spanish-primed.
+    # and clarity empirically. Adding "ritmo ágil" trims ~5-7% off
+    # generation duration without breaking the streaming endpoint
+    # (vllm-omni rejects the `speed` param when stream=true).
     tts_remote_instructions: str = (
         "Voz femenina, español nativo de España. "
-        "Tono alegre y cercano."
+        "Tono alegre y cercano. Ritmo ágil, conversacional, "
+        "sin pausas largas."
     )
 
     # === Logging ===
