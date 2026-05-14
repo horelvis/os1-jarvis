@@ -16,12 +16,6 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 // sentence into multiple finals; this debounce stitches them.
 const TRANSCRIPT_DEBOUNCE_MS = 800;
 
-// Minimum characters before a punctuation mark is allowed to flush a
-// sentence to TTS. Without this, the very first token like "Sí." or
-// "Mmm." would get its own /speak round-trip, which is wasteful and
-// chops Samantha's cadence.
-const SENTENCE_MIN_CHARS = 20;
-
 function micErrorMessage(code: string): string {
   switch (code) {
     case "not-allowed":
@@ -42,29 +36,6 @@ function micErrorMessage(code: string): string {
     default:
       return `Mic: ${code}`;
   }
-}
-
-/** Pull every completed sentence off the front of `buffer`. A sentence
- *  ends with `. ! ? \n` but only counts as complete if it has at least
- *  `SENTENCE_MIN_CHARS` characters — otherwise the LLM is too early in
- *  its reply and splitting hurts cadence.
- *
- *  Returns [ready, remainder]. */
-function flushSentences(buffer: string): [string[], string] {
-  const out: string[] = [];
-  let rest = buffer;
-  // Greedy: pull all complete sentences in one pass.
-  // Pattern: anything up to and including the next .!?\n followed by space.
-  const re = /^([\s\S]*?[.!?\n]+)\s*/;
-  while (rest.length >= SENTENCE_MIN_CHARS) {
-    const m = re.exec(rest);
-    if (!m) break;
-    const sentence = m[1].trim();
-    if (sentence.length < SENTENCE_MIN_CHARS) break;
-    out.push(sentence);
-    rest = rest.slice(m[0].length);
-  }
-  return [out, rest];
 }
 
 // Three input modes share the same surface:
@@ -159,54 +130,26 @@ export function ConversationScreen() {
     const replyId = crypto.randomUUID();
     appendMessage({ id: replyId, role: "samantha", text: "", timestamp: Date.now() });
 
-    // ── Sentence-streaming TTS ───────────────────────────────────
-    // As LLM tokens arrive we look for sentence boundaries (.!?\n)
-    // and ship each completed sentence to /speak as soon as it's
-    // ready. A worker plays one WAV at a time, so the user hears
-    // Samantha's first sentence within ~500 ms of the LLM starting
-    // instead of waiting for the whole reply.
-    let buffer = "";
-    const speakQueue: string[] = [];
-    let workerRunning = false;
-    const runWorker = async (): Promise<void> => {
-      if (workerRunning) return;
-      workerRunning = true;
-      while (speakQueue.length > 0) {
-        const sentence = speakQueue.shift()!;
-        try { await speak(sentence); } catch (e) { console.warn("speak failed", e); }
-      }
-      workerRunning = false;
-    };
-
+    // ── Full-response TTS ────────────────────────────────────────
+    // We collect the LLM tokens into a single string and only call
+    // /speak once with the complete reply. The backend streams the
+    // PCM, so the user hears Samantha's voice ~0.5 s after the call
+    // — but the model decodes the whole utterance with cross-
+    // sentence prosodic context, which is what makes the cloned
+    // voice sound conversational instead of "reading sentences".
     try {
-      let started = false;
+      let reply = "";
       const result = await getWSClient().chat(trimmed, (token) => {
-        if (!started) { started = true; setWaveMode("speaking"); }
+        reply += token;
         // Live transcript patch for the history view.
-        const current = useSamantha.getState().transcript.find((m) => m.id === replyId);
-        const next = (current?.text ?? "") + token;
-        patchMessage(replyId, next);
-
-        // Try to flush completed sentences.
-        buffer += token;
-        const [ready, rest] = flushSentences(buffer);
-        if (ready.length > 0) {
-          speakQueue.push(...ready);
-          buffer = rest;
-          void runWorker();
-        }
+        patchMessage(replyId, reply);
       });
       patchMessage(replyId, result.reply);
 
-      // Flush whatever trails the final period (or no period at all).
-      const tail = buffer.trim();
-      if (tail) {
-        speakQueue.push(tail);
-        void runWorker();
-      }
-      // Wait until everything has actually played out.
-      while (workerRunning || speakQueue.length > 0) {
-        await new Promise((r) => setTimeout(r, 50));
+      const full = result.reply.trim();
+      if (full) {
+        setWaveMode("speaking");
+        try { await speak(full); } catch (e) { console.warn("speak failed", e); }
       }
     } catch (e) {
       console.warn("chat failed", e);
@@ -217,6 +160,16 @@ export function ConversationScreen() {
     }
   };
 
+  // Surface the listening state and any interim/final transcript so
+  // we can see in the browser console whether react-speech-recognition
+  // is actually hearing anything.
+  useEffect(() => {
+    console.info("[conv] listening:", listening,
+      "interim:", JSON.stringify(interimTranscript),
+      "final:", JSON.stringify(finalTranscript),
+      "busy:", busy);
+  }, [listening, interimTranscript, finalTranscript, busy]);
+
   // Debounced commit of the recognizer's final transcript. Web Speech
   // API often emits multiple "final" chunks per utterance (one per
   // pause); waiting TRANSCRIPT_DEBOUNCE_MS after the last update keeps
@@ -226,12 +179,15 @@ export function ConversationScreen() {
     if (busy) return;
     const handle = setTimeout(() => {
       const text = finalTranscript.trim();
+      console.info("[conv] debounce fired, committing:", JSON.stringify(text));
       resetTranscript();
       if (!text) return;
       // Mute the mic during chat + TTS so Samantha's voice doesn't
       // get re-recognized as user speech (the echo-loop trap).
       SpeechRecognition.stopListening();
       void sendMessage(text).then(() => {
+        console.info("[conv] sendMessage done, conversation still active:",
+          activeRef.current);
         if (activeRef.current) {
           // Conversation still active → resume listening.
           SpeechRecognition.startListening({
@@ -239,6 +195,8 @@ export function ConversationScreen() {
             language: "es-ES",
           });
         }
+      }).catch((e) => {
+        console.error("[conv] sendMessage rejected:", e);
       });
     }, TRANSCRIPT_DEBOUNCE_MS);
     return () => clearTimeout(handle);
@@ -247,13 +205,18 @@ export function ConversationScreen() {
   const toggleConversation = () => {
     bump();
     setMicError(null);
+    console.info("[conv] toggle clicked. browserSupports:",
+      browserSupportsSpeechRecognition,
+      "active:", conversationActive);
     if (!browserSupportsSpeechRecognition) {
       setMicError(micErrorMessage("speech_recognition_unavailable"));
+      console.warn("[conv] browser does not support speech recognition");
       return;
     }
     if (conversationActive) {
       setConversationActive(false);
       SpeechRecognition.stopListening();
+      console.info("[conv] stop listening");
     } else {
       setConversationActive(true);
       try {
@@ -261,10 +224,12 @@ export function ConversationScreen() {
           continuous: true,
           language: "es-ES",
         });
+        console.info("[conv] start listening (es-ES, continuous)");
       } catch (e) {
         const code = e instanceof Error ? e.message : "unknown";
         setMicError(micErrorMessage(code));
         setConversationActive(false);
+        console.error("[conv] startListening threw:", e);
       }
     }
   };
