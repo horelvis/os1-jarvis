@@ -99,13 +99,16 @@ class Config:
     # native phonemes — see Qwen3-TTS discussion #230).
     tts_remote_language: str = "Spanish"
     # Style instruction. In voice_clone mode this still shapes prosody
-    # and clarity empirically. Adding "ritmo ágil" trims ~5-7% off
-    # generation duration without breaking the streaming endpoint
-    # (vllm-omni rejects the `speed` param when stream=true).
+    # and clarity. The previous "alegre y cercano" composed with the
+    # Inés Blázquez ref (naturally husky) and the v3 personality
+    # ("bromista, cercana") to produce a sultry vibe in conversation.
+    # Walking it back to "calmada, amistoso de día, sin pausas
+    # insinuantes" pushes the prosody toward neutral conversation
+    # without losing warmth.
     tts_remote_instructions: str = (
-        "Voz femenina, español nativo de España. "
-        "Tono alegre y cercano. Ritmo ágil, conversacional, "
-        "sin pausas largas."
+        "Voz femenina española, cálida pero calmada. "
+        "Tono amistoso de día, claridad articulada, "
+        "ritmo natural sin pausas insinuantes."
     )
 
     # === Logging ===
