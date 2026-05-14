@@ -50,11 +50,13 @@ services:
       - "--allowed-local-media-path"
       - "/refs"
       # Cap GPU memory so llama-server (Qwen3-8B Q8, ~9 GB) fits on
-      # the same 4090. Default 0.9 = 21.6 GB grabs nearly all VRAM
-      # and llama-server cudaMalloc fails / segfaults. 0.5 leaves
-      # ~12 GB for the LLM, plenty for Q8 at typical context lengths.
+      # the same 4090. The check is `free >= utilization * total`,
+      # and llama-server typically starts FIRST and grabs ~15 GB.
+      # That leaves ~9 GB free for vllm-omni — at 0.30 it requests
+      # 7 GB, which fits even after llama is up. Qwen3-TTS 1.7B
+      # weights are ~3.4 GB so 7 GB gives plenty of KV-cache headroom.
       - "--gpu-memory-utilization"
-      - "0.5"
+      - "0.30"
     ports:
       - "8091:8091"
     volumes:
