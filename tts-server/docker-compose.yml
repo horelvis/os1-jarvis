@@ -1,0 +1,72 @@
+# vLLM-Omni serving Qwen3-TTS Base for Samantha.
+#
+# Replaces the custom server.py path with the official upstream runtime
+# so we get streaming /v1/audio/speech out of the box. The host (4090
+# box) only needs Docker + nvidia-container-toolkit; everything else
+# lives inside the image.
+#
+# Pre-reqs on the host:
+#   - The Base model exists at ~/.samantha/qwen3-tts/1.7B-Base/
+#   - The voice-clone reference exists at:
+#       ~/.samantha/voices/ref/samantha.wav
+#       ~/.samantha/voices/ref/samantha.txt
+#   - nvidia-container-toolkit installed and Docker can see the GPU:
+#       docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f tts        # watch cold-load + serving
+#   docker compose down               # stop
+#
+# Voice cloning is per-request: the Samantha backend POSTs to
+# /v1/audio/speech with ref_audio: "/refs/samantha.wav" and the
+# transcript from samantha.txt. The container resolves /refs/* from
+# the bind mount below.
+
+services:
+  tts:
+    image: vllm/vllm-omni:v0.20.0
+    container_name: samantha-tts
+    # --ipc=host is required by vLLM for shared-memory tensor comms.
+    # Even with a single GPU it avoids stalls in some kernels.
+    ipc: host
+    # Pin the entrypoint explicitly: the image's default is "vllm serve
+    # --omni" but we want to be unambiguous about which binary runs.
+    entrypoint: ["vllm", "serve"]
+    command:
+      # Positional: path to the locally-mounted Base model.
+      - "/models/qwen3-tts-base"
+      - "--omni"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8091"
+      # Trust remote code for Qwen's custom model classes.
+      - "--trust-remote-code"
+    ports:
+      - "8091:8091"
+    volumes:
+      # The Base model is ~4.2 GB; mount read-only so the container
+      # can't accidentally rewrite it during cache builds.
+      - ${HOME}/.samantha/qwen3-tts/1.7B-Base:/models/qwen3-tts-base:ro
+      # Voice-clone reference (WAV + transcript). The Samantha backend
+      # POSTs ref_audio: "/refs/samantha.wav" — paths resolve here.
+      - ${HOME}/.samantha/voices/ref:/refs:ro
+      # HuggingFace cache, in case the model triggers an auxiliary
+      # download (tokenizer, vocoder) on first run. Cached to host.
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      # /ping is vllm-omni's OpenAI-compatible health endpoint.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8091/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
