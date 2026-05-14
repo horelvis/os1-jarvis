@@ -382,7 +382,155 @@ Useful for time-of-day or emotional inflection without retraining.
 
 ---
 
-## 13. Troubleshooting
+## 13. Voice cloning mode (native Spanish)
+
+The 9 preset speakers (serena, vivian, sohee, …) are all trained on
+Chinese / English / Japanese / Korean speech. When asked to speak
+Spanish they carry a heavy foreign accent regardless of `language`
+or `instruct` — confirmed by Qwen3-TTS
+[discussion #230](https://github.com/QwenLM/Qwen3-TTS/discussions/230).
+
+For native Spanish (or any language without a matching preset
+speaker), switch to **voice cloning**: the server replaces the preset
+speaker with a reference WAV of a native speaker, and inherits the
+timbre and phonetics of that reference.
+
+### 13.1. Download the Base model
+
+Cloning needs the Base variant, not CustomVoice. Both can live side
+by side — switching is just an env var.
+
+```bash
+python -c "from huggingface_hub import snapshot_download; \
+snapshot_download( \
+  'Qwen/Qwen3-TTS-12Hz-1.7B-Base', \
+  local_dir='$HOME/.samantha/qwen3-tts/1.7B-Base')"
+```
+
+~4.2 GB. Goes next to `1.7B-CustomVoice/`.
+
+### 13.2. Provide a reference WAV + transcript
+
+The reference WAV defines how Samantha will sound. Aim for:
+
+- **5–10 seconds.** Shorter loses prosody; longer wastes compute.
+- **Mono, any sample rate.** The model resamples internally.
+- **One speaker, clean audio.** No music, no overlap, no heavy noise
+  or reverb. Studio or close-mic recordings work best.
+- **Native speaker of the target language.** That's the whole point.
+
+Place the files at the canonical paths:
+
+```bash
+mkdir -p ~/.samantha/voices/ref
+cp /path/to/your-sample.wav ~/.samantha/voices/ref/samantha.wav
+echo "Transcripción exacta de lo que se dice en el WAV." \
+  > ~/.samantha/voices/ref/samantha.txt
+```
+
+The transcript MUST match the audio word-for-word, including accents
+and punctuation. The model uses it to align phonemes; punctuation
+also steers prosody.
+
+Sanity-check the WAV is well-formed:
+
+```bash
+ffprobe -hide_banner ~/.samantha/voices/ref/samantha.wav 2>&1 | head -10
+```
+
+**Where to source the WAV:**
+
+- A clean recording you have rights to use (your own voice, family,
+  voice actor friend, licensed dataset).
+- A public-domain audiobook reader (LibriVox).
+- Mozilla Common Voice — as of October 2025 distribution moved from
+  Hugging Face to the
+  [Mozilla Data Collective](https://commonvoice.mozilla.org/).
+  Community mirrors of CV17 on HF exist (e.g.
+  `fsicoli/common_voice_17_0`) but they require `trust_remote_code=True`,
+  `datasets<3.0`, and an HF token; not the simplest path.
+
+### 13.3. Enable cloning — quick test first
+
+Stop the service to free the port, run the server in the foreground
+with the new mode, and validate before persisting:
+
+```bash
+sudo systemctl stop samantha-tts.service
+cd ~/os1-samantha/tts-server
+source .venv/bin/activate
+TTS_MODE=voice_clone python server.py
+```
+
+In another terminal on the same host:
+
+```bash
+# Confirm the server picked up the new mode
+curl -s http://localhost:9876/ping | python3 -m json.tool
+# Expect:
+#   "mode": "voice_clone",
+#   "ref_audio": "/home/<user>/.samantha/voices/ref/samantha.wav",
+#   "ref_text_preview": "<first ~120 chars of your transcript>"
+
+# End-to-end synth
+curl -s -X POST http://localhost:9876/speak \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Hola, soy Samantha. Es bonito hablar contigo.","language":"Spanish"}' \
+  -D - -o /tmp/sam-clone.wav | grep -i x-tts
+# Expect: x-tts-backend: qwen3_clone
+
+aplay /tmp/sam-clone.wav
+```
+
+If it sounds right, `Ctrl+C` the foreground server.
+
+### 13.4. Persist via a systemd drop-in
+
+Don't edit the original unit file — use a drop-in so changes survive
+upgrades:
+
+```bash
+sudo systemctl edit samantha-tts.service
+```
+
+Paste:
+
+```ini
+[Service]
+Environment="TTS_MODE=voice_clone"
+```
+
+Save and:
+
+```bash
+sudo systemctl start samantha-tts.service
+sleep 5    # cold-load of the Base model
+curl -s http://localhost:9876/ping | python3 -m json.tool
+journalctl -u samantha-tts.service -n 20 --no-pager | grep -i "mode\|ref"
+```
+
+The Samantha backend on the mini-PC needs **no** change — `speaker`
+and `instruct` in its POST body are silently ignored in clone mode
+(the voice is fixed by the reference audio).
+
+### 13.5. Switching modes back
+
+Mode is decided at process start. To return to preset speakers:
+
+```bash
+sudo systemctl edit samantha-tts.service
+# Delete the Environment line, or change to:
+# Environment="TTS_MODE=custom_voice"
+sudo systemctl restart samantha-tts.service
+```
+
+`TTS_MODEL_PATH` defaults follow `TTS_MODE` (`1.7B-Base` vs
+`1.7B-CustomVoice`), so a mode change is sufficient — no extra path
+juggling.
+
+---
+
+## 14. Troubleshooting
 
 ### `RuntimeError: CUDA out of memory`
 The 1.7B at fp16 needs ~3.4 GB. If the GPU is shared:
@@ -420,7 +568,7 @@ pip install 'numpy<2'
 
 ---
 
-## 14. License notes
+## 15. License notes
 
 - Server code under MIT (this repo's license).
 - Qwen3-TTS weights under Qwen's licensing — see the model card
