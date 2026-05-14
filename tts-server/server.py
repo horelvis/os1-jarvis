@@ -61,8 +61,20 @@ MODEL_PATH = os.environ.get(
     str(Path.home() / ".samantha" / "qwen3-tts" / "1.7B-CustomVoice"),
 )
 DEFAULT_SPEAKER = os.environ.get("TTS_DEFAULT_SPEAKER", "serena")
-DEFAULT_LANGUAGE = os.environ.get("TTS_DEFAULT_LANGUAGE", "spanish")
-DEFAULT_INSTRUCT = os.environ.get("TTS_DEFAULT_INSTRUCT", "").strip() or None
+# Capitalized language name — the model's tokenizer treats "Spanish"
+# and "spanish" as different tokens, and the lowercase form drifts
+# toward English/Chinese phonemes (see Qwen3-TTS discussion #230).
+DEFAULT_LANGUAGE = os.environ.get("TTS_DEFAULT_LANGUAGE", "Spanish")
+# Style instruction primes the model toward Spanish phonemes when the
+# selected speaker (serena/vivian/etc.) isn't a native Spanish voice.
+DEFAULT_INSTRUCT = (
+    os.environ.get(
+        "TTS_DEFAULT_INSTRUCT",
+        "Voz femenina, español nativo de España. "
+        "Tono conversacional y cálido.",
+    ).strip()
+    or None
+)
 
 # Device override. If unset, picks CUDA when available, else CPU.
 DEVICE = os.environ.get("TTS_DEVICE", "").strip() or None

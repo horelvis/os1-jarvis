@@ -75,8 +75,21 @@ class Config:
     qwen3_tts_url: str = ""
     qwen3_tts_timeout_s: float = 30.0
     qwen3_speaker: str = "serena"          # female, warm, fits Samantha
-    qwen3_language: str = "spanish"        # Qwen3-TTS wants full language name
-    qwen3_instruct: str = ""               # optional style prompt ("Soft, warm voice.")
+    # Qwen3-TTS wants the language name capitalized ("Spanish", not
+    # "spanish"). Lowercase reaches the model as an unknown token and
+    # the preset Chinese/English speakers fall back to their native
+    # phonemes — that's what causes the "metallic / foreign accent"
+    # complaint when synthesizing Spanish.
+    qwen3_language: str = "Spanish"
+    # Style prompt fed to Qwen3-TTS's controllable synthesis path.
+    # Writing it IN Spanish primes the model's phoneme distribution
+    # toward Spanish, which mitigates the residual English/Chinese
+    # accent the preset speakers bleed through when speaking Spanish.
+    # Override via SAMANTHA_QWEN3_INSTRUCT.
+    qwen3_instruct: str = (
+        "Voz femenina, español nativo de España. "
+        "Tono conversacional y cálido."
+    )
 
     # === Logging ===
     log_level: str = "INFO"

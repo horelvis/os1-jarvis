@@ -217,7 +217,7 @@ Logs should show:
 ```
 INFO  Samantha TTS server starting on 0.0.0.0:9876
 INFO  Model: /home/<user>/.samantha/qwen3-tts/1.7B-CustomVoice
-INFO  Default speaker: serena (spanish)
+INFO  Default speaker: serena (Spanish)
 INFO  Uvicorn running on http://0.0.0.0:9876
 ```
 
@@ -233,7 +233,7 @@ Expected (first call cold-loads the model, ~3-10 s):
   "status": "ok",
   "model": "/home/<user>/.samantha/qwen3-tts/1.7B-CustomVoice",
   "default_speaker": "serena",
-  "default_language": "spanish",
+  "default_language": "Spanish",
   "languages": ["auto", "chinese", "english", "french", ...],
   "speakers": ["aiden", "dylan", "eric", "ono_anna", "ryan",
                "serena", "sohee", "uncle_fu", "vivian"]
