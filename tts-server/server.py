@@ -35,8 +35,10 @@ Endpoints:
   POST /speak        → 24kHz mono 16-bit WAV.
                        Body: {"text": str, "speaker"?: str,
                               "language"?: str, "instruct"?: str}
-                       In voice_clone mode `speaker` and `instruct` are
-                       ignored (the voice is fixed by the ref audio).
+                       In voice_clone mode `speaker` is ignored (the
+                       voice is fixed by the ref audio), but `instruct`
+                       still shapes prosody/clarity — empirically it
+                       makes the cloned voice noticeably cleaner.
 
 Run:
   python -m server
@@ -284,11 +286,15 @@ async def speak(req: SpeakRequest) -> Response:
     """Synthesize `text` to a 24 kHz mono WAV.
 
     In `custom_voice` mode the request's speaker/instruct steer the
-    output. In `voice_clone` mode those fields are ignored — the voice
-    is fixed by TTS_REF_AUDIO + TTS_REF_TEXT_FILE.
+    output. In `voice_clone` mode the speaker is fixed by the ref
+    audio (so request `speaker` is ignored), but `instruct` is still
+    forwarded — empirically it sharpens prosody and clarity on the
+    cloned voice even though the official docs only mention it for
+    CustomVoice/VoiceDesign.
     """
     model = get_model()
     language = req.language or DEFAULT_LANGUAGE
+    instruct = req.instruct if req.instruct is not None else DEFAULT_INSTRUCT
 
     t0 = time.perf_counter()
     try:
@@ -299,19 +305,22 @@ async def speak(req: SpeakRequest) -> Response:
                     f"voice-clone ref audio not found: {ref_audio}. "
                     "Set TTS_REF_AUDIO or put a WAV at the default path."
                 )
-            audio_chunks, sr = model.generate_voice_clone(
-                text=req.text,
-                language=language,
-                ref_audio=str(ref_audio),
-                ref_text=_get_ref_text(),
-            )
+            # Pass instruct only when non-empty: the qwen-tts cloning
+            # path accepts it as a kwarg but the official signature
+            # doesn't document it, so we stay defensive.
+            clone_kwargs: dict = {
+                "text": req.text,
+                "language": language,
+                "ref_audio": str(ref_audio),
+                "ref_text": _get_ref_text(),
+            }
+            if instruct:
+                clone_kwargs["instruct"] = instruct
+            audio_chunks, sr = model.generate_voice_clone(**clone_kwargs)
             backend_label = "qwen3_clone"
             speaker_label = "cloned"
         else:
             speaker_label = req.speaker or DEFAULT_SPEAKER
-            instruct = (
-                req.instruct if req.instruct is not None else DEFAULT_INSTRUCT
-            )
             audio_chunks, sr = model.generate_custom_voice(
                 text=req.text,
                 speaker=speaker_label,

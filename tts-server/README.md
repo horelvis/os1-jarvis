@@ -509,9 +509,12 @@ curl -s http://localhost:9876/ping | python3 -m json.tool
 journalctl -u samantha-tts.service -n 20 --no-pager | grep -i "mode\|ref"
 ```
 
-The Samantha backend on the mini-PC needs **no** change — `speaker`
-and `instruct` in its POST body are silently ignored in clone mode
-(the voice is fixed by the reference audio).
+The Samantha backend on the mini-PC needs **no** change. In clone
+mode `speaker` is ignored (the voice is fixed by the reference audio)
+but `instruct` is still forwarded — and noticeably helps. With the
+default Spanish-priming instruct (`Voz femenina, español nativo de
+España. Tono conversacional y cálido.`) the cloned voice comes out
+clearer and more natural than without it.
 
 ### 13.5. Switching modes back
 
