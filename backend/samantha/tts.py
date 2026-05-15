@@ -181,6 +181,8 @@ async def _stream_vllm_omni(text: str) -> AsyncIterator[bytes]:
     }
     if config.tts_remote_instructions:
         body["instructions"] = config.tts_remote_instructions
+    if config.tts_remote_seed:
+        body["seed"] = config.tts_remote_seed
 
     url = f"{config.tts_remote_url.rstrip('/')}/v1/audio/speech"
 

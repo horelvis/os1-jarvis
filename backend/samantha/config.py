@@ -126,6 +126,13 @@ class Config:
         "Tono amistoso de día, claridad articulada, "
         "ritmo natural sin pausas insinuantes."
     )
+    # Pin Qwen3-TTS sampling to a fixed seed so the RNG state is
+    # deterministic throughout each synthesis. Without this the model
+    # samples freely and the timbre drifts mid-utterance + varies
+    # noticeably between calls. Same input → same audio bit-for-bit
+    # (verified via byte-diff). Set to 0 / None to restore stochastic
+    # sampling.
+    tts_remote_seed: int | None = 42
 
     # === Logging ===
     log_level: str = "INFO"
@@ -190,6 +197,11 @@ class Config:
             ),
             tts_remote_language=_get(
                 "TTS_REMOTE_LANGUAGE", cls.tts_remote_language
+            ),
+            tts_remote_seed=(
+                int(os.environ["SAMANTHA_TTS_REMOTE_SEED"])
+                if os.environ.get("SAMANTHA_TTS_REMOTE_SEED", "").strip()
+                else cls.tts_remote_seed
             ),
             tts_remote_instructions=_get(
                 "TTS_REMOTE_INSTRUCTIONS", cls.tts_remote_instructions
