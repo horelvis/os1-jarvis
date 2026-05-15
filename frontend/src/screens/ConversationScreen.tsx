@@ -78,7 +78,16 @@ export function ConversationScreen() {
   // listens on its own stream and fires when real user voice appears.
   // On trigger we abort speak() and the user-message debounce picks up
   // the next finalTranscript naturally.
-  useBargeIn(isSpeaking, () => {
+  //
+  // Kill switch via localStorage so you can disable VAD without
+  // touching code while validating audio quality:
+  //   localStorage.setItem('sam.bargeIn', '0')   → off (until removed)
+  //   localStorage.removeItem('sam.bargeIn')     → back to default on
+  const bargeInEnabled =
+    typeof window === "undefined"
+      ? true
+      : localStorage.getItem("sam.bargeIn") !== "0";
+  useBargeIn(isSpeaking && bargeInEnabled, () => {
     if (speakAbortRef.current) {
       console.info("[conv] barge-in detected, aborting TTS");
       speakAbortRef.current.abort();
