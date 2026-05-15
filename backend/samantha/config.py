@@ -75,6 +75,12 @@ class Config:
     #               vllm-omni: same tone across requests (vllm-omni
     #               varied a lot), acceptable expressiveness at
     #               temperature 0.85.
+    # "cosyvoice" → CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the
+    #               4090 at port 8093. Voice cloning via
+    #               inference_zero_shot with the reference WAV +
+    #               its transcript. Only backend that honors the
+    #               personality v6 inline markers ([laughter],
+    #               <laughter>palabras</laughter>, [breath], [sigh]).
     # "vllm_omni" → vllm-omni serving Qwen3-TTS Base (port 8091).
     #               Voice cloning + streaming PCM. Kept as alt option.
     # "piper"     → local Piper synth (no GPU). Last-resort, lower
@@ -108,6 +114,20 @@ class Config:
     tts_xtts_temperature: float = 0.85
     tts_xtts_top_p: float = 0.9
     tts_xtts_repetition_penalty: float = 1.5
+
+    # ── CosyVoice 3 server config ──
+    # URL of the CosyVoice runtime FastAPI with our overlay
+    # (tts-server/cosyvoice/docker-compose.yml). The overlay injects
+    # the `<|endofprompt|>` system marker per request, so the client
+    # sends plain Spanish.
+    tts_cosyvoice_url: str = "http://192.168.100.58:8093"
+    tts_cosyvoice_timeout_s: float = 60.0
+    # Reference WAV — same Inés clip XTTS uses by default.
+    tts_cosyvoice_ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
+    # Literal transcript of the reference WAV. CosyVoice 3 zero-shot
+    # needs it to condition the LLM on prosody (cross_lingual sounds
+    # robotic because it discards prompt_text). Loaded once at startup.
+    tts_cosyvoice_ref_transcript_path: str = "~/.samantha/voices/ref/samantha.txt"
 
     # === Logging ===
     log_level: str = "INFO"
@@ -169,6 +189,17 @@ class Config:
             tts_xtts_top_p=_get("TTS_XTTS_TOP_P", cls.tts_xtts_top_p),
             tts_xtts_repetition_penalty=_get(
                 "TTS_XTTS_REPETITION_PENALTY", cls.tts_xtts_repetition_penalty
+            ),
+            tts_cosyvoice_url=_get("TTS_COSYVOICE_URL", cls.tts_cosyvoice_url),
+            tts_cosyvoice_timeout_s=_get(
+                "TTS_COSYVOICE_TIMEOUT_S", cls.tts_cosyvoice_timeout_s
+            ),
+            tts_cosyvoice_ref_wav=_get(
+                "TTS_COSYVOICE_REF_WAV", cls.tts_cosyvoice_ref_wav
+            ),
+            tts_cosyvoice_ref_transcript_path=_get(
+                "TTS_COSYVOICE_REF_TRANSCRIPT_PATH",
+                cls.tts_cosyvoice_ref_transcript_path,
             ),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )

@@ -1,6 +1,6 @@
-"""TTS for Samantha — XTTS-v2 streaming primary, Piper local fallback.
+"""TTS for Samantha — XTTS-v2 default, CosyVoice 3 for expressive, Piper local fallback.
 
-Both backends emit through a single contract: 24 kHz mono int16 PCM
+All backends emit through a single contract: 24 kHz mono int16 PCM
 chunks. Piper's native 22050 Hz output is resampled on the fly to
 keep the wire format uniform — the frontend only has to know one
 sample rate.
@@ -13,6 +13,16 @@ sample rate.
       cached). Chosen over vllm-omni + Qwen3-TTS after A/B testing
       on 2026-05-15: same tone across requests, expressive at
       temperature 0.85.
+
+  config.tts_backend == "cosyvoice"
+      CosyVoice 3 zero-shot (port 8093 on the 4090) via
+      inference_zero_shot. Sends the ref WAV + its transcript on
+      every call so the LLM gets prosodic conditioning (cross_lingual
+      strips it and sounds robotic). The ONLY backend that honors
+      Samantha's inline expression markers from personality v6
+      (`[laughter]`, `<laughter>palabras</laughter>`, `[breath]`,
+      `[sigh]`). For every other backend `_strip_tts_markers()` wipes
+      them upstream so they don't get read literally.
 
   config.tts_backend == "piper"
       Local Piper synth. One-shot WAV, ~50-300 ms on CPU. WAV header
@@ -89,6 +99,14 @@ def is_available() -> bool:
         return bool(config.tts_xtts_url) and Path(
             config.tts_xtts_ref_wav
         ).expanduser().is_file()
+    if backend == "cosyvoice":
+        return (
+            bool(config.tts_cosyvoice_url)
+            and Path(config.tts_cosyvoice_ref_wav).expanduser().is_file()
+            and Path(
+                config.tts_cosyvoice_ref_transcript_path
+            ).expanduser().is_file()
+        )
     return _piper_voice_available()
 
 
@@ -115,6 +133,10 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
         clean = _strip_tts_markers(clean).strip()
         if not clean:
             return
+    if backend == "cosyvoice":
+        async for chunk in _stream_cosyvoice(clean):
+            yield chunk, "cosyvoice"
+        return
     if backend == "xtts":
         async for chunk in _stream_xtts(clean):
             yield chunk, "xtts"
@@ -251,6 +273,111 @@ async def _stream_xtts(text: str) -> AsyncIterator[bytes]:
             async for chunk in resp.aiter_bytes(chunk_size=4096):
                 if chunk:
                     yield chunk
+
+
+# ──────────────────────────────────────────────────────────────────
+# CosyVoice 3 backend (zero-shot voice cloning + expressive markers)
+# ──────────────────────────────────────────────────────────────────
+
+
+# Cached at module scope for the process lifetime. Restart the
+# backend to pick up an edited transcript or reference WAV.
+_cosyvoice_ref_transcript: str | None = None
+_cosyvoice_ref_wav_bytes: bytes | None = None
+
+
+def _load_cosyvoice_refs() -> tuple[str, bytes, str]:
+    """Lazy-load (and cache) the CosyVoice reference transcript +
+    WAV bytes from disk. Returns (transcript, wav_bytes, wav_name).
+
+    Raises VoiceMissingError if either file is missing — the route
+    layer turns that into a fallback path, not a 500.
+    """
+    global _cosyvoice_ref_transcript, _cosyvoice_ref_wav_bytes
+
+    wav_path = Path(config.tts_cosyvoice_ref_wav).expanduser()
+    txt_path = Path(config.tts_cosyvoice_ref_transcript_path).expanduser()
+
+    if _cosyvoice_ref_transcript is None:
+        if not txt_path.is_file():
+            raise VoiceMissingError(
+                f"cosyvoice transcript not found: {txt_path}"
+            )
+        _cosyvoice_ref_transcript = txt_path.read_text(encoding="utf-8").strip()
+        logger.info(
+            f"tts: loaded cosyvoice transcript "
+            f"({len(_cosyvoice_ref_transcript)} chars) from {txt_path}"
+        )
+
+    if _cosyvoice_ref_wav_bytes is None:
+        if not wav_path.is_file():
+            raise VoiceMissingError(
+                f"cosyvoice ref wav not found: {wav_path}"
+            )
+        _cosyvoice_ref_wav_bytes = wav_path.read_bytes()
+        logger.info(
+            f"tts: cached cosyvoice ref wav "
+            f"({len(_cosyvoice_ref_wav_bytes)} bytes) from {wav_path}"
+        )
+
+    return _cosyvoice_ref_transcript, _cosyvoice_ref_wav_bytes, wav_path.name
+
+
+async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
+    """POST tts_text + cached ref transcript + ref WAV to
+    /inference_zero_shot; yield raw 24 kHz mono int16 PCM chunks.
+
+    The server overlay (tts-server/cosyvoice/server.py) prepends
+    `"You are a helpful assistant.<|endofprompt|>"` to prompt_text
+    so we send plain Spanish here.
+
+    Failure modes worth knowing:
+      - tts_text much shorter than prompt_text → hifigan crashes
+        with a kernel-size error and the server returns 200 + empty
+        body (chunked stream that never yields). We detect this and
+        raise a useful error.
+      - Marker the tokenizer can't handle → same silent failure.
+      - Stochastic timbre drift between calls (LLM sampling=25 in
+        the model). Not addressable from the client; would need a
+        seed parameter wired into the overlay.
+    """
+    transcript, wav_bytes, wav_name = _load_cosyvoice_refs()
+
+    url = f"{config.tts_cosyvoice_url.rstrip('/')}/inference_zero_shot"
+    timeout = httpx.Timeout(
+        connect=config.tts_cosyvoice_timeout_s,
+        read=None,
+        write=config.tts_cosyvoice_timeout_s,
+        pool=config.tts_cosyvoice_timeout_s,
+    )
+    # httpx multipart: (filename, content, content-type). For the
+    # plain-text fields, filename=None makes httpx emit them as
+    # regular form parts (no Content-Disposition filename).
+    files = {
+        "tts_text": (None, text),
+        "prompt_text": (None, transcript),
+        "prompt_wav": (wav_name, wav_bytes, "audio/wav"),
+    }
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", url, files=files) as resp:
+            if resp.status_code != 200:
+                err = await resp.aread()
+                raise RuntimeError(
+                    f"cosyvoice {resp.status_code}: "
+                    f"{err[:200].decode('utf-8', 'replace')}"
+                )
+            got_any = False
+            async for chunk in resp.aiter_bytes(chunk_size=4096):
+                if chunk:
+                    got_any = True
+                    yield chunk
+            if not got_any:
+                raise RuntimeError(
+                    "cosyvoice returned 200 but no audio — most likely "
+                    "tts_text shorter than prompt_text (hifigan kernel "
+                    "size 4), or an unrecognized expression marker"
+                )
 
 
 # ──────────────────────────────────────────────────────────────────
