@@ -1,404 +1,44 @@
-# Samantha TTS server — install guide
+# Samantha TTS server (vllm-omni + Qwen3-TTS)
 
-Standalone HTTP server that exposes Qwen3-TTS over a single `/speak`
-endpoint. Designed to run on a GPU host (4090, A100, etc.) while
-Samantha herself runs on a smaller box. Talks plain JSON in, WAV out.
+Docker compose deployment of [vllm-omni](https://github.com/vllm-project/vllm-omni)
+serving Qwen3-TTS-12Hz-1.7B-Base with **streaming voice cloning** for
+Samantha. The host (4090 box) only needs Docker + nvidia-container-toolkit;
+everything else lives inside the image.
 
-This guide walks the full install on a Linux host with an NVIDIA GPU.
-Tested with Ubuntu 22.04 LTS and Ubuntu Server 24.04. Steps for
-other distros are similar.
+Wire shape: OpenAI-compatible `POST /v1/audio/speech` with
+`response_format: "pcm"` + `stream: true` yields chunked 24 kHz mono int16
+PCM in real time. TTFA ~40 ms warm on a 4090. The Samantha backend
+proxies this stream through to the browser, which decodes via Web Audio
+API.
 
 ---
 
 ## 0. Prerequisites
 
-- **GPU**: NVIDIA RTX 4090 (24 GB) is the target. Anything from a
-  3060 (12 GB) up works for the 1.7B model. The 0.6B variant fits
-  in ~6 GB.
-- **OS**: Linux (kernel 5.15+). The model and server work on Windows
-  and macOS too, but the systemd unit at the end is Linux-only.
-- **Python**: 3.10 or 3.11 (3.11 recommended — torch wheel coverage is
-  best there). `qwen-tts` doesn't yet support 3.12+ at the time of
-  writing. The commands below use the generic `python3` alias; if your
-  system's `python3` is 3.12+, install 3.11 alongside and run setup.sh
-  with `PYTHON=python3.11 ./setup.sh`.
-- **Network**: the GPU host must be reachable from the mini-PC over
-  LAN. Static IP recommended.
-- **Disk**: ~5 GB for the 1.7B model, ~2 GB for the 0.6B, plus
-  ~1.5 GB of Python deps (torch + transformers).
+- **GPU**: any NVIDIA card with ≥ 8 GB VRAM (the 1.7B model needs ~3.4 GB
+  weights + KV cache; we test on an RTX 4090).
+- **OS**: Linux (we test on Ubuntu Server 24.04). Other distros work as
+  long as nvidia-container-toolkit is available.
+- **Docker** + **nvidia-container-toolkit** installed. Verify with:
+  ```bash
+  docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+  ```
+  If that fails, install the toolkit:
+  ```bash
+  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit.gpg
+  echo "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(dpkg --print-architecture) /" \
+    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  sudo apt update && sudo apt install -y nvidia-container-toolkit
+  sudo nvidia-ctk runtime configure --runtime=docker
+  sudo systemctl restart docker
+  ```
 
 ---
 
-## 1. Verify the GPU is alive
+## 1. Download the Base model
 
-```bash
-nvidia-smi
-```
-
-You should see something like:
-```
-+-----------------------------------------------------------------------+
-| NVIDIA-SMI 545.xx       Driver Version: 545.xx     CUDA Version: 12.3 |
-| GPU  Name        ...    Memory-Usage              GPU-Util            |
-|   0  NVIDIA GeForce RTX 4090   23018MiB / 24564MiB   0%               |
-+-----------------------------------------------------------------------+
-```
-
-If `nvidia-smi` isn't there or shows "ERR!", fix drivers before going
-further:
-
-```bash
-sudo ubuntu-drivers autoinstall   # Ubuntu auto-pick
-sudo reboot
-```
-
----
-
-## 2. System packages
-
-```bash
-sudo apt update
-sudo apt install -y \
-  python3 python3-venv python3-dev \
-  build-essential git curl ffmpeg sox \
-  libsndfile1
-```
-
-`ffmpeg` and `sox` are runtime deps of `librosa` (which `qwen-tts`
-pulls in). `libsndfile1` is needed for `soundfile`.
-
-If your distro's `python3` is 3.12+ (qwen-tts doesn't ship wheels for
-that yet), pin to 3.11 via deadsnakes on Ubuntu:
-
-```bash
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-dev
-# Then run setup.sh with: PYTHON=python3.11 ./setup.sh
-```
-
----
-
-## 3. Clone Samantha (just for `tts-server/`)
-
-```bash
-cd ~
-git clone https://github.com/horelvis/os1-samantha.git
-cd os1-samantha/tts-server
-```
-
-Only `tts-server/` is needed on the GPU host. The backend + frontend
-stay on the mini-PC.
-
----
-
-## 4. Create the venv
-
-### Shortcut: run `./setup.sh`
-
-For the impatient: after step 2 (system packages) and step 3 (clone),
-just run:
-
-```bash
-./setup.sh                    # 1.7B model (default)
-./setup.sh --model 0.6B       # smaller variant
-```
-
-It does steps 4–7 (venv, deps in the right order, torch CUDA check,
-model download) end-to-end. Idempotent — safe to rerun if something
-broke. Then jump to step 7 (smoke test) below.
-
-### Manual path
-
-If you'd rather do it by hand:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-```
-
----
-
-## 5. Install dependencies (order matters)
-
-### 5.1 Pre-built llvmlite + numba
-
-`qwen-tts` transitively pulls `librosa` → `numba` → `llvmlite`.
-Building `llvmlite` from source fails without the right LLVM in PATH;
-just use pre-built wheels:
-
-```bash
-pip install --only-binary=:all: llvmlite numba
-```
-
-### 5.2 Everything else
-
-```bash
-pip install -r requirements.txt
-```
-
-This installs `qwen-tts`, `torch`, `fastapi`, etc. Allow ~5 minutes
-on a fresh box (torch is ~700 MB).
-
-### 5.3 (Recommended) FlashAttention 2 for speed
-
-Big speed-up for the transformer pass. Only on Linux + Ada/Hopper:
-
-```bash
-pip install flash-attn --no-build-isolation
-```
-
-Build can take ~10 min. Worth it: ~2× faster synth.
-
-### 5.4 Sanity-check torch sees the GPU
-
-```bash
-python -c "import torch; print('cuda:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no gpu')"
-```
-
-Expected:
-```
-cuda: True
-NVIDIA GeForce RTX 4090
-```
-
-If `cuda: False`, the installed torch is the CPU build. Force the
-CUDA build:
-
-```bash
-pip uninstall -y torch torchaudio
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
-
-(Replace `cu121` with the CUDA version `nvidia-smi` reports if it's
-not 12.x.)
-
----
-
-## 6. Download the voice model
-
-The 1.7B-CustomVoice is the recommended default (better prosody,
-fits comfortably on a 4090):
-
-```bash
-mkdir -p ~/.samantha/qwen3-tts
-python -c "from huggingface_hub import snapshot_download; \
-snapshot_download( \
-  'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice', \
-  local_dir='$HOME/.samantha/qwen3-tts/1.7B-CustomVoice')"
-```
-
-~4.2 GB download. Saves to `~/.samantha/qwen3-tts/1.7B-CustomVoice/`.
-
-If you'd rather start with the 0.6B (faster cold-load, slightly
-less prosodic):
-
-```bash
-python -c "from huggingface_hub import snapshot_download; \
-snapshot_download( \
-  'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice', \
-  local_dir='$HOME/.samantha/qwen3-tts/0.6B-CustomVoice')"
-```
-
-You can keep both on disk and switch via `TTS_MODEL_PATH`.
-
----
-
-## 7. First run — foreground smoke test
-
-```bash
-cd ~/os1-samantha/tts-server
-source .venv/bin/activate
-TTS_PORT=9876 python server.py
-```
-
-Logs should show:
-```
-INFO  Samantha TTS server starting on 0.0.0.0:9876
-INFO  Model: /home/<user>/.samantha/qwen3-tts/1.7B-CustomVoice
-INFO  Default speaker: serena (Spanish)
-INFO  Uvicorn running on http://0.0.0.0:9876
-```
-
-In a second terminal:
-
-```bash
-curl http://localhost:9876/ping | python3 -m json.tool
-```
-
-Expected (first call cold-loads the model, ~3-10 s):
-```json
-{
-  "status": "ok",
-  "model": "/home/<user>/.samantha/qwen3-tts/1.7B-CustomVoice",
-  "default_speaker": "serena",
-  "default_language": "Spanish",
-  "languages": ["auto", "chinese", "english", "french", ...],
-  "speakers": ["aiden", "dylan", "eric", "ono_anna", "ryan",
-               "serena", "sohee", "uncle_fu", "vivian"]
-}
-```
-
-And a full synth:
-
-```bash
-curl -X POST http://localhost:9876/speak \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"Hola. Soy Samantha. Es bonito hablar contigo."}' \
-  -D - -o /tmp/sam.wav | grep -i x-tts
-```
-
-You should see something like:
-```
-x-tts-backend: qwen3
-x-tts-speaker: serena
-x-tts-rtf: 0.18
-x-tts-audio-duration-s: 3.84
-```
-
-`RTF < 1` = synth is faster than realtime. On a 4090 with FlashAttn
-expect `RTF ~ 0.1-0.2`.
-
-Play the WAV to verify (any local audio player). Press `Ctrl+C` in
-the server terminal to stop.
-
----
-
-## 8. Permanent install (systemd)
-
-Copy the unit file and enable it. The unit assumes the venv is at
-`tts-server/.venv` and the model lives at
-`~/.samantha/qwen3-tts/1.7B-CustomVoice`. Adjust `User=`,
-`WorkingDirectory=` and `EnvironmentFile=` to your username.
-
-```bash
-# 1. Edit samantha-tts.service in this directory if needed
-#    (mostly User= and ReadWritePaths=).
-# 2. Install it.
-sudo cp samantha-tts.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now samantha-tts.service
-```
-
-Verify:
-
-```bash
-systemctl status samantha-tts.service
-journalctl -u samantha-tts.service -f
-```
-
-On reboot the service auto-starts and listens on port 9876.
-
----
-
-## 9. Open the port (LAN only)
-
-The server listens on `0.0.0.0:9876`. Restrict it to the LAN with
-`ufw`:
-
-```bash
-# Assume your LAN is 192.168.100.0/24
-sudo ufw allow from 192.168.100.0/24 to any port 9876 proto tcp
-sudo ufw status
-```
-
-Don't expose 9876 to the internet — there's no auth.
-
----
-
-## 10. Wire Samantha to point at it
-
-On the **mini-PC** (where the Samantha backend runs):
-
-```bash
-export SAMANTHA_TTS_BACKEND=qwen3_remote
-export SAMANTHA_QWEN3_TTS_URL=http://192.168.100.58:9876
-export SAMANTHA_QWEN3_SPEAKER=serena       # or vivian / sohee / ...
-# Optional style steering:
-# export SAMANTHA_QWEN3_INSTRUCT="Soft, warm voice."
-
-python -m samantha.api
-```
-
-Samantha's own `/speak` will proxy each sentence to the 4090. On
-network failure / non-200 it falls back to local Piper so the kiosk
-stays usable if the GPU box is down.
-
-Verify end-to-end from the mini-PC:
-
-```bash
-curl -X POST http://127.0.0.1:7777/speak \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"Hola","voice":"default"}' \
-  -D - -o /tmp/end2end.wav | grep -i x-tts-mode
-# Expect: x-tts-mode: qwen3_remote
-```
-
----
-
-## 11. Choosing a voice
-
-`get_supported_speakers()` returns:
-
-```
-aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian
-```
-
-**Female-presenting in Spanish:** `serena`, `vivian`, `sohee`,
-`ono_anna`. Samantha's default is **serena** — the name fits the
-"warm but not effusive" voice described in CLAUDE.md §7.
-
-To audition them, hit `/speak` with each speaker name:
-
-```bash
-for s in serena vivian sohee ono_anna; do
-  curl -s -X POST http://localhost:9876/speak \
-    -H 'Content-Type: application/json' \
-    -d "{\"text\":\"Hola, soy Samantha.\", \"speaker\":\"$s\"}" \
-    -o /tmp/voice-$s.wav
-done
-```
-
----
-
-## 12. Style control
-
-Qwen3-TTS-CustomVoice supports natural-language style instructions
-via the `instruct` field. Examples that work well in Spanish:
-
-```json
-{ "text": "Es tarde y deberías dormir.",
-  "instruct": "Soft, slightly tired voice." }
-
-{ "text": "¡Lo conseguiste!",
-  "instruct": "Excited, warm tone." }
-
-{ "text": "Tranquila, estoy contigo.",
-  "instruct": "Whispering, very soft voice." }
-```
-
-Useful for time-of-day or emotional inflection without retraining.
-
----
-
-## 13. Voice cloning mode (native Spanish)
-
-The 9 preset speakers (serena, vivian, sohee, …) are all trained on
-Chinese / English / Japanese / Korean speech. When asked to speak
-Spanish they carry a heavy foreign accent regardless of `language`
-or `instruct` — confirmed by Qwen3-TTS
-[discussion #230](https://github.com/QwenLM/Qwen3-TTS/discussions/230).
-
-For native Spanish (or any language without a matching preset
-speaker), switch to **voice cloning**: the server replaces the preset
-speaker with a reference WAV of a native speaker, and inherits the
-timbre and phonetics of that reference.
-
-### 13.1. Download the Base model
-
-Cloning needs the Base variant, not CustomVoice. Both can live side
-by side — switching is just an env var.
+Voice cloning needs the **Base** variant (not CustomVoice / VoiceDesign):
 
 ```bash
 python -c "from huggingface_hub import snapshot_download; \
@@ -407,173 +47,205 @@ snapshot_download( \
   local_dir='$HOME/.samantha/qwen3-tts/1.7B-Base')"
 ```
 
-~4.2 GB. Goes next to `1.7B-CustomVoice/`.
+~4.2 GB download. Lives at `~/.samantha/qwen3-tts/1.7B-Base/`. The compose
+file bind-mounts this path read-only into the container.
 
-### 13.2. Provide a reference WAV + transcript
+---
 
-The reference WAV defines how Samantha will sound. Aim for:
+## 2. Voice clone reference (WAV + transcript)
 
-- **5–10 seconds.** Shorter loses prosody; longer wastes compute.
-- **Mono, any sample rate.** The model resamples internally.
-- **One speaker, clean audio.** No music, no overlap, no heavy noise
-  or reverb. Studio or close-mic recordings work best.
-- **Native speaker of the target language.** That's the whole point.
+The reference WAV defines how Samantha sounds. Aim for:
+
+- **6–10 seconds** of single-speaker speech.
+- **Mono**, any sample rate (the model resamples).
+- **Clean**: no music, no overlap, minimal noise / reverb.
+- **Acting, not narrating**: audiobook readers ("LibriVox" voices) come
+  out flat. A dubbing demo, podcast snippet, or interview clip works
+  much better.
+- **Native speaker of the target language** — the clone inherits the
+  ref's accent.
 
 Place the files at the canonical paths:
 
 ```bash
 mkdir -p ~/.samantha/voices/ref
-cp /path/to/your-sample.wav ~/.samantha/voices/ref/samantha.wav
-echo "Transcripción exacta de lo que se dice en el WAV." \
+cp /path/to/your-clip.wav ~/.samantha/voices/ref/samantha.wav
+echo "literal transcript of the wav, with accents and punctuation." \
   > ~/.samantha/voices/ref/samantha.txt
 ```
 
-The transcript MUST match the audio word-for-word, including accents
-and punctuation. The model uses it to align phonemes; punctuation
-also steers prosody.
+The transcript MUST match the audio word-for-word — Qwen3-TTS uses it
+for phoneme alignment. Skipping accents (`ayudaria` vs `ayudaría`)
+shifts stress and degrades quality.
 
-Sanity-check the WAV is well-formed:
+If you want to source from Mozilla Common Voice ES, note that Mozilla
+moved distribution off Hugging Face in October 2025 to the
+[Mozilla Data Collective](https://commonvoice.mozilla.org/). Community
+mirrors of CV17 on HF exist (`fsicoli/common_voice_17_0`) but they need
+`trust_remote_code=True` and `datasets<3.0`; not the simplest path.
+
+---
+
+## 3. Start the server
 
 ```bash
-ffprobe -hide_banner ~/.samantha/voices/ref/samantha.wav 2>&1 | head -10
+cd tts-server
+docker compose pull         # first time only — image is ~7.8 GB
+docker compose up -d
+docker compose logs -f tts  # watch the model cold-load (~30 s)
 ```
 
-**Where to source the WAV:**
+When you see `Uvicorn running on http://0.0.0.0:8091`, the server is up.
+Ctrl+C to exit `logs -f` (the container keeps running in the background).
 
-- A clean recording you have rights to use (your own voice, family,
-  voice actor friend, licensed dataset).
-- A public-domain audiobook reader (LibriVox).
-- Mozilla Common Voice — as of October 2025 distribution moved from
-  Hugging Face to the
-  [Mozilla Data Collective](https://commonvoice.mozilla.org/).
-  Community mirrors of CV17 on HF exist (e.g.
-  `fsicoli/common_voice_17_0`) but they require `trust_remote_code=True`,
-  `datasets<3.0`, and an HF token; not the simplest path.
-
-### 13.3. Enable cloning — quick test first
-
-Stop the service to free the port, run the server in the foreground
-with the new mode, and validate before persisting:
+Verify:
 
 ```bash
-sudo systemctl stop samantha-tts.service
-cd ~/os1-samantha/tts-server
-source .venv/bin/activate
-TTS_MODE=voice_clone python server.py
+docker compose ps
+curl -s http://localhost:8091/ping     # → 200 OK
 ```
 
-In another terminal on the same host:
+---
+
+## 4. Smoke test: streaming voice cloning
 
 ```bash
-# Confirm the server picked up the new mode
-curl -s http://localhost:9876/ping | python3 -m json.tool
-# Expect:
-#   "mode": "voice_clone",
-#   "ref_audio": "/home/<user>/.samantha/voices/ref/samantha.wav",
-#   "ref_text_preview": "<first ~120 chars of your transcript>"
-
-# End-to-end synth
-curl -s -X POST http://localhost:9876/speak \
+REF_TEXT=$(cat ~/.samantha/voices/ref/samantha.txt)
+curl -sN -X POST http://localhost:8091/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Hola, soy Samantha. Es bonito hablar contigo.","language":"Spanish"}' \
-  -D - -o /tmp/sam-clone.wav | grep -i x-tts
-# Expect: x-tts-backend: qwen3_clone
+  -d "{
+    \"input\": \"Hola, soy Samantha. Es bonito hablar contigo.\",
+    \"model\": \"/models/qwen3-tts-base\",
+    \"task_type\": \"Base\",
+    \"language\": \"Spanish\",
+    \"ref_audio\": \"file:///refs/samantha.wav\",
+    \"ref_text\": \"$REF_TEXT\",
+    \"stream\": true,
+    \"response_format\": \"pcm\"
+  }" --output /tmp/sam.pcm
 
-aplay /tmp/sam-clone.wav
+# /tmp/sam.pcm is raw 24 kHz mono int16. Wrap to WAV to play:
+python3 -c "
+import wave
+with open('/tmp/sam.pcm','rb') as f: pcm = f.read()
+with wave.open('/tmp/sam.wav','wb') as w:
+  w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)
+  w.writeframes(pcm)
+"
+aplay /tmp/sam.wav   # or play -t raw -r 24000 -e signed -b 16 -c 1 /tmp/sam.pcm
 ```
 
-If it sounds right, `Ctrl+C` the foreground server.
-
-### 13.4. Persist via a systemd drop-in
-
-Don't edit the original unit file — use a drop-in so changes survive
-upgrades:
-
-```bash
-sudo systemctl edit samantha-tts.service
-```
-
-Paste:
-
-```ini
-[Service]
-Environment="TTS_MODE=voice_clone"
-```
-
-Save and:
-
-```bash
-sudo systemctl start samantha-tts.service
-sleep 5    # cold-load of the Base model
-curl -s http://localhost:9876/ping | python3 -m json.tool
-journalctl -u samantha-tts.service -n 20 --no-pager | grep -i "mode\|ref"
-```
-
-The Samantha backend on the mini-PC needs **no** change. In clone
-mode `speaker` is ignored (the voice is fixed by the reference audio)
-but `instruct` is still forwarded — and noticeably helps. With the
-default Spanish-priming instruct (`Voz femenina, español nativo de
-España. Tono alegre y cercano.`) the cloned voice comes out
-clearer and more natural than without it.
-
-### 13.5. Switching modes back
-
-Mode is decided at process start. To return to preset speakers:
-
-```bash
-sudo systemctl edit samantha-tts.service
-# Delete the Environment line, or change to:
-# Environment="TTS_MODE=custom_voice"
-sudo systemctl restart samantha-tts.service
-```
-
-`TTS_MODEL_PATH` defaults follow `TTS_MODE` (`1.7B-Base` vs
-`1.7B-CustomVoice`), so a mode change is sufficient — no extra path
-juggling.
+Expected: cloned voice speaking the input phrase. Time-to-first-byte
+should be 40–200 ms warm, 1–3 s cold (first request after start).
 
 ---
 
-## 14. Troubleshooting
+## 5. Wire the Samantha backend
 
-### `RuntimeError: CUDA out of memory`
-The 1.7B at fp16 needs ~3.4 GB. If the GPU is shared:
-- Check `nvidia-smi` for hogs; kill the right one.
-- Or switch to the 0.6B model: re-download to
-  `~/.samantha/qwen3-tts/0.6B-CustomVoice` and set
-  `TTS_MODEL_PATH=$HOME/.samantha/qwen3-tts/0.6B-CustomVoice`.
+On the mini-PC where `samantha.api` runs:
 
-### `ModuleNotFoundError: llvmlite`
-You skipped step 5.1. Run:
 ```bash
-pip install --only-binary=:all: llvmlite numba
-pip install -r requirements.txt --force-reinstall
+export SAMANTHA_TTS_BACKEND=vllm_omni
+export SAMANTHA_TTS_REMOTE_URL=http://<this-host-ip>:8091
+# Optional overrides (defaults live in backend/samantha/config.py):
+# export SAMANTHA_TTS_REMOTE_MODEL=/models/qwen3-tts-base
+# export SAMANTHA_TTS_REMOTE_REF_AUDIO=file:///refs/samantha.wav
+# export SAMANTHA_TTS_REMOTE_REF_TEXT="..."
+# export SAMANTHA_TTS_REMOTE_LANGUAGE=Spanish
+# export SAMANTHA_TTS_REMOTE_INSTRUCTIONS="Voz femenina española, cálida pero calmada..."
 ```
 
-### `flash-attn` install fails
-Optional. Skip it — server still works without, just ~2× slower.
+End-to-end from the backend:
 
-### First /speak takes 10+ seconds
-That's the cold load. The model loads on the first request and
-stays resident. Hit `/ping` after starting the service to warm up.
-
-### `numpy.dtype size changed, may indicate binary incompatibility`
-torch 2.2.x is built against numpy <2. The `requirements.txt`
-already pins `numpy<2`, but if you've upgraded numpy by hand:
 ```bash
-pip install 'numpy<2'
+curl -sN -X POST http://127.0.0.1:7777/speak \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Hola","voice":"default"}' \
+  -D - --output /tmp/end2end.pcm | grep -i x-tts
+# Expect: x-tts-mode: vllm_omni
+#         x-tts-sample-rate: 24000
+#         content-type: audio/pcm
+#         transfer-encoding: chunked
 ```
-
-### Synth is slow on the 4090 (RTF > 1)
-- Verify `torch.cuda.is_available()` returns True (step 5.4).
-- Install `flash-attn` (step 5.3) — biggest single speed-up.
-- Check `nvidia-smi` during synth — GPU utilization should jump.
-  If it stays at 0%, torch is on CPU.
 
 ---
 
-## 15. License notes
+## 6. GPU memory tuning
 
-- Server code under MIT (this repo's license).
-- Qwen3-TTS weights under Qwen's licensing — see the model card
-  on Hugging Face. Apache 2.0 for the surrounding code; check
-  the weights' specific terms before commercial use.
+`docker-compose.yml` pins `--gpu-memory-utilization 0.30` so vllm-omni
+plays nice with other GPU consumers on the same host (e.g.
+`llama-server` running Qwen3-8B Q8 alongside). Adjust if your host has
+only this workload:
+
+| Workload on host | Recommended `--gpu-memory-utilization` |
+|---|---|
+| vllm-omni alone | 0.5–0.7 |
+| vllm-omni + llama-server (Q8, ctx 8k) | 0.30 (current default) |
+| vllm-omni + larger LLM | 0.15–0.20 |
+
+Note: vllm-omni runs **two stages** as separate processes (AR generation
++ Code2Wav decoder). The flag is applied PER stage, so actual VRAM
+usage is ~2× the requested fraction. With 0.30 on a 24 GB card that's
+~12 GB for vllm-omni.
+
+---
+
+## 7. Operations
+
+```bash
+# Stop
+docker compose down
+
+# Restart (e.g. after replacing samantha.wav — the speaker embedding
+# is cached at startup and needs a fresh load to pick up new refs).
+docker compose restart tts
+
+# Update image
+docker compose pull
+docker compose up -d
+```
+
+---
+
+## 8. Troubleshooting
+
+### `ValueError: Free memory on device cuda:0 is less than desired GPU memory utilization`
+Another process is hogging VRAM. Either lower
+`--gpu-memory-utilization` in the compose, or free the offending
+process. `nvidia-smi --query-compute-apps=pid,process_name,used_memory
+--format=csv` shows who's holding what.
+
+### `Cannot load local files without --allowed-local-media-path`
+The compose already passes `--allowed-local-media-path /refs`. If you
+mount your refs at a different path, update the flag accordingly.
+
+### `Code2Wav input_ids length 1 not divisible by num_quantizers 16; skipping malformed request`
+Benign — a 1-token (or empty) request hit the server. Other requests
+still serve normally.
+
+### First /speak takes 30+ seconds
+That's the model cold-load. Hit `/ping` once after the container
+starts to warm up before the first real request.
+
+### Voice sounds flat / "reading"
+The reference WAV is doing too much narration. Pick a clip where the
+speaker is actually acting (dubbing demo, conversation, performance)
+rather than reading. The `instructions` parameter can nudge but won't
+override the ref's natural style.
+
+### Voice sounds off (sultry, robotic, wrong accent)
+Either the reference (timbre / register) or the `instructions` (style
+hint) is off. Iterate: try a different segment of the same actress,
+or rewrite `instructions` to push toward a different mood. The model
+obeys instructs about pace and register; accent / phonetic identity
+comes from the ref.
+
+---
+
+## 9. License notes
+
+- `docker-compose.yml` and this README under the project's MIT license.
+- Qwen3-TTS weights under Qwen's licensing — see the model card on
+  Hugging Face. Apache 2.0 for the surrounding code; verify the
+  weights' specific terms before commercial use.
+- vllm-omni under Apache 2.0.
