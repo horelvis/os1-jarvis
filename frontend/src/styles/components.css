@@ -11,8 +11,7 @@
   font-family: var(--sans);
   font-size: var(--text-brand);
   font-weight: 400;
-  letter-spacing: 0.42em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--ink-label);
 }
 

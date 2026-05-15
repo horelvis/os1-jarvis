@@ -1,26 +1,36 @@
-import { useEffect, useState } from "react";
-import { OS1Loader } from "../components/OS1Loader";
+import { useEffect, useRef, useState } from "react";
+import { OS1Loader, type OS1LoaderHandle } from "../components/OS1Loader";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
 import { fetchProfile } from "../net/profile";
 
-// Boot orchestrates two parallel waits: a minimum 1.5s so the brand
-// has time to breathe, and a /profile probe. fetchProfile() returns
-// null on 404 (no profile yet → onboarding) and throws on any other
-// error. We treat a throw as "backend unreachable" and show a retry
-// alert — NOT as "user has no profile" — so a transient backend
-// outage can't accidentally overwrite an existing profile by
-// re-running onboarding on top of it.
+// Boot orchestrates two parallel waits: a minimum 2.8s so the OS1
+// ribbon has time to morph into its closing ring (~2.2 s for the
+// transform at fast speed + a brief breath), and a /profile probe.
+// fetchProfile() returns null on 404 (no profile yet → onboarding)
+// and throws on any other error. We treat a throw as "backend
+// unreachable" and show a retry alert — NOT as "user has no
+// profile" — so a transient backend outage can't accidentally
+// overwrite an existing profile by re-running onboarding on top of
+// it.
 export function BootScreen() {
   const route = useRoute();
   const setName = useSamantha((s) => s.setName);
+  const loaderRef = useRef<OS1LoaderHandle>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    const minDelay = new Promise<void>((r) => setTimeout(r, 1500));
+    // Give the ribbon a beat to register, then morph into the OS1 ring.
+    // The transform animates over ~2.2 s; minDelay below makes sure
+    // we don't navigate away before it lands.
+    const morphTimer = setTimeout(
+      () => loaderRef.current?.transform(true),
+      300,
+    );
+    const minDelay = new Promise<void>((r) => setTimeout(r, 2800));
     const load = async () => {
       try {
         const profile = await fetchProfile();
@@ -39,13 +49,16 @@ export function BootScreen() {
       }
     };
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(morphTimer);
+    };
   }, [route, setName, attempt]);
 
   if (error) {
     return (
       <div className="screen" style={{ gap: 24 }}>
-        <div className="brand">samantha</div>
+        <div className="brand">Samantha</div>
         <div
           style={{
             opacity: 0.7,
@@ -77,8 +90,8 @@ export function BootScreen() {
 
   return (
     <div className="screen" style={{ gap: 32 }}>
-      <OS1Loader size="small" />
-      <div className="brand">samantha</div>
+      <OS1Loader ref={loaderRef} size="large" />
+      <div className="brand">Samantha</div>
     </div>
   );
 }

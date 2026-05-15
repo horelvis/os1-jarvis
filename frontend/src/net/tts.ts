@@ -6,15 +6,24 @@
 // back-to-back so audio starts ~0.5 s after the POST and continues
 // seamlessly while the backend keeps streaming from vllm-omni.
 //
+// We insert an AnalyserNode between the source nodes and the
+// destination, then publish it via setActiveAnalyser() so the Wave
+// visualizer can sample real audio amplitude instead of a canned
+// pattern. The analyser is cleared on abort / completion.
+//
 // The fallback path is a complete WAV (audio/wav) returned by the
 // tone synthesizer when no real TTS backend is reachable. We play it
 // via HTMLAudioElement so the UI never hangs on a degraded backend.
+// The analyser is not wired into that path — fallback is rare and
+// the deterministic Wave fallback is fine for it.
 //
 // Pass an AbortSignal to cancel mid-playback (used by barge-in):
 //   const ac = new AbortController();
 //   speak(text, ac.signal);
 //   // …user starts talking…
 //   ac.abort();   // closes AudioContext + cancels the fetch reader
+
+import { setActiveAnalyser } from "./audio-analyser";
 
 export async function speak(text: string, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return;
@@ -60,9 +69,21 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
   // from a button/keypress handler so resume should always succeed.
   if (audioCtx.state === "suspended") await audioCtx.resume();
 
+  // Source nodes feed into this analyser, which then routes to the
+  // speakers AND to the Wave visualizer via the singleton bridge.
+  // fftSize=256 → 128 frequency bins, which we'll bucket into 40
+  // bars in Wave.tsx. smoothingTimeConstant=0.6 keeps the bars from
+  // looking jittery without smearing them through silence.
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.6;
+  analyser.connect(audioCtx.destination);
+  setActiveAnalyser(analyser);
+
   let aborted = false;
   const onAbort = () => {
     aborted = true;
+    setActiveAnalyser(null);
     // Closing the context cancels every AudioBufferSourceNode scheduled
     // through it — audio silences instantly.
     audioCtx.close().catch(() => {});
@@ -126,7 +147,7 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
       buffer.copyToChannel(float32, 0);
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(audioCtx.destination);
+      source.connect(analyser);
       const startAt = Math.max(audioCtx.currentTime, scheduledEnd);
       source.start(startAt);
       scheduledEnd = startAt + buffer.duration;
@@ -155,6 +176,7 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
     void lastSource;
   } finally {
     signal?.removeEventListener("abort", onAbort);
+    setActiveAnalyser(null);
     if (!aborted && audioCtx.state !== "closed") {
       await audioCtx.close().catch(() => {});
     }

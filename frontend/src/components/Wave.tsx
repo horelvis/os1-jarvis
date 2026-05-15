@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { WaveMode } from "../core/types";
+import { sampleFrequencyData } from "../net/audio-analyser";
 
 // Voice bars visualizer. 40 vertical capsules arranged along a single
 // horizontal centerline. Each bar's height = base envelope (gaussian
@@ -15,10 +16,12 @@ import type { WaveMode } from "../core/types";
 //   envSigma     bell-curve width (smaller = sharper center peak)
 //   baseHeight   minimum height fraction so bars never disappear
 //
-// Voice playback can later drive the bars via Web Audio AnalyserNode —
-// the same `mode` prop will keep working, but `speaking` will get
-// replaced with a real-amplitude path. For now the deterministic
-// patterns read clearly as "thinking" / "speaking" without that wiring.
+// When the TTS player is publishing an AnalyserNode (mode === "speaking"
+// during real playback), the bars are driven by frequency-bin energy
+// from the live audio instead of the deterministic oscillation — so
+// the wave actually follows Samantha's voice. The deterministic path
+// stays the fallback for idle/listening/thinking and for the WAV
+// fallback playback path that doesn't go through Web Audio.
 
 interface ModeParams {
   amp: number;
@@ -106,25 +109,47 @@ export function Wave({ mode, className }: WaveProps) {
       ctx.lineWidth = barWidth;
       ctx.lineCap = "round";
 
+      // If the TTS player is currently producing audio AND we're in
+      // "speaking" mode, drive the bars from the live FFT. Otherwise
+      // fall back to the deterministic per-mode pattern.
+      const freq =
+        modeRef.current === "speaking" ? sampleFrequencyData() : null;
+
       for (let i = 0; i < N_BARS; i++) {
         const env = envelope(i, params.envSigma);
-        const phase = PHASES[i];
+        let norm: number;
 
-        // Slow primary oscillation (0..1 via |sin|).
-        const wave = Math.abs(
-          Math.sin(t * params.speed * Math.PI + phase),
-        );
-        // Fast jitter — secondary sine at a different freq + phase
-        // so bars don't sync into a single peak.
-        const jit =
-          params.jitter *
-          (0.5 + 0.5 * Math.sin(t * (params.speed * 3.7) + phase * 1.9));
-
-        // Combine: envelope-weighted amp + a non-zero baseline so the
-        // bar never collapses to a point (looks alive even at idle).
-        const norm =
-          params.baseHeight +
-          env * params.amp * (0.4 * wave + 0.6 * jit);
+        if (freq && freq.length > 0) {
+          // Map this bar to a frequency-bin slice. We bias the mapping
+          // toward the lower half of the spectrum (where speech energy
+          // lives) by squaring the position — bar 0 → DC, bar N-1 →
+          // ~half of Nyquist. The bell envelope still applies on top
+          // so the visual centre stays the prominent one.
+          const pos = i / (N_BARS - 1);
+          const skewed = pos * pos;
+          const idx = Math.min(
+            freq.length - 1,
+            Math.floor(skewed * (freq.length - 1)),
+          );
+          const amp = freq[idx] / 255;
+          norm = params.baseHeight + env * params.amp * amp;
+        } else {
+          const phase = PHASES[i];
+          // Slow primary oscillation (0..1 via |sin|).
+          const wave = Math.abs(
+            Math.sin(t * params.speed * Math.PI + phase),
+          );
+          // Fast jitter — secondary sine at a different freq + phase
+          // so bars don't sync into a single peak.
+          const jit =
+            params.jitter *
+            (0.5 + 0.5 * Math.sin(t * (params.speed * 3.7) + phase * 1.9));
+          // Combine: envelope-weighted amp + a non-zero baseline so the
+          // bar never collapses to a point (looks alive even at idle).
+          norm =
+            params.baseHeight +
+            env * params.amp * (0.4 * wave + 0.6 * jit);
+        }
 
         const barHeight = Math.min(1, norm) * maxAmpPx * 2;
         // Account for round caps adding lineWidth/2 at each end.

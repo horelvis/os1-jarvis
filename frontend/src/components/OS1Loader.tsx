@@ -6,9 +6,9 @@ import * as THREE from "three";
 // The imperative API (transform/untransform/setActive/reset) lets
 // outside screens drive cinematic transitions.
 const SIZES = {
-  small:  200,
-  medium: 280,
-  large:  480,
+  small:  280,
+  medium: 420,
+  large:  720,
 } as const;
 
 export interface OS1LoaderHandle {
