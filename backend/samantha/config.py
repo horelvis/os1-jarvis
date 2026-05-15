@@ -67,16 +67,19 @@ class Config:
     )
 
     # === TTS — backend-pluggable ===
-    # "vllm_omni" → HTTP to vllm-omni serving Qwen3-TTS Base with voice
-    #               cloning. Streaming PCM via OpenAI-compatible
-    #               /v1/audio/speech. Best quality, ~40 ms TTFA warm.
-    # "piper"     → local Piper synth (no GPU). Fast fallback when the
-    #               remote is unreachable. Different sample rate (22050
-    #               vs vllm-omni's 24000) but the browser <audio>
-    #               element handles either via the WAV header.
-    # On vllm_omni failure (network / 5xx / timeout) requests auto-fall
-    # back to Piper so the UI stays alive.
-    tts_backend: str = "vllm_omni"
+    # "xtts"      → Coqui XTTS-v2 streaming server (4090, port 8092)
+    #               with our overlay exposing temperature / top_p /
+    #               repetition_penalty / speed. Voice cloning from a
+    #               ~8 s reference WAV uploaded once at startup.
+    #               Picked as default 2026-05-15 after A/B against
+    #               vllm-omni: same tone across requests (vllm-omni
+    #               varied a lot), acceptable expressiveness at
+    #               temperature 0.85.
+    # "vllm_omni" → vllm-omni serving Qwen3-TTS Base (port 8091).
+    #               Voice cloning + streaming PCM. Kept as alt option.
+    # "piper"     → local Piper synth (no GPU). Last-resort, lower
+    #               quality, no cloning (single fixed voice).
+    tts_backend: str = "xtts"
 
     # ── Piper config (local fallback) ──
     # Voice files live outside the repo (~70 MB each). If the model
@@ -133,6 +136,23 @@ class Config:
     # (verified via byte-diff). Set to 0 / None to restore stochastic
     # sampling.
     tts_remote_seed: int | None = 42
+
+    # ── XTTS-v2 server config ──
+    # URL of the Coqui xtts-streaming-server with our overlay
+    # (tts-server/xtts/docker-compose.yml).
+    tts_xtts_url: str = "http://192.168.100.58:8092"
+    tts_xtts_timeout_s: float = 60.0
+    # Reference WAV for voice cloning. Uploaded once at first synth
+    # call; embeddings cached in memory for the process lifetime.
+    # If you change the WAV, restart the backend to pick it up.
+    tts_xtts_ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
+    tts_xtts_language: str = "es"
+    # Sampling knobs (exposed by our overlay /tts_stream — upstream
+    # Coqui hardcodes these). Picked after audition; the user can
+    # tune via SAMANTHA_TTS_XTTS_TEMPERATURE etc. at runtime.
+    tts_xtts_temperature: float = 0.85
+    tts_xtts_top_p: float = 0.9
+    tts_xtts_repetition_penalty: float = 1.5
 
     # === Logging ===
     log_level: str = "INFO"
@@ -202,6 +222,17 @@ class Config:
                 int(os.environ["SAMANTHA_TTS_REMOTE_SEED"])
                 if os.environ.get("SAMANTHA_TTS_REMOTE_SEED", "").strip()
                 else cls.tts_remote_seed
+            ),
+            tts_xtts_url=_get("TTS_XTTS_URL", cls.tts_xtts_url),
+            tts_xtts_timeout_s=_get("TTS_XTTS_TIMEOUT_S", cls.tts_xtts_timeout_s),
+            tts_xtts_ref_wav=_get("TTS_XTTS_REF_WAV", cls.tts_xtts_ref_wav),
+            tts_xtts_language=_get("TTS_XTTS_LANGUAGE", cls.tts_xtts_language),
+            tts_xtts_temperature=_get(
+                "TTS_XTTS_TEMPERATURE", cls.tts_xtts_temperature
+            ),
+            tts_xtts_top_p=_get("TTS_XTTS_TOP_P", cls.tts_xtts_top_p),
+            tts_xtts_repetition_penalty=_get(
+                "TTS_XTTS_REPETITION_PENALTY", cls.tts_xtts_repetition_penalty
             ),
             tts_remote_instructions=_get(
                 "TTS_REMOTE_INSTRUCTIONS", cls.tts_remote_instructions

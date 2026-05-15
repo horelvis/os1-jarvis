@@ -68,6 +68,10 @@ def is_available() -> bool:
     fall-through inside stream()/synth() to handle real failures.
     """
     backend = (config.tts_backend or "piper").lower()
+    if backend == "xtts":
+        return bool(config.tts_xtts_url) and Path(
+            config.tts_xtts_ref_wav
+        ).expanduser().is_file()
     if backend == "vllm_omni":
         return bool(config.tts_remote_url)
     return _piper_voice_available()
@@ -89,7 +93,11 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
         return
     clean = text.strip()
 
-    backend = (config.tts_backend or "vllm_omni").lower()
+    backend = (config.tts_backend or "xtts").lower()
+    if backend == "xtts":
+        async for chunk in _stream_xtts(clean):
+            yield chunk, "xtts"
+        return
     if backend == "vllm_omni":
         async for chunk in _stream_vllm_omni(clean):
             yield chunk, "vllm_omni"
@@ -148,6 +156,84 @@ async def _consolidate(text: str) -> tuple[bytes, str]:
         wf.setframerate(OUTPUT_SAMPLE_RATE)
         wf.writeframes(pcm)
     return buf.getvalue(), backend
+
+
+# ──────────────────────────────────────────────────────────────────
+# XTTS-v2 backend (Coqui xtts-streaming-server + our overlay)
+# ──────────────────────────────────────────────────────────────────
+
+
+_xtts_embeddings: dict | None = None
+
+
+async def _xtts_clone_speaker() -> dict:
+    """One-time upload of the reference WAV. Returns the speaker
+    embedding + GPT conditioning latent that /tts_stream needs.
+
+    Cached at module scope for the process lifetime. Restart the
+    backend to pick up a changed ref WAV.
+    """
+    wav_path = Path(config.tts_xtts_ref_wav).expanduser()
+    if not wav_path.is_file():
+        raise VoiceMissingError(f"xtts ref wav not found: {wav_path}")
+
+    url = f"{config.tts_xtts_url.rstrip('/')}/clone_speaker"
+    logger.info(f"tts: cloning xtts speaker from {wav_path}")
+
+    async with httpx.AsyncClient(timeout=config.tts_xtts_timeout_s) as client:
+        with open(wav_path, "rb") as f:
+            files = {"wav_file": (wav_path.name, f.read(), "audio/wav")}
+        resp = await client.post(url, files=files)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"xtts /clone_speaker {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+        return resp.json()
+
+
+async def _stream_xtts(text: str) -> AsyncIterator[bytes]:
+    """POST text + cached embeddings to /tts_stream; yield raw PCM
+    chunks (24 kHz mono int16, header-less).
+
+    add_wav_header=False is critical — when true the server emits a
+    WAV header with a placeholder data-length of 0 and most decoders
+    refuse to play (the "silent file" bug we hit during the A/B
+    smoke test).
+    """
+    global _xtts_embeddings
+    if _xtts_embeddings is None:
+        _xtts_embeddings = await _xtts_clone_speaker()
+
+    body = {
+        **_xtts_embeddings,
+        "text": text,
+        "language": config.tts_xtts_language,
+        "add_wav_header": False,
+        "stream_chunk_size": "20",
+        "temperature": config.tts_xtts_temperature,
+        "top_p": config.tts_xtts_top_p,
+        "repetition_penalty": config.tts_xtts_repetition_penalty,
+    }
+    url = f"{config.tts_xtts_url.rstrip('/')}/tts_stream"
+    timeout = httpx.Timeout(
+        connect=config.tts_xtts_timeout_s,
+        read=None,
+        write=config.tts_xtts_timeout_s,
+        pool=config.tts_xtts_timeout_s,
+    )
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", url, json=body) as resp:
+            if resp.status_code != 200:
+                err = await resp.aread()
+                raise RuntimeError(
+                    f"xtts {resp.status_code}: "
+                    f"{err[:200].decode('utf-8', 'replace')}"
+                )
+            async for chunk in resp.aiter_bytes(chunk_size=4096):
+                if chunk:
+                    yield chunk
 
 
 # ──────────────────────────────────────────────────────────────────
