@@ -3,6 +3,7 @@ import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognitio
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
+import { stripEmoji } from "../core/sanitize";
 import { useBargeIn } from "../core/useBargeIn";
 import { useKeys } from "../core/useKeys";
 import { speak } from "../net/tts";
@@ -176,12 +177,15 @@ export function ConversationScreen() {
       let reply = "";
       const result = await getWSClient().chat(trimmed, (token) => {
         reply += token;
-        // Live transcript patch for the history view.
-        patchMessage(replyId, reply);
+        // Live transcript patch for the history view. Strip emojis so
+        // the displayed text matches what Samantha will actually say
+        // (the TTS path strips them too — see the speak() call below).
+        patchMessage(replyId, stripEmoji(reply));
       });
-      patchMessage(replyId, result.reply);
+      const cleanReply = stripEmoji(result.reply);
+      patchMessage(replyId, cleanReply);
 
-      const full = result.reply.trim();
+      const full = cleanReply.trim();
       if (full) {
         setWaveMode("speaking");
         const ac = new AbortController();

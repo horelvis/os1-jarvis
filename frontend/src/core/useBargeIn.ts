@@ -37,6 +37,14 @@ export function useBargeIn(
     let cancelled = false;
     (async () => {
       const vad = await MicVAD.new({
+        // vad-web 0.0.30 changed defaults to expect assets locally
+        // (`./silero_vad_legacy.onnx`), which 404s on our Vite dev
+        // server. Point both asset paths at jsDelivr until we vendor
+        // them under /public/ for the kiosk build.
+        baseAssetPath:
+          "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/",
+        onnxWASMBasePath:
+          "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/",
         onSpeechStart: () => {
           cbRef.current();
         },
