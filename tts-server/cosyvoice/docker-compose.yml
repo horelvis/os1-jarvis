@@ -44,6 +44,10 @@ services:
       # but it lets us curl-test the server without trips to the
       # Mac for the WAV file.
       - ${HOME}/.samantha/voices/ref:/refs:ro
+      # Patched server.py — upstream pre-loads prompt_wav to a tensor
+      # and CosyVoice 3's frontend then double-loads + crashes. Our
+      # overlay saves to a tempfile and passes the path instead.
+      - ./server.py:/opt/CosyVoice/runtime/python/fastapi/server.py:ro
     deploy:
       resources:
         reservations:
