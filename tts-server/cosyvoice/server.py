@@ -54,10 +54,36 @@ def generate_data(model_output):
 
 
 async def _save_upload(upload: UploadFile) -> str:
-    """Persist multipart upload to a tempfile and return the path."""
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp.write(await upload.read())
-        return tmp.name
+    """Persist multipart upload to a tempfile and return the path.
+
+    Force flush + fsync so the bytes are durable on disk before any
+    worker thread tries to open the file via libsndfile (which has
+    been failing with `System error` opening tempfiles that pass the
+    NamedTemporaryFile context exit but apparently aren't yet
+    reachable for the inference thread).
+    """
+    data = await upload.read()
+    fd, path = tempfile.mkstemp(suffix=".wav")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    size = os.path.getsize(path)
+    logging.info(
+        f"_save_upload: wrote {len(data)} bytes (disk size {size}) to {path}"
+    )
+    if size == 0 or size != len(data):
+        raise RuntimeError(
+            f"upload save mismatch: got {len(data)} bytes, on disk {size}"
+        )
+    return path
 
 
 def _safe_unlink(path: str) -> None:
