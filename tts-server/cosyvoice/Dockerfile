@@ -4,10 +4,13 @@
 # - Community images on Docker Hub are pinned to CosyVoice 2.
 #
 # Base is the same torch / CUDA combo CosyVoice's requirements.txt
-# expects (torch 2.0.1 + CUDA 11.7). Newer torch on Ada/Hopper GPUs
-# works fine at runtime; we don't need to push to 12.x just for that.
+# expects (torch 2.0.1 + CUDA 11.7). The -devel variant (vs -runtime)
+# ships the CUDA toolkit + sets CUDA_HOME, which DeepSpeed probes at
+# import time. Without it the transformers→modelscope import chain
+# fails with `CUDA_HOME does not exist`. ~3 GB larger image; worth
+# the simpler dep chain.
 
-FROM pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+FROM pytorch/pytorch:2.0.1-cuda11.7-cudnn8-devel
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -32,6 +35,12 @@ RUN pip install --upgrade --no-cache-dir pip wheel "setuptools<70"
 RUN pip install --no-cache-dir --no-build-isolation \
     "openai-whisper==20231117"
 RUN pip install --no-cache-dir -r requirements.txt
+
+# DeepSpeed is in CosyVoice's requirements but only matters for
+# training. For inference it just adds an import-time CUDA probe
+# that can fail on subtle env mismatches. Drop it after install —
+# transformers detects its absence and uses the non-deepspeed path.
+RUN pip uninstall -y deepspeed
 
 # The FastAPI server lives here; it speaks zero-shot / cross-lingual /
 # instruct cloning. Default port 50000 inside the container.
