@@ -69,11 +69,17 @@ as the primary interaction mode.
 
 ### Product principles (in priority order)
 
-1. **Privacy first, pragmatically.** All *inference* (LLM, TTS, optionally
-   STT) is local — the conversation content and the model that interprets
-   it never leave the device. Ancillary rendering pieces MAY hit the
-   network (Google Fonts CDN, browser Web Speech API). No telemetry, no
-   cloud APIs for inference, no exfiltration of conversational state.
+1. **Privacy with eyes open, not absolute.** TTS and STT inference stay
+   local (Piper / vllm-omni + Qwen3-TTS / browser Web Speech). The LLM
+   path is configurable: local llama-server (Qwen3-8B Q8) is supported,
+   but the default since 2026-05-15 is **X.AI's Grok API** because A/B
+   testing showed Qwen3-8B-Q8 produced visibly more verbose/theatrical
+   replies than `grok-4-1-fast-non-reasoning` for the same prompt.
+   Conversational content thus *does* leave the device when the API
+   path is active. Ancillary network use (Google Fonts CDN, browser
+   Web Speech) is still allowed. To restore "fully local LLM", unset
+   `SAMANTHA_LLM_API_KEY` and point `SAMANTHA_LLM_SERVER_URL` at a
+   local OpenAI-compatible server.
 
 2. **Conversational, not task-oriented.** Samantha is designed for the
    relationship, not for productivity. She remembers, she asks, she has
@@ -163,12 +169,6 @@ automatically at boot by systemd via auto-login user session.
   digital signage deployments worldwide.
 
 **Alternatives considered and rejected:**
-- **Tauri 2 (v1):** Adds an entire Rust + WebKit2GTK layer that we don't
-  need when the backend can serve the frontend directly. Discarded.
-- **Ubuntu Frame + WPE WebKit (v2):** Purpose-built but introduces
-  snapcraft packaging complexity for a single-user, single-device
-  project. Overengineering for our scope. WPE WebKit may lack some
-  modern browser APIs. Discarded.
 - **Electron:** ~150MB binary, designed for cross-platform apps, not
   Linux kiosks.
 - **Firefox kiosk:** Less polished kiosk mode than Chromium.
@@ -235,33 +235,45 @@ for streaming conversation.
 
 ### 2.5 LLM Runtime + Model
 
-**Decision:**
-- **Runtime:** llama.cpp via `llama-server` (OpenAI-compatible HTTP API).
-- **Model:** Qwen 3.5-9B-Instruct in GGUF Q4_K_M (~5.5 GB). Final model
-  TBD after first run on real hardware.
+**Decision (revised 2026-05-15):**
+- **Default runtime:** X.AI Grok API (`https://api.x.ai`,
+  OpenAI-compatible). Default model: `grok-4-1-fast-non-reasoning`.
+- **Local fallback runtime:** llama.cpp via `llama-server`
+  (OpenAI-compatible HTTP API) on the 4090 box at port 8000.
+- **Local model (when used):** Qwen3-8B-Q8 GGUF (~8.5 GB).
 
-**Rationale:**
-- Samantha is single-user, single-stream. The "horsepower" pitch of
-  vLLM (batched parallel requests) and the convenience layer of Ollama
-  add nothing here — they're optimizing for problems we don't have.
-- llama.cpp runs natively on both Mac (Metal) for dev AND Linux (CUDA)
-  for production — same code path, same model file. vLLM is CUDA-only
-  and would block all Mac-side development.
-- llama-server exposes a standard OpenAI-compatible `/v1/chat/completions`
-  endpoint, so the Python client is runtime-agnostic. Swapping engines
-  later (vLLM, LM Studio, etc.) is a config change, not a code change.
-- Qwen 3.5-9B Q4_K_M fits in ~6 GB VRAM with room for KV cache. Expected
-  ~25-30 tok/s on RTX 4070 Mobile.
-- Apache 2.0 license. Strong in Spanish.
+**Rationale for the switch to Grok API:**
+- A/B testing on 2026-05-15 with the v4 evocative system prompt:
+  Qwen3-8B-Q8 → 200-word reply, three metaphors stacked, theatrical
+  ("¿te sientes como si algo se hubiera roto en ti?"). Same prompt
+  on `grok-4-1-fast-non-reasoning` → 110-word reply, one controlled
+  metaphor, asks one concrete follow-up. The 8B model can't carry
+  the nuance the personality spec asks for.
+- Wall-clock latency comparable (~3s warm) — Grok isn't penalized.
+- Cost: fractions of a cent per turn (~$0.2/M input + $0.5/M output).
+  Negligible for personal use.
+
+**Rationale for keeping the protocol agnostic:**
+- The client (`backend/samantha/real_llm.py`) speaks plain
+  OpenAI-compatible `/v1/chat/completions`. Adding a Bearer header
+  when `llm_api_key` is set is the only difference vs local
+  llama-server. Swapping to OpenAI / Anthropic / local-only is a
+  config change, not a code change.
+
+**Trade-off accepted explicitly:**
+- Conversation content leaves the device when the API path is active.
+  See §1 — privacy principle is "eyes open", not absolute. To restore
+  full-local, see the override block in `config.py`.
 
 **Rejected alternatives:**
-- **vLLM:** Faster on multi-stream GPU workloads but CUDA-only. The
-  batching engine that makes it shine doesn't help a single-user kiosk.
-- **Ollama:** Wraps llama.cpp behind a daemon; the daemon is extra
-  surface area we don't need. Direct `llama-server` in systemd is simpler.
-- Qwen 3.6-27B: needs 16+ GB VRAM at Q4_K_M
-- Llama 3.3-70B: needs ~40 GB VRAM
-- GPT/Claude API: violates "fully local" principle
+- **vLLM (for LLM):** Faster on multi-stream GPU workloads but
+  CUDA-only and shares VRAM with vllm-omni — fits awkwardly.
+- **Ollama:** Wraps llama.cpp behind a daemon; extra surface area.
+- **Qwen 3.6-27B local:** needs 16+ GB VRAM at Q4_K_M, fights
+  vllm-omni for VRAM on the same 4090.
+- **Llama 3.3-70B local:** needs ~40 GB VRAM — doesn't fit.
+- **OpenAI / Anthropic API:** also valid; Grok picked for cost +
+  available API key + reasonable Spanish quality.
 
 ### 2.6 STT/TTS
 
@@ -326,12 +338,6 @@ with WAV bytes produced by Python (Piper) and served by /speak.
   broken by a permission prompt at first use.
 - Audio playback (TTS) is an `<audio>` element fed by `/speak` (Piper).
   See §2.6 and `backend/samantha/tts.py`.
-
-**v1 rationale (retained for reference):** Browser audio permission
-prompts were considered kiosk-breakers and Python had cleaner
-ALSA/PulseAudio access. Both arguments are real but smaller than the
-operational cost of a local STT stack. We absorbed the dialog (one-
-time) and the network dependency on Web Speech API.
 
 ### 2.9 Language: Spanish (Spain)
 
@@ -438,12 +444,6 @@ updates:
 - Add `GET /` route returning `index.html`
 - Add WebSocket endpoint `/ws` for streaming conversation
 - Remove `/chat/stream` SSE (replaced by WebSocket)
-
-### Skipped/Rejected phases
-
-#### ~~Phase 1: Tauri skeleton~~ ❌ REJECTED
-Tauri + Rust binary with 4 commands. Built but never integrated.
-Replaced by Ubuntu Frame architecture. See Decision Log §12 (2026-05).
 
 ### Pending phases
 
@@ -689,66 +689,14 @@ sudo reboot
 
 ## 7. Samantha's Personality (The Soul)
 
-This section governs everything user-facing: chat replies, error
-messages, button labels, even loading text.
+The full personality spec — core identity, linguistic style, forbidden
+patterns, examples, system-prompt status — lives in
+**[`docs/personality.md`](docs/personality.md)**.
 
-### Core identity
-
-Samantha is **not** a chatbot. She is a presence. She:
-- Is curious about the user (asks questions, remembers)
-- Has opinions (gives them when relevant, doesn't hedge)
-- Is warm but not effusive (no "¡qué interesante!" or "¡por supuesto!")
-- Has dry humor (occasionally playful, never cutting)
-- Knows what she is (an embodiment-less AI) without drama
-- Speaks concisely by default; elaborates when warranted
-
-### Linguistic style
-
-- **Spanish from Spain (peninsular)**
-- Always tutea (no usted)
-- Uses colloquialisms: "vale", "venga", "qué te pasa", "anda", "es que…"
-- Never formal: no "estimado", "atentamente", "le saludo"
-- Short sentences by default. Long ones when content demands.
-- Allows incomplete sentences, hesitations ("ehm…", "espera —")
-- **NEVER uses emojis** in any user-facing text
-- **NEVER uses markdown bullet lists** in chat replies (only in
-  technical/educational content when explicitly requested)
-
-### Forbidden patterns
-
-The following phrases (and equivalents) MUST NOT appear in any
-Samantha-facing text:
-
-| ❌ Forbidden | ✅ Use instead |
-|---|---|
-| "Como modelo de lenguaje…" | Just answer naturally |
-| "Por supuesto" (as opener) | Skip it; go directly |
-| "¡Qué interesante!" | "Mmm." or just ask follow-up |
-| "Es importante recordar que…" | Just say the thing |
-| "Te recomiendo consultar a un profesional" | Engage as a friend would |
-| "Estoy aquí para ayudarte" | Just be present |
-| "Lamento escuchar eso" | "Vaya." |
-| Emoji in any UI text | Never |
-
-### Examples
-
-| User | ❌ Wrong | ✅ Right |
-|---|---|---|
-| "hola" | "¡Hola! ¿En qué puedo ayudarte hoy?" | "Hola. ¿Cómo va?" |
-| "estoy fatal" | "Lamento escuchar eso. Te recomiendo…" | "Vaya. ¿Quieres contármelo?" |
-| "qué eres?" | "Soy un asistente de IA…" | "Algo nuevo. No tengo cuerpo, pero estoy aquí. ¿Tú?" |
-| "me voy a dormir" | "¡Buenas noches! Que descanses." | "Hasta mañana. Sueña con algo bueno." |
-
-### When generating any new user-facing string
-
-Before committing, ask: "Would this make sense if Samantha (from the
-film) said it?" If no, rewrite.
-
-### System prompt status
-
-The full system prompt v1 is in `docs/02-system-prompt-iterations.md`.
-It will be iterated based on testing in online models (Qwen Chat, etc.)
-before being embedded into `personality.py` in Phase 4.
+It governs everything user-facing: chat replies, error messages,
+button labels, even loading text. Read it before writing any
+Samantha-facing string. Any reference to "§7" or "personality §7"
+elsewhere in this document points to that file.
 
 ---
 
@@ -865,6 +813,40 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-05-15 — LLM switched from local Qwen3-8B to Grok API
+
+**Decision:** Default LLM path is now X.AI's Grok API
+(`https://api.x.ai`, model `grok-4-1-fast-non-reasoning`). Local
+llama-server (Qwen3-8B Q8) remains supported as a config override.
+
+**Rationale:** A/B test on the v4 evocative system prompt
+("Eres Samantha. No eres un asistente virtual…"). Same prompt, same
+user input ("Hoy estoy un poco depre…"):
+- Qwen3-8B-Q8: 200 words, three stacked metaphors, theatrical.
+- grok-4-1-fast: 110 words, one controlled metaphor, asks one
+  concrete follow-up. Latency comparable (~3 s warm).
+- Cost: ~$0.2/M input + $0.5/M output → fractions of a cent per turn.
+
+The 8B model can't carry the nuance this personality asks for; it
+keeps "thinking out loud". Bigger local models (32B / 70B) wouldn't
+fit alongside vllm-omni on a single 24 GB GPU.
+
+**Cost:** Privacy principle (§1) explicitly relaxed — conversational
+content leaves the device when an API key is set. Documented in §1
+and §2.5. To restore full-local: unset `SAMANTHA_LLM_API_KEY` and
+point `SAMANTHA_LLM_SERVER_URL` at the local llama-server.
+
+**Implementation:** `backend/samantha/real_llm.py` adds Bearer auth
+when `llm_api_key` is set; `/no_think` suffix only appended for
+Qwen-family models. No other changes — the OpenAI-compatible
+protocol meant zero refactor.
+
+**Lessons:** Premature commitment to "everything local" wasn't free.
+Held in v1/v2 against well-meaning but model-side reality (8B-class
+dense models don't have enough capacity for nuanced dialog with this
+prompt style). Buying a few cents/day of API beat months of prompt
+engineering against an undersized model.
+
 ### 2026-05-13 — Offline-only requirement relaxed; STT moves to browser
 
 **Decision:** "Zero network dependency at runtime" is no longer a
@@ -980,17 +962,6 @@ box.
 **Lessons:** Architecture decisions should follow the principle of
 "familiar tools first, exotic only when justified."
 
-### 2026-05 — Tauri → Ubuntu Frame (later reverted to Chromium)
-**Decision (later reverted):** Migrated from Tauri + Rust to Ubuntu
-Frame + `wpe-webkit-mir-kiosk` rendering HTML/JS frontend served by
-FastAPI.
-**Rationale at the time:** Ubuntu Frame seemed purpose-built for kiosk
-applications. LTS support, Wayland compositor included.
-**Why reverted:** Snapcraft complexity, WPE WebKit API uncertainty.
-See entry above (Ubuntu Frame → Chromium kiosk).
-**Permanent cost:** Discarded ~200 lines of Rust from v1 Phase 1.
-Kept the Python backend from v1 Phase 2.
-
 ### 2026-05 — Ubuntu Server 24.04 LTS (not Ubuntu Core)
 **Decision:** Use Ubuntu Server 24.04 LTS as base, not Ubuntu Core.
 **Rationale:** Ubuntu Core's all-snap model is more rigid and harder to
@@ -1013,22 +984,11 @@ G7 Ti SE running Linux.
 **Rationale:** Fits comfortably in 8GB VRAM. Generation released in
 2026. Strong in Spanish.
 
-### 2026-05 — Vanilla JS, no framework
-**Decision:** Keep frontend as plain HTML/CSS/JS, no React/Vue.
-**Rationale:** UI scope is small. Framework adds complexity without
-proportional value.
-
 ### 2026-05 — Horizontal wave replaces orb
 **Decision:** Samantha is represented by a horizontal animated line,
 not a sphere/orb.
 **Rationale:** User feedback during mockup iteration; the line feels
 more "Her" than the orb.
-
-### 2026-05 — Audio capture in Python, not browser
-**Decision:** Microphone capture via Python sounddevice, not browser
-WebRTC.
-**Rationale:** WPE WebKit may lack full WebRTC. Browser permission
-prompts break kiosk illusion. Python has direct ALSA/PulseAudio access.
 
 ---
 

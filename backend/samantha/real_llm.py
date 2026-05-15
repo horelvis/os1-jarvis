@@ -136,11 +136,19 @@ def _build_payload(
         system += _format_recall(recall)
     if short_term:
         system += _format_short_term(short_term)
+
+    # `/no_think` is Qwen3's soft switch to skip the <think> block.
+    # Other model families just echo it back as part of the prompt, so
+    # only append it for Qwen-family models.
+    user_content = message
+    if "qwen" in (config.llm_model or "").lower():
+        user_content = f"{message}\n/no_think"
+
     return {
         "model": config.llm_model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"{message}\n/no_think"},
+            {"role": "user", "content": user_content},
         ],
         "stream": True,
     }
@@ -172,8 +180,14 @@ async def stream_reply(
         f"short_term={len(short_term) if short_term else 0}"
     )
 
+    # Add Bearer auth when an API key is configured. Local llama-server
+    # ignores the header; Grok/OpenAI/Anthropic-compatible APIs require it.
+    headers: dict[str, str] = {}
+    if config.llm_api_key:
+        headers["Authorization"] = f"Bearer {config.llm_api_key}"
+
     try:
-        async with client.stream("POST", url, json=payload) as resp:
+        async with client.stream("POST", url, json=payload, headers=headers) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
                 logger.error(
