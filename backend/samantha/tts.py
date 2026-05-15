@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
@@ -57,6 +58,19 @@ class VoiceMissingError(RuntimeError):
 # Uniform output rate. XTTS-v2 emits 24 kHz natively; Piper (22050)
 # is resampled up to match before being yielded.
 OUTPUT_SAMPLE_RATE = 24000
+
+
+# Personality v6 lets Samantha emit inline CosyVoice 3 markers like
+# `[laughter]` and `<laughter>de verdad</laughter>`. XTTS and Piper
+# don't understand them — they'd read "corchete laughter corchete"
+# letter by letter. Strip when not routing to a marker-aware backend.
+# `[foo]` → removed entirely; `<tag>X</tag>` → keep X, drop the tags.
+_BRACKET_MARKER_RE = re.compile(r"\[[a-z][a-z_-]*\]")
+_TAG_MARKER_RE = re.compile(r"</?[a-z][a-z_-]*>")
+
+
+def _strip_tts_markers(text: str) -> str:
+    return _TAG_MARKER_RE.sub("", _BRACKET_MARKER_RE.sub("", text))
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -95,6 +109,12 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
     clean = text.strip()
 
     backend = (config.tts_backend or "xtts").lower()
+    # CosyVoice 3 understands the personality v6 inline markers; every
+    # other backend would read them literally.
+    if backend != "cosyvoice":
+        clean = _strip_tts_markers(clean).strip()
+        if not clean:
+            return
     if backend == "xtts":
         async for chunk in _stream_xtts(clean):
             yield chunk, "xtts"
