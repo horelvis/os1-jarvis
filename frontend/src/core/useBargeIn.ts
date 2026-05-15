@@ -30,6 +30,13 @@ export function useBargeIn(
   const cbRef = useRef(onSpeechStart);
   cbRef.current = onSpeechStart;
 
+  // Suppress VAD events for a short window after `active` flips true.
+  // Without this the very start of Samantha's audio bleeds through
+  // browser AEC into the mic and Silero fires `onSpeechStart` on her
+  // own voice → she cuts herself off after the first word. 600 ms
+  // is enough for the audio buffer to settle.
+  const warmupUntilRef = useRef(0);
+
   // Lazy-create the MicVAD instance once. The .new() returns a promise
   // and may take ~300 ms (downloading the ONNX model + spawning the
   // audio worklet); we live with that on the very first activation.
@@ -45,12 +52,19 @@ export function useBargeIn(
           "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/",
         onnxWASMBasePath:
           "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/",
+        // Conservative thresholds: with the laptop's built-in mic and
+        // speakers the browser's AEC isn't enough — Samantha's own
+        // voice leaks back enough for Silero defaults to fire.
+        // Raising the positive threshold to 0.85 and demanding 300 ms
+        // of sustained speech filters echo while still triggering on
+        // real user voice within a third of a second.
+        positiveSpeechThreshold: 0.85,
+        negativeSpeechThreshold: 0.6,
+        minSpeechMs: 300,
         onSpeechStart: () => {
+          if (Date.now() < warmupUntilRef.current) return;
           cbRef.current();
         },
-        // Default model + threshold work well enough for v1. Tune if
-        // false positives become a problem (positiveSpeechThreshold,
-        // negativeSpeechThreshold, redemptionFrames, etc.).
       });
       if (cancelled) {
         vad.destroy();
@@ -75,6 +89,7 @@ export function useBargeIn(
     const vad = vadRef.current;
     if (!vad) return;
     if (active) {
+      warmupUntilRef.current = Date.now() + 600;
       vad.start();
     } else {
       vad.pause();
