@@ -1,0 +1,66 @@
+# XTTS-v2 streaming server — A/B alternative to vllm-omni.
+#
+# Coqui's official demo server with native streaming HTTP. Runs
+# alongside the vllm-omni stack on the same 4090 for a quality /
+# consistency comparison with the cloned voice (Inés Blázquez).
+# Once the winner is picked the loser's compose is decommissioned.
+#
+# Two-step voice cloning flow (different from vllm-omni's per-request
+# ref_audio):
+#
+#   1. POST /clone_speaker with the reference WAV (multipart) → returns
+#      {speaker_embedding, gpt_cond_latent} — pre-computed, cached.
+#   2. POST /tts_stream with text + language + the two embeddings.
+#      Response is streamed audio chunks. The Samantha backend caches
+#      the embeddings once at startup and reuses them on every turn.
+#
+# VRAM math on a 24 GB 4090:
+#   vllm-omni  ~12 GB  (--gpu-memory-utilization 0.30)
+#   llama-server ~10 GB (Qwen3-8B Q8 @ ctx 8192)
+#   free        ~2 GB
+# XTTS-v2 needs ~2-3 GB. Tight. If allocation fails, either lower
+# vllm-omni to 0.20 in tts-server/docker-compose.yml or temporarily
+# `docker compose down` it while smoke-testing XTTS.
+
+services:
+  xtts:
+    # Pre-built by Coqui; CUDA 12.1 build is the latest tag (the
+    # repo is archived so no further releases expected). The image
+    # downloads the XTTS-v2 model (~1.8 GB) on first launch.
+    image: ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
+    container_name: samantha-xtts
+    # CPML license acceptance — required by Coqui or the model
+    # refuses to load. License allows non-commercial use freely;
+    # for commercial deployment check Coqui's tier docs.
+    environment:
+      - COQUI_TOS_AGREED=1
+    ports:
+      # Container exposes :80; map to 8092 on the host to avoid
+      # clashing with vllm-omni's 8091 and llama-server's 8000.
+      - "8092:80"
+    volumes:
+      # Cache the model + speaker latents on the host so a container
+      # rebuild doesn't redownload 1.8 GB. The image stores its
+      # weights under /root/.local/share/tts/.
+      - ${HOME}/.samantha/xtts-cache:/root/.local/share/tts
+      # Voice clone reference: same WAV vllm-omni uses, mounted
+      # read-only at /refs/samantha.wav. The /clone_speaker endpoint
+      # takes a multipart upload so the backend will POST the bytes
+      # rather than reference this mount — but having the file in
+      # the container makes manual curl tests trivial.
+      - ${HOME}/.samantha/voices/ref:/refs:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      # /languages is a cheap GET that loads if the model is ready.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/languages || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
