@@ -21,6 +21,17 @@ WORKDIR /opt
 RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
 
 WORKDIR /opt/CosyVoice
+
+# Upgrade pip/setuptools/wheel first so newer-style metadata works,
+# AND so openai-whisper==20231117 (pinned by CosyVoice's
+# requirements.txt) can find pkg_resources at setup-time.
+# Whisper's old setup.py uses pkg_resources without declaring
+# setuptools as a build-system requirement; install it separately
+# with --no-build-isolation so it reads from this layer's setuptools
+# instead of pip's empty isolated build env.
+RUN pip install --upgrade --no-cache-dir pip setuptools wheel
+RUN pip install --no-cache-dir --no-build-isolation \
+    "openai-whisper==20231117"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # The FastAPI server lives here; it speaks zero-shot / cross-lingual /
