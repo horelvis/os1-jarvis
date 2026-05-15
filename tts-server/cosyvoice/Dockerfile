@@ -1,0 +1,35 @@
+# CosyVoice 3 FastAPI server. We build our own image because:
+# - Upstream Dockerfile uses Aliyun pip mirrors that 404 outside CN.
+# - Upstream targets the gRPC runtime; we want the FastAPI one.
+# - Community images on Docker Hub are pinned to CosyVoice 2.
+#
+# Base is the same torch / CUDA combo CosyVoice's requirements.txt
+# expects (torch 2.0.1 + CUDA 11.7). Newer torch on Ada/Hopper GPUs
+# works fine at runtime; we don't need to push to 12.x just for that.
+
+FROM pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        git unzip git-lfs g++ ffmpeg libsndfile1 && \
+    git lfs install && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+
+WORKDIR /opt/CosyVoice
+RUN pip install --no-cache-dir -r requirements.txt
+
+# The FastAPI server lives here; it speaks zero-shot / cross-lingual /
+# instruct cloning. Default port 50000 inside the container.
+EXPOSE 50000
+
+# The model dir is mounted from the host at /models/cosyvoice3. The
+# user pre-downloads CosyVoice 3 via huggingface_hub so container
+# rebuilds don't redownload ~2 GB. See docker-compose.yml.
+CMD ["python", "runtime/python/fastapi/server.py", \
+     "--port", "50000", \
+     "--model_dir", "/models/cosyvoice3"]

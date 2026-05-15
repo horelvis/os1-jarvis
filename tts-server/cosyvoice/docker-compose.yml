@@ -1,0 +1,68 @@
+# CosyVoice 3 (FunAudioLLM/Fun-CosyVoice3-0.5B-2512) on port 8093.
+# Lives alongside XTTS-v2 (port 8092) for A/B comparison on the
+# same Inés reference WAV.
+#
+# Pre-reqs on the 4090 host:
+#
+#   1. Pre-download the model (~2 GB, one time):
+#
+#      pip install -U huggingface_hub
+#      hf download FunAudioLLM/Fun-CosyVoice3-0.5B-2512 \
+#        --local-dir ~/.samantha/cosyvoice3
+#
+#   2. The Inés reference WAV at ~/.samantha/voices/ref/samantha.wav
+#      (same path XTTS uses).
+#
+#   3. nvidia-container-toolkit installed (verified by the XTTS
+#      docker compose during its own setup).
+#
+# Usage:
+#   docker compose build       # ~10-15 min first time
+#   docker compose up -d
+#   docker compose logs -f cosyvoice
+#
+# Endpoints exposed on 8093:
+#   POST /inference_zero_shot      tts_text + prompt_text + prompt_wav (multipart)
+#   POST /inference_cross_lingual  tts_text + prompt_wav (no transcript)
+#   POST /inference_instruct2      tts_text + instruct_text + prompt_wav
+#
+# Audio response is streamed 16-bit PCM. The backend wraps in WAV.
+
+services:
+  cosyvoice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: samantha-cosyvoice
+    ports:
+      - "8093:50000"
+    volumes:
+      # Pre-downloaded CosyVoice 3 weights mounted read-only.
+      - ${HOME}/.samantha/cosyvoice3:/models/cosyvoice3:ro
+      # Inés reference WAV. The FastAPI server accepts uploads per
+      # request (multipart), so we don't strictly need this mount —
+      # but it lets us curl-test the server without trips to the
+      # Mac for the WAV file.
+      - ${HOME}/.samantha/voices/ref:/refs:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # CosyVoice 3 0.5B at fp16 fits comfortably in ~2 GB VRAM. With
+    # llama-server (~10 GB) + XTTS (~3 GB) on the 4090 there's still
+    # ~9 GB free, so no memory contention.
+    restart: unless-stopped
+    healthcheck:
+      # The /inference_sft endpoint exists for any model that has
+      # speaker presets. CosyVoice 3 base has them via its
+      # speaker_manager so this 422 (no body) confirms the server
+      # is alive. A simpler /docs / / would be cleaner but the
+      # server doesn't expose one.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:50000/docs || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
