@@ -49,6 +49,11 @@ services:
       # rather than reference this mount — but having the file in
       # the container makes manual curl tests trivial.
       - ${HOME}/.samantha/voices/ref:/refs:ro
+      # Our patched main.py that exposes temperature / top_p /
+      # top_k / repetition_penalty / length_penalty / speed on
+      # /tts_stream. Overrides the upstream binary's /app/main.py.
+      # See ./main.py for the diff vs upstream.
+      - ./main.py:/app/main.py:ro
     deploy:
       resources:
         reservations:
