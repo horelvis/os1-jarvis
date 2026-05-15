@@ -1,5 +1,13 @@
 import { useEffect, useRef } from "react";
 import { MicVAD } from "@ricky0123/vad-web";
+import * as ort from "onnxruntime-web";
+
+// VAD is a tiny model running per 30 ms frame — multi-threading
+// adds spawn overhead without speedup, and the auto-default tries to
+// use threads which requires crossOriginIsolated (COOP/COEP) that
+// Vite dev doesn't set, so it silently falls back to single-thread
+// anyway. Pin to 1 explicitly to skip the failed handshake.
+ort.env.wasm.numThreads = 1;
 
 // Hook that listens for the user's voice while `active` is true and
 // fires `onSpeechStart` when speech is detected. Used to interrupt
