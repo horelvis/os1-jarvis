@@ -1,22 +1,25 @@
-"""TTS for Samantha — vllm-omni streaming primary, Piper local fallback.
+"""TTS for Samantha — XTTS-v2 streaming primary, Piper local fallback.
 
 Both backends emit through a single contract: 24 kHz mono int16 PCM
 chunks. Piper's native 22050 Hz output is resampled on the fly to
 keep the wire format uniform — the frontend only has to know one
 sample rate.
 
-  config.tts_backend == "vllm_omni"  (default)
-      Streams PCM chunks from a vllm-omni server's OpenAI-compatible
-      /v1/audio/speech endpoint. Voice cloning driven by
-      `tts_remote_ref_audio` + `tts_remote_ref_text` (Qwen3-TTS Base
-      task_type). TTFA ~40 ms warm.
+  config.tts_backend == "xtts"  (default)
+      Streams PCM chunks from Coqui xtts-streaming-server (port
+      8092 on the 4090) with our overlay that exposes
+      temperature / top_p / repetition_penalty / speed. Voice
+      cloning from `tts_xtts_ref_wav` (uploaded once, embeddings
+      cached). Chosen over vllm-omni + Qwen3-TTS after A/B testing
+      on 2026-05-15: same tone across requests, expressive at
+      temperature 0.85.
 
   config.tts_backend == "piper"
       Local Piper synth. One-shot WAV, ~50-300 ms on CPU. WAV header
       stripped, PCM resampled 22050 → 24000 with linear interp, and
-      the whole thing yielded as a single chunk. Fallback target
-      when the remote is unreachable; can be selected explicitly for
-      offline/CPU-only environments.
+      the whole thing yielded as a single chunk. Selectable
+      explicitly for offline / CPU-only environments. No auto-
+      fallback from xtts — see CLAUDE.md decision log.
 
 Public API:
 
@@ -25,7 +28,7 @@ Public API:
                      PCM is raw int16 little-endian at 24 kHz mono.
     synth(text)    → sync wrapper; collects the stream and returns
                      (wav_bytes, backend). WAV header stamped at
-                     24 kHz. Used by api.py /speak's fallback path.
+                     24 kHz. Kept for the rare non-streaming caller.
     is_available() → True iff the configured backend has plausible
                      config to serve.
 """
@@ -51,8 +54,8 @@ class VoiceMissingError(RuntimeError):
     """Raised when synth()/stream() can't find any usable backend."""
 
 
-# Uniform output rate. vllm-omni Qwen3-TTS emits 24 kHz natively;
-# Piper (22050) is resampled up to match before being yielded.
+# Uniform output rate. XTTS-v2 emits 24 kHz natively; Piper (22050)
+# is resampled up to match before being yielded.
 OUTPUT_SAMPLE_RATE = 24000
 
 
@@ -72,8 +75,6 @@ def is_available() -> bool:
         return bool(config.tts_xtts_url) and Path(
             config.tts_xtts_ref_wav
         ).expanduser().is_file()
-    if backend == "vllm_omni":
-        return bool(config.tts_remote_url)
     return _piper_voice_available()
 
 
@@ -81,8 +82,8 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
     """Yield (pcm_chunk, backend_label) tuples.
 
     Every chunk is raw 24 kHz mono int16 little-endian PCM, no header.
-    Multiple chunks for vllm_omni (real streaming); a single chunk
-    for piper (one-shot synth, resampled if needed).
+    Multiple chunks for xtts (real streaming); a single chunk for
+    piper (one-shot synth, resampled if needed).
 
     No silent cross-backend fallback. If the selected backend fails,
     the exception propagates so the caller surfaces a real error to
@@ -98,10 +99,6 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
         async for chunk in _stream_xtts(clean):
             yield chunk, "xtts"
         return
-    if backend == "vllm_omni":
-        async for chunk in _stream_vllm_omni(clean):
-            yield chunk, "vllm_omni"
-        return
     if backend == "piper":
         # Sync synth — run in a thread so the event loop isn't blocked.
         # _piper_to_pcm strips the WAV header and resamples to
@@ -115,10 +112,10 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
 def synth(text: str) -> tuple[bytes, str]:
     """Synchronous wrapper around `stream()`.
 
-    Returns (wav_bytes, backend_label). For vllm_omni the streamed PCM
+    Returns (wav_bytes, backend_label). For xtts the streamed PCM
     chunks are concatenated and wrapped in a 24 kHz mono int16 WAV
-    header. For piper the single chunk is already a complete WAV and
-    is passed through.
+    header. For piper the chunk is already PCM at 24 kHz (post-
+    resampling) and gets wrapped the same way.
 
     Returns (b"", "empty") on blank input.
 
@@ -230,65 +227,6 @@ async def _stream_xtts(text: str) -> AsyncIterator[bytes]:
                 raise RuntimeError(
                     f"xtts {resp.status_code}: "
                     f"{err[:200].decode('utf-8', 'replace')}"
-                )
-            async for chunk in resp.aiter_bytes(chunk_size=4096):
-                if chunk:
-                    yield chunk
-
-
-# ──────────────────────────────────────────────────────────────────
-# vllm-omni backend
-# ──────────────────────────────────────────────────────────────────
-
-
-async def _stream_vllm_omni(text: str) -> AsyncIterator[bytes]:
-    """POST to /v1/audio/speech with stream=true; yield PCM chunks.
-
-    Body shape matches the OpenAI Audio API extended for Qwen3-TTS:
-        input, model, task_type="Base", language,
-        ref_audio (file URI or http(s) URL), ref_text,
-        instructions, stream=true, response_format="pcm".
-
-    Raises RuntimeError on non-200; raises VoiceMissingError if the
-    remote URL isn't configured.
-    """
-    if not config.tts_remote_url:
-        raise VoiceMissingError("tts_remote_url not configured")
-
-    body: dict = {
-        "input": text,
-        "model": config.tts_remote_model,
-        "task_type": "Base",
-        "language": config.tts_remote_language,
-        "ref_audio": config.tts_remote_ref_audio,
-        "ref_text": config.tts_remote_ref_text,
-        "stream": True,
-        "response_format": "pcm",
-    }
-    if config.tts_remote_instructions:
-        body["instructions"] = config.tts_remote_instructions
-    if config.tts_remote_seed:
-        body["seed"] = config.tts_remote_seed
-
-    url = f"{config.tts_remote_url.rstrip('/')}/v1/audio/speech"
-
-    # read=None disables the per-read timeout. Streaming responses
-    # may sit idle between chunks; the default 5s read timeout would
-    # spuriously kill long generations.
-    timeout = httpx.Timeout(
-        connect=config.tts_remote_timeout_s,
-        read=None,
-        write=config.tts_remote_timeout_s,
-        pool=config.tts_remote_timeout_s,
-    )
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", url, json=body) as resp:
-            if resp.status_code != 200:
-                err = await resp.aread()
-                snippet = err[:200].decode("utf-8", errors="replace")
-                raise RuntimeError(
-                    f"vllm-omni {resp.status_code}: {snippet}"
                 )
             async for chunk in resp.aiter_bytes(chunk_size=4096):
                 if chunk:

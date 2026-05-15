@@ -92,51 +92,6 @@ class Config:
     tts_voice: str = "es_ES-sharvard-medium"
     tts_speaker_id: int | None = 1
 
-    # ── vllm-omni remote config ──
-    # URL of the vllm-omni HTTP server. e.g. http://192.168.100.58:8091
-    # Leave empty to disable the remote path (forces piper).
-    tts_remote_url: str = ""
-    tts_remote_timeout_s: float = 60.0  # generous: includes cold-load
-    # Model id as seen by the server. With our docker compose this is
-    # the in-container mount point of the Qwen3-TTS Base weights.
-    tts_remote_model: str = "/models/qwen3-tts-base"
-    # Voice clone reference: file URI as resolved INSIDE the vllm-omni
-    # container (the /refs mount in tts-server/docker-compose.yml maps
-    # to ~/.samantha/voices/ref on the host).
-    tts_remote_ref_audio: str = "file:///refs/samantha.wav"
-    # Transcript of the ref audio — required by Qwen3-TTS cloning for
-    # phoneme alignment. Must match the audio in samantha.wav verbatim.
-    # Default matches the Inés Blázquez dubbing-demo clip currently
-    # used as ref (conversational scene, not narrative).
-    tts_remote_ref_text: str = (
-        "tengo que irme ya, la niñera se va a las 5:30, "
-        "he prometido a Emma que la ayudaría con su muñeco "
-        "de nieve para su proyecto de arte"
-    )
-    # Language name — Qwen3-TTS expects capitalized "Spanish", not
-    # "spanish" (the lowercase form drifts toward the preset speaker's
-    # native phonemes — see Qwen3-TTS discussion #230).
-    tts_remote_language: str = "Spanish"
-    # Style instruction. In voice_clone mode this still shapes prosody
-    # and clarity. The previous "alegre y cercano" composed with the
-    # Inés Blázquez ref (naturally husky) and the v3 personality
-    # ("bromista, cercana") to produce a sultry vibe in conversation.
-    # Walking it back to "calmada, amistoso de día, sin pausas
-    # insinuantes" pushes the prosody toward neutral conversation
-    # without losing warmth.
-    tts_remote_instructions: str = (
-        "Voz femenina española, cálida pero calmada. "
-        "Tono amistoso de día, claridad articulada, "
-        "ritmo natural sin pausas insinuantes."
-    )
-    # Pin Qwen3-TTS sampling to a fixed seed so the RNG state is
-    # deterministic throughout each synthesis. Without this the model
-    # samples freely and the timbre drifts mid-utterance + varies
-    # noticeably between calls. Same input → same audio bit-for-bit
-    # (verified via byte-diff). Set to 0 / None to restore stochastic
-    # sampling.
-    tts_remote_seed: int | None = 42
-
     # ── XTTS-v2 server config ──
     # URL of the Coqui xtts-streaming-server with our overlay
     # (tts-server/xtts/docker-compose.yml).
@@ -204,25 +159,6 @@ class Config:
                 if os.environ.get("SAMANTHA_TTS_SPEAKER_ID", "").strip()
                 else cls.tts_speaker_id
             ),
-            tts_remote_url=_get("TTS_REMOTE_URL", cls.tts_remote_url),
-            tts_remote_timeout_s=_get(
-                "TTS_REMOTE_TIMEOUT_S", cls.tts_remote_timeout_s
-            ),
-            tts_remote_model=_get("TTS_REMOTE_MODEL", cls.tts_remote_model),
-            tts_remote_ref_audio=_get(
-                "TTS_REMOTE_REF_AUDIO", cls.tts_remote_ref_audio
-            ),
-            tts_remote_ref_text=_get(
-                "TTS_REMOTE_REF_TEXT", cls.tts_remote_ref_text
-            ),
-            tts_remote_language=_get(
-                "TTS_REMOTE_LANGUAGE", cls.tts_remote_language
-            ),
-            tts_remote_seed=(
-                int(os.environ["SAMANTHA_TTS_REMOTE_SEED"])
-                if os.environ.get("SAMANTHA_TTS_REMOTE_SEED", "").strip()
-                else cls.tts_remote_seed
-            ),
             tts_xtts_url=_get("TTS_XTTS_URL", cls.tts_xtts_url),
             tts_xtts_timeout_s=_get("TTS_XTTS_TIMEOUT_S", cls.tts_xtts_timeout_s),
             tts_xtts_ref_wav=_get("TTS_XTTS_REF_WAV", cls.tts_xtts_ref_wav),
@@ -233,9 +169,6 @@ class Config:
             tts_xtts_top_p=_get("TTS_XTTS_TOP_P", cls.tts_xtts_top_p),
             tts_xtts_repetition_penalty=_get(
                 "TTS_XTTS_REPETITION_PENALTY", cls.tts_xtts_repetition_penalty
-            ),
-            tts_remote_instructions=_get(
-                "TTS_REMOTE_INSTRUCTIONS", cls.tts_remote_instructions
             ),
             log_level=_get("LOG_LEVEL", cls.log_level),
         )
