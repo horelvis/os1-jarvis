@@ -53,6 +53,38 @@ def generate_data(model_output):
         yield tts_audio
 
 
+# CosyVoice 3's LLM (`CosyVoice3LM` → inherited `Qwen2LM.inference`)
+# hard-asserts that token id 151646 (`<|endofprompt|>`) appears in the
+# concatenated prompt_text + text tokens. The upstream frontend never
+# inserts it — callers are expected to embed the literal string in
+# their input, exactly as upstream example.py does:
+#
+#     inference_cross_lingual(
+#         "You are a helpful assistant.<|endofprompt|>...spoken text...",
+#         ref_wav,
+#     )
+#     inference_zero_shot(
+#         tts_text,
+#         "You are a helpful assistant.<|endofprompt|>" + transcript,
+#         ref_wav,
+#     )
+#     inference_instruct2(tts_text, instruct_text + "<|endofprompt|>", ref_wav)
+#
+# The frontend's text_normalize() auto-disables splitting when `<|...|>`
+# appears in the input, so injecting the marker is safe for long text.
+# We do it here so the Samantha client can keep sending plain Spanish.
+_EOP = "<|endofprompt|>"
+_SYS_PREFIX = "You are a helpful assistant." + _EOP
+
+
+def _ensure_eop_prefix(s: str) -> str:
+    return s if _EOP in s else _SYS_PREFIX + s
+
+
+def _ensure_eop_suffix(s: str) -> str:
+    return s if _EOP in s else s + _EOP
+
+
 async def _save_upload(upload: UploadFile) -> str:
     """Persist multipart upload to a tempfile and return the path.
 
@@ -114,6 +146,7 @@ async def inference_zero_shot(
     # iterator actually reads it (the function returns immediately;
     # streaming happens later).
     background_tasks.add_task(_safe_unlink, path)
+    prompt_text = _ensure_eop_prefix(prompt_text)
     model_output = cosyvoice.inference_zero_shot(tts_text, prompt_text, path)
     return StreamingResponse(generate_data(model_output), background=background_tasks)
 
@@ -127,6 +160,7 @@ async def inference_cross_lingual(
 ):
     path = await _save_upload(prompt_wav)
     background_tasks.add_task(_safe_unlink, path)
+    tts_text = _ensure_eop_prefix(tts_text)
     model_output = cosyvoice.inference_cross_lingual(tts_text, path)
     return StreamingResponse(generate_data(model_output), background=background_tasks)
 
@@ -152,6 +186,7 @@ async def inference_instruct2(
 ):
     path = await _save_upload(prompt_wav)
     background_tasks.add_task(_safe_unlink, path)
+    instruct_text = _ensure_eop_suffix(instruct_text)
     model_output = cosyvoice.inference_instruct2(tts_text, instruct_text, path)
     return StreamingResponse(generate_data(model_output), background=background_tasks)
 
