@@ -3,6 +3,7 @@ import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognitio
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
+import { useBargeIn } from "../core/useBargeIn";
 import { useKeys } from "../core/useKeys";
 import { speak } from "../net/tts";
 import { getWSClient } from "../net/wsClient";
@@ -65,6 +66,23 @@ export function ConversationScreen() {
   const lastActivityRef = useRef<number>(Date.now());
   const activeRef = useRef(false);
   const busyRef = useRef(false);
+  // AbortController for the in-flight TTS playback. Barge-in (or Esc)
+  // aborts the controller, which closes the AudioContext + cancels the
+  // streamed fetch, silencing Samantha mid-utterance.
+  const speakAbortRef = useRef<AbortController | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // VAD-based barge-in: while Samantha is speaking the mic is muted at
+  // the speech-recognition layer (to avoid echo), but a separate VAD
+  // listens on its own stream and fires when real user voice appears.
+  // On trigger we abort speak() and the user-message debounce picks up
+  // the next finalTranscript naturally.
+  useBargeIn(isSpeaking, () => {
+    if (speakAbortRef.current) {
+      console.info("[conv] barge-in detected, aborting TTS");
+      speakAbortRef.current.abort();
+    }
+  });
 
   const {
     interimTranscript,
@@ -114,6 +132,13 @@ export function ConversationScreen() {
 
   useKeys({
     Escape: () => {
+      // If Samantha is talking, Esc cuts her off (manual barge-in
+      // fallback for when the VAD doesn't fire — e.g. typed input
+      // mode, or headphone setup where the mic can't hear).
+      if (speakAbortRef.current) {
+        speakAbortRef.current.abort();
+        return;
+      }
       if (showTextInput) setShowTextInput(false);
       else if (conversationActive) toggleConversation();
       else route("ambient");
@@ -159,7 +184,17 @@ export function ConversationScreen() {
       const full = result.reply.trim();
       if (full) {
         setWaveMode("speaking");
-        try { await speak(full); } catch (e) { console.warn("speak failed", e); }
+        const ac = new AbortController();
+        speakAbortRef.current = ac;
+        setIsSpeaking(true);
+        try {
+          await speak(full, ac.signal);
+        } catch (e) {
+          console.warn("speak failed", e);
+        } finally {
+          setIsSpeaking(false);
+          speakAbortRef.current = null;
+        }
       }
     } catch (e) {
       console.warn("chat failed", e);
