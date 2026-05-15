@@ -1,15 +1,21 @@
-"""Real LLM client — talks to a local OpenAI-compatible server.
+"""Real LLM client — talks to an OpenAI-compatible server.
 
-The default target is `llama-server` from llama.cpp (`config.llm_server_url`).
-Anything that speaks OpenAI's `/v1/chat/completions` works here: vLLM,
-LM Studio, an OpenAI-compat shim around Ollama, etc.
+The default target is X.AI's Grok API (`config.llm_server_url`). Any
+OpenAI-compatible `/v1/chat/completions` endpoint works: a local
+llama-server (no auth), vLLM, LM Studio, OpenAI, Anthropic via a
+compat shim, etc. Auth header is added automatically when
+`config.llm_api_key` is non-empty.
 
-The contract is the same as `mock_llm`:
+Contract:
   - `generate_reply(message)`   → full text (awaitable)
   - `stream_reply(message)`     → async iterator of token chunks
 
-Errors don't crash the request loop. If the LLM server is down or hangs,
-the caller gets a short, in-character apology so the UI stays usable.
+Errors are NOT swallowed. If the LLM server is unreachable, the
+HTTP layer raises and the caller surfaces it to the user. The
+previous canned "He perdido el hilo…" fallback was removed because
+it (a) hid LLM outages behind plausible-sounding text and (b) when
+the mic re-captured Samantha saying that line it triggered an
+infinite echo loop. Fail loud, fail visible.
 """
 
 from __future__ import annotations
@@ -27,10 +33,6 @@ from .personality import SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION
 if TYPE_CHECKING:
     from .memory import MemoryChunk
 
-
-_FALLBACK_REPLY = (
-    "He perdido el hilo un momento. Dame un segundo y vuelve a decírmelo."
-)
 
 _client: httpx.AsyncClient | None = None
 
@@ -186,17 +188,16 @@ async def stream_reply(
     if config.llm_api_key:
         headers["Authorization"] = f"Bearer {config.llm_api_key}"
 
-    try:
-        async with client.stream("POST", url, json=payload, headers=headers) as resp:
-            if resp.status_code != 200:
-                body = await resp.aread()
-                logger.error(
-                    f"real_llm: HTTP {resp.status_code} from {url}: {body[:200]!r}"
-                )
-                yield _FALLBACK_REPLY
-                return
+    async with client.stream("POST", url, json=payload, headers=headers) as resp:
+        if resp.status_code != 200:
+            body = await resp.aread()
+            raise httpx.HTTPStatusError(
+                f"LLM {resp.status_code}: {body[:200].decode('utf-8', 'replace')}",
+                request=resp.request,
+                response=resp,
+            )
 
-            async for line in resp.aiter_lines():
+        async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
@@ -214,9 +215,6 @@ async def stream_reply(
                 token = delta.get("content") or ""
                 if token:
                     yield token
-    except httpx.HTTPError as e:
-        logger.error(f"real_llm: transport error talking to {url}: {e}")
-        yield _FALLBACK_REPLY
 
 
 async def generate_reply(
@@ -232,4 +230,4 @@ async def generate_reply(
         message, facts=facts, recall=recall, short_term=short_term
     ):
         chunks.append(tok)
-    return "".join(chunks).strip() or _FALLBACK_REPLY
+    return "".join(chunks).strip()

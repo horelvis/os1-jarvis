@@ -22,14 +22,10 @@ Or with hot reload during development:
 """
 
 import asyncio
-import io
 import json
-import math
 import os
 import random
-import struct
 import time
-import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -382,105 +378,66 @@ async def speak(req: SpeakRequest) -> Response:
     Backends (config.tts_backend):
       vllm_omni → Stream from a vllm-omni server (typically the 4090
                   box). Voice cloning via Qwen3-TTS Base. ~40 ms TTFA
-                  warm. On failure falls back to Piper.
+                  warm. Default.
       piper     → Local Piper synth, ~50-300 ms on CPU. Resampled to
                   24 kHz at the tts.py layer so the wire format is
                   uniform.
 
     Response is `audio/pcm` raw 24 kHz mono int16 little-endian,
     chunked. Headers carry mode + sample rate. The frontend uses
-    Web Audio API to decode & play as chunks arrive (Phase 3.1).
+    Web Audio API to decode & play as chunks arrive.
 
-    Fallback to the mock tone WAV (audio/wav) if no backend is
-    available at all — so the UI never hangs even on cold-install.
+    No tone-WAV / mock fallback. If the configured backend is
+    unreachable the handler returns 503 so the UI surfaces a real
+    "no oigo al TTS" alert instead of a placebo beep that hides
+    the outage.
     """
     logger.info(
         f"speak: voice={req.voice} backend={config.tts_backend} "
         f"text='{req.text[:60]}'"
     )
 
+    if not req.text.strip():
+        return Response(
+            b"", media_type="audio/pcm", headers={"X-TTS-Mode": "empty"},
+        )
+
     from . import tts
 
-    if tts.is_available() and req.text.strip():
-        try:
-            gen = tts.stream(req.text)
-            # Prime the generator to discover the backend that serves
-            # — we need its label for the X-TTS-Mode header, which
-            # has to be set BEFORE the body starts streaming.
-            first_chunk, mode_used = await gen.__anext__()
+    if not tts.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail=f"tts backend '{config.tts_backend}' not available",
+        )
 
-            async def body():
-                yield first_chunk
-                async for chunk, _label in gen:
-                    yield chunk
+    gen = tts.stream(req.text)
+    # Prime the generator to discover the backend that serves — we
+    # need its label for the X-TTS-Mode header, which has to be set
+    # BEFORE the body starts streaming.
+    try:
+        first_chunk, mode_used = await gen.__anext__()
+    except StopAsyncIteration:
+        # stream() yielded nothing (e.g. whitespace-only input slipped
+        # through the strip check); equivalent to "empty".
+        return Response(
+            b"", media_type="audio/pcm", headers={"X-TTS-Mode": "empty"},
+        )
 
-            return StreamingResponse(
-                body(),
-                media_type="audio/pcm",
-                headers={
-                    "X-TTS-Mode": mode_used,
-                    "X-TTS-Sample-Rate": str(tts.OUTPUT_SAMPLE_RATE),
-                    # Hint to caches: each call is unique audio.
-                    "Cache-Control": "no-store",
-                },
-            )
-        except StopAsyncIteration:
-            # Empty input — generator yielded nothing.
-            return Response(
-                b"", media_type="audio/pcm",
-                headers={"X-TTS-Mode": "empty"},
-            )
-        except Exception as e:  # pragma: no cover — runtime safety net
-            logger.error(f"speak: stream failed, falling back to tone: {e}")
+    async def body():
+        yield first_chunk
+        async for chunk, _label in gen:
+            yield chunk
 
-    # Tone fallback (rare — only when every TTS backend is unreachable).
-    await asyncio.sleep(len(req.text) * 0.01)
-    duration_s = max(0.6, min(7.0, len(req.text) / 13.0))
-    wav_bytes = _generate_tone_wav(duration_s=duration_s, freq=440)
-
-    return Response(
-        content=wav_bytes,
-        media_type="audio/wav",
-        headers={"X-TTS-Mode": "mock"},
+    return StreamingResponse(
+        body(),
+        media_type="audio/pcm",
+        headers={
+            "X-TTS-Mode": mode_used,
+            "X-TTS-Sample-Rate": str(tts.OUTPUT_SAMPLE_RATE),
+            # Hint to caches: each call is unique audio.
+            "Cache-Control": "no-store",
+        },
     )
-
-
-def _generate_tone_wav(duration_s: float, freq: float = 440.0) -> bytes:
-    """Build a mono 16-bit WAV.
-
-    The waveform is a soft fade-in/out tone for the first ~250 ms (just
-    enough to confirm audio is playing), then silence for the rest. This
-    keeps `audio.ended` firing at `duration_s` so the frontend can drive
-    state transitions on it, without subjecting the listener to a multi-
-    second pitch.
-    """
-    sample_rate = 16000
-    n_samples = int(duration_s * sample_rate)
-    tone_samples = min(n_samples, int(0.25 * sample_rate))
-    fade_samples = int(0.05 * sample_rate)
-    # Audible-but-soft tap; the previous 0.12 was inaudible at normal
-    # system volume. Still just a placeholder — Phase 5 swaps Piper in.
-    amplitude = 0.45
-
-    samples = [0] * n_samples
-    for i in range(tone_samples):
-        if i < fade_samples:
-            envelope = i / fade_samples
-        elif i > tone_samples - fade_samples:
-            envelope = (tone_samples - i) / fade_samples
-        else:
-            envelope = 1.0
-        value = envelope * amplitude * math.sin(2 * math.pi * freq * i / sample_rate)
-        samples[i] = int(value * 32767)
-
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(struct.pack(f"<{n_samples}h", *samples))
-
-    return buf.getvalue()
 
 
 # ========================================================================

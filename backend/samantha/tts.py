@@ -80,30 +80,28 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
     Multiple chunks for vllm_omni (real streaming); a single chunk
     for piper (one-shot synth, resampled if needed).
 
-    On vllm_omni failure the function silently falls back to Piper.
-    Empty / whitespace input yields nothing.
+    No silent cross-backend fallback. If the selected backend fails,
+    the exception propagates so the caller surfaces a real error to
+    the UI instead of swapping voices mid-utterance (which was the
+    "voice changes mid-audio" bug). Empty input yields nothing.
     """
     if not text or not text.strip():
         return
     clean = text.strip()
 
-    backend = (config.tts_backend or "piper").lower()
+    backend = (config.tts_backend or "vllm_omni").lower()
     if backend == "vllm_omni":
-        try:
-            async for chunk in _stream_vllm_omni(clean):
-                # vllm-omni already emits at OUTPUT_SAMPLE_RATE.
-                yield chunk, "vllm_omni"
-            return
-        except Exception as e:
-            logger.warning(
-                f"tts: vllm_omni failed ({e}); falling back to piper"
-            )
-
-    # Piper path. Sync — run in a thread. Returns a complete WAV
-    # which we strip + resample to match OUTPUT_SAMPLE_RATE before
-    # yielding so the frontend only sees one wire format.
-    pcm = await asyncio.to_thread(_piper_to_pcm, clean)
-    yield pcm, "piper"
+        async for chunk in _stream_vllm_omni(clean):
+            yield chunk, "vllm_omni"
+        return
+    if backend == "piper":
+        # Sync synth — run in a thread so the event loop isn't blocked.
+        # _piper_to_pcm strips the WAV header and resamples to
+        # OUTPUT_SAMPLE_RATE so the frontend only sees one wire format.
+        pcm = await asyncio.to_thread(_piper_to_pcm, clean)
+        yield pcm, "piper"
+        return
+    raise ValueError(f"unknown tts backend: {backend!r}")
 
 
 def synth(text: str) -> tuple[bytes, str]:

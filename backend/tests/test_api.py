@@ -94,52 +94,14 @@ def test_transcribe_returns_text():
 # ========================================================================
 
 
-def test_speak_returns_wav():
-    response = client.post("/speak", json={"text": "Hola", "voice": "default"})
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "audio/wav"
-    # WAV magic bytes
-    assert response.content[:4] == b"RIFF"
-    assert response.content[8:12] == b"WAVE"
-    # X-TTS-Mode reports the backend that served. "mock" is the tone
-    # fallback when no backend is ready; "piper" / "qwen3_remote" are
-    # real synth.
-    assert response.headers.get("X-TTS-Mode") in {"piper", "qwen3_remote", "mock"}
-
-
-def test_speak_falls_back_to_mock_when_backend_unavailable(monkeypatch):
-    """When the TTS backend can't serve (model absent, remote unreachable),
-    /speak returns the tone WAV rather than failing the request."""
+def test_speak_503_when_backend_unavailable(monkeypatch):
+    """No silent tone fallback: if the configured TTS backend can't serve,
+    /speak returns 503 so the UI surfaces a real error instead of a beep."""
     from samantha import tts as tts_mod
 
     monkeypatch.setattr(tts_mod, "is_available", lambda: False)
     response = client.post("/speak", json={"text": "Hola", "voice": "default"})
-    assert response.status_code == 200
-    assert response.headers.get("X-TTS-Mode") == "mock"
-    assert response.content[:4] == b"RIFF"
-
-
-def test_qwen3_remote_falls_back_to_piper_on_http_error(monkeypatch):
-    """If the remote Qwen3 server returns non-200 (or refuses connection),
-    synth() should silently fall through to Piper instead of bubbling."""
-    from samantha import tts as tts_mod
-    from samantha.config import config as cfg
-
-    monkeypatch.setattr(cfg, "tts_backend", "qwen3_remote")
-    monkeypatch.setattr(cfg, "qwen3_tts_url", "http://127.0.0.1:1")  # closed
-    # Pretend Piper is present so the fallback path returns something.
-    monkeypatch.setattr(tts_mod, "_piper_voice_available", lambda: True)
-
-    def fake_piper(text: str) -> bytes:
-        return b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 16
-
-    monkeypatch.setattr(tts_mod, "_synth_piper", fake_piper)
-    out, mode_used = tts_mod.synth("hola")
-    assert out.startswith(b"RIFF")
-    assert b"WAVE" in out[:12]
-    # When qwen3_remote fails, the response must reflect that Piper
-    # served — not the originally requested backend.
-    assert mode_used == "piper"
+    assert response.status_code == 503
 
 
 def test_speak_validates_empty():
@@ -281,14 +243,16 @@ def test_real_llm_streams_sse_tokens():
             return None
 
     class _FakeClient:
-        def stream(self, method, url, json=None):
+        def stream(self, method, url, json=None, headers=None):
             assert method == "POST"
             assert url.endswith("/v1/chat/completions")
             assert json["stream"] is True
             assert json["messages"][0]["role"] == "system"
-            # User message is the raw input plus Qwen3's /no_think
-            # control token (disables the reasoning block).
-            assert json["messages"][1]["content"] == "hola\n/no_think"
+            # User message verbatim (no /no_think suffix because the
+            # default model is grok-* not qwen). The suffix is only
+            # appended for Qwen-family models — see
+            # test_real_llm_build_payload_qwen_appends_no_think.
+            assert json["messages"][1]["content"] == "hola"
             return _FakeStreamCtx()
 
         async def aclose(self):
@@ -305,15 +269,24 @@ def test_real_llm_streams_sse_tokens():
     assert "".join(tokens) == "Hola. ¿Cómo va?"
 
 
-def test_real_llm_falls_back_on_http_error():
-    """If the LLM server returns non-200, we emit an in-character fallback
-    instead of bubbling an exception to the UI."""
+def test_real_llm_raises_on_http_error():
+    """If the LLM server returns non-200, the stream raises so the WS
+    handler surfaces it. The previous silent 'He perdido el hilo'
+    fallback hid LLM outages AND fed the mic-feedback loop (Samantha
+    saying the fallback line was picked back up as the next user
+    message)."""
     import asyncio
+
+    import httpx
 
     from samantha import real_llm
 
+    class _FakeRequest:
+        pass
+
     class _FakeResponse:
         status_code = 503
+        request = _FakeRequest()
 
         async def aiter_lines(self):
             if False:
@@ -343,11 +316,9 @@ def test_real_llm_falls_back_on_http_error():
         finally:
             real_llm._client = None
 
-    tokens = asyncio.run(run())
-    full = "".join(tokens)
-    assert full, "should still yield something so the UI doesn't hang"
-    # Fallback is in Samantha's voice (no "error 503" disclaimer)
-    assert "perdido el hilo" in full.lower() or "vuelve a" in full.lower()
+    import pytest
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(run())
 
 
 def test_personality_system_prompt_loaded():
@@ -594,7 +565,8 @@ def test_real_llm_injects_recall_into_system_prompt():
     assert "Toby" in system
     assert "tú dijiste" in system  # samantha-role line
     assert "ella" in system  # user-role line
-    assert payload["messages"][-1]["content"] == "¿Cómo está Toby?\n/no_think"
+    # /no_think is Qwen-specific; with the default grok model it's not appended.
+    assert payload["messages"][-1]["content"] == "¿Cómo está Toby?"
 
 
 def test_real_llm_build_payload_includes_facts_recall_and_short_term():
@@ -638,7 +610,23 @@ def test_real_llm_build_payload_includes_facts_recall_and_short_term():
         < system.find("# Conversación reciente")
     )
     assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == "me siento perdido\n/no_think"
+    # /no_think is Qwen-specific; with the default grok model it's not appended.
+    assert payload["messages"][-1]["content"] == "me siento perdido"
+
+
+def test_real_llm_build_payload_qwen_appends_no_think(monkeypatch):
+    """Qwen3-family models get the /no_think soft switch appended so we
+    don't wait for the reasoning block; non-Qwen models don't."""
+    from samantha import real_llm
+    from samantha.config import config as cfg
+
+    monkeypatch.setattr(cfg, "llm_model", "qwen3-8b")
+    payload_qwen = real_llm._build_payload("hola")
+    assert payload_qwen["messages"][-1]["content"] == "hola\n/no_think"
+
+    monkeypatch.setattr(cfg, "llm_model", "grok-4-1-fast-non-reasoning")
+    payload_grok = real_llm._build_payload("hola")
+    assert payload_grok["messages"][-1]["content"] == "hola"
 
 
 # ========================================================================
