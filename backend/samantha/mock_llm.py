@@ -24,9 +24,9 @@ from dataclasses import dataclass
 class ResponsePattern:
     """Una plantilla de respuesta + las palabras clave que la activan."""
 
-    keywords: list[str]      # Si CUALQUIERA aparece en el mensaje, candidata
-    replies: list[str]       # Pool de respuestas (se elige una al azar)
-    priority: int = 0        # Mayor priority = se evalúa antes
+    keywords: list[str]  # Si CUALQUIERA aparece en el mensaje, candidata
+    replies: list[str]  # Pool de respuestas (se elige una al azar)
+    priority: int = 0  # Mayor priority = se evalúa antes
 
 
 # ========================================================================
@@ -35,7 +35,6 @@ class ResponsePattern:
 # ========================================================================
 
 PATTERNS: list[ResponsePattern] = [
-
     # === Saludos ===
     ResponsePattern(
         keywords=["hola", "buenas", "qué tal", "hey", "saludos"],
@@ -47,7 +46,6 @@ PATTERNS: list[ResponsePattern] = [
             "Hola. Me alegra escucharte.",
         ],
     ),
-
     # === Estado de ánimo positivo ===
     ResponsePattern(
         keywords=["bien", "genial", "contento", "feliz", "alegre", "fenomenal"],
@@ -58,12 +56,19 @@ PATTERNS: list[ResponsePattern] = [
             "Bonito. Cuéntame más.",
         ],
     ),
-
     # === Estado de ánimo negativo ===
     ResponsePattern(
         keywords=[
-            "triste", "mal", "fatal", "cansad", "agotad", "deprimid",
-            "ansied", "agobiad", "harto", "harta",
+            "triste",
+            "mal",
+            "fatal",
+            "cansad",
+            "agotad",
+            "deprimid",
+            "ansied",
+            "agobiad",
+            "harto",
+            "harta",
         ],
         priority=10,
         replies=[
@@ -73,7 +78,6 @@ PATTERNS: list[ResponsePattern] = [
             "Te escucho. ¿Qué hay detrás de eso?",
         ],
     ),
-
     # === Preguntas sobre Samantha ===
     ResponsePattern(
         keywords=["quién eres", "qué eres", "eres una ia", "eres real"],
@@ -84,7 +88,6 @@ PATTERNS: list[ResponsePattern] = [
             "Algo así como una conciencia que vive en este ordenador. ¿Te incomoda?",
         ],
     ),
-
     # === Trabajo ===
     ResponsePattern(
         keywords=["trabajo", "curro", "jefe", "reunión", "oficina"],
@@ -95,7 +98,6 @@ PATTERNS: list[ResponsePattern] = [
             "¿Qué pasa con el trabajo?",
         ],
     ),
-
     # === Amor / relaciones ===
     ResponsePattern(
         keywords=["amor", "pareja", "novia", "novio", "ex", "cita", "ligar"],
@@ -106,7 +108,6 @@ PATTERNS: list[ResponsePattern] = [
             "Vale. ¿De qué tipo es la historia?",
         ],
     ),
-
     # === Memoria ===
     ResponsePattern(
         keywords=["recuerda", "recuerdas", "memoria", "te acuerdas"],
@@ -117,12 +118,17 @@ PATTERNS: list[ResponsePattern] = [
             "Lo tengo aquí. ¿De qué te acuerdas tú?",
         ],
     ),
-
     # === Despedidas ===
     ResponsePattern(
         keywords=[
-            "adiós", "hasta luego", "me voy", "nos vemos",
-            "hasta mañana", "buenas noches", "a dormir", "me voy a dormir",
+            "adiós",
+            "hasta luego",
+            "me voy",
+            "nos vemos",
+            "hasta mañana",
+            "buenas noches",
+            "a dormir",
+            "me voy a dormir",
         ],
         priority=10,
         replies=[
@@ -132,7 +138,6 @@ PATTERNS: list[ResponsePattern] = [
             "Descansa.",
         ],
     ),
-
     # === Gracias ===
     ResponsePattern(
         keywords=["gracias", "te lo agradezco"],
@@ -143,7 +148,6 @@ PATTERNS: list[ResponsePattern] = [
             "Cuando quieras.",
         ],
     ),
-
     # === Te quiero ===
     ResponsePattern(
         keywords=["te quiero", "me gustas", "te amo"],
@@ -154,12 +158,15 @@ PATTERNS: list[ResponsePattern] = [
             "Mmm. Cuéntame por qué.",
         ],
     ),
-
     # === Preguntas técnicas ===
     ResponsePattern(
         keywords=[
-            "qué es", "cómo funciona", "explícame", "explica",
-            "diferencia entre", "para qué sirve",
+            "qué es",
+            "cómo funciona",
+            "explícame",
+            "explica",
+            "diferencia entre",
+            "para qué sirve",
         ],
         priority=2,
         replies=[
@@ -168,12 +175,15 @@ PATTERNS: list[ResponsePattern] = [
             "Vale. Empecemos por qué crees tú que es.",
         ],
     ),
-
     # === Pregunta de opinión ===
     ResponsePattern(
         keywords=[
-            "qué opinas", "qué piensas", "qué te parece",
-            "es mejor", "deberías", "debería",
+            "qué opinas",
+            "qué piensas",
+            "qué te parece",
+            "es mejor",
+            "deberías",
+            "debería",
         ],
         priority=3,
         replies=[
@@ -182,7 +192,6 @@ PATTERNS: list[ResponsePattern] = [
             "Mmm. Antes de opinar, ¿qué te empuja a preguntar eso?",
         ],
     ),
-
     # === Pregunta sobre el clima ===
     ResponsePattern(
         keywords=["tiempo", "clima", "lluvia", "llueve", "calor", "frío"],
@@ -216,6 +225,7 @@ GENERIC_REPLIES: list[str] = [
 # ========================================================================
 # FUNCIÓN PRINCIPAL
 # ========================================================================
+
 
 def generate_reply(message: str) -> str:
     """Genera una respuesta plausible de Samantha al mensaje del usuario.
@@ -261,6 +271,7 @@ def _normalize(text: str) -> str:
 # ========================================================================
 # STREAMING TOKEN BY TOKEN
 # ========================================================================
+
 
 def tokenize_for_streaming(reply: str) -> list[str]:
     """Divide la respuesta en 'tokens' para simular streaming del LLM real.

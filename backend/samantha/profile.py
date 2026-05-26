@@ -28,9 +28,7 @@ BIG5_BY_INDEX: dict[int, str] = {
     5: "neuroticism",
 }
 
-BIG5_FACT_KINDS: tuple[str, ...] = tuple(
-    f"big5_{d}" for d in BIG5_BY_INDEX.values()
-)
+BIG5_FACT_KINDS: tuple[str, ...] = tuple(f"big5_{d}" for d in BIG5_BY_INDEX.values())
 
 # Facts that constitute the pairing itself. delete_profile() wipes
 # these and only these — conversational chunks survive.
@@ -43,9 +41,7 @@ def is_onboarded(mem: Memory, *, user_id: str = "primary") -> bool:
     return mem.get_fact("onboarding_completed_at", user_id=user_id) is not None
 
 
-def get_profile(
-    mem: Memory, *, user_id: str = "primary"
-) -> dict | None:
+def get_profile(mem: Memory, *, user_id: str = "primary") -> dict | None:
     if not is_onboarded(mem, user_id=user_id):
         return None
     name_fact = mem.get_fact("name", user_id=user_id)
@@ -94,13 +90,15 @@ def complete_onboarding(
             )
 
     mem.set_fact(
-        "name", name,
+        "name",
+        name,
         text=f"El usuario se llama {name}",
         user_id=user_id,
     )
     ts = int(time.time())
     mem.set_fact(
-        "onboarding_completed_at", ts,
+        "onboarding_completed_at",
+        ts,
         text=f"Onboarding completado en {ts}",
         user_id=user_id,
     )
@@ -111,22 +109,28 @@ def complete_onboarding(
 
 
 def delete_profile(mem: Memory, *, user_id: str = "primary") -> bool:
-    """ADMIN-ONLY. Removes the facts that constitute the pairing —
+    """ADMIN-ONLY. Removes all facts that constitute the pairing —
     name, onboarding_completed_at, and the five Big-Five trait facts.
+    Both the latest and any historical/overwritten versions of these facts
+    for this user are deleted.
     The 6 answer chunks stay (Samantha never forgets)."""
-    facts = mem.all_facts(user_id=user_id)
-    if not facts:
+    res = mem._collection.get(
+        where={
+            "$and": [
+                {"user_id": user_id},
+                {"role": "fact"},
+                {"kind": {"$in": list(PROFILE_FACT_KINDS)}},
+            ]
+        }
+    )
+    ids = res.get("ids") or []
+    if not ids:
         return False
-    to_delete = [f["id"] for f in facts if f.get("kind") in PROFILE_FACT_KINDS]
-    if not to_delete:
-        return False
-    mem._collection.delete(ids=to_delete)
+    mem._collection.delete(ids=ids)
     return True
 
 
-def _recover_answers(
-    mem: Memory, anchor_ts: int, *, user_id: str = "primary"
-) -> list[dict]:
+def _recover_answers(mem: Memory, anchor_ts: int, *, user_id: str = "primary") -> list[dict]:
     """Find role='user' chunks inserted within ±5 s of the onboarding marker."""
     if anchor_ts <= 0:
         return []

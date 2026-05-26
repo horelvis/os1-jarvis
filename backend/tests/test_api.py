@@ -176,6 +176,25 @@ def test_ws_chat_streams_tokens_then_done():
         assert done_msg["thinking_ms"] >= 0
 
 
+def test_ws_chat_handles_streaming_exception(monkeypatch):
+    """If an exception occurs during streaming, /ws sends an error message instead of crashing."""
+    from samantha import api
+
+    async def mock_stream_tokens(*args, **kwargs):
+        if False:
+            yield ""
+        raise ValueError("Simulated streaming error")
+
+    monkeypatch.setattr(api, "_stream_tokens", mock_stream_tokens)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "chat", "message": "hola"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "llm_error" in msg["error"]
+        assert "Simulated streaming error" in msg["error"]
+
+
 def test_ws_listen_returns_transcription():
     """A `listen` turn returns a single `transcription` message."""
     with client.websocket_connect("/ws") as ws:
@@ -317,6 +336,7 @@ def test_real_llm_raises_on_http_error():
             real_llm._client = None
 
     import pytest
+
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(run())
 
@@ -461,6 +481,7 @@ def test_memory_uses_fastembed_multilingual_by_default(tmp_path):
     interaction (covered separately).
     """
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
     mem.remember("user", "Mi mascota se llama Toby, es un labrador.", user_id="u1")
     mem.remember("user", "Mi color favorito es el azul cobalto.", user_id="u1")
@@ -473,6 +494,7 @@ def test_memory_uses_fastembed_multilingual_by_default(tmp_path):
 
 def test_memory_remember_writes_to_short_term(tmp_path):
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=3)
     mem.remember("user", "uno", user_id="u1")
     mem.remember("samantha", "dos", user_id="u1")
@@ -484,17 +506,18 @@ def test_memory_remember_writes_to_short_term(tmp_path):
 
 def test_memory_recall_excludes_short_term_entries(tmp_path):
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=10)
     mem.remember("user", "hablamos del café por la mañana", user_id="u1")
     short_ids = {e.id for e in mem.short_term(user_id="u1")}
     results = mem.recall("café por la mañana", k=5, user_id="u1")
     result_ids = {r.id for r in results}
-    assert not (result_ids & short_ids), \
-        "recall should exclude short-term entries"
+    assert not (result_ids & short_ids), "recall should exclude short-term entries"
 
 
 def test_memory_set_and_get_fact(tmp_path):
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"))
     fact_id = mem.set_fact("name", "Horelvis", user_id="u1")
     assert fact_id
@@ -507,6 +530,7 @@ def test_memory_set_and_get_fact(tmp_path):
 def test_memory_get_fact_returns_newest(tmp_path):
     import time
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"))
     mem.set_fact("name", "Old Name", user_id="u1")
     time.sleep(1.1)
@@ -517,9 +541,9 @@ def test_memory_get_fact_returns_newest(tmp_path):
 
 def test_memory_facts_excluded_from_conversational_recall(tmp_path):
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=0)
-    mem.set_fact("name", "Horelvis", user_id="u1",
-                 text="El usuario se llama Horelvis")
+    mem.set_fact("name", "Horelvis", user_id="u1", text="El usuario se llama Horelvis")
     mem.remember("user", "Me encanta el café por la mañana", user_id="u1")
     results = mem.recall("Horelvis", k=5, user_id="u1")
     for r in results:
@@ -528,6 +552,7 @@ def test_memory_facts_excluded_from_conversational_recall(tmp_path):
 
 def test_memory_all_facts_filters_by_kind(tmp_path):
     from samantha.memory import Memory
+
     mem = Memory(persist_dir=str(tmp_path / "mem"))
     mem.set_fact("name", "Alice", user_id="u1")
     mem.set_fact("preferred_tone", "direct", user_id="u1")
@@ -575,20 +600,29 @@ def test_real_llm_build_payload_includes_facts_recall_and_short_term():
     from samantha.memory import MemoryChunk
 
     facts = [
-        {"kind": "name", "value": "Horelvis",
-         "text": "El usuario se llama Horelvis"},
-        {"kind": "onboarding_completed_at", "value": 1778000000,
-         "text": "Onboarding completado en 1778000000"},
+        {"kind": "name", "value": "Horelvis", "text": "El usuario se llama Horelvis"},
+        {
+            "kind": "onboarding_completed_at",
+            "value": 1778000000,
+            "text": "Onboarding completado en 1778000000",
+        },
     ]
     recall = [
-        MemoryChunk(id="r1", role="user", text="Trabajo en una agencia",
-                    timestamp=1778001000, user_id="primary"),
+        MemoryChunk(
+            id="r1",
+            role="user",
+            text="Trabajo en una agencia",
+            timestamp=1778001000,
+            user_id="primary",
+        ),
     ]
     short_term = [
-        MemoryChunk(id="s1", role="user", text="¿qué tal el día?",
-                    timestamp=1778002000, user_id="primary"),
-        MemoryChunk(id="s2", role="samantha", text="Bien. ¿Y tú?",
-                    timestamp=1778002005, user_id="primary"),
+        MemoryChunk(
+            id="s1", role="user", text="¿qué tal el día?", timestamp=1778002000, user_id="primary"
+        ),
+        MemoryChunk(
+            id="s2", role="samantha", text="Bien. ¿Y tú?", timestamp=1778002005, user_id="primary"
+        ),
     ]
 
     payload = real_llm._build_payload(
@@ -700,10 +734,13 @@ def test_profile_post_rejects_empty_body():
 
 
 def test_profile_post_rejects_short_answers():
-    r = client.post("/profile", json={
-        "name": "Foo",
-        "answers": [{"q": "q", "a": "a"}],
-    })
+    r = client.post(
+        "/profile",
+        json={
+            "name": "Foo",
+            "answers": [{"q": "q", "a": "a"}],
+        },
+    )
     assert r.status_code == 422
 
 
@@ -765,3 +802,135 @@ def test_profile_post_rejects_re_pairing(tmp_path, monkeypatch):
     client.delete("/profile")
     r3 = client.post("/profile", json={**body, "name": "Bob"})
     assert r3.status_code == 200
+
+
+def test_hermes_provider_config_loading(monkeypatch):
+    """Verify that SAMANTHA_LLM_PROVIDER loads correctly and sets Config.llm_provider."""
+    from samantha.config import Config
+    monkeypatch.setenv("SAMANTHA_LLM_PROVIDER", "hermes")
+    cfg = Config.from_env()
+    assert cfg.llm_provider == "hermes"
+
+
+def test_real_llm_build_payload_hermes_format():
+    """Verify that when llm_provider == 'hermes', _build_payload constructs a clean messages format."""
+    from samantha import real_llm
+    from samantha.config import config as cfg
+    from samantha.memory import MemoryChunk
+
+    # Save original provider to restore later
+    orig_provider = cfg.llm_provider
+    cfg.llm_provider = "hermes"
+
+    try:
+        short_term = [
+            MemoryChunk(id="s1", role="user", text="hola", timestamp=1778002000, user_id="primary"),
+            MemoryChunk(id="s2", role="samantha", text="hola, qué tal?", timestamp=1778002005, user_id="primary"),
+            MemoryChunk(id="s3", role="user", text="bien, y tú?", timestamp=1778002010, user_id="primary"),
+        ]
+
+        payload = real_llm._build_payload(
+            message="bien, y tú?",
+            facts=[{"text": "Fact 1"}],
+            recall=[MemoryChunk(id="r1", role="user", text="recall", timestamp=1778002020, user_id="primary")],
+            short_term=short_term,
+        )
+
+        messages = payload["messages"]
+        # System prompt should be exactly SYSTEM_PROMPT without injected facts/recall/short_term
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == real_llm.SYSTEM_PROMPT
+        assert "# Lo que sabes de ella" not in messages[0]["content"]
+        assert "# Lo que recuerdas" not in messages[0]["content"]
+        assert "# Conversación reciente" not in messages[0]["content"]
+
+        # Short term conversation must be mapped to user/assistant turns
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "hola"
+
+        assert messages[2]["role"] == "assistant"
+        assert messages[2]["content"] == "hola, qué tal?"
+
+        assert messages[3]["role"] == "user"
+        assert messages[3]["content"] == "bien, y tú?"
+
+        # Make sure no double current message is appended if already present at the end
+        assert len(messages) == 4
+    finally:
+        cfg.llm_provider = orig_provider
+
+
+def test_real_llm_build_payload_hermes_no_qwen_no_think(monkeypatch):
+    """Verify that when llm_provider == 'hermes', Qwen /no_think switch is NOT appended."""
+    from samantha import real_llm
+    from samantha.config import config as cfg
+
+    orig_provider = cfg.llm_provider
+    orig_model = cfg.llm_model
+    cfg.llm_provider = "hermes"
+    cfg.llm_model = "qwen3-8b"
+
+    try:
+        payload = real_llm._build_payload("hola")
+        messages = payload["messages"]
+        # Last message should just be "hola", without "/no_think"
+        assert messages[-1]["content"] == "hola"
+    finally:
+        cfg.llm_provider = orig_provider
+        cfg.llm_model = orig_model
+
+
+def test_real_llm_hermes_session_header_injected(monkeypatch):
+    """Verify that X-Hermes-Session-Id header is injected with user_id when calling stream_reply in hermes mode."""
+    import asyncio
+    from samantha import real_llm
+    from samantha.config import config as cfg
+    import httpx
+
+    orig_provider = cfg.llm_provider
+    orig_url = cfg.llm_server_url
+    cfg.llm_provider = "hermes"
+    cfg.llm_server_url = "http://127.0.0.1:8642"
+
+    class MockStreamContext:
+        def __init__(self, method, url, **kwargs):
+            self.headers = kwargs.get("headers", {})
+            self.request = httpx.Request(method, url)
+
+        async def __aenter__(self):
+            # Return self or a mock response
+            class MockResponse:
+                status_code = 200
+                request = self.request
+                async def aread(self):
+                    return b""
+                async def aiter_lines(self):
+                    # Yield a simple DONE event to end stream immediately
+                    yield "data: [DONE]"
+            return MockResponse()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_headers = {}
+
+    def mock_stream(self, method, url, **kwargs):
+        nonlocal mock_headers
+        mock_headers = kwargs.get("headers", {})
+        return MockStreamContext(method, url, **kwargs)
+
+    # Force recreating the client to pick up the patched stream method
+    real_llm._client = None
+    monkeypatch.setattr(httpx.AsyncClient, "stream", mock_stream)
+
+    async def run():
+        async for _ in real_llm.stream_reply("hello", user_id="user_custom_123"):
+            pass
+
+    try:
+        asyncio.run(run())
+        assert mock_headers.get("X-Hermes-Session-Id") == "user_custom_123"
+    finally:
+        cfg.llm_provider = orig_provider
+        cfg.llm_server_url = orig_url
+        real_llm._client = None

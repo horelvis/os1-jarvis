@@ -80,13 +80,21 @@ export class WSClient {
     userId = "primary",
   ): Promise<{ reply: string; thinkingMs: number }> {
     await this.whenOpen();
+    const socket = this.ws;
     return new Promise((resolve, reject) => {
       let full = "";
       const restore = () => {
         this.handlers.delete("token");
         this.handlers.delete("done");
         this.handlers.delete("error");
+        socket?.removeEventListener("close", onClose);
       };
+      const onClose = () => {
+        restore();
+        reject(new Error("ws_not_connected"));
+      };
+      socket?.addEventListener("close", onClose);
+
       this.on("token", (m) => { full += m.token; onToken(m.token); });
       this.on("done", (m) => { restore(); resolve({ reply: full, thinkingMs: m.thinking_ms }); });
       this.on("error", (m) => { restore(); reject(new Error(m.error)); });
@@ -99,12 +107,24 @@ export class WSClient {
 
   async listen(): Promise<string> {
     await this.whenOpen();
+    const socket = this.ws;
     return new Promise((resolve, reject) => {
-      this.on("transcription", (m) => {
+      const restore = () => {
         this.handlers.delete("transcription");
+        socket?.removeEventListener("close", onClose);
+      };
+      const onClose = () => {
+        restore();
+        reject(new Error("ws_not_connected"));
+      };
+      socket?.addEventListener("close", onClose);
+
+      this.on("transcription", (m) => {
+        restore();
         resolve(m.text);
       });
       if (!this.send({ type: "listen" })) {
+        restore();
         reject(new Error("ws_not_connected"));
       }
     });

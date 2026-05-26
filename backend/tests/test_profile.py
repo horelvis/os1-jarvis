@@ -14,8 +14,7 @@ def _six_answers() -> list[dict]:
         {"q": "¿Cómo te llamo?", "a": "Bob"},
         {"q": "¿Cómo estás hoy?", "a": "regular"},
         {"q": "¿Qué te gusta hacer?", "a": "salir a correr"},
-        {"q": "Cuéntame algo que te haya hecho ilusión",
-         "a": "encontré un café nuevo"},
+        {"q": "Cuéntame algo que te haya hecho ilusión", "a": "encontré un café nuevo"},
         {"q": "¿Algo que te ronde la cabeza?", "a": "mi color favorito es el azul"},
         {"q": "¿Directa o cuidadosa?", "a": "directa"},
     ]
@@ -58,10 +57,7 @@ def test_onboarding_answers_become_user_memory_chunks(tmp_path):
     complete_onboarding(mem, name="Bob", answers=_six_answers())
     results = mem.recall("color favorito", k=10)
     expected_substrings = ["azul", "café", "correr"]
-    matched = any(
-        any(s.lower() in r.text.lower() for s in expected_substrings)
-        for r in results
-    )
+    matched = any(any(s.lower() in r.text.lower() for s in expected_substrings) for r in results)
     assert matched, f"recall returned {[r.text for r in results]}"
 
 
@@ -98,3 +94,27 @@ def test_delete_profile_removes_big_five_facts(tmp_path):
     delete_profile(mem)
     for kind in BIG5_FACT_KINDS:
         assert mem.get_fact(kind) is None, f"{kind} survived delete_profile"
+
+
+def test_delete_profile_removes_multiple_historical_fact_versions(tmp_path):
+    """delete_profile must remove all historical versions of profile facts, not just the latest."""
+    mem = _make_mem(tmp_path)
+    mem.set_fact("name", "Oldest Alice")
+    mem.set_fact("name", "Older Alice")
+    mem.set_fact("name", "Current Alice")
+
+    delete_profile(mem)
+
+    assert mem.get_fact("name") is None
+
+    # Verify no facts remain in the database at all for 'name'
+    res = mem._collection.get(
+        where={
+            "$and": [
+                {"user_id": "primary"},
+                {"role": "fact"},
+                {"kind": "name"},
+            ]
+        }
+    )
+    assert not res.get("ids")

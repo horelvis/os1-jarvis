@@ -48,11 +48,11 @@ from loguru import logger
 @dataclass
 class MemoryChunk:
     id: str
-    role: str          # "user" or "samantha"
+    role: str  # "user" or "samantha"
     text: str
-    timestamp: int     # Unix epoch seconds
+    timestamp: int  # Unix epoch seconds
     user_id: str
-    distance: float = 0.0   # Set by recall(); 0 = closest match
+    distance: float = 0.0  # Set by recall(); 0 = closest match
 
 
 # ============================================================
@@ -126,9 +126,7 @@ class Memory:
         *,
         collection_name: str | None = None,
         embedding_function: Any | None = None,
-        embedder_model: str = (
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-        ),
+        embedder_model: str = ("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
         short_term_capacity: int = 20,
     ) -> None:
         # Lazy import — chromadb is heavy. Importing it inside __init__
@@ -155,9 +153,7 @@ class Memory:
             embedding_function=embedding_function,
         )
 
-        self._short_term = ShortTermBuffer(
-            path / "state.db", capacity=short_term_capacity
-        )
+        self._short_term = ShortTermBuffer(path / "state.db", capacity=short_term_capacity)
 
         logger.info(
             f"memory: opened {self._persist_dir} "
@@ -167,9 +163,7 @@ class Memory:
 
     # ------------- write -------------
 
-    def remember(
-        self, role: str, text: str, *, user_id: str = "primary"
-    ) -> str:
+    def remember(self, role: str, text: str, *, user_id: str = "primary") -> str:
         """Store a chunk in both long-term and short-term layers.
 
         Returns the chunk id (empty string if skipped).
@@ -183,11 +177,13 @@ class Memory:
         self._collection.add(
             ids=[chunk_id],
             documents=[text.strip()],
-            metadatas=[{
-                "role": role,
-                "timestamp": ts,
-                "user_id": user_id,
-            }],
+            metadatas=[
+                {
+                    "role": role,
+                    "timestamp": ts,
+                    "user_id": user_id,
+                }
+            ],
         )
         # Mirror into short-term ring with the SAME id so recall can
         # dedupe without a cross-store lookup.
@@ -269,20 +265,20 @@ class Memory:
         self._collection.add(
             ids=[chunk_id],
             documents=[doc],
-            metadatas=[{
-                "role": "fact",
-                "kind": kind,
-                "value": value_serialized,
-                "value_kind": value_kind,
-                "timestamp": ts,
-                "user_id": user_id,
-            }],
+            metadatas=[
+                {
+                    "role": "fact",
+                    "kind": kind,
+                    "value": value_serialized,
+                    "value_kind": value_kind,
+                    "timestamp": ts,
+                    "user_id": user_id,
+                }
+            ],
         )
         return chunk_id
 
-    def get_fact(
-        self, kind: str, *, user_id: str = "primary"
-    ) -> dict | None:
+    def get_fact(self, kind: str, *, user_id: str = "primary") -> dict | None:
         """Return the newest fact for `kind`, or None."""
         res = self._collection.get(
             where={
@@ -302,13 +298,15 @@ class Memory:
         candidates = []
         for i, fid in enumerate(ids):
             m = metas[i] or {}
-            candidates.append({
-                "id": fid,
-                "kind": m.get("kind"),
-                "value": self._deserialize_fact_value(m),
-                "text": docs[i] if i < len(docs) else "",
-                "timestamp": int(m.get("timestamp", 0)),
-            })
+            candidates.append(
+                {
+                    "id": fid,
+                    "kind": m.get("kind"),
+                    "value": self._deserialize_fact_value(m),
+                    "text": docs[i] if i < len(docs) else "",
+                    "timestamp": int(m.get("timestamp", 0)),
+                }
+            )
         candidates.sort(key=lambda c: c["timestamp"], reverse=True)
         return candidates[0]
 
@@ -400,9 +398,7 @@ class Memory:
             return []
         ids = [m.id for m in matches]
         self._collection.delete(ids=ids)
-        logger.warning(
-            f"memory: ADMIN deleted {len(ids)} chunks matching '{query[:40]}'"
-        )
+        logger.warning(f"memory: ADMIN deleted {len(ids)} chunks matching '{query[:40]}'")
         return ids
 
     def forget_id(self, chunk_id: str) -> bool:
@@ -433,9 +429,7 @@ class Memory:
     # ------------- internals -------------
 
     @staticmethod
-    def _unpack_query_result(
-        res: dict[str, Any], user_id: str
-    ) -> list[MemoryChunk]:
+    def _unpack_query_result(res: dict[str, Any], user_id: str) -> list[MemoryChunk]:
         ids = (res.get("ids") or [[]])[0]
         docs = (res.get("documents") or [[]])[0]
         metas = (res.get("metadatas") or [[]])[0]
@@ -443,33 +437,35 @@ class Memory:
         out: list[MemoryChunk] = []
         for i, doc_id in enumerate(ids):
             meta = metas[i] or {}
-            out.append(MemoryChunk(
-                id=doc_id,
-                role=str(meta.get("role", "unknown")),
-                text=docs[i],
-                timestamp=int(meta.get("timestamp", 0)),
-                user_id=str(meta.get("user_id", user_id)),
-                distance=float(dists[i]) if dists else 0.0,
-            ))
+            out.append(
+                MemoryChunk(
+                    id=doc_id,
+                    role=str(meta.get("role", "unknown")),
+                    text=docs[i],
+                    timestamp=int(meta.get("timestamp", 0)),
+                    user_id=str(meta.get("user_id", user_id)),
+                    distance=float(dists[i]) if dists else 0.0,
+                )
+            )
         return out
 
     @staticmethod
-    def _unpack_get_result(
-        res: dict[str, Any], user_id: str
-    ) -> list[MemoryChunk]:
+    def _unpack_get_result(res: dict[str, Any], user_id: str) -> list[MemoryChunk]:
         ids = res.get("ids") or []
         docs = res.get("documents") or []
         metas = res.get("metadatas") or []
         out: list[MemoryChunk] = []
         for i, doc_id in enumerate(ids):
             meta = metas[i] or {}
-            out.append(MemoryChunk(
-                id=doc_id,
-                role=str(meta.get("role", "unknown")),
-                text=docs[i],
-                timestamp=int(meta.get("timestamp", 0)),
-                user_id=str(meta.get("user_id", user_id)),
-            ))
+            out.append(
+                MemoryChunk(
+                    id=doc_id,
+                    role=str(meta.get("role", "unknown")),
+                    text=docs[i],
+                    timestamp=int(meta.get("timestamp", 0)),
+                    user_id=str(meta.get("user_id", user_id)),
+                )
+            )
         return out
 
 

@@ -35,6 +35,9 @@ Then open `http://localhost:7777/` in any browser.
 
 - **[CLAUDE.md](CLAUDE.md)** — Authoritative project specification (v3).
   Read this first.
+- **[docs/personality.md](docs/personality.md)** — Samantha's voice, style
+  and forbidden patterns. Required reading before writing any user-facing
+  string.
 - **[PROGRESS.md](PROGRESS.md)** — Phase completion log.
 - **[backend/README.md](backend/README.md)** — Backend-specific docs.
 

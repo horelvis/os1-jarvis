@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 # /ping
 # ========================================================================
 
+
 class PingResponse(BaseModel):
     """Respuesta del endpoint de health check."""
 
@@ -27,6 +28,7 @@ class PingResponse(BaseModel):
 # ========================================================================
 # /chat
 # ========================================================================
+
 
 class ChatRequest(BaseModel):
     """Mensaje del usuario hacia Samantha."""
@@ -61,6 +63,7 @@ class ChatResponse(BaseModel):
 # /transcribe — STT
 # ========================================================================
 
+
 class TranscribeResponse(BaseModel):
     """Resultado de transcribir un fragmento de audio a texto."""
 
@@ -76,6 +79,7 @@ class TranscribeResponse(BaseModel):
 # ========================================================================
 # /speak — TTS
 # ========================================================================
+
 
 class SpeakRequest(BaseModel):
     """Petición para sintetizar voz a partir de texto."""
@@ -121,6 +125,7 @@ class ProfileResponse(BaseModel):
 # ========================================================================
 # Errores estándar
 # ========================================================================
+
 
 class ErrorResponse(BaseModel):
     """Respuesta de error estándar."""

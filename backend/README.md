@@ -94,6 +94,7 @@ pattern matching del mock, y que las respuestas son variadas.
 | `SAMANTHA_HOST` | `127.0.0.1` | Solo localhost (nunca expuesto) |
 | `SAMANTHA_PORT` | `7777` | Puerto del backend |
 | `SAMANTHA_MODE` | `mock` | `mock` o `real` |
+| `SAMANTHA_LLM_PROVIDER` | `openai` | Proveedor LLM: `openai` (Grok/llama-server) o `hermes` (Hermes-Agent) |
 | `SAMANTHA_MOCK_MIN_LATENCY` | `0.4` | Latencia mínima simulada (segundos) |
 | `SAMANTHA_MOCK_MAX_LATENCY` | `1.8` | Latencia máxima simulada |
 | `SAMANTHA_MOCK_STREAM_DELAY` | `0.04` | Pausa entre tokens en streaming |

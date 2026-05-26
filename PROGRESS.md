@@ -11,6 +11,48 @@
 > **Notes:** any caveats, follow-ups, or surprises
 > ```
 
+## 2026-05-26 — Phase 10: Onboarding por Voz y Pulido de Interfaz (Her) ✅
+
+Rediseño interactivo del onboarding a un flujo conversacional por voz. Samantha lee por voz las preguntas y el micrófono se abre automáticamente al finalizar su locución. Se pulieron botones y espaciados siguiendo la estética minimalista y orgánica de la película *Her*.
+
+**Changed files:**
+- [OnboardingScreen.tsx](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/frontend/src/screens/OnboardingScreen.tsx) (modificado)
+- [components.css](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/frontend/src/styles/components.css) (modificado)
+
+**Tests:** tsc --noEmit exitoso; 65 tests en pytest aprobados.
+
+**Notes:** Se implementó degradación elegante a modo texto en caso de que el navegador no tenga soporte para SpeechRecognition o permisos bloqueados de micrófono.
+
+---
+
+## 2026-05-26 — Phase 9: Integración de Hermes-Agent ✅
+
+Integración híbrida de NousResearch `hermes-agent` como cerebro agéntico secundario compatible con la API de OpenAI. Se estructuró el envío limpio del historial de conversación y se propagó el `user_id` para garantizar la continuidad de sesión y memoria del agente local.
+
+**Changed files:**
+- [config.py](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/backend/samantha/config.py) (modificado)
+- [real_llm.py](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/backend/samantha/real_llm.py) (modificado)
+- [api.py](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/backend/samantha/api.py) (modificado)
+- [samantha-hermes.service](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/systemd/samantha-hermes.service) (nuevo)
+- [test_api.py](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/backend/tests/test_api.py) (modificado)
+
+**Tests:** 65 passed, 0 failed
+
+**Notes:** La omisión de `/no_think` permite al agente de Hermes utilizar el bloque de razonamiento de Qwen para invocar herramientas, y la inyección de `X-Hermes-Session-Id` mapea correctamente el almacenamiento SQLite de Hermes.
+
+---
+
+## 2026-05-26 — Hermes-Agent Evaluation Spike ✅
+
+Evaluación e informe de viabilidad técnica de NousResearch Hermes-Agent para sustentar las capacidades agénticas de Samantha v3. Se concluye con una recomendación de adopción híbrida, empleando Hermes como cerebro REST API local de herramientas y memoria mientras se conserva el backend actual en FastAPI para la gestión de audio en tiempo real y el frontend en React.
+
+**Changed files:**
+- [REPORT.md](file:///Volumes/Macintosh%20SSD%20-%20Daten/Users/horelvis/git/os1-samantha/docs/superpowers/specs/hermes-agent-spike/REPORT.md) (nuevo)
+
+**Tests:** N/A (fase investigativa/documental)
+
+**Notes:** La integración híbrida vía API OpenAI-compatible mantiene intacto nuestro frontend y simplifica de sobremanera la incorporación de MCP (correo/calendario).
+
 ---
 
 ## 2026-05-13 — Phase 8: UI v2 redesign ✅

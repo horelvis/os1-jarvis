@@ -181,7 +181,16 @@ export const OS1Loader = forwardRef<OS1LoaderHandle, OS1LoaderProps>(
       };
     }, [backgroundColor, startTransformed]);
 
-    useImperativeHandle(ref, () => apiRef.current as OS1LoaderHandle, []);
+    useImperativeHandle(
+      ref,
+      () => ({
+        transform: (fast) => apiRef.current?.transform(fast),
+        untransform: () => apiRef.current?.untransform(),
+        setActive: (active) => apiRef.current?.setActive(active),
+        reset: () => apiRef.current?.reset(),
+      }),
+      [],
+    );
 
     const px = SIZES[size];
     return (

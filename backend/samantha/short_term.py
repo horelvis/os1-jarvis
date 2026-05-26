@@ -46,20 +46,13 @@ class ShortTermBuffer:
             ")"
         )
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_short_term_user_ts "
-            "ON short_term(user_id, timestamp)"
+            "CREATE INDEX IF NOT EXISTS idx_short_term_user_ts ON short_term(user_id, timestamp)"
         )
         self._conn.commit()
-        logger.info(
-            f"short_term: opened {self.path} (capacity={capacity})"
-        )
+        logger.info(f"short_term: opened {self.path} (capacity={capacity})")
 
-    def append(
-        self, role: str, text: str, *, user_id: str = "primary"
-    ) -> str:
-        return self.append_with_id(
-            str(uuid.uuid4()), role, text, user_id=user_id
-        )
+    def append(self, role: str, text: str, *, user_id: str = "primary") -> str:
+        return self.append_with_id(str(uuid.uuid4()), role, text, user_id=user_id)
 
     def append_with_id(
         self, entry_id: str, role: str, text: str, *, user_id: str = "primary"
@@ -101,22 +94,17 @@ class ShortTermBuffer:
             (user_id,),
         )
         return [
-            ShortTermEntry(id=row[0], role=row[1], text=row[2],
-                           timestamp=row[3], user_id=row[4])
+            ShortTermEntry(id=row[0], role=row[1], text=row[2], timestamp=row[3], user_id=row[4])
             for row in cur.fetchall()
         ]
 
     def ids(self, *, user_id: str = "primary") -> set[str]:
-        cur = self._conn.execute(
-            "SELECT id FROM short_term WHERE user_id = ?", (user_id,)
-        )
+        cur = self._conn.execute("SELECT id FROM short_term WHERE user_id = ?", (user_id,))
         return {row[0] for row in cur.fetchall()}
 
     def clear(self, *, user_id: str = "primary") -> int:
         with self._conn:
-            cur = self._conn.execute(
-                "DELETE FROM short_term WHERE user_id = ?", (user_id,)
-            )
+            cur = self._conn.execute("DELETE FROM short_term WHERE user_id = ?", (user_id,))
             return cur.rowcount
 
     def close(self) -> None:

@@ -64,10 +64,7 @@ def _format_recall(chunks: "list[MemoryChunk]") -> str:
         return ""
     lines = ["", "# Lo que recuerdas"]
     for c in chunks:
-        when = (
-            time.strftime("%Y-%m-%d", time.localtime(c.timestamp))
-            if c.timestamp else "?"
-        )
+        when = time.strftime("%Y-%m-%d", time.localtime(c.timestamp)) if c.timestamp else "?"
         who = "tú dijiste" if c.role == "samantha" else "ella"
         snippet = c.text if len(c.text) <= 280 else c.text[:277] + "..."
         lines.append(f"- {when}  ({who}): {snippet}")
@@ -131,6 +128,28 @@ def _build_payload(
     conversational presence, not a chain-of-thought tool — we want her
     final answer, not her internal monologue.
     """
+    if config.llm_provider == "hermes":
+        messages = []
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+
+        has_current_message = False
+        if short_term:
+            for c in short_term:
+                role = "assistant" if c.role == "samantha" else "user"
+                messages.append({"role": role, "content": c.text})
+                if role == "user" and c.text.strip() == message.strip():
+                    has_current_message = True
+
+        if not has_current_message or (messages and messages[-1]["role"] != "user"):
+            if not messages or messages[-1]["content"].strip() != message.strip() or messages[-1]["role"] != "user":
+                messages.append({"role": "user", "content": message})
+
+        return {
+            "model": config.llm_model,
+            "messages": messages,
+            "stream": True,
+        }
+
     system = SYSTEM_PROMPT
     if facts:
         system += _format_facts(facts)
@@ -162,6 +181,7 @@ async def stream_reply(
     facts: "list[dict] | None" = None,
     recall: "list[MemoryChunk] | None" = None,
     short_term: "list[MemoryChunk] | None" = None,
+    user_id: str = "primary",
 ) -> AsyncIterator[str]:
     """Yield token chunks as the LLM produces them.
 
@@ -171,7 +191,10 @@ async def stream_reply(
     """
     url = f"{config.llm_server_url.rstrip('/')}/v1/chat/completions"
     payload = _build_payload(
-        message, facts=facts, recall=recall, short_term=short_term,
+        message,
+        facts=facts,
+        recall=recall,
+        short_term=short_term,
     )
     client = _get_client()
 
@@ -187,6 +210,8 @@ async def stream_reply(
     headers: dict[str, str] = {}
     if config.llm_api_key:
         headers["Authorization"] = f"Bearer {config.llm_api_key}"
+    if config.llm_provider == "hermes":
+        headers["X-Hermes-Session-Id"] = user_id
 
     async with client.stream("POST", url, json=payload, headers=headers) as resp:
         if resp.status_code != 200:
@@ -195,26 +220,26 @@ async def stream_reply(
                 f"LLM {resp.status_code}: {body[:200].decode('utf-8', 'replace')}",
                 request=resp.request,
                 response=resp,
-            )
+                )
 
         async for line in resp.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(data)
-                except json.JSONDecodeError:
-                    logger.warning(f"real_llm: non-JSON SSE line: {line!r}")
-                    continue
-                choices = obj.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta") or {}
-                token = delta.get("content") or ""
-                if token:
-                    yield token
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+            except json.JSONDecodeError:
+                logger.warning(f"real_llm: non-JSON SSE line: {line!r}")
+                continue
+            choices = obj.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            token = delta.get("content") or ""
+            if token:
+                yield token
 
 
 async def generate_reply(
@@ -223,11 +248,12 @@ async def generate_reply(
     facts: "list[dict] | None" = None,
     recall: "list[MemoryChunk] | None" = None,
     short_term: "list[MemoryChunk] | None" = None,
+    user_id: str = "primary",
 ) -> str:
     """Non-streaming convenience: collect the full reply."""
     chunks: list[str] = []
     async for tok in stream_reply(
-        message, facts=facts, recall=recall, short_term=short_term
+        message, facts=facts, recall=recall, short_term=short_term, user_id=user_id
     ):
         chunks.append(tok)
     return "".join(chunks).strip()

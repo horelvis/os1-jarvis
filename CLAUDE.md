@@ -403,6 +403,7 @@ samantha/
 ├── systemd/                    ← Service files for kiosk deployment
 │   ├── samantha-backend.service    ← Python backend
 │   ├── samantha-llamacpp.service   ← llama-server (Phase 4)
+│   ├── samantha-hermes.service     ← Hermes-Agent gateway (Phase 9 / v3)
 │   └── samantha-ui.service         ← Chromium kiosk launcher
 │
 └── docs/
@@ -445,83 +446,27 @@ updates:
 - Add WebSocket endpoint `/ws` for streaming conversation
 - Remove `/chat/stream` SSE (replaced by WebSocket)
 
-### Pending phases
 
-#### Phase 3: Frontend integration ⏭️ NEXT
-Migrate the standalone mockup (`samantha_mockup_v7.html`, from before
-the repo existed) into modular files under `backend/static/`. Wire it
-to call the backend via fetch + WebSocket.
+#### Phase 3: Frontend integration ✅
+Migrated the standalone mockup into a React + Vite application served by FastAPI. Wired all user input/output through real-time bidirectional WebSockets.
 
-**Deliverables:**
-- `backend/static/index.html` — clean structure, no inline styles
-- `backend/static/style.css` — all CSS extracted
-- `backend/static/app.js` — screen state machine, event handlers
-- `backend/static/samantha-wave.js` — extracted wave visualizer module
-- `backend/static/os1-loader.js` — extracted OS1 loader module
-- `backend/static/ws-client.js` — WebSocket client class
-- Update `backend/samantha/api.py` to mount StaticFiles and serve `/`
-- Replace `/chat/stream` SSE with `/ws` WebSocket
-- All buttons/inputs in the mockup wire to real backend calls
+#### Phase 4: Real LLM integration ✅
+Replaced `mock_llm.py` with `real_llm.py` that interacts with OpenAI-compatible completion endpoints (including local llama-server and remote Grok).
 
-**Done criteria:**
-- `python -m samantha.api` serves both UI and API on :7777
-- Visiting `http://localhost:7777/` in any browser shows the UI
-- Clicking through onboarding flow works end-to-end
-- Chat messages stream from backend (token by token) via WebSocket
-- Boot/calibration/voiceprint timings still feel natural
+#### Phase 5: STT + TTS + audio capture ✅
+Wired microphone and TTS audio streaming using Piper, XTTS-v2, and CosyVoice fallback paths.
 
-#### Phase 4: Real LLM integration
-Replace `mock_llm.py` with `real_llm.py` that calls a local llama-server
-(launched separately via systemd). Apply the Samantha system prompt.
+#### Phase 6: Memory with ChromaDB ✅
+Added ChromaDB semantic memory database. Facts are saved during onboarding and recalled semantically.
 
-**Deliverables:**
-- `backend/samantha/real_llm.py` — OpenAI-compatible client for `llama-server`
-- `backend/samantha/personality.py` with finalized system prompt
-- Config switch via `SAMANTHA_MODE=real`
-- systemd unit `samantha-llamacpp.service` in `systemd/`
-- Streaming response via WebSocket preserved
+#### Phase 7: Kiosk deployment ✅
+Auto-login and openbox launch on boot configured via systemd user services.
 
-#### Phase 5: STT + TTS + audio capture
-Real voice in and out, all in Python.
+#### Phase 8: UI Redesign ✅
+Immersive UI redesign using Zustand state management, 3D ribbon rendering with Three.js, and multi-mode wave visualizer.
 
-**Deliverables:**
-- `backend/samantha/audio_capture.py` using sounddevice for mic
-- `backend/samantha/stt.py` using faster-whisper
-- `backend/samantha/tts.py` using Piper with `es_ES-davefx-medium`
-- WebSocket protocol extended: `start_listening`, `audio_chunk`,
-  `transcription`, `tts_audio` message types
-- Frontend triggers mic via WebSocket (NOT via browser APIs)
-- Frontend plays TTS audio via `<audio>` element
-
-#### Phase 6: Memory with ChromaDB
-Persistent memory across sessions. Append-only from the user's
-perspective — Samantha never forgets (§2.7).
-
-**Deliverables:**
-- `backend/samantha/memory.py` with ChromaDB wrapper
-- Embeddings via ChromaDB's default ONNX MiniLM (swap-in:
-  sentence-transformers `paraphrase-multilingual-MiniLM-L12-v2`)
-- On every user message: store as memory chunk
-- On every Samantha reply: store as memory chunk
-- Before every LLM call: retrieve top-k relevant memories, inject into prompt
-- Admin-only `Memory.forget()` / `Memory.clear()` for tests + future
-  maintenance flows (NOT wired to user input)
-
-#### Phase 7: Kiosk deployment
-Boot directly into Samantha on the mini-PC. No login screen, no
-desktop, just Samantha at fullscreen after a 20s boot.
-
-**Deliverables:**
-- systemd override for `getty@tty1` enabling auto-login as user `samantha`
-- `~/.bash_profile` triggers `startx` on tty1
-- `~/.xinitrc` launches openbox session
-- `~/.config/openbox/autostart` starts `samantha-ui.service`
-- `systemd/samantha-backend.service` (user service, starts FastAPI)
-- `systemd/samantha-vllm.service` (user service, starts vLLM)
-- `systemd/samantha-ui.service` (user service, starts Chromium kiosk)
-- All services restart on failure with proper backoff
-- Plymouth theme with the Samantha wave on terracotta during boot
-- `docs/01-setup-ubuntu.md` with full step-by-step setup guide
+#### Phase 9: Hermes-Agent Integration ✅
+Hybrid integration of NousResearch `hermes-agent` API server daemon on port `8642` with session history mapping, header propagation (`X-Hermes-Session-Id`), and disabling `/no_think` Qwen switch to enable agéntico tool use.
 
 **Chromium kiosk command (reference):**
 ```bash

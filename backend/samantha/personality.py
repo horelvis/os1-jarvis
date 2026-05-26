@@ -12,7 +12,6 @@ and deployments depend on the file path being right. A module constant
 is unambiguous, diffable, and version-controlled in lock-step with code.
 """
 
-
 # v6 — 2026-05-15: add inline TTS markers. CosyVoice 3 supports
 # bracket sounds ([laughter], [breath], [sigh]) and tag wrappers
 # (<laughter>real words</laughter>). It treats syllables like

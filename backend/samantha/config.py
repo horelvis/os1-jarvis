@@ -13,8 +13,8 @@ class Config:
     """Configuración global del backend."""
 
     # === Servidor HTTP ===
-    host: str = "127.0.0.1"           # Solo escucha en localhost (nunca expuesto)
-    port: int = 7777                   # Puerto del backend (vLLM usa 8000)
+    host: str = "127.0.0.1"  # Solo escucha en localhost (nunca expuesto)
+    port: int = 7777  # Puerto del backend (vLLM usa 8000)
 
     # === Modo de operación ===
     # "mock"  → respuestas falsas pero plausibles (desarrollo)
@@ -23,8 +23,8 @@ class Config:
 
     # === Latencia simulada (solo en mode=mock) ===
     # Hacemos que el mock se sienta como el real: con espera y streaming
-    mock_min_latency_s: float = 0.4    # Latencia mínima antes de empezar a responder
-    mock_max_latency_s: float = 1.8    # Latencia máxima
+    mock_min_latency_s: float = 0.4  # Latencia mínima antes de empezar a responder
+    mock_max_latency_s: float = 1.8  # Latencia máxima
     mock_streaming_delay_s: float = 0.04  # Pausa entre tokens (simula generación)
 
     # === LLM (cuando mode=real) ===
@@ -45,6 +45,9 @@ class Config:
     # `https://api.x.ai/v1`. Same for OpenAI (`https://api.openai.com`).
     llm_server_url: str = "https://api.x.ai"
     llm_model: str = "grok-4-1-fast-non-reasoning"
+    # "openai" → standard OpenAI compat endpoint with system prompt packaging (Grok, local llama-server, etc.)
+    # "hermes" → local hermes-agent gateway endpoint (passes clean history)
+    llm_provider: str = "openai"
     # When non-empty the backend sends `Authorization: Bearer <key>` on
     # each /v1/chat/completions call. Leave empty for local llama-server
     # (no auth). Read from SAMANTHA_LLM_API_KEY; never commit a key.
@@ -62,9 +65,7 @@ class Config:
     memory_persist_dir: str = "~/.samantha/memory"
     memory_top_k: int = 5  # how many past chunks to inject before each LLM call
     memory_short_term_capacity: int = 20  # last N turns kept verbatim in SQLite ring
-    memory_embedder_model: str = (
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
+    memory_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     # === TTS — backend-pluggable ===
     # "xtts"      → Coqui XTTS-v2 streaming server (4090, port 8092)
@@ -135,6 +136,7 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         """Crea config leyendo variables SAMANTHA_*."""
+
         def _get(key: str, default):
             val = os.environ.get(f"SAMANTHA_{key}")
             if val is None:
@@ -157,6 +159,7 @@ class Config:
             mock_streaming_delay_s=_get("MOCK_STREAM_DELAY", cls.mock_streaming_delay_s),
             llm_server_url=_get("LLM_SERVER_URL", cls.llm_server_url),
             llm_model=_get("LLM_MODEL", cls.llm_model),
+            llm_provider=_get("LLM_PROVIDER", cls.llm_provider),
             llm_api_key=_get("LLM_API_KEY", cls.llm_api_key),
             llm_request_timeout_s=_get("LLM_REQUEST_TIMEOUT_S", cls.llm_request_timeout_s),
             memory_enabled=_get("MEMORY_ENABLED", cls.memory_enabled),
@@ -165,9 +168,7 @@ class Config:
             memory_short_term_capacity=_get(
                 "MEMORY_SHORT_TERM_CAPACITY", cls.memory_short_term_capacity
             ),
-            memory_embedder_model=_get(
-                "MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model
-            ),
+            memory_embedder_model=_get("MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model),
             tts_backend=_get("TTS_BACKEND", cls.tts_backend),
             tts_voices_dir=_get("TTS_VOICES_DIR", cls.tts_voices_dir),
             tts_voice=_get("TTS_VOICE", cls.tts_voice),
@@ -183,20 +184,14 @@ class Config:
             tts_xtts_timeout_s=_get("TTS_XTTS_TIMEOUT_S", cls.tts_xtts_timeout_s),
             tts_xtts_ref_wav=_get("TTS_XTTS_REF_WAV", cls.tts_xtts_ref_wav),
             tts_xtts_language=_get("TTS_XTTS_LANGUAGE", cls.tts_xtts_language),
-            tts_xtts_temperature=_get(
-                "TTS_XTTS_TEMPERATURE", cls.tts_xtts_temperature
-            ),
+            tts_xtts_temperature=_get("TTS_XTTS_TEMPERATURE", cls.tts_xtts_temperature),
             tts_xtts_top_p=_get("TTS_XTTS_TOP_P", cls.tts_xtts_top_p),
             tts_xtts_repetition_penalty=_get(
                 "TTS_XTTS_REPETITION_PENALTY", cls.tts_xtts_repetition_penalty
             ),
             tts_cosyvoice_url=_get("TTS_COSYVOICE_URL", cls.tts_cosyvoice_url),
-            tts_cosyvoice_timeout_s=_get(
-                "TTS_COSYVOICE_TIMEOUT_S", cls.tts_cosyvoice_timeout_s
-            ),
-            tts_cosyvoice_ref_wav=_get(
-                "TTS_COSYVOICE_REF_WAV", cls.tts_cosyvoice_ref_wav
-            ),
+            tts_cosyvoice_timeout_s=_get("TTS_COSYVOICE_TIMEOUT_S", cls.tts_cosyvoice_timeout_s),
+            tts_cosyvoice_ref_wav=_get("TTS_COSYVOICE_REF_WAV", cls.tts_cosyvoice_ref_wav),
             tts_cosyvoice_ref_transcript_path=_get(
                 "TTS_COSYVOICE_REF_TRANSCRIPT_PATH",
                 cls.tts_cosyvoice_ref_transcript_path,

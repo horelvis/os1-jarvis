@@ -38,6 +38,9 @@ export function useBargeIn(
   const cbRef = useRef(onSpeechStart);
   cbRef.current = onSpeechStart;
 
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
   // Suppress VAD events for a short window after `active` flips true.
   // Without this the very start of Samantha's audio bleeds through
   // browser AEC into the mic and Silero fires `onSpeechStart` on her
@@ -79,6 +82,11 @@ export function useBargeIn(
         return;
       }
       vadRef.current = vad;
+      // If conversation is already active when VAD finishes initializing, start it immediately.
+      if (activeRef.current) {
+        warmupUntilRef.current = Date.now() + 600;
+        vad.start();
+      }
     })().catch((e) => {
       console.warn("useBargeIn: VAD init failed", e);
     });

@@ -121,6 +121,7 @@ async def _stream_tokens(
     facts: "list[dict] | None" = None,
     recall: "list[MemoryChunk] | None" = None,
     short_term: "list[MemoryChunk] | None" = None,
+    user_id: str = "primary",
 ) -> AsyncIterator[str]:
     """Yield reply tokens, dispatching on `config.mode`.
 
@@ -135,7 +136,7 @@ async def _stream_tokens(
         from .real_llm import stream_reply as real_stream_reply
 
         async for tok in real_stream_reply(
-            message, facts=facts, recall=recall, short_term=short_term
+            message, facts=facts, recall=recall, short_term=short_term, user_id=user_id
         ):
             yield tok
         return
@@ -152,9 +153,7 @@ async def _stream_tokens(
 # APP SETUP
 # ========================================================================
 
-FRONTEND_DIST = (
-    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-)
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 INDEX_FILE = FRONTEND_DIST / "index.html"
 
 app = FastAPI(
@@ -312,16 +311,14 @@ async def chat(req: ChatRequest) -> ChatResponse:
     if mem is not None:
         mem.remember("user", req.message, user_id=req.user_id)
         facts = _collect_facts(mem, user_id=req.user_id)
-        recall = mem.recall(
-            req.message, k=config.memory_top_k, user_id=req.user_id
-        )
+        recall = mem.recall(req.message, k=config.memory_top_k, user_id=req.user_id)
         short = mem.short_term(user_id=req.user_id)
 
     if config.mode == "real":
         from .real_llm import generate_reply as real_generate_reply
 
         reply = await real_generate_reply(
-            req.message, facts=facts, recall=recall, short_term=short
+            req.message, facts=facts, recall=recall, short_term=short, user_id=req.user_id
         )
     else:
         latency = random.uniform(config.mock_min_latency_s, config.mock_max_latency_s)
@@ -392,14 +389,13 @@ async def speak(req: SpeakRequest) -> Response:
     "no oigo al TTS" alert instead of a placebo beep that hides
     the outage.
     """
-    logger.info(
-        f"speak: voice={req.voice} backend={config.tts_backend} "
-        f"text='{req.text[:60]}'"
-    )
+    logger.info(f"speak: voice={req.voice} backend={config.tts_backend} text='{req.text[:60]}'")
 
     if not req.text.strip():
         return Response(
-            b"", media_type="audio/pcm", headers={"X-TTS-Mode": "empty"},
+            b"",
+            media_type="audio/pcm",
+            headers={"X-TTS-Mode": "empty"},
         )
 
     from . import tts
@@ -420,7 +416,9 @@ async def speak(req: SpeakRequest) -> Response:
         # stream() yielded nothing (e.g. whitespace-only input slipped
         # through the strip check); equivalent to "empty".
         return Response(
-            b"", media_type="audio/pcm", headers={"X-TTS-Mode": "empty"},
+            b"",
+            media_type="audio/pcm",
+            headers={"X-TTS-Mode": "empty"},
         )
 
     async def body():
@@ -454,10 +452,7 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     dispatches on `config.mode`. Samantha never forgets.
     """
     start = time.perf_counter()
-    logger.info(
-        f"ws chat: user_id={user_id} mode={config.mode} "
-        f"message='{message[:60]}'"
-    )
+    logger.info(f"ws chat: user_id={user_id} mode={config.mode} message='{message[:60]}'")
 
     mem = get_memory()
     facts: list[dict] = []
@@ -466,19 +461,18 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     if mem is not None:
         mem.remember("user", message, user_id=user_id)
         facts = _collect_facts(mem, user_id=user_id)
-        recall = mem.recall(
-            message, k=config.memory_top_k, user_id=user_id
-        )
+        recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
         short = mem.short_term(user_id=user_id)
 
     reply_chunks: list[str] = []
-    async for token in _stream_tokens(
-        message, facts=facts, recall=recall, short_term=short
-    ):
-        reply_chunks.append(token)
-        await websocket.send_text(
-            json.dumps({"type": "token", "token": token})
-        )
+    try:
+        async for token in _stream_tokens(message, facts=facts, recall=recall, short_term=short, user_id=user_id):
+            reply_chunks.append(token)
+            await websocket.send_text(json.dumps({"type": "token", "token": token}))
+    except Exception as e:
+        logger.exception("Error in websocket chat stream")
+        await websocket.send_text(json.dumps({"type": "error", "error": f"llm_error: {str(e)}"}))
+        return
 
     if mem is not None and reply_chunks:
         full_reply = "".join(reply_chunks).strip()
@@ -486,9 +480,7 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
             mem.remember("samantha", full_reply, user_id=user_id)
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
-    await websocket.send_text(
-        json.dumps({"type": "done", "thinking_ms": elapsed_ms})
-    )
+    await websocket.send_text(json.dumps({"type": "done", "thinking_ms": elapsed_ms}))
 
 
 async def _ws_handle_listen(websocket: WebSocket) -> None:

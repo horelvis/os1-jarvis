@@ -96,16 +96,12 @@ def is_available() -> bool:
     """
     backend = (config.tts_backend or "piper").lower()
     if backend == "xtts":
-        return bool(config.tts_xtts_url) and Path(
-            config.tts_xtts_ref_wav
-        ).expanduser().is_file()
+        return bool(config.tts_xtts_url) and Path(config.tts_xtts_ref_wav).expanduser().is_file()
     if backend == "cosyvoice":
         return (
             bool(config.tts_cosyvoice_url)
             and Path(config.tts_cosyvoice_ref_wav).expanduser().is_file()
-            and Path(
-                config.tts_cosyvoice_ref_transcript_path
-            ).expanduser().is_file()
+            and Path(config.tts_cosyvoice_ref_transcript_path).expanduser().is_file()
         )
     return _piper_voice_available()
 
@@ -224,10 +220,7 @@ async def _xtts_clone_speaker() -> dict:
             files = {"wav_file": (wav_path.name, f.read(), "audio/wav")}
         resp = await client.post(url, files=files)
         if resp.status_code != 200:
-            raise RuntimeError(
-                f"xtts /clone_speaker {resp.status_code}: "
-                f"{resp.text[:200]}"
-            )
+            raise RuntimeError(f"xtts /clone_speaker {resp.status_code}: {resp.text[:200]}")
         return resp.json()
 
 
@@ -267,8 +260,7 @@ async def _stream_xtts(text: str) -> AsyncIterator[bytes]:
             if resp.status_code != 200:
                 err = await resp.aread()
                 raise RuntimeError(
-                    f"xtts {resp.status_code}: "
-                    f"{err[:200].decode('utf-8', 'replace')}"
+                    f"xtts {resp.status_code}: {err[:200].decode('utf-8', 'replace')}"
                 )
             async for chunk in resp.aiter_bytes(chunk_size=4096):
                 if chunk:
@@ -300,9 +292,7 @@ def _load_cosyvoice_refs() -> tuple[str, bytes, str]:
 
     if _cosyvoice_ref_transcript is None:
         if not txt_path.is_file():
-            raise VoiceMissingError(
-                f"cosyvoice transcript not found: {txt_path}"
-            )
+            raise VoiceMissingError(f"cosyvoice transcript not found: {txt_path}")
         _cosyvoice_ref_transcript = txt_path.read_text(encoding="utf-8").strip()
         logger.info(
             f"tts: loaded cosyvoice transcript "
@@ -311,13 +301,10 @@ def _load_cosyvoice_refs() -> tuple[str, bytes, str]:
 
     if _cosyvoice_ref_wav_bytes is None:
         if not wav_path.is_file():
-            raise VoiceMissingError(
-                f"cosyvoice ref wav not found: {wav_path}"
-            )
+            raise VoiceMissingError(f"cosyvoice ref wav not found: {wav_path}")
         _cosyvoice_ref_wav_bytes = wav_path.read_bytes()
         logger.info(
-            f"tts: cached cosyvoice ref wav "
-            f"({len(_cosyvoice_ref_wav_bytes)} bytes) from {wav_path}"
+            f"tts: cached cosyvoice ref wav ({len(_cosyvoice_ref_wav_bytes)} bytes) from {wav_path}"
         )
 
     return _cosyvoice_ref_transcript, _cosyvoice_ref_wav_bytes, wav_path.name
@@ -364,8 +351,7 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
             if resp.status_code != 200:
                 err = await resp.aread()
                 raise RuntimeError(
-                    f"cosyvoice {resp.status_code}: "
-                    f"{err[:200].decode('utf-8', 'replace')}"
+                    f"cosyvoice {resp.status_code}: {err[:200].decode('utf-8', 'replace')}"
                 )
             got_any = False
             async for chunk in resp.aiter_bytes(chunk_size=4096):
@@ -420,9 +406,7 @@ def _get_piper_voice() -> "PiperVoice":
 
     logger.info(f"tts: loading piper voice {config.tts_voice} from {onnx}")
     _voice = PiperVoice.load(str(onnx))
-    logger.info(
-        f"tts: piper voice ready (sample_rate={_voice.config.sample_rate} Hz)"
-    )
+    logger.info(f"tts: piper voice ready (sample_rate={_voice.config.sample_rate} Hz)")
     return _voice
 
 
