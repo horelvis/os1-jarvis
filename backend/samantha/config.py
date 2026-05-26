@@ -86,7 +86,7 @@ class Config:
     #               Voice cloning + streaming PCM. Kept as alt option.
     # "piper"     → local Piper synth (no GPU). Last-resort, lower
     #               quality, no cloning (single fixed voice).
-    tts_backend: str = "xtts"
+    tts_backend: str = "cosyvoice"
 
     # ── Piper config (local fallback) ──
     # Voice files live outside the repo (~70 MB each). If the model

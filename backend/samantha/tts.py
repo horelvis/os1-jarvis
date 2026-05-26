@@ -1,11 +1,11 @@
-"""TTS for Samantha — XTTS-v2 default, CosyVoice 3 for expressive, Piper local fallback.
+"""TTS for Samantha — CosyVoice 3 default, XTTS-v2 or Piper fallback.
 
 All backends emit through a single contract: 24 kHz mono int16 PCM
 chunks. Piper's native 22050 Hz output is resampled on the fly to
 keep the wire format uniform — the frontend only has to know one
 sample rate.
 
-  config.tts_backend == "xtts"  (default)
+  config.tts_backend == "cosyvoice"  (default)
       Streams PCM chunks from Coqui xtts-streaming-server (port
       8092 on the 4090) with our overlay that exposes
       temperature / top_p / repetition_penalty / speed. Voice
@@ -122,7 +122,7 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
         return
     clean = text.strip()
 
-    backend = (config.tts_backend or "xtts").lower()
+    backend = (config.tts_backend or "cosyvoice").lower()
     # CosyVoice 3 understands the personality v6 inline markers; every
     # other backend would read them literally.
     if backend != "cosyvoice":
