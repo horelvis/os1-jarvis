@@ -987,3 +987,27 @@ def test_real_llm_hermes_session_header_injected(monkeypatch):
         cfg.llm_provider = orig_provider
         cfg.llm_server_url = orig_url
         real_llm._client = None
+
+
+# ========================================================================
+# exception handler — must RETURN JSON 500, not re-raise
+# ========================================================================
+
+
+def test_unhandled_exception_returns_json_500(monkeypatch):
+    """The generic handler must RETURN a JSONResponse — raising inside
+    an exception handler propagates to uvicorn as a bodyless 500."""
+    from samantha import api as api_mod
+    from samantha import tts as tts_mod
+
+    monkeypatch.setattr(tts_mod, "is_available", lambda: True)
+
+    def boom(text):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(tts_mod, "stream", boom)
+
+    client = TestClient(api_mod.app, raise_server_exceptions=False)
+    r = client.post("/speak", json={"text": "hola"})
+    assert r.status_code == 500
+    assert r.json() == {"detail": "internal_error"}

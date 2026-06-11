@@ -29,8 +29,16 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -554,9 +562,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 
 @app.exception_handler(Exception)
-async def generic_exception_handler(request, exc):
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception(f"Unhandled exception on {request.url.path}")
-    raise HTTPException(status_code=500, detail=str(exc))
+    # Deliberately generic: str(exc) can leak paths/keys to the client.
+    # The full traceback is in the log.
+    return JSONResponse(status_code=500, content={"detail": "internal_error"})
 
 
 # ========================================================================
