@@ -807,6 +807,7 @@ def test_profile_post_rejects_re_pairing(tmp_path, monkeypatch):
 def test_hermes_provider_config_loading(monkeypatch):
     """Verify that SAMANTHA_LLM_PROVIDER loads correctly and sets Config.llm_provider."""
     from samantha.config import Config
+
     monkeypatch.setenv("SAMANTHA_LLM_PROVIDER", "hermes")
     cfg = Config.from_env()
     assert cfg.llm_provider == "hermes"
@@ -825,14 +826,26 @@ def test_real_llm_build_payload_hermes_format():
     try:
         short_term = [
             MemoryChunk(id="s1", role="user", text="hola", timestamp=1778002000, user_id="primary"),
-            MemoryChunk(id="s2", role="samantha", text="hola, qué tal?", timestamp=1778002005, user_id="primary"),
-            MemoryChunk(id="s3", role="user", text="bien, y tú?", timestamp=1778002010, user_id="primary"),
+            MemoryChunk(
+                id="s2",
+                role="samantha",
+                text="hola, qué tal?",
+                timestamp=1778002005,
+                user_id="primary",
+            ),
+            MemoryChunk(
+                id="s3", role="user", text="bien, y tú?", timestamp=1778002010, user_id="primary"
+            ),
         ]
 
         payload = real_llm._build_payload(
             message="bien, y tú?",
             facts=[{"text": "Fact 1"}],
-            recall=[MemoryChunk(id="r1", role="user", text="recall", timestamp=1778002020, user_id="primary")],
+            recall=[
+                MemoryChunk(
+                    id="r1", role="user", text="recall", timestamp=1778002020, user_id="primary"
+                )
+            ],
             short_term=short_term,
         )
 
@@ -880,6 +893,43 @@ def test_real_llm_build_payload_hermes_no_qwen_no_think(monkeypatch):
         cfg.llm_model = orig_model
 
 
+def test_chat_does_not_duplicate_current_message(tmp_path, monkeypatch):
+    """The current user message must NOT be in the short_term context
+    passed to the LLM (it is appended as the user message separately).
+    It MUST appear in short_term on the NEXT turn."""
+    from samantha import api as api_mod
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "memory"))
+    monkeypatch.setattr(api_mod, "_memory", mem)
+    monkeypatch.setattr(api_mod, "_memory_init_failed", False)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+    monkeypatch.setattr(api_mod.config, "mode", "real")
+
+    captured = {}
+
+    async def fake_generate_reply(
+        message, *, facts=None, recall=None, short_term=None, user_id="primary"
+    ):
+        captured["short_term"] = short_term or []
+        return "claro"
+
+    monkeypatch.setattr("samantha.real_llm.generate_reply", fake_generate_reply)
+
+    client = TestClient(api_mod.app)
+    r = client.post("/chat", json={"message": "hola, ¿qué tal?"})
+    assert r.status_code == 200
+    texts = [c.text for c in captured["short_term"]]
+    assert "hola, ¿qué tal?" not in texts  # current turn excluded
+
+    r2 = client.post("/chat", json={"message": "segunda pregunta"})
+    assert r2.status_code == 200
+    texts2 = [c.text for c in captured["short_term"]]
+    assert "hola, ¿qué tal?" in texts2  # previous turn present
+    assert "claro" in texts2  # previous reply present
+    assert "segunda pregunta" not in texts2  # current turn excluded
+
+
 def test_real_llm_hermes_session_header_injected(monkeypatch):
     """Verify that X-Hermes-Session-Id header is injected with user_id when calling stream_reply in hermes mode."""
     import asyncio
@@ -902,11 +952,14 @@ def test_real_llm_hermes_session_header_injected(monkeypatch):
             class MockResponse:
                 status_code = 200
                 request = self.request
+
                 async def aread(self):
                     return b""
+
                 async def aiter_lines(self):
                     # Yield a simple DONE event to end stream immediately
                     yield "data: [DONE]"
+
             return MockResponse()
 
         async def __aexit__(self, exc_type, exc_val, exc_tb):

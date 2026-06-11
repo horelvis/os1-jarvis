@@ -309,10 +309,13 @@ async def chat(req: ChatRequest) -> ChatResponse:
     recall: list = []
     short: list = []
     if mem is not None:
-        mem.remember("user", req.message, user_id=req.user_id)
+        # Context first, persist after: the ring must NOT contain the
+        # current message, because _build_payload appends it as the
+        # user message — otherwise the LLM sees it twice.
         facts = _collect_facts(mem, user_id=req.user_id)
         recall = mem.recall(req.message, k=config.memory_top_k, user_id=req.user_id)
         short = mem.short_term(user_id=req.user_id)
+        mem.remember("user", req.message, user_id=req.user_id)
 
     if config.mode == "real":
         from .real_llm import generate_reply as real_generate_reply
@@ -459,14 +462,19 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     recall: list = []
     short: list = []
     if mem is not None:
-        mem.remember("user", message, user_id=user_id)
+        # Same ordering rationale as /chat: context first, persist after.
+        # The ring must not contain the current message before _build_payload
+        # runs, otherwise the LLM sees it twice.
         facts = _collect_facts(mem, user_id=user_id)
         recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
         short = mem.short_term(user_id=user_id)
+        mem.remember("user", message, user_id=user_id)
 
     reply_chunks: list[str] = []
     try:
-        async for token in _stream_tokens(message, facts=facts, recall=recall, short_term=short, user_id=user_id):
+        async for token in _stream_tokens(
+            message, facts=facts, recall=recall, short_term=short, user_id=user_id
+        ):
             reply_chunks.append(token)
             await websocket.send_text(json.dumps({"type": "token", "token": token}))
     except Exception as e:
