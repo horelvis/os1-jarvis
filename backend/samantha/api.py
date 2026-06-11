@@ -123,6 +123,27 @@ def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
 # ============================================================
 
 
+async def _gather_context(
+    mem: "Memory", message: str, user_id: str
+) -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
+    """Collect facts + recall + short-term and persist the user turn,
+    off the event loop (embedding + ChromaDB + SQLite are all sync and
+    CPU-bound; running them inline stalls /ping and TTS streaming).
+
+    Ordering matters: context FIRST, remember AFTER, so the ring never
+    contains the current message (the LLM payload appends it itself).
+    """
+
+    def _work() -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
+        facts = _collect_facts(mem, user_id=user_id)
+        recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
+        short = mem.short_term(user_id=user_id)
+        mem.remember("user", message, user_id=user_id)
+        return facts, recall, short
+
+    return await asyncio.to_thread(_work)
+
+
 async def _stream_tokens(
     message: str,
     *,
@@ -217,8 +238,8 @@ async def ping() -> PingResponse:
     `has_profile` lets the frontend route between Onboarding (false) and
     Ambient (true) without a separate /profile probe at boot.
     """
-    mem = get_memory()
-    has_profile = bool(mem and _is_onboarded(mem))
+    mem = await asyncio.to_thread(get_memory)
+    has_profile = bool(mem and await asyncio.to_thread(_is_onboarded, mem))
     return PingResponse(
         status="ok",
         version=__version__,
@@ -236,7 +257,7 @@ async def ping() -> PingResponse:
 @app.get("/profile", response_model=ProfileResponse)
 async def get_profile_endpoint() -> ProfileResponse:
     """Return the synthesized profile, or 404 if onboarding hasn't completed."""
-    mem = get_memory()
+    mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
     profile = _get_profile(mem)
@@ -257,7 +278,7 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
     empty / whitespace `answers[0].a` is rejected so we never persist
     a degenerate "tú" profile.
     """
-    mem = get_memory()
+    mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
     if _is_onboarded(mem):
@@ -285,7 +306,7 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
 async def delete_profile_endpoint() -> dict:
     """ADMIN-only: clears name + onboarding_completed_at facts. The 6
     onboarding-answer chunks survive (Samantha never forgets)."""
-    mem = get_memory()
+    mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
     deleted = _delete_profile(mem)
@@ -312,18 +333,12 @@ async def chat(req: ChatRequest) -> ChatResponse:
     start = time.perf_counter()
     logger.info(f"chat: user_id={req.user_id} message='{req.message[:60]}'")
 
-    mem = get_memory()
+    mem = await asyncio.to_thread(get_memory)
     facts: list[dict] = []
     recall: list = []
     short: list = []
     if mem is not None:
-        # Context first, persist after: the ring must NOT contain the
-        # current message, because _build_payload appends it as the
-        # user message — otherwise the LLM sees it twice.
-        facts = _collect_facts(mem, user_id=req.user_id)
-        recall = mem.recall(req.message, k=config.memory_top_k, user_id=req.user_id)
-        short = mem.short_term(user_id=req.user_id)
-        mem.remember("user", req.message, user_id=req.user_id)
+        facts, recall, short = await _gather_context(mem, req.message, req.user_id)
 
     if config.mode == "real":
         from .real_llm import generate_reply as real_generate_reply
@@ -337,7 +352,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         reply = mock_generate_reply(req.message)
 
     if mem is not None and reply:
-        mem.remember("samantha", reply, user_id=req.user_id)
+        await asyncio.to_thread(mem.remember, "samantha", reply, user_id=req.user_id)
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     logger.info(f"chat: replied in {elapsed_ms}ms — '{reply[:60]}'")
@@ -465,18 +480,12 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     start = time.perf_counter()
     logger.info(f"ws chat: user_id={user_id} mode={config.mode} message='{message[:60]}'")
 
-    mem = get_memory()
+    mem = await asyncio.to_thread(get_memory)
     facts: list[dict] = []
     recall: list = []
     short: list = []
     if mem is not None:
-        # Same ordering rationale as /chat: context first, persist after.
-        # The ring must not contain the current message before _build_payload
-        # runs, otherwise the LLM sees it twice.
-        facts = _collect_facts(mem, user_id=user_id)
-        recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
-        short = mem.short_term(user_id=user_id)
-        mem.remember("user", message, user_id=user_id)
+        facts, recall, short = await _gather_context(mem, message, user_id)
 
     reply_chunks: list[str] = []
     try:
@@ -493,7 +502,7 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
     if mem is not None and reply_chunks:
         full_reply = "".join(reply_chunks).strip()
         if full_reply:
-            mem.remember("samantha", full_reply, user_id=user_id)
+            await asyncio.to_thread(mem.remember, "samantha", full_reply, user_id=user_id)
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     await websocket.send_text(json.dumps({"type": "done", "thinking_ms": elapsed_ms}))

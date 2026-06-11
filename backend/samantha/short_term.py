@@ -10,6 +10,7 @@ deleted — but its content is preserved in long-term memory (see
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -49,6 +50,10 @@ class ShortTermBuffer:
             "CREATE INDEX IF NOT EXISTS idx_short_term_user_ts ON short_term(user_id, timestamp)"
         )
         self._conn.commit()
+        # The connection is shared across threads (api.py calls us via
+        # asyncio.to_thread); sqlite3 objects are not thread-safe even
+        # with check_same_thread=False, so serialize all access.
+        self._lock = threading.Lock()
         logger.info(f"short_term: opened {self.path} (capacity={capacity})")
 
     def append(self, role: str, text: str, *, user_id: str = "primary") -> str:
@@ -68,7 +73,7 @@ class ShortTermBuffer:
         if not text or not text.strip():
             return ""
         ts = int(time.time())
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO short_term (id, role, text, timestamp, user_id) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -87,25 +92,29 @@ class ShortTermBuffer:
         return entry_id
 
     def list(self, *, user_id: str = "primary") -> list[ShortTermEntry]:
-        cur = self._conn.execute(
-            "SELECT id, role, text, timestamp, user_id "
-            "FROM short_term WHERE user_id = ? "
-            "ORDER BY rowid ASC",
-            (user_id,),
-        )
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id, role, text, timestamp, user_id "
+                "FROM short_term WHERE user_id = ? "
+                "ORDER BY rowid ASC",
+                (user_id,),
+            )
+            rows = cur.fetchall()
         return [
             ShortTermEntry(id=row[0], role=row[1], text=row[2], timestamp=row[3], user_id=row[4])
-            for row in cur.fetchall()
+            for row in rows
         ]
 
     def ids(self, *, user_id: str = "primary") -> set[str]:
-        cur = self._conn.execute("SELECT id FROM short_term WHERE user_id = ?", (user_id,))
-        return {row[0] for row in cur.fetchall()}
+        with self._lock:
+            cur = self._conn.execute("SELECT id FROM short_term WHERE user_id = ?", (user_id,))
+            return {row[0] for row in cur.fetchall()}
 
     def clear(self, *, user_id: str = "primary") -> int:
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute("DELETE FROM short_term WHERE user_id = ?", (user_id,))
             return cur.rowcount
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

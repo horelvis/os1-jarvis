@@ -46,3 +46,26 @@ def test_ids_are_unique_uuids(tmp_path):
     id2 = buf.append("user", "b", user_id="u1")
     assert id1 != id2
     assert len(id1) == 36
+
+
+def test_concurrent_appends_from_threads(tmp_path):
+    import threading
+
+    buf = ShortTermBuffer(tmp_path / "state.db", capacity=50)
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            for j in range(25):
+                buf.append("user", f"msg-{i}-{j}")
+        except Exception as e:  # noqa: BLE001 — collecting for assertion
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert len(buf.list()) == 50  # capacity respected under concurrency
