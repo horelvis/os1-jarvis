@@ -128,9 +128,17 @@ export function ConversationScreen() {
     return () => clearInterval(tick);
   }, [route]);
 
-  // Stop the singleton listener if we unmount mid-conversation.
+  // Unmounting mid-conversation must tear the whole turn down: clear
+  // activeRef FIRST so the in-flight sendMessage .then can't restart
+  // the (module-singleton) recognizer on another screen, silence any
+  // playing TTS, and abort recognition (abort, not stop, so a
+  // continuous session can't auto-restart on `onend`).
   useEffect(() => {
-    return () => { SpeechRecognition.stopListening(); };
+    return () => {
+      activeRef.current = false;
+      speakAbortRef.current?.abort();
+      void SpeechRecognition.abortListening();
+    };
   }, []);
 
   // Reflect listening state on the wave when we aren't busy with a
