@@ -71,6 +71,9 @@ export function ConversationScreen() {
   // aborts the controller, which closes the AudioContext + cancels the
   // streamed fetch, silencing Samantha mid-utterance.
   const speakAbortRef = useRef<AbortController | null>(null);
+  // Set when the VAD interrupts Samantha; tells the busy-flip wipe to
+  // KEEP the transcript (it's the user's interruption, not echo).
+  const bargedInRef = useRef(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   // VAD-based barge-in: while Samantha is speaking the mic is muted at
@@ -89,8 +92,18 @@ export function ConversationScreen() {
       : localStorage.getItem("sam.bargeIn") !== "0";
   useBargeIn(isSpeaking && bargeInEnabled, () => {
     if (speakAbortRef.current) {
-      console.info("[conv] barge-in detected, aborting TTS");
       speakAbortRef.current.abort();
+      bargedInRef.current = true;
+      // Reopen the mic NOW — waiting for speak() to settle loses the
+      // first words of the interruption. startListening on an
+      // already-listening manager is a no-op, so the later resume in
+      // sendMessage's .then is harmless.
+      if (activeRef.current) {
+        void SpeechRecognition.startListening({
+          continuous: true,
+          language: "es-ES",
+        });
+      }
     }
   });
 
@@ -105,14 +118,20 @@ export function ConversationScreen() {
   useEffect(() => { activeRef.current = conversationActive; }, [conversationActive]);
   useEffect(() => { busyRef.current = busy; }, [busy]);
 
-  // Mic-feedback loop guard: react-speech-recognition keeps producing
-  // transcripts for a beat after `stopListening()` (the underlying
-  // webkitSpeechRecognition stream doesn't drop instantly). Anything
-  // captured DURING busy is Samantha's own voice echoing off the
-  // speakers. When busy flips false we wipe finalTranscript so the
-  // debounce useEffect can't fire it as a new user message.
+  // Tail-echo guard: even though the turn now aborts recognition
+  // up-front, results already in flight when the abort lands can
+  // still arrive. Anything captured DURING busy is presumed to be
+  // Samantha's own voice; when busy flips false we wipe it so the
+  // debounce effect can't ship it as a user message — EXCEPT right
+  // after a barge-in, where the in-flight transcript is the user's
+  // interruption and must survive.
   useEffect(() => {
-    if (!busy) resetTranscript();
+    if (busy) return;
+    if (bargedInRef.current) {
+      bargedInRef.current = false;
+      return;
+    }
+    resetTranscript();
   }, [busy, resetTranscript]);
 
   const bump = () => { lastActivityRef.current = Date.now(); };
