@@ -31,13 +31,21 @@ function micErrorMessage(code: string): string {
       return "No encuentro el micrófono.";
     case "aborted":
       return "Captura cancelada.";
-    case "ws_not_connected":
-      return "Conexión perdida. Vuelvo a intentarlo en un segundo.";
     case "speech_recognition_unavailable":
       return "Tu navegador no soporta reconocimiento de voz.";
     default:
       return `Mic: ${code}`;
   }
+}
+
+// Errors from the chat turn (WS / LLM), as Samantha would say them —
+// distinct from mic errors, which come from speech recognition.
+function chatErrorMessage(code: string): string {
+  if (code === "ws_not_connected")
+    return "He perdido la conexión con mi cabeza. Dame un momento y repítemelo.";
+  if (code.startsWith("llm_error"))
+    return "Se me ha ido el hilo. ¿Me lo dices otra vez?";
+  return "Algo se me ha cruzado. Inténtalo de nuevo.";
 }
 
 // Three input modes share the same surface:
@@ -52,6 +60,7 @@ export function ConversationScreen() {
   const transcript = useSamantha((s) => s.transcript);
   const appendMessage = useSamantha((s) => s.appendMessage);
   const patchMessage = useSamantha((s) => s.patchMessage);
+  const removeMessage = useSamantha((s) => s.removeMessage);
 
   const [showHistory, setShowHistory] = useState(false);
   const [showTextInput, setShowTextInput] = useState(false);
@@ -188,6 +197,7 @@ export function ConversationScreen() {
 
   const sendMessage = async (msg: string) => {
     bump();
+    setMicError(null);
     const trimmed = msg.trim();
     if (!trimmed) return;
     appendMessage({
@@ -238,7 +248,8 @@ export function ConversationScreen() {
       }
     } catch (e) {
       console.warn("chat failed", e);
-      setMicError(micErrorMessage(e instanceof Error ? e.message : "unknown"));
+      removeMessage(replyId);
+      setMicError(chatErrorMessage(e instanceof Error ? e.message : "unknown"));
     } finally {
       setBusy(false);
       setWaveMode("idle");

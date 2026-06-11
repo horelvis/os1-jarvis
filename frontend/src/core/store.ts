@@ -9,6 +9,7 @@ interface SamanthaState {
   setName: (n: string | null) => void;
   appendMessage: (m: ChatMessage) => void;
   patchMessage: (id: string, text: string) => void;
+  removeMessage: (id: string) => void;
   resetTranscript: () => void;
 }
 
@@ -25,6 +26,10 @@ export const useSamantha = create<SamanthaState>((set) => ({
       transcript: state.transcript.map((m) =>
         m.id === id ? { ...m, text } : m,
       ),
+    })),
+  removeMessage: (id) =>
+    set((state) => ({
+      transcript: state.transcript.filter((m) => m.id !== id),
     })),
   resetTranscript: () => set({ transcript: [] }),
 }));
