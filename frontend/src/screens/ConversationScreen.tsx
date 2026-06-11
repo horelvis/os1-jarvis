@@ -238,11 +238,15 @@ export function ConversationScreen() {
     const handle = setTimeout(() => {
       const text = finalTranscript.trim();
       console.info("[conv] debounce fired, committing:", JSON.stringify(text));
+      // Abort BEFORE resetting: resetTranscript() aborts with
+      // pauseAfterDisconnect=false, and in continuous mode the manager
+      // auto-restarts on `onend` — the mic would stay open during
+      // Samantha's TTS (the echo-loop trap). abortListening() while
+      // still listening sets pauseAfterDisconnect=true, so the
+      // recognizer stays down until we explicitly resume.
+      if (text) void SpeechRecognition.abortListening();
       resetTranscript();
       if (!text) return;
-      // Mute the mic during chat + TTS so Samantha's voice doesn't
-      // get re-recognized as user speech (the echo-loop trap).
-      SpeechRecognition.stopListening();
       void sendMessage(text).then(() => {
         console.info("[conv] sendMessage done, conversation still active:",
           activeRef.current);
