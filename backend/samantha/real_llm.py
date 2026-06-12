@@ -129,20 +129,29 @@ def _build_payload(
     final answer, not her internal monologue.
     """
     if config.llm_provider == "hermes":
-        messages = []
-        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        # Hermes keeps its own session history server-side, but facts
+        # and semantic recall live only in OUR memory — without them
+        # the agent never learns the user's name. Short-term turns go
+        # as real chat messages (hermes wants clean history), the rest
+        # rides the system prompt like the openai path.
+        system = SYSTEM_PROMPT
+        if facts:
+            system += _format_facts(facts)
+        if recall:
+            system += _format_recall(recall)
 
-        has_current_message = False
+        messages: list[dict] = [{"role": "system", "content": system}]
         if short_term:
             for c in short_term:
                 role = "assistant" if c.role == "samantha" else "user"
                 messages.append({"role": role, "content": c.text})
-                if role == "user" and c.text.strip() == message.strip():
-                    has_current_message = True
 
-        if not has_current_message or (messages and messages[-1]["role"] != "user"):
-            if not messages or messages[-1]["content"].strip() != message.strip() or messages[-1]["role"] != "user":
-                messages.append({"role": "user", "content": message})
+        # The ring no longer contains the current message (api.py
+        # persists AFTER collecting context), but guard anyway so a
+        # direct caller passing it can't double-send.
+        last = messages[-1]
+        if last["role"] != "user" or last["content"].strip() != message.strip():
+            messages.append({"role": "user", "content": message})
 
         return {
             "model": config.llm_model,
@@ -220,7 +229,7 @@ async def stream_reply(
                 f"LLM {resp.status_code}: {body[:200].decode('utf-8', 'replace')}",
                 request=resp.request,
                 response=resp,
-                )
+            )
 
         async for line in resp.aiter_lines():
             if not line or not line.startswith("data:"):

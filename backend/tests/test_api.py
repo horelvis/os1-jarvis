@@ -852,11 +852,13 @@ def test_real_llm_build_payload_hermes_format():
         )
 
         messages = payload["messages"]
-        # System prompt should be exactly SYSTEM_PROMPT without injected facts/recall/short_term
+        # System prompt should include SYSTEM_PROMPT plus injected facts/recall
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == real_llm.SYSTEM_PROMPT
-        assert "# Lo que sabes de ella" not in messages[0]["content"]
-        assert "# Lo que recuerdas" not in messages[0]["content"]
+        assert messages[0]["content"].startswith(real_llm.SYSTEM_PROMPT)
+        assert "# Lo que sabes de ella" in messages[0]["content"]
+        assert "Fact 1" in messages[0]["content"]
+        assert "# Lo que recuerdas" in messages[0]["content"]
+        # Short-term turns go as messages, not embedded in the system prompt
         assert "# Conversación reciente" not in messages[0]["content"]
 
         # Short term conversation must be mapped to user/assistant turns
@@ -1034,6 +1036,23 @@ def test_ws_non_string_message_field_returns_error():
         ws.send_text(json.dumps({"type": "chat", "message": 123}))
         msg = ws.receive_json()
         assert msg == {"type": "error", "error": "empty_message"}
+
+
+def test_real_llm_build_payload_hermes_includes_facts_and_recall(monkeypatch):
+    """facts and recall must be injected into the hermes system prompt."""
+    from samantha import real_llm
+    from samantha.config import config as cfg
+
+    orig_provider = cfg.llm_provider
+    cfg.llm_provider = "hermes"
+
+    try:
+        facts = [{"kind": "name", "value": "Hor", "text": "Se llama Hor"}]
+        payload = real_llm._build_payload("hola", facts=facts)
+        system = payload["messages"][0]["content"]
+        assert "Se llama Hor" in system
+    finally:
+        cfg.llm_provider = orig_provider
 
 
 def test_ws_oversized_message_returns_error():
