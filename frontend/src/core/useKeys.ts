@@ -11,6 +11,14 @@ export function useKeys(handlers: KeyHandlers): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Typing "hasta" in the text input must not toggle history/text
+      // panels — only Escape passes through from editable elements.
+      const t = e.target;
+      const isEditable =
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t instanceof HTMLElement && t.isContentEditable);
+      if (isEditable && e.key !== "Escape") return;
       const handler = handlersRef.current[e.key];
       if (handler) handler(e);
     };
