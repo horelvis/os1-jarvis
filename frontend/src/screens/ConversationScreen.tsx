@@ -127,9 +127,18 @@ export function ConversationScreen() {
     listening,
     resetTranscript,
     browserSupportsSpeechRecognition,
+    isMicrophoneAvailable,
   } = useSpeechRecognition();
 
   useEffect(() => { activeRef.current = conversationActive; }, [conversationActive]);
+
+  // react-speech-recognition reports permission problems only through
+  // this flag — startListening() swallows its own failures.
+  useEffect(() => {
+    if (isMicrophoneAvailable) return;
+    setMicError(micErrorMessage("not-allowed"));
+    setConversationActive(false);
+  }, [isMicrophoneAvailable]);
 
   // Tail-echo guard: even though the turn now aborts recognition
   // up-front, results already in flight when the abort lands can
@@ -333,18 +342,11 @@ export function ConversationScreen() {
       console.info("[conv] stop listening");
     } else {
       setConversationActive(true);
-      try {
-        SpeechRecognition.startListening({
-          continuous: true,
-          language: "es-ES",
-        });
-        console.info("[conv] start listening (es-ES, continuous)");
-      } catch (e) {
-        const code = e instanceof Error ? e.message : "unknown";
-        setMicError(micErrorMessage(code));
-        setConversationActive(false);
-        console.error("[conv] startListening threw:", e);
-      }
+      void SpeechRecognition.startListening({
+        continuous: true,
+        language: "es-ES",
+      });
+      console.info("[conv] start listening (es-ES, continuous)");
     }
   };
 
