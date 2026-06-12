@@ -6,6 +6,8 @@ Para ejecutar:
     pytest tests/
 """
 
+import json
+
 from fastapi.testclient import TestClient
 
 from samantha.api import app
@@ -1011,3 +1013,40 @@ def test_unhandled_exception_returns_json_500(monkeypatch):
     r = client.post("/speak", json={"text": "hola"})
     assert r.status_code == 500
     assert r.json() == {"detail": "internal_error"}
+
+
+# ========================================================================
+# /ws — hardening: malformed messages, binary frames, length cap
+# ========================================================================
+
+
+def test_ws_non_dict_json_returns_error():
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text("42")  # valid JSON, not an object
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "invalid_message"}
+
+
+def test_ws_non_string_message_field_returns_error():
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "chat", "message": 123}))
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "empty_message"}
+
+
+def test_ws_oversized_message_returns_error():
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "chat", "message": "x" * 9001}))
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "message_too_long"}
+
+
+def test_ws_binary_frame_returns_error():
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_bytes(b"\x00\x01")
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "binary_not_supported"}

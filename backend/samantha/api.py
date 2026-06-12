@@ -230,6 +230,10 @@ FAKE_TRANSCRIPTS: list[str] = [
     "hola (mic en modo mock — Phase 5 cablea Whisper)",
 ]
 
+# Mirror ChatRequest's max_length — the WS path must not accept
+# unbounded input the HTTP path rejects.
+MAX_WS_MESSAGE_CHARS = 8000
+
 
 # ========================================================================
 # GET / → frontend
@@ -510,9 +514,18 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
         ):
             reply_chunks.append(token)
             await websocket.send_text(json.dumps({"type": "token", "token": token}))
+    except (WebSocketDisconnect, RuntimeError):
+        # Client went away mid-reply — not an LLM error; don't try to
+        # talk to a dead socket. The endpoint loop handles the close.
+        raise
     except Exception as e:
         logger.exception("Error in websocket chat stream")
-        await websocket.send_text(json.dumps({"type": "error", "error": f"llm_error: {str(e)}"}))
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "error": f"llm_error: {str(e)}"})
+            )
+        except Exception:
+            logger.info("ws: client gone before error could be delivered")
         return
 
     if mem is not None and reply_chunks:
@@ -554,22 +567,40 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     logger.info("ws: client connected")
     try:
         while True:
-            raw = await websocket.receive_text()
+            try:
+                raw = await websocket.receive_text()
+            except KeyError:
+                # Starlette's receive_text() KeyErrors on binary frames.
+                await websocket.send_text(
+                    json.dumps({"type": "error", "error": "binary_not_supported"})
+                )
+                continue
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"type": "error", "error": "invalid_json"}))
                 continue
+            if not isinstance(msg, dict):
+                await websocket.send_text(json.dumps({"type": "error", "error": "invalid_message"}))
+                continue
 
             msg_type = msg.get("type")
             if msg_type == "chat":
-                message = (msg.get("message") or "").strip()
+                message = msg.get("message")
+                message = message.strip() if isinstance(message, str) else ""
                 if not message:
                     await websocket.send_text(
                         json.dumps({"type": "error", "error": "empty_message"})
                     )
                     continue
-                user_id = msg.get("user_id", "primary")
+                if len(message) > MAX_WS_MESSAGE_CHARS:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "error": "message_too_long"})
+                    )
+                    continue
+                user_id = msg.get("user_id")
+                if not isinstance(user_id, str) or not user_id:
+                    user_id = "primary"
                 await _ws_stream_chat(websocket, message, user_id)
             elif msg_type == "listen":
                 await _ws_handle_listen(websocket)
@@ -579,6 +610,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
     except WebSocketDisconnect:
         logger.info("ws: client disconnected")
+    except RuntimeError:
+        # send on an already-closed socket (client vanished mid-reply)
+        logger.info("ws: connection closed mid-send")
 
 
 # ========================================================================
