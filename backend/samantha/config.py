@@ -133,6 +133,16 @@ class Config:
     # === Logging ===
     log_level: str = "INFO"
 
+    def __post_init__(self) -> None:
+        normalized = self.mode.strip().lower()
+        if normalized not in ("mock", "real"):
+            raise ValueError(
+                f"SAMANTHA_MODE must be 'mock' or 'real', got {self.mode!r} "
+                "— refusing to start with an ambiguous mode (a typo here "
+                "would silently serve canned mock replies)."
+            )
+        self.mode = normalized
+
     @classmethod
     def from_env(cls) -> "Config":
         """Crea config leyendo variables SAMANTHA_*."""
