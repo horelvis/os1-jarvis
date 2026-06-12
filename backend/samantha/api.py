@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import random
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
@@ -66,11 +67,16 @@ if TYPE_CHECKING:
 
 
 # ============================================================
-# Memory singleton (lazy)
+# Memory singleton (lazy, single-flight)
 # ============================================================
+# The kiosk polls /ping during boot, so first-init must be single-flight
+# now that callers run in threads (asyncio.to_thread). Double-checked
+# locking: cheap unlocked fast-path once _memory is set, lock only for
+# the actual initialization window.
 
 _memory: "Memory | None" = None
 _memory_init_failed: bool = False
+_memory_lock = threading.Lock()
 
 
 def get_memory() -> "Memory | None":
@@ -80,9 +86,19 @@ def get_memory() -> "Memory | None":
     if initialization fails — never raise into the request path.
     """
     global _memory, _memory_init_failed
+    # Fast path: already initialized (or permanently failed/disabled).
     if not config.memory_enabled or _memory_init_failed:
         return None
-    if _memory is None:
+    if _memory is not None:
+        return _memory
+    # Slow path: first init. Serialize across threads so only one
+    # fastembed ONNX session and one chroma open happen.
+    with _memory_lock:
+        # Re-check inside the lock — another thread may have won the race.
+        if _memory_init_failed:
+            return None
+        if _memory is not None:
+            return _memory
         try:
             from .memory import Memory
 
