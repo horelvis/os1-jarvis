@@ -33,6 +33,7 @@ ort.env.wasm.numThreads = 1;
 export function useBargeIn(
   active: boolean,
   onSpeechStart: () => void,
+  enabled: boolean = true,
 ): void {
   const vadRef = useRef<MicVAD | null>(null);
   const cbRef = useRef(onSpeechStart);
@@ -52,6 +53,9 @@ export function useBargeIn(
   // and may take ~300 ms (downloading the ONNX model + spawning the
   // audio worklet); we live with that on the very first activation.
   useEffect(() => {
+    // Kill switch (`sam.bargeIn = 0`): skip entirely — no extra
+    // getUserMedia stream, no ONNX/WASM downloads from jsDelivr.
+    if (!enabled) return;
     let cancelled = false;
     (async () => {
       const vad = await MicVAD.new({
@@ -96,7 +100,7 @@ export function useBargeIn(
       vadRef.current?.destroy();
       vadRef.current = null;
     };
-  }, []);
+  }, [enabled]);
 
   // Toggle start/pause on `active`. If the VAD instance isn't ready
   // yet (cold-start race) we just no-op; the first speak() may miss

@@ -104,22 +104,26 @@ export function ConversationScreen() {
     typeof window === "undefined"
       ? true
       : localStorage.getItem("sam.bargeIn") !== "0";
-  useBargeIn(isSpeaking && bargeInEnabled, () => {
-    if (speakAbortRef.current) {
-      speakAbortRef.current.abort();
-      bargedInRef.current = true;
-      // Reopen the mic NOW — waiting for speak() to settle loses the
-      // first words of the interruption. startListening on an
-      // already-listening manager is a no-op, so the later resume in
-      // sendMessage's .then is harmless.
-      if (activeRef.current) {
-        void SpeechRecognition.startListening({
-          continuous: true,
-          language: "es-ES",
-        });
+  useBargeIn(
+    isSpeaking && bargeInEnabled,
+    () => {
+      if (speakAbortRef.current) {
+        speakAbortRef.current.abort();
+        bargedInRef.current = true;
+        // Reopen the mic NOW — waiting for speak() to settle loses the
+        // first words of the interruption. startListening on an
+        // already-listening manager is a no-op, so the later resume in
+        // sendMessage's .then is harmless.
+        if (activeRef.current) {
+          void SpeechRecognition.startListening({
+            continuous: true,
+            language: "es-ES",
+          });
+        }
       }
-    }
-  });
+    },
+    bargeInEnabled,
+  );
 
   const {
     interimTranscript,
