@@ -330,6 +330,12 @@ export function ConversationScreen() {
       setConversationActive(false);
       SpeechRecognition.stopListening();
     } else {
+      // isMicrophoneAvailable never recovers once false; re-surface the
+      // error on repeat taps instead of showing a dead "active" call.
+      if (!isMicrophoneAvailable) {
+        setStatusMessage(micErrorMessage("not-allowed"));
+        return;
+      }
       setConversationActive(true);
       void SpeechRecognition.startListening({
         continuous: true,
