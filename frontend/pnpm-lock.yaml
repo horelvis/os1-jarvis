@@ -11,9 +11,6 @@ importers:
       '@ricky0123/vad-web':
         specifier: ^0.0.30
         version: 0.0.30
-      '@types/react-speech-recognition':
-        specifier: ^3.9.6
-        version: 3.9.6
       onnxruntime-web:
         specifier: ^1.26.0
         version: 1.26.0
@@ -39,6 +36,9 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.0
         version: 18.3.7(@types/react@18.3.28)
+      '@types/react-speech-recognition':
+        specifier: ^3.9.6
+        version: 3.9.6
       '@types/three':
         specifier: ^0.160.0
         version: 0.160.0

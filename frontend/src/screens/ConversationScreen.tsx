@@ -45,6 +45,8 @@ function chatErrorMessage(code: string): string {
     return "He perdido la conexión con mi cabeza. Dame un momento y repítemelo.";
   if (code.startsWith("llm_error"))
     return "Se me ha ido el hilo. ¿Me lo dices otra vez?";
+  if (code === "message_too_long")
+    return "Eso es mucho de golpe. Cuéntamelo en trozos más pequeños.";
   return "Algo se me ha cruzado. Inténtalo de nuevo.";
 }
 
@@ -66,7 +68,7 @@ export function ConversationScreen() {
   const [showTextInput, setShowTextInput] = useState(false);
   const [textValue, setTextValue] = useState("");
   const [waveMode, setWaveMode] = useState<WaveMode>("idle");
-  const [micError, setMicError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   // Conversation mode = "we're in a phone call with Samantha". One tap
   // enters, another exits. Auto-resumes listening after each TTS turn.
   const [conversationActive, setConversationActive] = useState(false);
@@ -140,7 +142,7 @@ export function ConversationScreen() {
   // this flag — startListening() swallows its own failures.
   useEffect(() => {
     if (isMicrophoneAvailable) return;
-    setMicError(micErrorMessage("not-allowed"));
+    setStatusMessage(micErrorMessage("not-allowed"));
     setConversationActive(false);
   }, [isMicrophoneAvailable]);
 
@@ -225,7 +227,7 @@ export function ConversationScreen() {
     // race-free for same-tick double submits.
     if (busyRef.current) return;
     busyRef.current = true;
-    setMicError(null);
+    setStatusMessage(null);
     appendMessage({
       id: crypto.randomUUID(),
       role: "user",
@@ -275,23 +277,13 @@ export function ConversationScreen() {
     } catch (e) {
       console.warn("chat failed", e);
       removeMessage(replyId);
-      setMicError(chatErrorMessage(e instanceof Error ? e.message : "unknown"));
+      setStatusMessage(chatErrorMessage(e instanceof Error ? e.message : "unknown"));
     } finally {
       busyRef.current = false;
       setBusy(false);
       setWaveMode("idle");
     }
   };
-
-  // Surface the listening state and any interim/final transcript so
-  // we can see in the browser console whether react-speech-recognition
-  // is actually hearing anything.
-  useEffect(() => {
-    console.info("[conv] listening:", listening,
-      "interim:", JSON.stringify(interimTranscript),
-      "final:", JSON.stringify(finalTranscript),
-      "busy:", busy);
-  }, [listening, interimTranscript, finalTranscript, busy]);
 
   // Debounced commit of the recognizer's final transcript. Web Speech
   // API often emits multiple "final" chunks per utterance (one per
@@ -302,7 +294,6 @@ export function ConversationScreen() {
     if (busy) return;
     const handle = setTimeout(() => {
       const text = finalTranscript.trim();
-      console.info("[conv] debounce fired, committing:", JSON.stringify(text));
       // Abort BEFORE resetting: resetTranscript() aborts with
       // pauseAfterDisconnect=false, and in continuous mode the manager
       // auto-restarts on `onend` — the mic would stay open during
@@ -313,8 +304,6 @@ export function ConversationScreen() {
       resetTranscript();
       if (!text) return;
       void sendMessage(text).then(() => {
-        console.info("[conv] sendMessage done, conversation still active:",
-          activeRef.current);
         if (activeRef.current) {
           // Conversation still active → resume listening.
           SpeechRecognition.startListening({
@@ -331,26 +320,21 @@ export function ConversationScreen() {
 
   const toggleConversation = () => {
     bump();
-    setMicError(null);
-    console.info("[conv] toggle clicked. browserSupports:",
-      browserSupportsSpeechRecognition,
-      "active:", conversationActive);
+    setStatusMessage(null);
     if (!browserSupportsSpeechRecognition) {
-      setMicError(micErrorMessage("speech_recognition_unavailable"));
+      setStatusMessage(micErrorMessage("speech_recognition_unavailable"));
       console.warn("[conv] browser does not support speech recognition");
       return;
     }
     if (conversationActive) {
       setConversationActive(false);
       SpeechRecognition.stopListening();
-      console.info("[conv] stop listening");
     } else {
       setConversationActive(true);
       void SpeechRecognition.startListening({
         continuous: true,
         language: "es-ES",
       });
-      console.info("[conv] start listening (es-ES, continuous)");
     }
   };
 
@@ -436,21 +420,21 @@ export function ConversationScreen() {
         </div>
       )}
 
-      {/* Mic status — sits below Samantha's last line. Live interim
-          shows what the recognizer is currently hearing; errors
-          replace it when present. */}
-      {!showHistory && (liveCaption || micError) && (
+      {/* Status line — sits below Samantha's last line. Shows the live
+          interim transcript while listening, and mic OR chat-turn errors
+          when present. */}
+      {!showHistory && (liveCaption || statusMessage) && (
         <div style={{
           position: "absolute", left: 0, right: 0, bottom: "10vh",
           textAlign: "center",
           fontSize: "var(--text-label)",
           fontStyle: "italic",
           letterSpacing: "0.08em",
-          color: micError ? "var(--ink-soft)" : "var(--ink-dim)",
+          color: statusMessage ? "var(--ink-soft)" : "var(--ink-dim)",
           padding: "0 8vw",
           pointerEvents: "none",
         }}>
-          {micError ?? `“${liveCaption}”`}
+          {statusMessage ?? `“${liveCaption}”`}
         </div>
       )}
 
