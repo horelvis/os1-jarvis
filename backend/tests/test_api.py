@@ -1050,3 +1050,14 @@ def test_ws_binary_frame_returns_error():
         ws.send_bytes(b"\x00\x01")
         msg = ws.receive_json()
         assert msg == {"type": "error", "error": "binary_not_supported"}
+
+        # The socket must survive the error: a normal turn still works.
+        ws.send_json({"type": "chat", "message": "hola"})
+        while True:
+            msg = ws.receive_json()
+            if msg["type"] == "token":
+                continue
+            elif msg["type"] == "done":
+                break
+            else:
+                raise AssertionError(f"unexpected message after recovery: {msg}")
