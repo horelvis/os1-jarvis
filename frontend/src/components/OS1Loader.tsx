@@ -173,6 +173,16 @@ export const OS1Loader = forwardRef<OS1LoaderHandle, OS1LoaderProps>(
         running = false;
         cancelAnimationFrame(frameId);
         window.removeEventListener("resize", onResize);
+        // TubeGeometry + planes + materials leak GPU memory per mount
+        // (StrictMode double-mounts; every boot remount stacks).
+        scene.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            const mat = obj.material;
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else mat.dispose();
+          }
+        });
         renderer.dispose();
         if (container.contains(renderer.domElement)) {
           container.removeChild(renderer.domElement);
