@@ -83,6 +83,11 @@ export function ConversationScreen() {
   // Set when the VAD interrupts Samantha; tells the busy-flip wipe to
   // KEEP the transcript (it's the user's interruption, not echo).
   const bargedInRef = useRef(false);
+  // False once the screen unmounts; sendMessage checks it before
+  // starting TTS so a turn resolving late can't speak over another
+  // screen. Don't reuse activeRef: typed-input turns run with
+  // conversationActive === false.
+  const mountedRef = useRef(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   // VAD-based barge-in: while Samantha is speaking the mic is muted at
@@ -125,7 +130,6 @@ export function ConversationScreen() {
   } = useSpeechRecognition();
 
   useEffect(() => { activeRef.current = conversationActive; }, [conversationActive]);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
 
   // Tail-echo guard: even though the turn now aborts recognition
   // up-front, results already in flight when the abort lands can
@@ -159,10 +163,13 @@ export function ConversationScreen() {
   // Unmounting mid-conversation must tear the whole turn down: clear
   // activeRef FIRST so the in-flight sendMessage .then can't restart
   // the (module-singleton) recognizer on another screen, silence any
-  // playing TTS, and abort recognition (abort, not stop, so a
-  // continuous session can't auto-restart on `onend`).
+  // playing TTS, and abort recognition (abort, not stop, so pending
+  // recognition results are discarded instead of arriving as ghost
+  // finals after unmount).
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       activeRef.current = false;
       speakAbortRef.current?.abort();
       void SpeechRecognition.abortListening();
@@ -197,9 +204,15 @@ export function ConversationScreen() {
 
   const sendMessage = async (msg: string) => {
     bump();
-    setMicError(null);
     const trimmed = msg.trim();
     if (!trimmed) return;
+    // One turn at a time: WSClient keeps ONE handler per message type,
+    // so a second concurrent chat() would steal the first turn's
+    // token/done/error handlers. The ref (not state) makes the guard
+    // race-free for same-tick double submits.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setMicError(null);
     appendMessage({
       id: crypto.randomUUID(),
       role: "user",
@@ -232,7 +245,7 @@ export function ConversationScreen() {
       patchMessage(replyId, cleanReply);
 
       const full = cleanReply.trim();
-      if (full) {
+      if (full && mountedRef.current) {
         setWaveMode("speaking");
         const ac = new AbortController();
         speakAbortRef.current = ac;
@@ -251,6 +264,7 @@ export function ConversationScreen() {
       removeMessage(replyId);
       setMicError(chatErrorMessage(e instanceof Error ? e.message : "unknown"));
     } finally {
+      busyRef.current = false;
       setBusy(false);
       setWaveMode("idle");
     }
