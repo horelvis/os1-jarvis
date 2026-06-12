@@ -248,9 +248,13 @@ async def _stream_xtts(text: str) -> AsyncIterator[bytes]:
         "repetition_penalty": config.tts_xtts_repetition_penalty,
     }
     url = f"{config.tts_xtts_url.rstrip('/')}/tts_stream"
+    # `read` is httpx's per-read-operation (inter-chunk) timeout, not a
+    # whole-body cap: a healthy stream that keeps emitting chunks never
+    # trips it, while a wedged server (CUDA hang) fails loudly instead
+    # of freezing /speak forever.
     timeout = httpx.Timeout(
         connect=config.tts_xtts_timeout_s,
-        read=None,
+        read=config.tts_xtts_timeout_s,
         write=config.tts_xtts_timeout_s,
         pool=config.tts_xtts_timeout_s,
     )
@@ -331,9 +335,13 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
     transcript, wav_bytes, wav_name = _load_cosyvoice_refs()
 
     url = f"{config.tts_cosyvoice_url.rstrip('/')}/inference_zero_shot"
+    # `read` is httpx's per-read-operation (inter-chunk) timeout, not a
+    # whole-body cap: a healthy stream that keeps emitting chunks never
+    # trips it, while a wedged server (CUDA hang) fails loudly instead
+    # of freezing /speak forever.
     timeout = httpx.Timeout(
         connect=config.tts_cosyvoice_timeout_s,
-        read=None,
+        read=config.tts_cosyvoice_timeout_s,
         write=config.tts_cosyvoice_timeout_s,
         pool=config.tts_cosyvoice_timeout_s,
     )
