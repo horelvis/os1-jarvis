@@ -21,7 +21,12 @@ RUN apt-get update -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+# Pinned: our server.py overlay (docker-compose mounts it over
+# runtime/python/fastapi/server.py) tracks THIS revision's internals.
+# Bump deliberately, re-testing the overlay against upstream changes.
+ARG COSYVOICE_COMMIT=074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git \
+    && cd CosyVoice && git checkout --recurse-submodules "$COSYVOICE_COMMIT"
 
 WORKDIR /opt/CosyVoice
 

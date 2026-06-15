@@ -49,7 +49,9 @@ app.add_middleware(
 
 def generate_data(model_output):
     for i in model_output:
-        tts_audio = (i['tts_speech'].numpy() * (2 ** 15)).astype(np.int16).tobytes()
+        # Clip before casting: a sample at/above 1.0 would wrap to
+        # -32768 (audible click). Matches the XTTS overlay's handling.
+        tts_audio = (np.clip(i['tts_speech'].numpy(), -1.0, 1.0) * 32767).astype(np.int16).tobytes()
         yield tts_audio
 
 
