@@ -22,7 +22,11 @@ Type=simple
 Environment=API_SERVER_ENABLED=true
 Environment=API_SERVER_PORT=8642
 Environment=API_SERVER_HOST=127.0.0.1
-Environment=API_SERVER_KEY=samantha-api-secret-key-2026
+# API_SERVER_KEY intentionally NOT set here — the unit is committed to
+# git. Set the real key in a local drop-in on the kiosk box:
+#   systemctl --user edit samantha-hermes
+#   [Service]
+#   Environment=API_SERVER_KEY=<new key>
 
 # Path to the hermes executable (adjust if installed in a virtualenv or custom location)
 ExecStart=/usr/bin/env hermes gateway
