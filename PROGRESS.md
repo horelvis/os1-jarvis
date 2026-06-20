@@ -1,5 +1,48 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-06-20 — Bugfix Sweep (2026-06-11 plan) ✅
+
+23-task sweep fixing the daily-conversation path, backend robustness, frontend robustness, and deploy issues found in a full-project review.
+
+**Fase 1 — Conversation core:**
+- Task 1: Stop duplicating current user message in LLM context (collect → persist ordering).
+- Task 2: Abort recognition before transcript reset so mic stays muted during TTS.
+- Task 3: Abort TTS and recognizer on unmount; clear activeRef first.
+- Task 4: Restart mic immediately on barge-in; keep interruption transcript via bargedInRef.
+- Task 5: Drop empty reply bubble on chat failure; honest Samantha-voiced error copy.
+
+**Fase 2 — Backend robustness:**
+- Task 7: Generic exception handler returns JSONResponse(500) instead of re-raising.
+- Task 8: Memory init and per-turn memory work moved off the event loop (asyncio.to_thread); ShortTermBuffer gains a threading.Lock.
+- Task 9: WS loop survives malformed messages, binary frames, and mid-stream disconnects; MAX_WS_MESSAGE_CHARS cap.
+- Task 10: SAMANTHA_MODE validated and normalized at startup; unknown values raise ValueError.
+- Task 11: TTS read timeout applied to synthesis streams (wedged server no longer hangs /speak).
+- Task 12: Hermes path gets facts + semantic recall injected into system prompt.
+
+**Fase 3 — Frontend robustness:**
+- Task 13: Global keyboard shortcuts ignored while typing in editable elements.
+- Task 14: Serialize chat turns — concurrent sends clobbered WS handlers.
+- Task 15: Surface microphone permission errors via isMicrophoneAvailable effect.
+- Task 16: Kill switch skips VAD init (no mic stream, no CDN fetches) when barge-in disabled.
+- Task 17: Dispose Three.js geometries and materials on OS1Loader unmount.
+- Task 18: Strip debug logging, fix emoji residue (ZWJ + combining keycap), move @types dep.
+
+**Fase 4 — Deploy & TTS server:**
+- Task 19: Add missing samantha-backend.service and samantha-ui.service systemd units.
+- Task 20: Move hermes API key out of committed unit file (rotate on kiosk box).
+- Task 21: CosyVoice server — clip audio before int16 cast; pin upstream clone.
+- Task 22: is_available() exhaustive dispatch; unified default fallback; purge stale docs across tts.py/config.py/api.py/memory.py/schemas.py.
+
+**Changed files:** `backend/samantha/api.py`, `backend/samantha/config.py`, `backend/samantha/memory.py`, `backend/samantha/real_llm.py`, `backend/samantha/schemas.py`, `backend/samantha/short_term.py`, `backend/samantha/tts.py`, `backend/tests/test_api.py`, `backend/tests/test_short_term.py`, `backend/tests/test_tts.py`, `frontend/src/screens/ConversationScreen.tsx`, `frontend/src/core/useKeys.ts`, `frontend/src/core/useBargeIn.ts`, `frontend/src/core/store.ts`, `frontend/src/core/sanitize.ts`, `frontend/src/components/OS1Loader.tsx`, `frontend/package.json`, `tts-server/cosyvoice/server.py`, `tts-server/cosyvoice/Dockerfile`, `systemd/samantha-backend.service`, `systemd/samantha-ui.service`, `systemd/samantha-hermes.service`
+
+**Tests:** 75 passed, 1 pre-existing failure (test_synth_produces_riff_wave — piper not installed on dev machine). Frontend: tsc clean, pnpm build succeeds.
+
+**Notes:**
+- The piper test failure is not new — `piper` module is not installed in the dev venv. On the kiosk box with piper installed it passes.
+- Task 6 (Fase 1 smoke test) is manual — verify in the real kiosk environment.
+
+---
+
 > **For Claude Code:** Append to this file after completing each phase
 > from CLAUDE.md §4. Newest entries at the top. Format:
 >
