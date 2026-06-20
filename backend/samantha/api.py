@@ -111,53 +111,11 @@ def get_memory() -> "Memory | None":
     return _memory
 
 
-def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
-    """Gather the facts surfaced into the system prompt.
-
-    Order matters for prompt readability:
-        1. name (identity anchor)
-        2. five Big-Five trait answers (E / O / C / A / N)
-        3. onboarding_completed_at (timestamp, last so it doesn't
-           crowd out the personality signal)
-
-    Future preference facts land here too — keep the list short so the
-    prompt stays scannable for the LLM.
-    """
-    from .profile import BIG5_FACT_KINDS
-
-    kinds = ("name", *BIG5_FACT_KINDS, "onboarding_completed_at")
-    out: list[dict] = []
-    for kind in kinds:
-        f = mem.get_fact(kind, user_id=user_id)
-        if f is not None:
-            out.append(f)
-    return out
-
+from .context import gather_context as _gather_context  # noqa: E402
 
 # ============================================================
 # Token streaming (dispatches on config.mode)
 # ============================================================
-
-
-async def _gather_context(
-    mem: "Memory", message: str, user_id: str
-) -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
-    """Collect facts + recall + short-term and persist the user turn,
-    off the event loop (embedding + ChromaDB + SQLite are all sync and
-    CPU-bound; running them inline stalls /ping and TTS streaming).
-
-    Ordering matters: context FIRST, remember AFTER, so the ring never
-    contains the current message (the LLM payload appends it itself).
-    """
-
-    def _work() -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
-        facts = _collect_facts(mem, user_id=user_id)
-        recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
-        short = mem.short_term(user_id=user_id)
-        mem.remember("user", message, user_id=user_id)
-        return facts, recall, short
-
-    return await asyncio.to_thread(_work)
 
 
 async def _stream_tokens(
