@@ -416,26 +416,16 @@ async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
 
 @app.post("/speak")
 async def speak(req: SpeakRequest) -> Response:
-    """Synthesize speech via the configured TTS backend, streaming.
-
-    Backends (config.tts_backend):
-      cosyvoice → CosyVoice 3 zero-shot (4090, port 8093). Default.
-                  Honors personality v6 inline markers ([laughter] etc.).
-      xtts      → Coqui XTTS-v2 streaming server (4090, port 8092).
-      piper     → Local Piper synth, ~50-300 ms on CPU. Resampled to
-                  24 kHz at the tts.py layer so the wire format is
-                  uniform.
+    """Synthesize speech via CosyVoice 3, streaming.
 
     Response is `audio/pcm` raw 24 kHz mono int16 little-endian,
     chunked. Headers carry mode + sample rate. The frontend uses
     Web Audio API to decode & play as chunks arrive.
 
-    No tone-WAV / mock fallback. If the configured backend is
-    unreachable the handler returns 503 so the UI surfaces a real
-    "no oigo al TTS" alert instead of a placebo beep that hides
-    the outage.
+    Returns 503 if the CosyVoice server config or ref files are
+    missing — no silent fallback.
     """
-    logger.info(f"speak: voice={req.voice} backend={config.tts_backend} text='{req.text[:60]}'")
+    logger.info(f"speak: voice={req.voice} text='{req.text[:60]}'")
 
     if not req.text.strip():
         return Response(
@@ -449,7 +439,7 @@ async def speak(req: SpeakRequest) -> Response:
     if not tts.is_available():
         raise HTTPException(
             status_code=503,
-            detail=f"tts backend '{config.tts_backend}' not available",
+            detail="cosyvoice not available — check ref WAV + transcript paths",
         )
 
     gen = tts.stream(req.text)

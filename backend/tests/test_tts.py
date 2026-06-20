@@ -1,10 +1,4 @@
-"""Unit tests for backend/samantha/tts.py.
-
-The Piper voice model is large (~60 MB) and lives outside the repo
-at ~/.samantha/voices/. Tests that require it skip cleanly when it
-isn't present — keeps CI / fresh-clone runs green without forcing a
-60 MB download up front.
-"""
+"""Unit tests for backend/samantha/tts.py (CosyVoice 3 backend)."""
 
 from __future__ import annotations
 
@@ -19,9 +13,7 @@ def test_is_available_reflects_disk_state():
 
 
 def test_synth_empty_text_returns_empty_bytes():
-    """Blank inputs short-circuit before loading the voice — useful
-    for not paying piper startup on no-op calls. Returns (b"",
-    "empty") so the route layer can still set a sensible header."""
+    """Blank inputs short-circuit before hitting the network."""
     data, mode = tts.synth("")
     assert data == b""
     assert mode == "empty"
@@ -30,38 +22,22 @@ def test_synth_empty_text_returns_empty_bytes():
     assert mode == "empty"
 
 
-def test_synth_raises_when_voice_missing(monkeypatch, tmp_path):
-    """If the model path doesn't exist, synth must raise rather than
-    return a silent placeholder — the /speak fallback at the route
-    layer is what makes the bad path UX-safe."""
-    monkeypatch.setattr(tts.config, "tts_backend", "piper")
-    monkeypatch.setattr(tts.config, "tts_voices_dir", str(tmp_path))
-    # Force re-load attempt on the next synth call.
-    monkeypatch.setattr(tts, "_voice", None)
-    monkeypatch.setattr(tts, "_voice_load_failed", False)
-    with pytest.raises(tts.VoiceMissingError):
-        tts.synth("hola")
-
-
-def test_unknown_tts_backend_reports_unavailable(monkeypatch):
-    """An unimplemented backend (e.g. the documented-but-never-built
-    'vllm_omni') must gate at is_available() → /speak 503, not fall
-    through to the Piper check and then 500 in stream()."""
-    monkeypatch.setattr(tts.config, "tts_backend", "vllm_omni")
+def test_is_available_false_when_refs_missing(monkeypatch, tmp_path):
+    """is_available() returns False when ref WAV or transcript are absent."""
+    monkeypatch.setattr(tts.config, "tts_cosyvoice_ref_wav", str(tmp_path / "missing.wav"))
+    monkeypatch.setattr(
+        tts.config, "tts_cosyvoice_ref_transcript_path", str(tmp_path / "missing.txt")
+    )
     assert tts.is_available() is False
 
 
-@pytest.mark.skipif(
-    not tts.is_available(),
-    reason="piper voice model not on disk (~/.samantha/voices/) — skip real synth",
-)
-def test_synth_produces_riff_wave(monkeypatch):
-    """End-to-end: feed real text, get a parseable WAV back."""
-    # Force the piper path regardless of test env's tts_backend.
-    monkeypatch.setattr(tts.config, "tts_backend", "piper")
-    data, mode = tts.synth("Hola. Soy Samantha.")
-    assert mode == "piper"
-    assert data[:4] == b"RIFF"
-    assert data[8:12] == b"WAVE"
-    # 22.05 kHz mono 16-bit → at least a few KB for a 2-second phrase.
-    assert len(data) > 4_000
+def test_synth_raises_when_refs_missing(monkeypatch, tmp_path):
+    """If the ref files don't exist, synth must raise VoiceMissingError."""
+    monkeypatch.setattr(tts.config, "tts_cosyvoice_ref_wav", str(tmp_path / "missing.wav"))
+    monkeypatch.setattr(
+        tts.config, "tts_cosyvoice_ref_transcript_path", str(tmp_path / "missing.txt")
+    )
+    monkeypatch.setattr(tts, "_cosyvoice_ref_transcript", None)
+    monkeypatch.setattr(tts, "_cosyvoice_ref_wav_bytes", None)
+    with pytest.raises(tts.VoiceMissingError):
+        tts.synth("hola")

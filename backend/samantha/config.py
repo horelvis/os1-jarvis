@@ -67,49 +67,11 @@ class Config:
     memory_short_term_capacity: int = 20  # last N turns kept verbatim in SQLite ring
     memory_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
-    # === TTS — backend-pluggable ===
-    # "cosyvoice" → CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the
-    #               4090 at port 8093. Voice cloning via
-    #               inference_zero_shot with the reference WAV +
-    #               its transcript. Only backend that honors the
-    #               personality v6 inline markers ([laughter],
-    #               <laughter>palabras</laughter>, [breath], [sigh]).
-    #               Default since commit 1df4ea8.
-    # "xtts"      → Coqui XTTS-v2 streaming server (4090, port 8092)
-    #               with our overlay exposing temperature / top_p /
-    #               repetition_penalty / speed. Voice cloning from a
-    #               ~8 s reference WAV uploaded once at startup.
-    # "piper"     → local Piper synth (no GPU). Last-resort, lower
-    #               quality, no cloning (single fixed voice).
-    # Any other value → /speak returns 503 (see tts.is_available()).
-    tts_backend: str = "cosyvoice"
-
-    # ── Piper config (local fallback) ──
-    # Voice files live outside the repo (~70 MB each). If the model
-    # isn't on disk, /speak returns 503 — no hard dependency at runtime.
-    # Default: es_ES-sharvard-medium, speaker F (female). The other
-    # sharvard speaker is M=0. Single-speaker voices like
-    # es_ES-davefx-medium ignore tts_speaker_id (set it to None).
-    tts_voices_dir: str = "~/.samantha/voices"
-    tts_voice: str = "es_ES-sharvard-medium"
-    tts_speaker_id: int | None = 1
-
-    # ── XTTS-v2 server config ──
-    # URL of the Coqui xtts-streaming-server with our overlay
-    # (tts-server/xtts/docker-compose.yml).
-    tts_xtts_url: str = "http://192.168.100.58:8092"
-    tts_xtts_timeout_s: float = 60.0
-    # Reference WAV for voice cloning. Uploaded once at first synth
-    # call; embeddings cached in memory for the process lifetime.
-    # If you change the WAV, restart the backend to pick it up.
-    tts_xtts_ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
-    tts_xtts_language: str = "es"
-    # Sampling knobs (exposed by our overlay /tts_stream — upstream
-    # Coqui hardcodes these). Picked after audition; the user can
-    # tune via SAMANTHA_TTS_XTTS_TEMPERATURE etc. at runtime.
-    tts_xtts_temperature: float = 0.85
-    tts_xtts_top_p: float = 0.9
-    tts_xtts_repetition_penalty: float = 1.5
+    # === TTS — CosyVoice 3 ===
+    # CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the 4090 at port 8093.
+    # Voice cloning via inference_zero_shot with the reference WAV +
+    # its transcript. Honors personality v6 inline markers ([laughter],
+    # <laughter>palabras</laughter>, [breath], [sigh]).
 
     # ── CosyVoice 3 server config ──
     # URL of the CosyVoice runtime FastAPI with our overlay
@@ -118,7 +80,7 @@ class Config:
     # sends plain Spanish.
     tts_cosyvoice_url: str = "http://192.168.100.58:8093"
     tts_cosyvoice_timeout_s: float = 60.0
-    # Reference WAV — same Inés clip XTTS uses by default.
+    # Reference WAV (~8 s of Samantha's voice).
     tts_cosyvoice_ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
     # Literal transcript of the reference WAV. CosyVoice 3 zero-shot
     # needs it to condition the LLM on prosody (cross_lingual sounds
@@ -174,26 +136,6 @@ class Config:
                 "MEMORY_SHORT_TERM_CAPACITY", cls.memory_short_term_capacity
             ),
             memory_embedder_model=_get("MEMORY_EMBEDDER_MODEL", cls.memory_embedder_model),
-            tts_backend=_get("TTS_BACKEND", cls.tts_backend),
-            tts_voices_dir=_get("TTS_VOICES_DIR", cls.tts_voices_dir),
-            tts_voice=_get("TTS_VOICE", cls.tts_voice),
-            # speaker_id needs a custom path because the helper above
-            # can't tell "default int 1" from "user wants 1". `None`
-            # = single-speaker model, omit speaker_id from synth.
-            tts_speaker_id=(
-                int(os.environ["SAMANTHA_TTS_SPEAKER_ID"])
-                if os.environ.get("SAMANTHA_TTS_SPEAKER_ID", "").strip()
-                else cls.tts_speaker_id
-            ),
-            tts_xtts_url=_get("TTS_XTTS_URL", cls.tts_xtts_url),
-            tts_xtts_timeout_s=_get("TTS_XTTS_TIMEOUT_S", cls.tts_xtts_timeout_s),
-            tts_xtts_ref_wav=_get("TTS_XTTS_REF_WAV", cls.tts_xtts_ref_wav),
-            tts_xtts_language=_get("TTS_XTTS_LANGUAGE", cls.tts_xtts_language),
-            tts_xtts_temperature=_get("TTS_XTTS_TEMPERATURE", cls.tts_xtts_temperature),
-            tts_xtts_top_p=_get("TTS_XTTS_TOP_P", cls.tts_xtts_top_p),
-            tts_xtts_repetition_penalty=_get(
-                "TTS_XTTS_REPETITION_PENALTY", cls.tts_xtts_repetition_penalty
-            ),
             tts_cosyvoice_url=_get("TTS_COSYVOICE_URL", cls.tts_cosyvoice_url),
             tts_cosyvoice_timeout_s=_get("TTS_COSYVOICE_TIMEOUT_S", cls.tts_cosyvoice_timeout_s),
             tts_cosyvoice_ref_wav=_get("TTS_COSYVOICE_REF_WAV", cls.tts_cosyvoice_ref_wav),
