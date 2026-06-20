@@ -419,9 +419,9 @@ async def speak(req: SpeakRequest) -> Response:
     """Synthesize speech via the configured TTS backend, streaming.
 
     Backends (config.tts_backend):
-      vllm_omni → Stream from a vllm-omni server (typically the 4090
-                  box). Voice cloning via Qwen3-TTS Base. ~40 ms TTFA
-                  warm. Default.
+      cosyvoice → CosyVoice 3 zero-shot (4090, port 8093). Default.
+                  Honors personality v6 inline markers ([laughter] etc.).
+      xtts      → Coqui XTTS-v2 streaming server (4090, port 8092).
       piper     → Local Piper synth, ~50-300 ms on CPU. Resampled to
                   24 kHz at the tts.py layer so the wire format is
                   uniform.

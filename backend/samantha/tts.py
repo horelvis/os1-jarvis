@@ -5,7 +5,7 @@ chunks. Piper's native 22050 Hz output is resampled on the fly to
 keep the wire format uniform — the frontend only has to know one
 sample rate.
 
-  config.tts_backend == "cosyvoice"  (default)
+  config.tts_backend == "xtts"
       Streams PCM chunks from Coqui xtts-streaming-server (port
       8092 on the 4090) with our overlay that exposes
       temperature / top_p / repetition_penalty / speed. Voice
@@ -14,7 +14,7 @@ sample rate.
       on 2026-05-15: same tone across requests, expressive at
       temperature 0.85.
 
-  config.tts_backend == "cosyvoice"
+  config.tts_backend == "cosyvoice"  (default since commit 1df4ea8)
       CosyVoice 3 zero-shot (port 8093 on the 4090) via
       inference_zero_shot. Sends the ref WAV + its transcript on
       every call so the LLM gets prosodic conditioning (cross_lingual
@@ -94,16 +94,19 @@ def is_available() -> bool:
     Doesn't ping the remote. The /speak handler relies on the runtime
     fall-through inside stream()/synth() to handle real failures.
     """
-    backend = (config.tts_backend or "piper").lower()
-    if backend == "xtts":
-        return bool(config.tts_xtts_url) and Path(config.tts_xtts_ref_wav).expanduser().is_file()
+    backend = (config.tts_backend or "").strip().lower() or "cosyvoice"
     if backend == "cosyvoice":
         return (
             bool(config.tts_cosyvoice_url)
             and Path(config.tts_cosyvoice_ref_wav).expanduser().is_file()
             and Path(config.tts_cosyvoice_ref_transcript_path).expanduser().is_file()
         )
-    return _piper_voice_available()
+    if backend == "xtts":
+        return bool(config.tts_xtts_url) and Path(config.tts_xtts_ref_wav).expanduser().is_file()
+    if backend == "piper":
+        return _piper_voice_available()
+    logger.error(f"tts: unknown backend {backend!r} — check SAMANTHA_TTS_BACKEND")
+    return False
 
 
 async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
@@ -122,7 +125,7 @@ async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
         return
     clean = text.strip()
 
-    backend = (config.tts_backend or "cosyvoice").lower()
+    backend = (config.tts_backend or "").strip().lower() or "cosyvoice"
     # CosyVoice 3 understands the personality v6 inline markers; every
     # other backend would read them literally.
     if backend != "cosyvoice":
@@ -157,8 +160,8 @@ def synth(text: str) -> tuple[bytes, str]:
 
     Returns (b"", "empty") on blank input.
 
-    Used by api.py /speak today; Phase 2.2 will replace the caller
-    with a StreamingResponse driven by `stream()` directly.
+    Test-only convenience; /speak uses stream() directly via a
+    StreamingResponse so audio starts flowing before synthesis ends.
     """
     if not text or not text.strip():
         return b"", "empty"

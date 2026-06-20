@@ -68,30 +68,25 @@ class Config:
     memory_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     # === TTS — backend-pluggable ===
-    # "xtts"      → Coqui XTTS-v2 streaming server (4090, port 8092)
-    #               with our overlay exposing temperature / top_p /
-    #               repetition_penalty / speed. Voice cloning from a
-    #               ~8 s reference WAV uploaded once at startup.
-    #               Picked as default 2026-05-15 after A/B against
-    #               vllm-omni: same tone across requests (vllm-omni
-    #               varied a lot), acceptable expressiveness at
-    #               temperature 0.85.
     # "cosyvoice" → CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the
     #               4090 at port 8093. Voice cloning via
     #               inference_zero_shot with the reference WAV +
     #               its transcript. Only backend that honors the
     #               personality v6 inline markers ([laughter],
     #               <laughter>palabras</laughter>, [breath], [sigh]).
-    # "vllm_omni" → vllm-omni serving Qwen3-TTS Base (port 8091).
-    #               Voice cloning + streaming PCM. Kept as alt option.
+    #               Default since commit 1df4ea8.
+    # "xtts"      → Coqui XTTS-v2 streaming server (4090, port 8092)
+    #               with our overlay exposing temperature / top_p /
+    #               repetition_penalty / speed. Voice cloning from a
+    #               ~8 s reference WAV uploaded once at startup.
     # "piper"     → local Piper synth (no GPU). Last-resort, lower
     #               quality, no cloning (single fixed voice).
+    # Any other value → /speak returns 503 (see tts.is_available()).
     tts_backend: str = "cosyvoice"
 
     # ── Piper config (local fallback) ──
     # Voice files live outside the repo (~70 MB each). If the model
-    # isn't on disk and vllm_omni is also down, /speak degrades to a
-    # tone WAV — no hard dependency at runtime.
+    # isn't on disk, /speak returns 503 — no hard dependency at runtime.
     # Default: es_ES-sharvard-medium, speaker F (female). The other
     # sharvard speaker is M=0. Single-speaker voices like
     # es_ES-davefx-medium ignore tts_speaker_id (set it to None).

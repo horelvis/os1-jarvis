@@ -22,10 +22,8 @@ Schema per chunk:
   document  raw text
   metadata  {role: "user"|"samantha", timestamp: int, user_id: str}
 
-Embedder: ChromaDB's default ONNX MiniLM-L6-v2. Primarily English but
-covers enough multilingual signal for short Spanish chunks. TODO: swap
-to `paraphrase-multilingual-MiniLM-L12-v2` via sentence-transformers
-once we've validated retrieval quality in real conversation.
+Embedder: fastembed (ONNX runtime) with
+`paraphrase-multilingual-MiniLM-L12-v2`. Spanish-first; no extra daemon.
 """
 
 from __future__ import annotations

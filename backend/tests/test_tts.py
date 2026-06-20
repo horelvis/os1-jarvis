@@ -43,6 +43,14 @@ def test_synth_raises_when_voice_missing(monkeypatch, tmp_path):
         tts.synth("hola")
 
 
+def test_unknown_tts_backend_reports_unavailable(monkeypatch):
+    """An unimplemented backend (e.g. the documented-but-never-built
+    'vllm_omni') must gate at is_available() → /speak 503, not fall
+    through to the Piper check and then 500 in stream()."""
+    monkeypatch.setattr(tts.config, "tts_backend", "vllm_omni")
+    assert tts.is_available() is False
+
+
 @pytest.mark.skipif(
     not tts.is_available(),
     reason="piper voice model not on disk (~/.samantha/voices/) — skip real synth",

@@ -1,7 +1,7 @@
 """Modelos de datos (Pydantic) que definen el contrato del API.
 
-Estos schemas SON el contrato entre Tauri (Rust) y este backend (Python).
-Si cambias algo aquí, hay que actualizar también `src-tauri/src/backend.rs`.
+Estos schemas SON el contrato entre el frontend (React) y este backend (Python).
+Si cambias algo aquí, actualiza también los tipos en `frontend/src/`.
 """
 
 from pydantic import BaseModel, Field
