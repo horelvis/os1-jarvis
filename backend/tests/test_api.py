@@ -715,7 +715,7 @@ def test_profile_endpoints_full_cycle(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     r = client.get("/profile")
     assert r.status_code == 404
@@ -775,7 +775,7 @@ def test_profile_post_rejects_empty_first_answer(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     body = {
         "name": "tú",  # frontend fallback we must reject
@@ -801,7 +801,7 @@ def test_profile_post_rejects_re_pairing(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     body = {
         "name": "Alice",
@@ -927,7 +927,7 @@ def test_chat_does_not_duplicate_current_message(tmp_path, monkeypatch):
 
     mem = Memory(persist_dir=str(tmp_path / "memory"))
     monkeypatch.setattr(api_mod, "_memory", mem)
-    monkeypatch.setattr(api_mod, "_memory_init_failed", False)
+    monkeypatch.setattr(api_mod, "_memory_init_failed_at", None)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
     monkeypatch.setattr(api_mod.config, "mode", "real")
 
@@ -1206,3 +1206,41 @@ def test_lifespan_closes_memory():
         api_mod._memory = FakeMem()
     assert closed["value"] is True
     assert api_mod._memory is None
+
+
+def test_memory_init_failure_retries_after_backoff(monkeypatch):
+    """A failed init (e.g. external volume not yet mounted at boot)
+    must not disable memory forever — retry after the backoff window."""
+    import samantha.memory as memory_mod
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod, "_memory", None)
+    monkeypatch.setattr(api_mod, "_memory_init_failed_at", None)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+
+    calls = {"n": 0}
+
+    class FlakyMemory:
+        def __init__(self, persist_dir):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("volume not mounted")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(memory_mod, "Memory", FlakyMemory)
+
+    # First call fails and latches the failure timestamp.
+    assert api_mod.get_memory() is None
+    # Within the backoff window: no new attempt.
+    assert api_mod.get_memory() is None
+    assert calls["n"] == 1
+    # Simulate the window elapsing.
+    monkeypatch.setattr(
+        api_mod,
+        "_memory_init_failed_at",
+        api_mod._memory_init_failed_at - api_mod.MEMORY_INIT_RETRY_S - 1,
+    )
+    assert api_mod.get_memory() is not None
+    assert calls["n"] == 2

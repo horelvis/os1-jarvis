@@ -76,19 +76,32 @@ if TYPE_CHECKING:
 # the actual initialization window.
 
 _memory: "Memory | None" = None
-_memory_init_failed: bool = False
+# Monotonic timestamp of the last failed init, or None. Failures are
+# NOT permanent: the persist dir may live on a volume that mounts late
+# during boot, so we retry after a backoff window instead of latching.
+_memory_init_failed_at: float | None = None
 _memory_lock = threading.Lock()
+
+MEMORY_INIT_RETRY_S = 30.0
+
+
+def _init_backoff_active() -> bool:
+    return (
+        _memory_init_failed_at is not None
+        and (time.monotonic() - _memory_init_failed_at) < MEMORY_INIT_RETRY_S
+    )
 
 
 def get_memory() -> "Memory | None":
     """Lazily initialize the persistent memory store.
 
     Returns None if memory is disabled (config.memory_enabled=False) or
-    if initialization fails — never raise into the request path.
+    while the retry backoff after a failed init is active — never raise
+    into the request path.
     """
-    global _memory, _memory_init_failed
-    # Fast path: already initialized (or permanently failed/disabled).
-    if not config.memory_enabled or _memory_init_failed:
+    global _memory, _memory_init_failed_at
+    # Fast path: disabled, cooling down after a failure, or ready.
+    if not config.memory_enabled or _init_backoff_active():
         return None
     if _memory is not None:
         return _memory
@@ -96,18 +109,19 @@ def get_memory() -> "Memory | None":
     # fastembed ONNX session and one chroma open happen.
     with _memory_lock:
         # Re-check inside the lock — another thread may have won the race.
-        if _memory_init_failed:
-            return None
         if _memory is not None:
             return _memory
+        if _init_backoff_active():
+            return None
         try:
             from .memory import Memory
 
             persist = os.path.expanduser(config.memory_persist_dir)
             _memory = Memory(persist_dir=persist)
-        except Exception as e:  # pragma: no cover — defensive
-            logger.error(f"memory: failed to initialize, disabling: {e}")
-            _memory_init_failed = True
+            _memory_init_failed_at = None
+        except Exception as e:
+            logger.error(f"memory: init failed, retrying in {MEMORY_INIT_RETRY_S:.0f}s: {e}")
+            _memory_init_failed_at = time.monotonic()
             return None
     return _memory
 
