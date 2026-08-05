@@ -91,6 +91,20 @@ def test_transcribe_returns_text():
     assert data["duration_s"] > 0
 
 
+def test_transcribe_real_mode_returns_501(monkeypatch):
+    """Real mode has no server-side STT (browser Web Speech per
+    CLAUDE.md §2.8) — a fake transcript presented as real is a lie."""
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod.config, "mode", "real")
+    r = client.post(
+        "/transcribe",
+        files={"audio": ("test.wav", b"\x00" * 100, "audio/wav")},
+    )
+    assert r.status_code == 501
+    assert "stt_not_implemented" in r.text
+
+
 # ========================================================================
 # /speak
 # ========================================================================
@@ -226,6 +240,16 @@ def test_ws_listen_returns_transcription():
         assert msg["type"] == "transcription"
         assert isinstance(msg["text"], str)
         assert msg["text"]
+
+
+def test_ws_listen_real_mode_returns_error(monkeypatch):
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod.config, "mode", "real")
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "listen"})
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "stt_not_implemented"}
 
 
 def test_ws_rejects_unknown_type():

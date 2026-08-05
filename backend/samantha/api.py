@@ -393,7 +393,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
-    """Mock transcription. Phase 5 swaps in faster-whisper."""
+    """Mock-only transcription. STT lives in the browser (Web Speech
+    API, CLAUDE.md §2.8); in real mode this endpoint is explicitly
+    unimplemented instead of returning a canned transcript."""
+    if config.mode == "real":
+        raise HTTPException(status_code=501, detail="stt_not_implemented")
     contents = await audio.read()
     size = len(contents)
     logger.info(f"transcribe: received {size} bytes")
@@ -536,11 +540,15 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
 
 
 async def _ws_handle_listen(websocket: WebSocket) -> None:
-    """Placeholder for the future audio-driven listen turn (Phase 5).
+    """Deprecated listen turn (browser Web Speech replaced it).
 
-    For now: simulate a short capture, then send back a fake transcription.
-    The frontend's mic button drives this; it never opens the browser mic.
+    Mock mode still returns the clearly-labeled fake transcription for
+    UI development; real mode reports an error frame instead of
+    pretending to have heard the user.
     """
+    if config.mode == "real":
+        await websocket.send_text(json.dumps({"type": "error", "error": "stt_not_implemented"}))
+        return
     await asyncio.sleep(random.uniform(0.8, 1.6))
     text = random.choice(FAKE_TRANSCRIPTS)
     logger.info(f"ws listen: returning fake transcription '{text}'")
