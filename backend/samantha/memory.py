@@ -424,6 +424,12 @@ class Memory:
             "collection": self._collection_name,
         }
 
+    def close(self) -> None:
+        """Release held resources: the short-term ring's SQLite
+        connection. ChromaDB's PersistentClient exposes no public
+        close; its handles are released on GC."""
+        self._short_term.close()
+
     # ------------- internals -------------
 
     @staticmethod

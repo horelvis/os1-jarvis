@@ -27,6 +27,7 @@ import os
 import random
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -159,10 +160,27 @@ async def _stream_tokens(
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 INDEX_FILE = FRONTEND_DIST / "index.html"
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Startup is lazy (memory and HTTP clients init on first use);
+    shutdown releases whatever got created: the shared LLM httpx
+    client and the memory store (SQLite ring connection)."""
+    global _memory
+    yield
+    from . import real_llm
+
+    await real_llm.aclose()
+    if _memory is not None:
+        await asyncio.to_thread(_memory.close)
+        _memory = None
+
+
 app = FastAPI(
     title="Samantha Backend",
     version=__version__,
     description="Backend local para Samantha. Solo accesible desde localhost.",
+    lifespan=_lifespan,
 )
 
 # Frontend served from same origin → no CORS needed.

@@ -1172,3 +1172,37 @@ def test_profile_endpoints_run_memory_work_off_event_loop(monkeypatch):
     assert client.get("/profile").status_code == 200
     assert client.delete("/profile").status_code == 200
     assert violations == [], f"ran on the event loop: {violations}"
+
+
+# ========================================================================
+# lifespan — shutdown must release long-lived resources
+# ========================================================================
+
+
+def test_lifespan_closes_llm_client():
+    """real_llm.aclose() exists but was never wired to the app
+    lifecycle — the shared httpx client must be released on shutdown."""
+    from samantha import api as api_mod
+    from samantha import real_llm
+
+    with TestClient(api_mod.app):
+        real_llm._get_client()
+        assert real_llm._client is not None
+    assert real_llm._client is None
+
+
+def test_lifespan_closes_memory():
+    """Shutdown closes the memory store (SQLite ring connection) and
+    drops the singleton so a restart re-initializes cleanly."""
+    from samantha import api as api_mod
+
+    closed = {"value": False}
+
+    class FakeMem:
+        def close(self):
+            closed["value"] = True
+
+    with TestClient(api_mod.app):
+        api_mod._memory = FakeMem()
+    assert closed["value"] is True
+    assert api_mod._memory is None
