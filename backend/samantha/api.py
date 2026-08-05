@@ -238,7 +238,7 @@ async def get_profile_endpoint() -> ProfileResponse:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    profile = _get_profile(mem)
+    profile = await asyncio.to_thread(_get_profile, mem)
     if profile is None:
         raise HTTPException(status_code=404, detail="not_onboarded")
     return ProfileResponse(**profile)
@@ -259,7 +259,7 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    if _is_onboarded(mem):
+    if await asyncio.to_thread(_is_onboarded, mem):
         raise HTTPException(status_code=409, detail="already_paired")
 
     first_answer = (req.answers[0].a or "").strip() if req.answers else ""
@@ -270,7 +270,10 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
         raise HTTPException(status_code=422, detail="name_required")
 
     try:
-        profile = _complete_onboarding(
+        # 6 fastembed embeddings + ~13 Chroma writes — seconds of CPU.
+        # Must not stall /ping, the WS, or /speak streaming.
+        profile = await asyncio.to_thread(
+            _complete_onboarding,
             mem,
             name=name,
             answers=[a.model_dump() for a in req.answers],
@@ -287,7 +290,7 @@ async def delete_profile_endpoint() -> dict:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    deleted = _delete_profile(mem)
+    deleted = await asyncio.to_thread(_delete_profile, mem)
     return {"deleted": deleted}
 
 

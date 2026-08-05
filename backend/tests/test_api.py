@@ -1080,3 +1080,74 @@ def test_ws_binary_frame_returns_error():
                 break
             else:
                 raise AssertionError(f"unexpected message after recovery: {msg}")
+
+
+# ========================================================================
+# /profile — blocking Memory work must run off the event loop
+# ========================================================================
+
+
+def test_profile_endpoints_run_memory_work_off_event_loop(monkeypatch):
+    """The profile helpers do fastembed + Chroma work (seconds of CPU).
+    Inside asyncio.to_thread there is no running loop, so
+    get_running_loop() raising RuntimeError proves we're off-loop."""
+    import asyncio as aio
+
+    from samantha import api as api_mod
+
+    violations: list[str] = []
+
+    def _record_if_on_loop(label: str) -> None:
+        try:
+            aio.get_running_loop()
+            violations.append(label)
+        except RuntimeError:
+            pass  # worker thread — correct
+
+    class FakeMem:
+        pass
+
+    monkeypatch.setattr(api_mod, "_memory", FakeMem())
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+
+    onboarded = {"value": False}
+    profile = {"name": "Ana", "onboarding_completed_at": 123, "answers": []}
+
+    def fake_is_onboarded(mem):
+        _record_if_on_loop("is_onboarded")
+        return onboarded["value"]
+
+    def fake_get_profile(mem):
+        _record_if_on_loop("get_profile")
+        return profile if onboarded["value"] else None
+
+    def fake_complete_onboarding(mem, name, answers):
+        _record_if_on_loop("complete_onboarding")
+        onboarded["value"] = True
+        return {**profile, "name": name, "answers": answers}
+
+    def fake_delete_profile(mem):
+        _record_if_on_loop("delete_profile")
+        onboarded["value"] = False
+        return True
+
+    monkeypatch.setattr(api_mod, "_is_onboarded", fake_is_onboarded)
+    monkeypatch.setattr(api_mod, "_get_profile", fake_get_profile)
+    monkeypatch.setattr(api_mod, "_complete_onboarding", fake_complete_onboarding)
+    monkeypatch.setattr(api_mod, "_delete_profile", fake_delete_profile)
+
+    body = {
+        "name": "Ana",
+        "answers": [
+            {"q": "¿Cómo te llamo?", "a": "Ana"},
+            {"q": "¿Cómo estás hoy?", "a": "bien"},
+            {"q": "¿Qué te gusta?", "a": "leer"},
+            {"q": "¿Algo que te ilusione?", "a": "viajar"},
+            {"q": "¿Algo que te ronde?", "a": "trabajo"},
+            {"q": "¿Directa o cuidadosa?", "a": "directa"},
+        ],
+    }
+    assert client.post("/profile", json=body).status_code == 200
+    assert client.get("/profile").status_code == 200
+    assert client.delete("/profile").status_code == 200
+    assert violations == [], f"ran on the event loop: {violations}"
