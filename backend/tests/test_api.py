@@ -197,6 +197,27 @@ def test_ws_chat_handles_streaming_exception(monkeypatch):
         assert "Simulated streaming error" in msg["error"]
 
 
+def test_ws_chat_reports_generator_runtime_error(monkeypatch):
+    """httpx raises RuntimeError for real faults (client closed, event
+    loop closed). Those come from the token GENERATOR, not from the
+    socket — the client must receive an error frame, not silence."""
+    from samantha import api
+
+    async def mock_stream_tokens(*args, **kwargs):
+        if False:
+            yield ""
+        raise RuntimeError("Cannot send a request, as the client has been closed")
+
+    monkeypatch.setattr(api, "_stream_tokens", mock_stream_tokens)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "chat", "message": "hola"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "llm_error" in msg["error"]
+        assert "client has been closed" in msg["error"]
+
+
 def test_ws_listen_returns_transcription():
     """A `listen` turn returns a single `transcription` message."""
     with client.websocket_connect("/ws") as ws:

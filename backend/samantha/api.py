@@ -193,6 +193,15 @@ FAKE_TRANSCRIPTS: list[str] = [
 MAX_WS_MESSAGE_CHARS = 8000
 
 
+class _ClientGone(Exception):
+    """A websocket SEND failed because the client disconnected.
+
+    Distinguishes send-side RuntimeErrors (client vanished mid-reply)
+    from generator-side RuntimeErrors (httpx client closed, event loop
+    closed) — the latter are real LLM faults the client must hear about.
+    """
+
+
 # ========================================================================
 # GET / → frontend
 # ========================================================================
@@ -464,10 +473,16 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
             message, facts=facts, recall=recall, short_term=short, user_id=user_id
         ):
             reply_chunks.append(token)
-            await websocket.send_text(json.dumps({"type": "token", "token": token}))
-    except (WebSocketDisconnect, RuntimeError):
-        # Client went away mid-reply — not an LLM error; don't try to
-        # talk to a dead socket. The endpoint loop handles the close.
+            try:
+                await websocket.send_text(json.dumps({"type": "token", "token": token}))
+            except (WebSocketDisconnect, RuntimeError) as e:
+                # ONLY send failures mean "client gone". Anything the
+                # generator raises falls through to the branches below.
+                raise _ClientGone() from e
+    except _ClientGone:
+        # Don't try to talk to a dead socket; the endpoint loop closes.
+        raise
+    except WebSocketDisconnect:
         raise
     except Exception as e:
         logger.exception("Error in websocket chat stream")
@@ -561,8 +576,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
     except WebSocketDisconnect:
         logger.info("ws: client disconnected")
-    except RuntimeError:
-        # send on an already-closed socket (client vanished mid-reply)
+    except (_ClientGone, RuntimeError):
+        # _ClientGone: token send failed mid-reply. Bare RuntimeError
+        # here can only come from sends issued by this loop itself
+        # (error frames / the `done` frame) on an already-closed socket.
         logger.info("ws: connection closed mid-send")
 
 
