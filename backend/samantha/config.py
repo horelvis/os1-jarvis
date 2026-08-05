@@ -18,7 +18,8 @@ class Config:
 
     # === Modo de operación ===
     # "mock"  → respuestas falsas pero plausibles (desarrollo)
-    # "real"  → vLLM + Whisper + Piper (producción)
+    # "real"  → LLM real (Grok API por defecto / llama-server local)
+    #           + CosyVoice 3 TTS (producción)
     mode: str = "mock"
 
     # === Latencia simulada (solo en mode=mock) ===
@@ -78,6 +79,11 @@ class Config:
     # (tts-server/cosyvoice/docker-compose.yml). The overlay injects
     # the `<|endofprompt|>` system marker per request, so the client
     # sends plain Spanish.
+    #
+    # ⚠ 192.168.100.58 is THIS deployment's 4090 box on the LAN.
+    # Any other install (CI, laptop, new hardware) MUST override it:
+    #   SAMANTHA_TTS_COSYVOICE_URL=http://<your-gpu-host>:8093
+    # Kept as the default so the kiosk box needs zero env config.
     tts_cosyvoice_url: str = "http://192.168.100.58:8093"
     tts_cosyvoice_timeout_s: float = 60.0
     # Reference WAV (~8 s of Samantha's voice).
