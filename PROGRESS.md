@@ -43,6 +43,15 @@
 
 ---
 
+## Phases 5 & 7 — backfilled 2026-08-04
+
+- **Phase 5 — STT + TTS + audio ✅:** STT moved to the browser Web Speech API (`es-ES`, decision 2026-05-13); TTS server-side via `/speak`, iterated Piper → XTTS-v2 → CosyVoice 3 only (commit `2f7d6cf`).
+- **Phase 7 — Kiosk deployment ✅:** systemd user units (`samantha-backend.service`, `samantha-ui.service`, `samantha-hermes.service`) + auto-login → openbox → Chromium `--kiosk`; llama-server runs manually on the 4090 box, never via systemd on the kiosk.
+
+CLAUDE.md §4 marks both ✅ but no PROGRESS entry was recorded at the time.
+
+---
+
 > **For Claude Code:** Append to this file after completing each phase
 > from CLAUDE.md §4. Newest entries at the top. Format:
 >
