@@ -15,6 +15,7 @@
 - Frontend: run `pnpm typecheck` and `pnpm build` from `frontend/` before committing. Never `npm install` — pnpm only.
 - Commit messages in English (conventional-commit style). User-facing strings in Spanish, in Samantha's voice (`docs/personality.md`).
 - The user always runs `SAMANTHA_MODE=real` — never verify against mock mode only.
+- **Test baseline (measured 2026-08-05).** The tracked suite is green: `pytest tests/ -q --ignore=tests/test_voice_pipeline.py` → **75 passed**. `backend/tests/test_voice_pipeline.py` is untracked WIP that pytest still collects, and its 7 tests **fail when run after the rest of the suite** (they pass in isolation) because its `_run` helper uses `asyncio.get_event_loop().run_until_complete`, which reuses a closed loop. Until Task 14 lands, every task must verify with `--ignore=tests/test_voice_pipeline.py` and treat those 7 failures as pre-existing and out of scope. Task 14 fixes the helper as its first act, and from Task 14 onward the full suite must be green with no ignore flag.
 - Tasks marked `⚠ Requiere confirmación del usuario` must NOT be executed until the user explicitly approves them (CLAUDE.md §8: public-contract changes, deletions, renames).
 - The `/voice` endpoint wiring itself belongs to the in-flight Phase 11 plan (`docs/superpowers/plans/2026-06-20-phase11-voice-loop.md`) — Fase 3 here fixes defects in that WIP, it does not duplicate its tasks.
 
@@ -2145,7 +2146,36 @@ breaks nothing.
 - Modify: `backend/samantha/voice_pipeline.py`
 - Modify: `backend/tests/test_voice_pipeline.py`
 
-- [ ] **Step 1: Commit the WIP as-is, so the fixes have a baseline**
+- [ ] **Step 1: Fix the broken test helper, then commit the WIP**
+
+`test_voice_pipeline.py`'s `_run` uses `asyncio.get_event_loop().run_until_complete`,
+which reuses a closed loop: its 7 tests pass in isolation and fail when run
+after the rest of the suite (measured 2026-08-05). Committing a test file
+with a helper that fails in suite order would make every later task's
+verification unreadable, so fix it before it becomes tracked code. Replace:
+
+```python
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
+```
+
+with:
+
+```python
+def _run(coro):
+    # asyncio.get_event_loop() is deprecated from sync code on 3.11 and
+    # reuses a closed loop when the suite has already run other async
+    # tests; each test gets its own loop instead.
+    return asyncio.run(coro)
+```
+
+Verify the whole suite is green — no ignore flag, all 82 tests:
+
+```bash
+cd backend && .venv/bin/python -m pytest tests/ -q
+```
+
+Expected: `82 passed`. Then commit the WIP with the fix folded in:
 
 ```bash
 cd "/Volumes/Macintosh SSD - Daten/Users/horelvis/git/os1-samantha"
@@ -3755,10 +3785,10 @@ git commit -m "perf(voice): synthesize at sentence boundaries, survive TTS failu
    `dst_len = max(1, 0)` forces one output sample while `np.interp`'s `xp`
    is empty → `ValueError` kills the pipeline task. (Task 14 already wrote
    the guard; this step is its test, so the behaviour is locked in.)
-3. **Deprecated event-loop access in the tests.**
-   `test_voice_pipeline.py:21-22` uses
-   `asyncio.get_event_loop().run_until_complete`, which emits a
-   `DeprecationWarning` on 3.11 and is slated for removal.
+3. ~~**Deprecated event-loop access in the tests.**~~ Already fixed in
+   Task 14 Step 1 — it had to land before the file became tracked, because
+   the helper made the whole suite fail in run order. Listed here only so
+   the finding is not lost.
 4. **`tests/conftest.py` does not pin STT env**, so a developer with
    `SAMANTHA_STT_DEVICE=cuda` exported would have the new config defaults
    leak into tests.
@@ -4043,23 +4073,12 @@ with:
                 text = await asyncio.to_thread(self._transcribe, audio)
 ```
 
-- [ ] **Step 6: Modernize the test runner helper and pin STT env**
+- [ ] **Step 6: Pin the STT env for tests**
 
-In `backend/tests/test_voice_pipeline.py`, replace:
-
-```python
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-```
-
-with:
-
-```python
-def _run(coro):
-    # asyncio.get_event_loop() is deprecated from sync code on 3.11 and
-    # slated for removal; each test gets its own loop anyway.
-    return asyncio.run(coro)
-```
+(The `_run` helper was already switched to `asyncio.run` in Task 14 Step 1 —
+it had to happen before the file became tracked. Nothing to do here for it;
+confirm with `grep -n "def _run" -A3 backend/tests/test_voice_pipeline.py`
+that it reads `asyncio.run(coro)`, and move on.)
 
 In `backend/tests/conftest.py`, append:
 
