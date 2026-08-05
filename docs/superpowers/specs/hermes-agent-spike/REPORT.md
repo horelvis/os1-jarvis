@@ -37,7 +37,7 @@ Para integrarlo con el backend de Samantha, se configura el servidor HTTP de Her
 
 ```env
 API_SERVER_ENABLED=true
-API_SERVER_KEY=samantha-api-secret-key-2026
+API_SERVER_KEY=<redacted — set via systemctl --user edit samantha-hermes>
 API_SERVER_PORT=8642
 API_SERVER_HOST=127.0.0.1
 ```
@@ -47,7 +47,7 @@ Arrancando el demonio con:
 hermes gateway
 ```
 
-Esto expone un endpoint compatible con la API de OpenAI en `http://localhost:8642/v1/chat/completions`. Nuestro `real_llm.py` en Samantha se conectará a este puerto enviando la cabecera `Authorization: Bearer samantha-api-secret-key-2026`.
+Esto expone un endpoint compatible con la API de OpenAI en `http://localhost:8642/v1/chat/completions`. Nuestro `real_llm.py` en Samantha se conectará a este puerto enviando la cabecera `Authorization: Bearer <redacted — set via systemctl --user edit samantha-hermes>`.
 
 ---
 
