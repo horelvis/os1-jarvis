@@ -38,6 +38,38 @@ class VoiceMissingError(RuntimeError):
 OUTPUT_SAMPLE_RATE = 24000
 
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    """Shared AsyncClient: one connection pool for all synthesis calls
+    instead of a fresh client (and TCP handshake) per /speak.
+
+    `read` is httpx's per-read-operation (inter-chunk) timeout, not a
+    whole-body cap: a healthy stream that keeps emitting chunks never
+    trips it, while a wedged server (CUDA hang) fails loudly instead
+    of freezing /speak forever.
+    """
+    global _client
+    if _client is None:
+        timeout = httpx.Timeout(
+            connect=config.tts_cosyvoice_timeout_s,
+            read=config.tts_cosyvoice_timeout_s,
+            write=config.tts_cosyvoice_timeout_s,
+            pool=config.tts_cosyvoice_timeout_s,
+        )
+        _client = httpx.AsyncClient(timeout=timeout)
+    return _client
+
+
+async def aclose() -> None:
+    """Release the shared HTTP client. Called from api.py's lifespan."""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
+
 # ──────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────
@@ -77,23 +109,29 @@ def synth(text: str) -> tuple[bytes, str]:
 
 
 async def _consolidate(text: str) -> tuple[bytes, str]:
-    chunks: list[bytes] = []
-    backend: str = ""
-    async for chunk, label in stream(text):
-        chunks.append(chunk)
-        backend = label
+    try:
+        chunks: list[bytes] = []
+        backend: str = ""
+        async for chunk, label in stream(text):
+            chunks.append(chunk)
+            backend = label
 
-    if not backend:
-        return b"", "empty"
+        if not backend:
+            return b"", "empty"
 
-    pcm = b"".join(chunks)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(OUTPUT_SAMPLE_RATE)
-        wf.writeframes(pcm)
-    return buf.getvalue(), backend
+        pcm = b"".join(chunks)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(OUTPUT_SAMPLE_RATE)
+            wf.writeframes(pcm)
+        return buf.getvalue(), backend
+    finally:
+        # synth() runs in its own asyncio.run() loop — close the shared
+        # client here so it can't outlive that loop and poison the next
+        # caller. /speak (uvicorn's single loop) is unaffected.
+        await aclose()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -152,16 +190,6 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
     transcript, wav_bytes, wav_name = _load_cosyvoice_refs()
 
     url = f"{config.tts_cosyvoice_url.rstrip('/')}/inference_zero_shot"
-    # `read` is httpx's per-read-operation (inter-chunk) timeout, not a
-    # whole-body cap: a healthy stream that keeps emitting chunks never
-    # trips it, while a wedged server (CUDA hang) fails loudly instead
-    # of freezing /speak forever.
-    timeout = httpx.Timeout(
-        connect=config.tts_cosyvoice_timeout_s,
-        read=config.tts_cosyvoice_timeout_s,
-        write=config.tts_cosyvoice_timeout_s,
-        pool=config.tts_cosyvoice_timeout_s,
-    )
     # httpx multipart: (filename, content, content-type). filename=None
     # for text fields makes httpx emit them as plain form parts.
     files = {
@@ -170,21 +198,21 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
         "prompt_wav": (wav_name, wav_bytes, "audio/wav"),
     }
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", url, files=files) as resp:
-            if resp.status_code != 200:
-                err = await resp.aread()
-                raise RuntimeError(
-                    f"cosyvoice {resp.status_code}: {err[:200].decode('utf-8', 'replace')}"
-                )
-            got_any = False
-            async for chunk in resp.aiter_bytes(chunk_size=4096):
-                if chunk:
-                    got_any = True
-                    yield chunk
-            if not got_any:
-                raise RuntimeError(
-                    "cosyvoice returned 200 but no audio — most likely "
-                    "tts_text shorter than prompt_text (hifigan kernel "
-                    "size 4), or an unrecognized expression marker"
-                )
+    client = _get_client()
+    async with client.stream("POST", url, files=files) as resp:
+        if resp.status_code != 200:
+            err = await resp.aread()
+            raise RuntimeError(
+                f"cosyvoice {resp.status_code}: {err[:200].decode('utf-8', 'replace')}"
+            )
+        got_any = False
+        async for chunk in resp.aiter_bytes(chunk_size=4096):
+            if chunk:
+                got_any = True
+                yield chunk
+        if not got_any:
+            raise RuntimeError(
+                "cosyvoice returned 200 but no audio — most likely "
+                "tts_text shorter than prompt_text (hifigan kernel "
+                "size 4), or an unrecognized expression marker"
+            )

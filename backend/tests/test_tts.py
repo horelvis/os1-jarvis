@@ -41,3 +41,14 @@ def test_synth_raises_when_refs_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(tts, "_cosyvoice_ref_wav_bytes", None)
     with pytest.raises(tts.VoiceMissingError):
         tts.synth("hola")
+
+
+def test_tts_shared_client_reused_and_closed():
+    """stream() must reuse one AsyncClient; aclose() releases it."""
+    import asyncio
+
+    c1 = tts._get_client()
+    c2 = tts._get_client()
+    assert c1 is c2
+    asyncio.run(tts.aclose())
+    assert tts._client is None

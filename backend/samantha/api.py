@@ -182,9 +182,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     client and the memory store (SQLite ring connection)."""
     global _memory
     yield
-    from . import real_llm
+    from . import real_llm, tts
 
     await real_llm.aclose()
+    await tts.aclose()
     if _memory is not None:
         await asyncio.to_thread(_memory.close)
         _memory = None

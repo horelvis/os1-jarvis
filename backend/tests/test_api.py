@@ -1268,3 +1268,13 @@ def test_memory_init_failure_retries_after_backoff(monkeypatch):
     )
     assert api_mod.get_memory() is not None
     assert calls["n"] == 2
+
+
+def test_lifespan_closes_tts_client():
+    from samantha import api as api_mod
+    from samantha import tts as tts_mod
+
+    with TestClient(api_mod.app):
+        tts_mod._get_client()
+        assert tts_mod._client is not None
+    assert tts_mod._client is None
