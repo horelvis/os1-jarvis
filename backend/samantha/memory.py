@@ -174,7 +174,10 @@ class Memory:
 
         `extra_metadata` lets callers tag chunks with scalar metadata
         (e.g. profile.py tags onboarding answers with their slot index
-        so recovery doesn't depend on timestamps).
+        so recovery doesn't depend on timestamps). It MUST NOT contain
+        the reserved keys `role`, `timestamp`, or `user_id` — those are
+        core chunk metadata set by this method; a caller trying to
+        override them is a bug, not a valid use case.
 
         Returns the chunk id (empty string if skipped).
         """
@@ -182,6 +185,9 @@ class Memory:
             return ""
         if role not in ("user", "samantha"):
             raise ValueError(f"role must be 'user' or 'samantha', got {role!r}")
+        reserved = {"role", "timestamp", "user_id"}
+        if extra_metadata and (clashing := reserved & extra_metadata.keys()):
+            raise ValueError(f"extra_metadata cannot override reserved keys: {sorted(clashing)}")
         chunk_id = str(uuid.uuid4())
         ts = int(time.time())
         metadata: dict = {

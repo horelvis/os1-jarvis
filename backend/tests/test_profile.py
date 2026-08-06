@@ -130,6 +130,29 @@ def test_memory_remember_with_extra_metadata(tmp_path):
     assert meta["onboarding_slot"] == 3
 
 
+def test_remember_rejects_reserved_extra_metadata_keys(tmp_path):
+    """extra_metadata must not be able to override role/timestamp/user_id."""
+    import pytest
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    with pytest.raises(ValueError):
+        mem.remember(
+            "user",
+            "texto",
+            extra_metadata={"role": "samantha", "user_id": "otro", "onboarding_slot": 2},
+        )
+    # A call with only non-reserved keys still succeeds.
+    chunk_id = mem.remember("user", "texto ok", extra_metadata={"onboarding_slot": 2})
+    assert chunk_id != ""
+    items = mem.get_chunks({"onboarding_slot": {"$gte": 0}})
+    assert len(items) == 1
+    doc, meta = items[0]
+    assert doc == "texto ok"
+    assert meta["role"] == "user"
+    assert meta["user_id"] == "primary"
+    assert meta["onboarding_slot"] == 2
+
+
 def test_answers_survive_slow_onboarding_writes(tmp_path, monkeypatch):
     """Recovery must not depend on the ±5 s window. Simulate slow
     embedding: every clock read during onboarding advances a minute,
