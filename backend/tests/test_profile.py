@@ -118,3 +118,51 @@ def test_delete_profile_removes_multiple_historical_fact_versions(tmp_path):
         }
     )
     assert not res.get("ids")
+
+
+def test_memory_remember_with_extra_metadata(tmp_path):
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem.remember("user", "respuesta uno", extra_metadata={"onboarding_slot": 3})
+    items = mem.get_chunks({"onboarding_slot": {"$gte": 0}})
+    assert len(items) == 1
+    doc, meta = items[0]
+    assert doc == "respuesta uno"
+    assert meta["onboarding_slot"] == 3
+
+
+def test_answers_survive_slow_onboarding_writes(tmp_path, monkeypatch):
+    """Recovery must not depend on the ±5 s window. Simulate slow
+    embedding: every clock read during onboarding advances a minute,
+    spreading the chunks far beyond any timestamp window."""
+    import itertools
+
+    from samantha import memory as memory_mod
+
+    mem = _make_mem(tmp_path)
+
+    base = 1_800_000_000
+    counter = itertools.count()
+    # Patches time.time globally (memory.py and profile.py share the
+    # stdlib module); monkeypatch restores it on teardown.
+    monkeypatch.setattr(memory_mod.time, "time", lambda: base + 60 * next(counter))
+
+    complete_onboarding(mem, name="Bob", answers=_six_answers())
+    profile = get_profile(mem)
+    assert profile is not None
+    assert len(profile["answers"]) == 6
+
+
+def test_legacy_profiles_recover_via_timestamp_window(tmp_path):
+    """Profiles stored before the slot tag existed (plain chunks + a
+    marker fact in the same second) must still recover their answers."""
+    import time
+
+    mem = _make_mem(tmp_path)
+    for entry in _six_answers():
+        mem.remember("user", f"[Q] {entry['q']} → [A] {entry['a']}")
+    mem.set_fact("name", "Bob", text="El usuario se llama Bob")
+    mem.set_fact("onboarding_completed_at", int(time.time()), text="Onboarding completado")
+
+    profile = get_profile(mem)
+    assert profile is not None
+    assert len(profile["answers"]) == 6

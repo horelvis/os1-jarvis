@@ -162,8 +162,19 @@ class Memory:
 
     # ------------- write -------------
 
-    def remember(self, role: str, text: str, *, user_id: str = "primary") -> str:
+    def remember(
+        self,
+        role: str,
+        text: str,
+        *,
+        user_id: str = "primary",
+        extra_metadata: dict[str, str | int | float | bool] | None = None,
+    ) -> str:
         """Store a chunk in both long-term and short-term layers.
+
+        `extra_metadata` lets callers tag chunks with scalar metadata
+        (e.g. profile.py tags onboarding answers with their slot index
+        so recovery doesn't depend on timestamps).
 
         Returns the chunk id (empty string if skipped).
         """
@@ -173,16 +184,17 @@ class Memory:
             raise ValueError(f"role must be 'user' or 'samantha', got {role!r}")
         chunk_id = str(uuid.uuid4())
         ts = int(time.time())
+        metadata: dict = {
+            "role": role,
+            "timestamp": ts,
+            "user_id": user_id,
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
         self._collection.add(
             ids=[chunk_id],
             documents=[text.strip()],
-            metadatas=[
-                {
-                    "role": role,
-                    "timestamp": ts,
-                    "user_id": user_id,
-                }
-            ],
+            metadatas=[metadata],
         )
         # Mirror into short-term ring with the SAME id so recall can
         # dedupe without a cross-store lookup.
@@ -363,6 +375,45 @@ class Memory:
         out = list(latest_by_kind.values())
         out.sort(key=lambda c: c["timestamp"], reverse=True)
         return out
+
+    def get_chunks(self, where: dict, *, user_id: str = "primary") -> list[tuple[str, dict]]:
+        """Public metadata-filtered fetch: (document, metadata) pairs.
+
+        `where` is a Chroma where-clause fragment; the user_id filter
+        is added automatically. Replaces callers reaching into
+        `self._collection` directly (profile.py used to).
+        """
+        res = self._collection.get(
+            where={"$and": [{"user_id": user_id}, where]},
+            include=["documents", "metadatas"],
+        )
+        docs = res.get("documents") or []
+        metas = res.get("metadatas") or []
+        return [(docs[i], metas[i] or {}) for i in range(len(docs))]
+
+    def delete_facts(self, kinds: Sequence[str], *, user_id: str = "primary") -> int:
+        """ADMIN: delete every historical fact whose kind is in `kinds`.
+
+        Returns the number of chunks deleted. Used by
+        profile.delete_profile — NOT wired to user input (Samantha
+        never forgets conversational content; see module docstring).
+        """
+        if not kinds:
+            return 0
+        res = self._collection.get(
+            where={
+                "$and": [
+                    {"user_id": user_id},
+                    {"role": "fact"},
+                    {"kind": {"$in": list(kinds)}},
+                ]
+            }
+        )
+        ids = res.get("ids") or []
+        if not ids:
+            return 0
+        self._collection.delete(ids=ids)
+        return len(ids)
 
     @staticmethod
     def _deserialize_fact_value(metadata: dict) -> Any:

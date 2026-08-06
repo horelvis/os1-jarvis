@@ -68,8 +68,9 @@ def complete_onboarding(
     if len(answers) != 6:
         raise ValueError(f"answers must have length 6, got {len(answers)}")
 
-    # Insert the 6 answer chunks FIRST so they share a tight timestamp
-    # window with the onboarding marker (recovery uses ±5s window).
+    # Each answer chunk carries its slot index as metadata — recovery
+    # is by `onboarding_slot`, not by timestamp proximity (slow
+    # embedding used to push chunks out of the old ±5 s window).
     # Each big-5 answer is also promoted to a fact so it surfaces in
     # every prompt, not just when semantic recall pulls it in.
     for i, entry in enumerate(answers):
@@ -79,7 +80,12 @@ def complete_onboarding(
             continue
         a_clean = str(a).strip()
         chunk_text = f"[Q] {q} → [A] {a_clean}"
-        mem.remember("user", chunk_text, user_id=user_id)
+        mem.remember(
+            "user",
+            chunk_text,
+            user_id=user_id,
+            extra_metadata={"onboarding_slot": i},
+        )
         dim = BIG5_BY_INDEX.get(i)
         if dim is not None:
             mem.set_fact(
@@ -114,45 +120,44 @@ def delete_profile(mem: Memory, *, user_id: str = "primary") -> bool:
     Both the latest and any historical/overwritten versions of these facts
     for this user are deleted.
     The 6 answer chunks stay (Samantha never forgets)."""
-    res = mem._collection.get(
-        where={
-            "$and": [
-                {"user_id": user_id},
-                {"role": "fact"},
-                {"kind": {"$in": list(PROFILE_FACT_KINDS)}},
-            ]
-        }
-    )
-    ids = res.get("ids") or []
-    if not ids:
-        return False
-    mem._collection.delete(ids=ids)
-    return True
+    return mem.delete_facts(sorted(PROFILE_FACT_KINDS), user_id=user_id) > 0
+
+
+def _parse_answer(doc: str) -> dict | None:
+    if "[Q]" in doc and "→ [A]" in doc:
+        q = doc.split("[Q]", 1)[1].split("→ [A]", 1)[0].strip()
+        a = doc.split("→ [A]", 1)[1].strip()
+        return {"q": q, "a": a}
+    return None
 
 
 def _recover_answers(mem: Memory, anchor_ts: int, *, user_id: str = "primary") -> list[dict]:
-    """Find role='user' chunks inserted within ±5 s of the onboarding marker."""
+    """Recover the 6 onboarding answers.
+
+    Preferred: chunks tagged with `onboarding_slot` at write time
+    (complete_onboarding). Fallback for profiles stored before the tag
+    existed: role='user' chunks within ±5 s of the onboarding marker —
+    fragile (slow embedding pushed chunks out of the window), kept only
+    for backward compatibility with already-stored profiles.
+    """
+    items = mem.get_chunks({"onboarding_slot": {"$gte": 0}}, user_id=user_id)
+    if items:
+        items.sort(key=lambda x: int(x[1].get("onboarding_slot", 0)))
+        out = [p for doc, _meta in items if (p := _parse_answer(doc)) is not None]
+        if out:
+            return out
+
     if anchor_ts <= 0:
         return []
-    res = mem._collection.get(
-        where={
+    items = mem.get_chunks(
+        {
             "$and": [
-                {"user_id": user_id},
                 {"role": "user"},
                 {"timestamp": {"$gte": anchor_ts - 5}},
                 {"timestamp": {"$lte": anchor_ts + 5}},
             ]
         },
-        include=["documents", "metadatas"],
+        user_id=user_id,
     )
-    docs = res.get("documents") or []
-    metas = res.get("metadatas") or []
-    items = list(zip(docs, metas))
     items.sort(key=lambda x: int(x[1].get("timestamp", 0)))
-    out = []
-    for doc, _meta in items:
-        if "[Q]" in doc and "→ [A]" in doc:
-            q = doc.split("[Q]", 1)[1].split("→ [A]", 1)[0].strip()
-            a = doc.split("→ [A]", 1)[1].strip()
-            out.append({"q": q, "a": a})
-    return out
+    return [p for doc, _meta in items if (p := _parse_answer(doc)) is not None]
