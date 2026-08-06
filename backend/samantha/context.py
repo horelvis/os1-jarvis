@@ -17,16 +17,13 @@ def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
     """Gather facts surfaced into the system prompt.
 
     Order: name → Big-Five traits → onboarding_completed_at.
+    One batched Chroma get for all kinds (was: 7 separate gets/turn).
     """
     from .profile import BIG5_FACT_KINDS
 
     kinds = ("name", *BIG5_FACT_KINDS, "onboarding_completed_at")
-    out: list[dict] = []
-    for kind in kinds:
-        f = mem.get_fact(kind, user_id=user_id)
-        if f is not None:
-            out.append(f)
-    return out
+    by_kind = mem.latest_facts(kinds, user_id=user_id)
+    return [by_kind[kind] for kind in kinds if kind in by_kind]
 
 
 async def gather_context(

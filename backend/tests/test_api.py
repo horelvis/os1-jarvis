@@ -586,6 +586,58 @@ def test_memory_get_fact_returns_newest(tmp_path):
     assert fact["value"] == "New Name"
 
 
+def test_memory_latest_facts_batches_kinds(tmp_path):
+    """One call, several kinds, newest entry per kind; missing kinds
+    are simply absent."""
+    import time
+
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem.set_fact("name", "Old Name", user_id="u1")
+    time.sleep(1.1)
+    mem.set_fact("name", "New Name", user_id="u1")
+    mem.set_fact("big5_openness", "alta", user_id="u1")
+
+    out = mem.latest_facts(("name", "big5_openness", "missing_kind"), user_id="u1")
+    assert out["name"]["value"] == "New Name"
+    assert out["big5_openness"]["value"] == "alta"
+    assert "missing_kind" not in out
+
+
+def test_collect_facts_uses_single_batched_query():
+    """_collect_facts must issue ONE latest_facts call, never per-kind
+    get_fact calls (7 Chroma scans per turn)."""
+    from samantha.context import _collect_facts
+
+    class FakeMem:
+        def __init__(self):
+            self.latest_calls = 0
+            self.get_fact_calls = 0
+
+        def latest_facts(self, kinds, *, user_id="primary"):
+            self.latest_calls += 1
+            return {
+                "name": {
+                    "id": "f1",
+                    "kind": "name",
+                    "value": "Ana",
+                    "text": "El usuario se llama Ana",
+                    "timestamp": 1,
+                }
+            }
+
+        def get_fact(self, *args, **kwargs):
+            self.get_fact_calls += 1
+            return None
+
+    mem = FakeMem()
+    facts = _collect_facts(mem, user_id="primary")
+    assert mem.latest_calls == 1
+    assert mem.get_fact_calls == 0
+    assert [f["kind"] for f in facts] == ["name"]
+
+
 def test_memory_facts_excluded_from_conversational_recall(tmp_path):
     from samantha.memory import Memory
 

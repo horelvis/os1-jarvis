@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -278,35 +279,50 @@ class Memory:
 
     def get_fact(self, kind: str, *, user_id: str = "primary") -> dict | None:
         """Return the newest fact for `kind`, or None."""
+        return self.latest_facts((kind,), user_id=user_id).get(kind)
+
+    def latest_facts(
+        self,
+        kinds: Sequence[str],
+        *,
+        user_id: str = "primary",
+    ) -> dict[str, dict]:
+        """Newest fact per kind, in ONE Chroma metadata get.
+
+        Replaces per-kind get_fact loops (context._collect_facts used
+        to issue 7 gets per chat turn). Facts are append-only, so we
+        reduce to the max-timestamp entry per kind in Python.
+        """
+        if not kinds:
+            return {}
         res = self._collection.get(
             where={
                 "$and": [
                     {"user_id": user_id},
                     {"role": "fact"},
-                    {"kind": kind},
+                    {"kind": {"$in": list(kinds)}},
                 ]
             },
             include=["documents", "metadatas"],
         )
         ids = res.get("ids") or []
-        if not ids:
-            return None
         metas = res.get("metadatas") or []
         docs = res.get("documents") or []
-        candidates = []
+        latest: dict[str, dict] = {}
         for i, fid in enumerate(ids):
             m = metas[i] or {}
-            candidates.append(
-                {
-                    "id": fid,
-                    "kind": m.get("kind"),
-                    "value": self._deserialize_fact_value(m),
-                    "text": docs[i] if i < len(docs) else "",
-                    "timestamp": int(m.get("timestamp", 0)),
-                }
-            )
-        candidates.sort(key=lambda c: c["timestamp"], reverse=True)
-        return candidates[0]
+            kind = str(m.get("kind", ""))
+            entry = {
+                "id": fid,
+                "kind": kind,
+                "value": self._deserialize_fact_value(m),
+                "text": docs[i] if i < len(docs) else "",
+                "timestamp": int(m.get("timestamp", 0)),
+            }
+            prev = latest.get(kind)
+            if prev is None or entry["timestamp"] > prev["timestamp"]:
+                latest[kind] = entry
+        return latest
 
     def all_facts(
         self,
