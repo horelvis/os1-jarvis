@@ -6,6 +6,52 @@ Patrón: nada se hardcodea, todo se puede ajustar sin tocar código.
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from loguru import logger
+
+# Fixed path by design — not configurable (see CLAUDE.md §8: a
+# configurable path here would need separate user approval).
+_ENV_FILE_PATH = Path.home() / ".samantha" / ".env"
+
+
+def _load_env_file(path: Path) -> None:
+    """Load `KEY=value` pairs from `path` into `os.environ`.
+
+    Shell-exported variables always win: a key already present in
+    `os.environ` is never overwritten by the file. A missing or
+    unreadable file, or malformed lines within it, must never raise —
+    this runs at import time and startup must not depend on the file
+    existing.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        # Missing file, directory in its place, permission denied, etc.
+        # Silent no-op by design.
+        return
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+    logger.debug(f"Loaded env overrides from {path}")
+
+
+# Fill in anything missing from the environment before Config.from_env()
+# reads it below. Shell-exported vars always take precedence (setdefault).
+_load_env_file(_ENV_FILE_PATH)
 
 
 @dataclass
