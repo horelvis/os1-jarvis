@@ -496,6 +496,65 @@ Hermes feature fixes that; it is our data model.
 
 ---
 
+## 4c. Interruption: how Hermes does it, and what it does NOT do
+
+Investigated because the design needs to know what happens to a reply
+the user cut off. Reference point: OpenAI's Realtime API, where the mic
+stays open, a server-side VAD (optionally `semantic_vad`, a classifier
+scoring *the probability the user is done* from the words spoken, with
+an `eagerness` knob) fires `input_audio_buffer.speech_started`, the
+in-flight response is cancelled, and the client sends
+`conversation.item.truncate` so **the unplayed tail is removed from the
+conversation**. That last step is the one that matters: without it the
+model believes it said words the user never heard.
+
+**Hermes has the first two and not the third.**
+
+PR #74223 (`fix(voice): full-duplex turn listener`) adds
+`full_duplex_listen()` to `tools/voice_mode.py` — importable, not
+CLI-bound — with `_voice_full_duplex_listener` in `cli.py` and
+`_arm_full_duplex_listener` in `tui_gateway/server.py`. It corrects an
+earlier note in this document: **Hermes' voice loop is no longer
+half-duplex.** One listener instance spans the whole turn, generation
+*and* playback, explicitly to remove "the silent gap during LLM
+generation" and avoid a re-arm race at the transition.
+
+How it survives its own speakers, and this is the interesting part:
+**not with echo cancellation.** Phase-aware RMS thresholds instead —
+`voice.barge_in_threshold_multiplier` (default 3.0) and
+`voice.barge_in_grace_seconds` (default 0.5), and during playback the
+trigger is clamped to a 1500-RMS floor "so speaker bleed alone cannot
+trip detection", while genuine speech at 3000–8000 RMS still gets
+through. A pre-roll keeps the first syllable of the interjection.
+
+Interrupting during **generation** goes through `agent.interrupt()` —
+the same seam as a typed Ctrl+C — and kills the pending TTS so the
+stale reply never plays. Interrupting during **playback** stops the
+streaming pipeline, the fallback speak stop events and the file player,
+then submits the capture as the next turn.
+
+**What is missing:** nothing trims the assistant message to what was
+actually spoken. The release notes describe the softer mechanism — "the
+next message carries a short note telling the model its spoken reply was
+cut off". So after an interruption at word 5 of 60, the history holds 60
+words she never said, plus a note that she was cut off.
+
+For Samantha that is worse than for a generic agent, because **our
+memory is append-only by user directive**: those 55 unspoken words are
+persisted forever and will surface in later semantic recall as things
+she said. This is the same failure shape as the unresolved `name='Hore'`
+vs recalled "Ore" divergence — a stored record that never matched what
+actually passed between them. Left alone, frequent barge-in would seed
+that divergence continuously.
+
+**Design consequence:** we should track spoken-so-far on our side (the
+`StreamingTTSHandle` already carries `audible`/`aborted`, and our TTS
+provider knows how many PCM chunks it yielded) and trim the assistant
+text before it reaches our `MemoryProvider.sync_turn()`. Hermes' own
+history can keep whatever it keeps; *our* store, the one that feeds
+recall, records only what was heard. This is a small, well-bounded piece
+of work and it belongs in the design, not in a later sweep.
+
 ## 5. Recommendation
 
 **Adopt Hermes as a set of plugins, boundary at the microphone.**
