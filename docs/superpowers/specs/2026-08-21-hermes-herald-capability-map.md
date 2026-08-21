@@ -555,6 +555,28 @@ history can keep whatever it keeps; *our* store, the one that feeds
 recall, records only what was heard. This is a small, well-bounded piece
 of work and it belongs in the design, not in a later sweep.
 
+## 4d. Ruling 2026-08-22 — audio stays in the browser
+
+The user chose the browser path over Hermes' native `full_duplex_listen()`.
+Recorded so it is not re-litigated.
+
+What it keeps: the Silero VAD instance already tuned against this room's
+speakers (positive 0.85, 300 ms sustained, 600 ms warm-up), and
+`getUserMedia`'s echo cancellation — a different and stronger mechanism
+than Hermes' RMS floor, and one we have already proven here.
+
+What it costs: nothing on interruption coverage, as long as the VAD is
+armed for **the whole turn** rather than only during playback, which is
+a small change to `useBargeIn`. Speech detected while she is still
+generating sends the same interrupt frame; the adapter routes it to
+`agent.interrupt()`. The generation-phase gap that motivated PR #74223
+does not apply to us.
+
+What stays in scope as a result: Task 22 (vendor the Silero + ONNX
+assets — a 24/7 appliance must not fetch its VAD from a CDN), and
+`useBargeIn.ts` itself, which gains `onSpeechEnd` as the endpointer.
+Wake word remains unavailable; revisit only if it is ever asked for.
+
 ## 5. Recommendation
 
 **Adopt Hermes as a set of plugins, boundary at the microphone.**
