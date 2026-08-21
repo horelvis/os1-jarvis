@@ -287,14 +287,27 @@ The built-in set is mostly unrelated to us (`disk-cleanup`,
 > **`google_meet`** — "Join Meet calls, live-caption transcription,
 > optional realtime duplex audio"
 
-A bundled plugin doing **realtime duplex audio** on a non-CLI surface is
-the strongest evidence yet against the §1 finding. It means the pattern
-for getting audio *in* through the plugin system exists in-tree and can
-be read, even if the platform-adapter guide never documents it. **Read
-`plugins/google_meet/` first** — before writing any kiosk adapter, and
-before treating "Hermes cannot listen through a custom adapter" as
-settled. §1 stands as what the *documentation* supports; this is the
-lead that may overturn it.
+That looked like the strongest evidence yet against the §1 finding — a
+bundled plugin getting audio *in* on a non-CLI surface. **Checked, and
+it is not.** `plugins/google_meet/` (`meet_bot.py`, `audio_bridge.py`,
+`realtime/openai_client.py`, a `node/` client-server pair) gets its
+duplex audio by **bypassing the gateway adapter contract entirely**:
+
+- Inbound is OS-level plumbing, not a Hermes API — a PulseAudio
+  null-sink on Linux, BlackHole on macOS, with Chrome pointed at the
+  fake mic. The documented path is
+  `OpenAI Realtime WS → speaker.pcm → paplay → null-sink ← Chrome fake mic`.
+- The audio goes to **OpenAI's Realtime API over its own WebSocket**,
+  not through Hermes STT. For us that is the autonomy goal inverted:
+  raw voice to a cloud vendor, the exact leak we are closing.
+- The `node/` split exists to run all of this on a separate machine
+  from the gateway, which underlines that it is a side-channel rather
+  than a platform capability.
+
+So it is a workaround, not a pattern to copy, and **§1 stands**: there
+is no supported route for inbound audio through a custom adapter. The
+microphone stays ours. That is not fatal — it is the boundary in §5 —
+but the hoped-for shortcut is closed.
 
 **Not verified:** the build-a-plugin guide — the page served empty and
 the raw markdown path 404s. The plugins feature page gives only a
