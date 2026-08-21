@@ -18,25 +18,33 @@ audio" — was correct then and is the exact line this spike redraws.
 Mounting Samantha on Hermes is viable, but not as a straight swap, and
 the reason is a **hard asymmetry** the release notes do not advertise:
 
-> **Hermes can speak through a custom adapter. It cannot listen
-> through one.**
+> **Hermes streams audio out; it takes audio in one utterance at a
+> time. The asymmetry is streaming, not direction.**
 
-Outbound audio has a real, documented, opt-in contract on
-`BasePlatformAdapter` — five methods, PCM chunks, ordered clause
-playback, ~500–800 ms perceived latency. That is precisely the seam a
-kiosk needs, and it is the single strongest argument for adopting.
+Outbound has a real, opt-in contract on `BasePlatformAdapter` — five
+methods, PCM chunks, ordered clause playback, ~500–800 ms perceived
+latency. That is precisely the seam a kiosk needs.
 
-Inbound audio has no such contract. The documented adapter interface is
-text-only (`connect` / `disconnect` / `send`, plus `MessageEvent` built
-with `MessageType.TEXT`). Voice *input* is wired per-surface — CLI/TUI
-push-to-talk, Discord voice channels, and named messaging platforms —
-none of which the kiosk is. The streaming PR says so in as many words:
-the seam "handles synthesis only".
+Inbound has no streaming counterpart, but it is **not** text-only, which
+is what the documentation alone had led me to conclude. Reading
+`gateway/platforms/base.py` settles it: `MessageType` carries `AUDIO`
+and `VOICE` members alongside `TEXT`, `MessageEvent` carries
+`media_urls` / `media_types`, and the base class ships
+`cache_audio_from_bytes()` / `cache_audio_from_url()`. So a custom
+adapter *can* hand Hermes a voice message — cache the bytes, build a
+`MessageEvent(message_type=MessageType.VOICE, media_urls=[...])`, call
+`handle_message()` — and Hermes transcribes it with local
+faster-whisper. The `pre_transcription` hook exists for exactly this
+path.
 
-**Consequence:** adopting Hermes deletes most of Fase 3, but not all of
-it. The microphone half of the voice loop stays ours either way. What
-changes is that it shrinks from "build a full duplex pipeline" to
-"capture audio, get text, hand Hermes a text event".
+**Consequence:** adopting Hermes deletes most of Fase 3. What stays ours
+is **VAD and endpointing** — deciding when an utterance ends — because
+that is the decision an utterance-level API forces onto the caller. What
+we give up versus our Pipecat design is partial transcripts: inbound
+latency becomes end-of-utterance rather than incremental. For a
+companion whose felt latency is dominated by time-to-first-audio on the
+reply, and where barge-in needs a local VAD anyway, that is a cheap
+trade.
 
 **Recommendation: adopt, as a set of Hermes plugins, with the boundary
 drawn at the microphone.** Samantha is buildable as an *extension* —
@@ -72,9 +80,11 @@ Claimed effect: perceived voice latency ~2–3.5 s → ~500–800 ms.
 This maps onto Samantha's existing transport almost exactly: our kiosk
 WebSocket already carries binary PCM out and JSON control text.
 
-**Inbound: no.** The developer guide for adding a platform adapter
-documents only `connect()`, `disconnect()`, `send()` as abstract, with
-`send_typing()` and `get_chat_info()` optional, and inbound arriving as:
+**Inbound: yes, but only per utterance.** *(Corrected 2026-08-21 after
+reading the source. The documentation alone had me conclude "no"; that
+was wrong.)* The developer guide documents only `connect()`,
+`disconnect()`, `send()` as abstract, with `send_typing()` and
+`get_chat_info()` optional, and shows inbound only as text:
 
 ```python
 event = MessageEvent(
@@ -86,10 +96,34 @@ event = MessageEvent(
 await self.handle_message(event)
 ```
 
-No microphone, no audio ingress, no STT routing. The per-platform voice
-work named in the release notes (Feishu, DingTalk, LINE, QQ, WhatsApp,
-Weixin) is platform-specific inbound classification, not a generic
-capability a new adapter inherits.
+The guide never goes past `MessageType.TEXT`. The code does:
+
+```python
+class MessageType(Enum):
+    """Types of incoming messages."""
+    TEXT = "text"
+    LOCATION = "location"
+    PHOTO = "photo"
+    VIDEO = "video"
+    AUDIO = "audio"
+    VOICE = "voice"
+    DOCUMENT = "document"
+    STICKER = "sticker"
+    COMMAND = "command"
+```
+
+`MessageEvent` carries `media_urls` and `media_types` (alongside
+`raw_message`, `metadata`, reply threading and `allow_gateway_control`),
+and the base class provides `cache_audio_from_bytes()` and
+`cache_audio_from_url()` to stash a voice attachment locally, classified
+by MIME type at cache time. There is no dedicated audio field and no
+streaming ingress — audio rides the generic media arrays — but the route
+exists and is the same one the messaging platforms use.
+
+So the per-platform voice work in the release notes (Feishu, DingTalk,
+LINE, QQ, WhatsApp, Weixin) is inbound *classification and routing* on
+top of a shared mechanism, not a private capability we are locked out
+of.
 
 **Stability:** the adapter guide makes **no** stability statement either
 way. Note this corrects the 2026-08-07 research note in the ledger,
@@ -97,10 +131,11 @@ which said the contract "explicitly excludes voice/audio and may change
 without deprecation" — that was about the *relay connector*, and it is
 now stale on both counts.
 
-**Not verified:** whether `MessageType` has an AUDIO/VOICE member that
-an adapter could populate. The guide does not list the enum. Worth 10
-minutes in `gateway/platforms/base.py` before the design is finalised —
-if it exists, the inbound story improves materially.
+**What is genuinely missing** is not a direction but a *shape*: there is
+no inbound analogue of the streaming-TTS seam. Nothing lets an adapter
+push PCM frames in as they arrive and receive partial transcripts back.
+Everything inbound is a completed utterance with a cached media file.
+That is what pins VAD and endpointing to our side of the line.
 
 ---
 
@@ -148,7 +183,7 @@ provider implements `stream()`. Route 1 again.
 | Samantha today | Hermes Herald equivalent | Verdict |
 |---|---|---|
 | Fase 3 voice pipeline (Pipecat, Tasks 14-19) — outbound half | streaming TTS adapter seam + `StreamingTTSConsumer` | **replace** — this is the wheel we were reinventing |
-| Fase 3 — inbound half (mic capture, VAD, endpointing) | none for custom adapters | **keep**, but shrink to capture → text |
+| Fase 3 — inbound half (mic capture, VAD, endpointing) | utterance-level only: `MessageType.VOICE` + `cache_audio_from_bytes()`; no streaming ingress | **keep** VAD/endpointing, **replace** transcription |
 | `tts.py` CosyVoice client | provider registry, no CosyVoice | **adapt** — becomes a plugin provider (route 1) |
 | `stt.py` / browser Web Speech | faster-whisper, zero-key, local | **replace** — and it also kills the Google Web Speech network hop, which serves the autonomy goal |
 | Task 22 (vendoring Silero VAD + onnxruntime off the CDN) | n/a — VAD stays ours | **keep**, still needed |
@@ -309,15 +344,51 @@ is no supported route for inbound audio through a custom adapter. The
 microphone stays ours. That is not fatal — it is the boundary in §5 —
 but the hoped-for shortcut is closed.
 
-**Not verified:** the build-a-plugin guide — the page served empty and
-the raw markdown path 404s. The plugins feature page gives only a
-minimal manifest (`name`, `version`, `description`) and never shows
-`manifest_version`, `api_version`, `kind` and `requires_plugins` in one
-example, so the full manifest shape is still second-hand. Confirm
-against `hermes_cli/plugins.py`. Also unverified: no page consulted
-carries any API-stability, deprecation or version-compatibility
-statement — the absence is consistent across the plugins page, the
-adapter guide and the memory-provider guide.
+### 4b.3 Confirmed from `hermes_cli/plugins.py` (2026-08-21)
+
+The manifest shape, previously second-hand, checks out and is richer
+than the docs show:
+
+- **Metadata:** `name`, `version`, `description`, `author`, `license`,
+  `homepage`, `tags`.
+- **Dependencies:** `requires_env`, `requires_plugins`,
+  `python_dependencies`, `external_dependencies`.
+- **Capabilities:** `provides_tools`, `provides_hooks`, `capabilities`
+  (declared-consent metadata — note `tools.override` and
+  `llm.model_override` are gated behind it).
+- **Manifest v2:** `manifest_version` (file format), `api_version`
+  (runtime API), `config_schema`, `emits`, `listens`.
+
+`kind` values: `standalone`, `backend`, `exclusive`, `platform`,
+`model-provider`.
+
+`PluginContext` registration methods seen: `register_tool` (gated by
+the `override` capability), `register_hook`, `register_command`,
+`register_cli_command`, `register_context_engine`,
+**`register_memory_provider`**, `register_image_gen_provider`,
+`register_dashboard_auth_provider`, `register_approval_transport`,
+`register_context_reference`.
+
+**Discrepancy to resolve:** `register_platform()` — which the
+platform-adapter guide says the adapter's `register()` calls — did
+**not** appear in that list. Either the listing is partial or platform
+registration goes through a different registry (earlier research
+pointed at `gateway/platform_registry.py`). This is the one mechanism
+the whole kiosk plan rests on, so confirm it before designing.
+
+The hook catalogue is also larger than the plugins page said — 60+, not
+26. Ones we would actually use: `on_stream_start` / `on_stream_delta` /
+`on_stream_end` (drive the wave and the token stream to the UI),
+`transform_llm_output` (personality and spoken-text shaping),
+`pre_transcription`, `pre_gateway_dispatch`, `gateway_platform_event`,
+and `on_session_start` / `on_session_end`.
+
+**Still not verified:** no page or file consulted carries any
+API-stability, deprecation or version-compatibility statement. The
+absence is consistent across the plugins page, the adapter guide, the
+memory-provider guide and the manifest fields themselves — `api_version`
+exists as a field, but nothing says what changing it obliges anyone to
+do. Treat pinning as mandatory, not cautious.
 
 ## 4. What Hermes does not solve, and what it puts at risk
 
@@ -360,13 +431,15 @@ route is what makes upstream upgrades a dependency bump instead of a
 re-merge (§4b).
 
 - Hermes owns: the LLM turn, the reply stream, outbound audio through a
-  `kind: platform` plugin implementing the streaming TTS seam, and STT
-  via local faster-whisper.
+  `kind: platform` plugin implementing the streaming TTS seam, and
+  transcription via local faster-whisper — fed by us as complete
+  utterances (`MessageType.VOICE` + `cache_audio_from_bytes()`).
 - We own, but ship *as plugins*: the kiosk WebSocket adapter, memory
-  (Chroma + ring + facts, as a memory provider), and the CosyVoice
-  voice (TTS provider overriding `stream()`).
-- We own outright: microphone capture, VAD and endpointing in the
-  kiosk, and the entire OS1 frontend.
+  (Chroma + ring + facts, via `register_memory_provider`), and the
+  CosyVoice voice (TTS provider overriding `stream()`).
+- We own outright: microphone capture, **VAD and endpointing** — the
+  utterance-level inbound API forces this on us — and the entire OS1
+  frontend.
 - Pin a known-good Hermes version and `api_version`; do not track
   `main`. Upgrading is a deliberate act gated on a manual voice smoke
   test, because there is no CI (Task 32 declined).
@@ -376,11 +449,11 @@ is now dead work. Re-scope, do not resume.
 
 **Cheapest next step, before any design is finalised:** ~30 minutes in
 the actual v0.20.5 source answering the two things the docs leave open —
-(a) does `MessageType` have an audio member a custom adapter can
-populate, (b) what exactly does the TTS plugin provider `stream()`
-interface require, and (c) the real `plugin.yaml` field list and
-`register(ctx)` signature from `hermes_cli/plugins.py`, since the
-build-a-plugin guide would not load. Both change the shape of the design, and neither is
+(a) does `ctx.register_platform()` exist, and if not, how a plugin
+registers a gateway adapter (see the discrepancy in §4b.3) — the whole
+kiosk plan rests on it; and (b) what exactly the TTS plugin provider
+`stream()` interface requires, since that is what keeps her voice.
+Items on `MessageType` and the manifest are now closed. Both change the shape of the design, and neither is
 answerable from the documentation.
 
 ---
