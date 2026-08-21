@@ -287,15 +287,22 @@ Hermes feature fixes that; it is our data model.
 
 ## 5. Recommendation
 
-**Adopt Hermes, with the boundary at the microphone.**
+**Adopt Hermes as a set of plugins, boundary at the microphone.**
+Extension, not fork, and not a client-of-a-gateway either — the plugin
+route is what makes upstream upgrades a dependency bump instead of a
+re-merge (§4b).
 
 - Hermes owns: the LLM turn, the reply stream, outbound audio through a
-  custom adapter implementing the streaming TTS seam, and STT via local
-  faster-whisper.
-- We own: microphone capture, VAD and endpointing in the kiosk, the
-  WebSocket transport, the entire OS1 frontend, and — through a plugin
-  provider — the CosyVoice voice.
-- Memory stays ours until a separate spike says otherwise.
+  `kind: platform` plugin implementing the streaming TTS seam, and STT
+  via local faster-whisper.
+- We own, but ship *as plugins*: the kiosk WebSocket adapter, memory
+  (Chroma + ring + facts, as a memory provider), and the CosyVoice
+  voice (TTS provider overriding `stream()`).
+- We own outright: microphone capture, VAD and endpointing in the
+  kiosk, and the entire OS1 frontend.
+- Pin a known-good Hermes version and `api_version`; do not track
+  `main`. Upgrading is a deliberate act gated on a manual voice smoke
+  test, because there is no CI (Task 32 declined).
 
 **Do not dispatch Fase 3 (Tasks 14-19) as written.** Its outbound half
 is now dead work. Re-scope, do not resume.
@@ -303,8 +310,10 @@ is now dead work. Re-scope, do not resume.
 **Cheapest next step, before any design is finalised:** ~30 minutes in
 the actual v0.20.5 source answering the two things the docs leave open —
 (a) does `MessageType` have an audio member a custom adapter can
-populate, and (b) what exactly does the TTS plugin provider `stream()`
-interface require. Both change the shape of the design, and neither is
+populate, (b) what exactly does the TTS plugin provider `stream()`
+interface require, and (c) the real `plugin.yaml` field list and
+`register(ctx)` signature from `hermes_cli/plugins.py`, since the
+build-a-plugin guide would not load. Both change the shape of the design, and neither is
 answerable from the documentation.
 
 ---
