@@ -157,11 +157,40 @@ person. This is identity, not plumbing.
 
 Three routes to keep CosyVoice, in descending order of quality:
 
-1. **Python plugin provider overriding `stream()`** — the docs state
-   plugin providers may "override `stream()` to deliver audio bytes
-   chunked for streaming delivery". This is the only route that keeps
-   both our voice *and* the 500–800 ms streaming win. It is also the
-   only one that requires writing real code against a plugin API.
+1. **A `StreamingTTSProvider` subclass** — confirmed contract, read
+   from `tools/tts_streaming.py`:
+
+   ```python
+   class StreamingTTSProvider(ABC):
+       """Yields raw int16, little-endian, mono PCM chunks at ``sample_rate``."""
+       sample_rate: int = 24000
+       channels: int = 1
+       sample_width: int = 2
+   ```
+
+   Two methods: static `available()` ("True when this provider's
+   credentials/SDK are usable right now") and abstract
+   `stream(text: str)` yielding `bytes` — raw int16 LE mono PCM.
+   Providers register with an `@register("name")` decorator;
+   `resolve_streaming_provider()` picks one from
+   `tts.streaming.provider` (or `auto`), and the code is documented as
+   never silently swapping providers.
+
+   This fits CosyVoice well — it already emits 24 kHz — and it is the
+   only route that keeps both our voice *and* the streaming win.
+
+   **Caveat worth pricing in:** `stream()` is a *synchronous*
+   `Iterator[bytes]`, while our `tts.stream()` is async. The provider
+   will need a bridge, and it must not block the event loop.
+
+   **And the finding that matters most here:** the four providers that
+   implement streaming today are ElevenLabs, OpenAI, Gemini and xAI —
+   **all four are cloud**. None of the local providers (piper, neutts,
+   kittentts) stream. So "local voice" and "streaming voice" are
+   currently mutually exclusive in stock Hermes, and the only way to
+   have both is to write this provider ourselves. That is not a
+   nice-to-have; it is the price of keeping her voice and the autonomy
+   goal at the same time.
 2. **`openai` provider with `base_url`** pointed at an
    OpenAI-compatible shim in front of CosyVoice. CosyVoice's HTTP API
    is not OpenAI-shaped, so this means writing and running a shim —
@@ -369,12 +398,56 @@ the `override` capability), `register_hook`, `register_command`,
 `register_dashboard_auth_provider`, `register_approval_transport`,
 `register_context_reference`.
 
-**Discrepancy to resolve:** `register_platform()` — which the
-platform-adapter guide says the adapter's `register()` calls — did
-**not** appear in that list. Either the listing is partial or platform
-registration goes through a different registry (earlier research
-pointed at `gateway/platform_registry.py`). This is the one mechanism
-the whole kiosk plan rests on, so confirm it before designing.
+**`register_platform()` confirmed** (the earlier listing was partial).
+`plugins/platforms/` holds 22 worked examples — a2a, buzz, dingtalk,
+discord, email, feishu, google_chat, homeassistant, irc, line, matrix,
+mattermost, ntfy, photon, raft, simplex, slack, sms, teams, telegram,
+wecom, whatsapp. `irc` is the smallest (stdlib asyncio only) and is the
+template to copy. Its `__init__.py` is just
+`from .adapter import register`, and `adapter.py` ends with:
+
+```python
+def register(ctx):
+    ctx.register_platform(
+        name="irc",
+        label="IRC",
+        adapter_factory=lambda cfg: IRCAdapter(cfg),
+        check_fn=check_requirements,
+        validate_config=validate_config,
+        is_connected=is_connected,
+        required_env=["IRC_SERVER", "IRC_CHANNEL", "IRC_NICKNAME"],
+        install_hint="No extra packages needed (stdlib only)",
+        setup_fn=interactive_setup,
+        env_enablement_fn=_env_enablement,
+        cron_deliver_env_var="IRC_HOME_CHANNEL",
+        standalone_sender_fn=_standalone_send,
+        allowed_users_env="IRC_ALLOWED_USERS",
+        allow_all_env="IRC_ALLOW_ALL_USERS",
+        max_message_length=450,
+        emoji="💬",
+        pii_safe=False,
+        allow_update_command=True,
+        platform_hint="You are chatting via IRC. IRC does not support markdown formatting — use plain text only.",
+    )
+```
+
+Two things there we want. `platform_hint` is a per-platform string fed
+into the prompt — for the kiosk it becomes "you are being spoken aloud",
+which is exactly the instruction our replies need and currently carry
+in `personality.py`. And `max_message_length` gives us a natural place
+to keep replies short enough to speak.
+
+The real `plugin.yaml` for a platform (from `irc`) is:
+`name`, `label`, `kind: platform`, `version`, `description`, `author`,
+`requires_env` and `optional_env` (each entry with `name`,
+`description`, `prompt`, `password`). Note it carries **no**
+`manifest_version` or `api_version` — those are optional v2 additions,
+not required.
+
+Reference implementations for memory live in `plugins/memory/`:
+byterover, hindsight, holographic, honcho, mem0, openviking, retaindb,
+supermemory. `mem0` is the one we already evaluated and rejected in
+2026-05, so it is the most legible starting point for us.
 
 The hook catalogue is also larger than the plugins page said — 60+, not
 26. Ones we would actually use: `on_stream_start` / `on_stream_delta` /
@@ -447,13 +520,16 @@ re-merge (§4b).
 **Do not dispatch Fase 3 (Tasks 14-19) as written.** Its outbound half
 is now dead work. Re-scope, do not resume.
 
-**Cheapest next step, before any design is finalised:** ~30 minutes in
-the actual v0.20.5 source answering the two things the docs leave open —
-(a) does `ctx.register_platform()` exist, and if not, how a plugin
-registers a gateway adapter (see the discrepancy in §4b.3) — the whole
-kiosk plan rests on it; and (b) what exactly the TTS plugin provider
-`stream()` interface requires, since that is what keeps her voice.
-Items on `MessageType` and the manifest are now closed. Both change the shape of the design, and neither is
+**All four blocking unknowns are now closed against source** —
+`MessageType` audio members, the real `plugin.yaml` shape,
+`ctx.register_platform()`, and the `StreamingTTSProvider` contract.
+Nothing else needs reading before the design.
+
+The design should open on the three pieces that carry real work, in
+this order: the kiosk platform adapter (copy `irc`, add the five
+streaming-TTS methods), the CosyVoice `StreamingTTSProvider` (the only
+way to have a local *and* streaming voice), and the `MemoryProvider`
+wrapper over our existing `Memory` (copy `mem0` for shape). Both change the shape of the design, and neither is
 answerable from the documentation.
 
 ---
