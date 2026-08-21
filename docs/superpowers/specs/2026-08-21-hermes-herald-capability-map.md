@@ -246,11 +246,65 @@ tracking `main`, upgrade deliberately, and keep one end-to-end smoke
 test that actually speaks and listens. Note we have no CI to run that
 in — Task 32 was declined — so it is a manual gate on upgrade day.
 
-**Not verified:** I could not read the build-a-plugin guide — the page
-served empty and the raw markdown path 404s. The manifest field list
-and the `register()` signature above come from the plugins feature page
-and the platform-adapter guide, not from a worked example. Confirm both
-against `hermes_cli/plugins.py` before designing.
+### 4b.1 The `MemoryProvider` contract (read 2026-08-21)
+
+This is the one that decides whether Samantha's memory survives, and it
+maps onto what we already have almost line for line. Subclass
+`MemoryProvider` from `agent.memory_provider`:
+
+- `name` (property), `is_available()` — "Check if this provider can
+  activate. NO network calls."
+- `initialize(session_id, **kwargs)` — once at agent startup.
+- `prefetch(query)` — **before each API call**, returns recalled
+  context. This is `gather_context()`: facts + semantic recall + the
+  short-term ring.
+- `sync_turn(user, assistant, *, session_id="", messages=None)` —
+  **after each completed turn**, persists. Receives user/assistant
+  messages plus tool calls and results. Documented as MUST be
+  non-blocking, which suits us: our Chroma writes already go off the
+  event loop.
+- `get_tool_schemas()` / `handle_tool_call(...)` — memory may expose
+  tools to the agent.
+- `get_config_schema()` / `save_config(values, hermes_home)`.
+
+Two consequences worth stating. First, **the provider owns persistence
+outright** — there is no forget/expiry the core imposes, so "Samantha
+never forgets" is ours to keep by simply not implementing forgetting.
+Second, the split is exactly our current one, so the port is a wrapper
+over `Memory`, not a redesign.
+
+Memory plugins are `kind: exclusive` (single active). The documented
+`kind` values seen so far are `standalone`, `backend`, `platform` and
+`exclusive`; the docs never enumerate them in one place.
+
+### 4b.2 Bundled plugins — what already exists
+
+The built-in set is mostly unrelated to us (`disk-cleanup`,
+`security-guidance`, `observability/langfuse`, `spotify`,
+`image_gen/*`, `kanban/dashboard`, `hermes-achievements`,
+`teams_pipeline`). One matters enormously:
+
+> **`google_meet`** — "Join Meet calls, live-caption transcription,
+> optional realtime duplex audio"
+
+A bundled plugin doing **realtime duplex audio** on a non-CLI surface is
+the strongest evidence yet against the §1 finding. It means the pattern
+for getting audio *in* through the plugin system exists in-tree and can
+be read, even if the platform-adapter guide never documents it. **Read
+`plugins/google_meet/` first** — before writing any kiosk adapter, and
+before treating "Hermes cannot listen through a custom adapter" as
+settled. §1 stands as what the *documentation* supports; this is the
+lead that may overturn it.
+
+**Not verified:** the build-a-plugin guide — the page served empty and
+the raw markdown path 404s. The plugins feature page gives only a
+minimal manifest (`name`, `version`, `description`) and never shows
+`manifest_version`, `api_version`, `kind` and `requires_plugins` in one
+example, so the full manifest shape is still second-hand. Confirm
+against `hermes_cli/plugins.py`. Also unverified: no page consulted
+carries any API-stability, deprecation or version-compatibility
+statement — the absence is consistent across the plugins page, the
+adapter guide and the memory-provider guide.
 
 ## 4. What Hermes does not solve, and what it puts at risk
 
@@ -261,12 +315,12 @@ That is Samantha. Hermes replaces plumbing under it, never it.
 **Puts at risk:**
 
 - **The voice.** Covered in §2. Route 1 or we do not sound like her.
-- **"Samantha never forgets."** That is a standing user directive
-  (2026-05-12) and our store is append-only by design, with a
-  multilingual embedder chosen because Spanish recall was weak.
-  Hermes's memory system has its own model. Migrating 279 real chunks —
-  including the onboarding answers and the name correction — is a
-  design problem, not a config flag. **Do not assume this migrates.**
+- **"Samantha never forgets."** Largely defused by §4b.1: as a
+  `MemoryProvider` we keep our own store, our own embedder and our own
+  write policy, and nothing in the contract forces expiry. The residual
+  risk is narrower — that Hermes's context engine compacts history in a
+  way that fights our recall, which is what the context-engine plugin
+  kind exists to override. The 279 real chunks stay where they are.
 - **CLAUDE.md §1**, which says Samantha is explicitly *not* "an agentic
   tool-using system". Mounting her on an agent runtime whose whole
   point is tools and skills contradicts that. It may well be the right
