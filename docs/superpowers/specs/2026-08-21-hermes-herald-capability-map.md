@@ -38,8 +38,11 @@ it. The microphone half of the voice loop stays ours either way. What
 changes is that it shrinks from "build a full duplex pipeline" to
 "capture audio, get text, hand Hermes a text event".
 
-**Recommendation: adopt, with the boundary drawn at the microphone.**
-Details in §5.
+**Recommendation: adopt, as a set of Hermes plugins, with the boundary
+drawn at the microphone.** Samantha is buildable as an *extension* —
+not merely a client talking to a gateway. See §4b for the plugin
+surface, which is the part that makes this worth doing; §5 for the
+boundary.
 
 ---
 
@@ -157,6 +160,97 @@ provider implements `stream()`. Route 1 again.
 | Frontend: OS1 UI, wave, onboarding, Spanish voice | nothing | **keep** — this is the product |
 
 ---
+
+## 4b. Samantha as a Hermes *extension* — the plugin surface
+
+Reviewed after the first pass, on the user's prompt. It is the strongest
+version of the adoption and it changes the shape of the recommendation:
+Samantha is not a client that talks to a Hermes gateway, she is a set of
+plugins that Hermes loads.
+
+Plugins are discovered from four places — bundled `<repo>/plugins/`,
+user `~/.hermes/plugins/`, project `.hermes/plugins/` (gated behind
+`HERMES_ENABLE_PROJECT_PLUGINS=true`), and pip `hermes_agent.plugins`
+entry points. Each carries a `plugin.yaml` manifest.
+
+Kinds that matter to us:
+
+- **`kind: platform`** — this is the piece I missed in the first pass.
+  An adapter ships as a plugin directory with `plugin.yaml` and an
+  `adapter.py` exposing `register(ctx)`, which calls
+  `ctx.register_platform()`. That one call "handles adapter creation,
+  config parsing, user authorization, env auto-enable, cron delivery,
+  and CLI UI integration automatically". So the kiosk adapter needs no
+  fork of Hermes and no core patch.
+- **Memory providers** — a first-class plugin kind, single-select, that
+  *replaces* built-in memory. This is the clean answer to the risk in
+  §4: ChromaDB + the SQLite ring + the fact chunks + the multilingual
+  embedder survive intact as a memory provider, and "Samantha never
+  forgets" stops being a migration problem.
+- **Context engines** — single-select, replaces the built-in
+  compressor. Relevant later if Hermes's compaction fights our recall.
+- **Model providers** — multi-register. Only interesting if we ever
+  want the 4090's llama-server registered natively.
+- **General plugins** — `ctx.register_tool()`, `register_hook()`,
+  `register_command()`, `register_cli_command()`, `register_skill()`.
+
+The hook catalogue is the other pleasant surprise: 26 lifecycle events
+in `hermes_cli.plugins.VALID_HOOKS`, including `pre_llm_call`,
+`post_llm_call`, `transform_llm_output`, `pre_gateway_dispatch` and —
+notably — **`pre_transcription`**. A transcription hook existing at all
+is evidence that inbound audio does flow through the core somewhere,
+which is the best lead we have against the §1 finding. It does not
+prove a custom adapter can feed it.
+
+So the extension shape is roughly:
+
+| Samantha piece | Delivered as |
+|---|---|
+| kiosk WebSocket transport | `kind: platform` plugin + the streaming-TTS seam |
+| memory (Chroma + ring + facts) | memory provider plugin |
+| CosyVoice voice | TTS plugin provider overriding `stream()` |
+| personality | `~/.hermes/SOUL.md` + `transform_llm_output` hook |
+| spoken-text shaping (the CosyVoice expression markers, short-text crash guard) | `pre_transcription` / output hooks |
+| OS1 frontend | stays ours, unchanged |
+
+**The cost of this shape, stated plainly:** it binds Samantha's identity
+to a plugin API with **no backward-compatibility guarantee**. The docs
+carry `manifest_version` and `api_version` fields but no stability
+statement; the hook catalogue is described as "the 26 lifecycle events
+*currently* accepted"; plugin middleware is called out as "a separate
+registry/surface" that is still moving. Against a project shipping
+weekly (five releases in the sixteen days after v0.20.0), that is a
+standing maintenance tax, and it lands on the pieces that *are*
+Samantha rather than on plumbing we would happily let churn.
+
+**The argument in favour, which is the decisive one (user, 2026-08-21):
+Hermes updates transparently.** Staying out of the core is what buys
+this. Every upstream release — new voice work, new providers, latency
+wins like PR #73862 — arrives by upgrading a dependency, not by
+re-merging a fork. Against a project shipping weekly, the compounding
+difference between "plugin" and "fork" is not close, and it is the
+whole reason to prefer the extension shape over vendoring pieces of
+Hermes into our backend.
+
+The letter of it: transparent updates hold exactly as far as the
+surfaces we bind to are stable, and stability here is a function of how
+many other plugins share the surface, not of a promise in the docs.
+Tools, hooks and `SOUL.md` are crowded surfaces — if they break, they
+break loudly for everyone and get fixed upstream. A WebSocket kiosk
+platform adapter carrying streaming PCM is a population of one; if the
+seam shifts, it shifts under us alone and we find out at runtime.
+
+So the mitigation is not "avoid plugins", it is: bind shallowly where
+we can, pin `api_version` and a known-good Hermes version rather than
+tracking `main`, upgrade deliberately, and keep one end-to-end smoke
+test that actually speaks and listens. Note we have no CI to run that
+in — Task 32 was declined — so it is a manual gate on upgrade day.
+
+**Not verified:** I could not read the build-a-plugin guide — the page
+served empty and the raw markdown path 404s. The manifest field list
+and the `register()` signature above come from the plugins feature page
+and the platform-adapter guide, not from a worked example. Confirm both
+against `hermes_cli/plugins.py` before designing.
 
 ## 4. What Hermes does not solve, and what it puts at risk
 
