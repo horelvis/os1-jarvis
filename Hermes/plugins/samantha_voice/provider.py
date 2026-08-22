@@ -13,6 +13,7 @@ from loguru import logger
 
 from samantha import tts
 
+from .announce import announcement_pcm
 from .bridge import iter_sync
 from .markers import has_unclosed_tag
 
@@ -57,6 +58,48 @@ MIN_CLAUSE_CHARS = 12
 # MIN_CLAUSE_CHARS. Rationale in full: stream()'s docstring.
 MAX_PENDING_CHARS = 400
 
+# Failure shapes that mean "the server is not there", as opposed to
+# "this clause upset the server". All three are raised before any bytes
+# of the request reach CosyVoice — connection refused, no route to a
+# powered-off host, no free slot in the pool — so the clause's content
+# cannot possibly be the cause, and no other clause of this turn will
+# fare better. Everything else in httpx.HTTPError (ReadTimeout,
+# RemoteProtocolError, HTTP status errors) means the server answered,
+# or started to, and stays a per-clause failure.
+_UNREACHABLE = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+# How many clauses a turn may attempt, with zero audio to show for it,
+# before the turn is declared dead by the cumulative rule.
+#
+# 2, not 1. A single failed clause is ordinary: the isolated-fragment
+# failure measured on 2026-08-22 hit 2 of 6 calls for the worst string.
+# Announcing on it would talk over a reply that then speaks fine. Two
+# clauses with nothing audible between them is not ordinary, and — the
+# reason this threshold is cheap — by the time it fires the turn has
+# already produced silence, so declaring it dead can never cost the
+# user audio they would otherwise have heard.
+#
+# 2 alone would miss the common one-clause turn (her replies are 1-3
+# sentences by design), which is exactly what `_UNREACHABLE` above
+# covers: a dead server is caught on clause one, by shape rather than
+# by count.
+_MIN_SILENT_CLAUSES = 2
+
+# Chunk size the announcement clip is handed out in — the same 4 KB
+# `samantha.tts.stream` reads the CosyVoice response with, so the
+# consumer sees the clip exactly as it sees a spoken clause.
+_CLIP_CHUNK_BYTES = 4096
+
+
+class SilentTurnError(Exception):
+    """No clause in an entire speaking turn produced any audio.
+
+    Deliberately NOT a RuntimeError: `stream()` catches RuntimeError as
+    "one clause failed, keep going", and `samantha.tts` raises
+    RuntimeError for exactly that. A turn-level failure must never be
+    mistaken for a clause-level one by a future edit to that handler.
+    """
+
 
 class CosyVoiceStreamingProvider(StreamingTTSProvider):
     sample_rate: int = tts.OUTPUT_SAMPLE_RATE
@@ -91,6 +134,11 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         # either under MIN_CLAUSE_CHARS or held an unclosed <laughter>
         # tag under MAX_PENDING_CHARS. See stream()'s docstring for why.
         self._pending: str = ""
+        # Set once this turn has been declared dead, so the announcement
+        # plays once and the exception is raised once. Same per-turn
+        # lifetime as bytes_yielded_per_clause above, and correct for
+        # the same reason: Hermes builds a fresh provider per turn.
+        self._turn_declared_dead: bool = False
 
     @staticmethod
     def available() -> bool:
@@ -143,6 +191,17 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         why the except clause below has to catch `httpx.HTTPError`
         alongside `RuntimeError`, not just the latter.
 
+        A FAILED CLAUSE IS SWALLOWED; A SILENT TURN IS NOT. Skipping a
+        clause is deliberate and stays. But the same `except` against a
+        dead server swallowed all 15 clauses of a reply and raised
+        nothing, which on an appliance is indistinguishable from
+        thinking. `_turn_is_dead` separates the two: one clause failing
+        is ordinary, a whole turn producing no audio is not. When it
+        fires, `_announce_dead_turn` plays a pre-recorded clip in
+        Samantha's voice and raises `SilentTurnError`. Read `announce.
+        py` before touching that path — the clip being pre-recorded is a
+        ruling, not an implementation detail.
+
         Two conditions hold a clause back rather than sending it:
         - it is still under MIN_CLAUSE_CHARS, or
         - it holds an unclosed `<laughter>` tag (see `markers.
@@ -189,6 +248,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         self._pending = ""
 
         emitted = 0
+        failure: BaseException | None = None
         try:
             for chunk in iter_sync(lambda c=clause: _pcm_only(c)):
                 emitted += len(chunk)
@@ -200,8 +260,87 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
             # so one lost clause doesn't abort the rest of the reply: on
             # an appliance, half a reply beats silence.
             logger.warning(f"samantha-voice: clause failed, skipping — {exc}")
+            failure = exc
         finally:
             self.bytes_yielded_per_clause.append((clause, emitted))
+
+        # Reached only on a normal exit from the block above — a
+        # GeneratorExit from a barge-in re-raises out of the `finally`
+        # and never gets here, so an interruption is never mistaken for
+        # a dead server.
+        if failure is not None and self._turn_is_dead(failure):
+            yield from self._announce_dead_turn(failure)
+
+    def _turn_is_dead(self, failure: BaseException) -> bool:
+        """True when `failure` means the whole turn is lost, not one clause.
+
+        Two independent signals, because neither covers the other's case:
+
+        - the failure never reached the server (`_UNREACHABLE`), which
+          is true of a powered-off 4090 on the very first clause of a
+          one-sentence reply;
+        - this turn has attempted `_MIN_SILENT_CLAUSES` clauses and has
+          yielded zero bytes across all of them, which catches the
+          shapes where the server does answer but never with audio.
+
+        Only ever True once per turn: after the first time, the
+        announcement has played and the exception has been raised, and
+        repeating either adds noise, not information.
+        """
+        if self._turn_declared_dead:
+            return False
+        if isinstance(failure, _UNREACHABLE):
+            self._turn_declared_dead = True
+            return True
+        attempted = len(self.bytes_yielded_per_clause)
+        audible = sum(count for _, count in self.bytes_yielded_per_clause)
+        if attempted >= _MIN_SILENT_CLAUSES and audible == 0:
+            self._turn_declared_dead = True
+            return True
+        return False
+
+    def _announce_dead_turn(self, failure: BaseException) -> Iterator[bytes]:
+        """Say it out loud, then raise.
+
+        The clip's PCM is yielded into this very stream because that is
+        the only channel out of here that reaches the person in the
+        room. Both of Hermes' call sites swallow an exception from
+        `stream()` into a log line — `_enqueue_audio` and
+        `_consume_to_queue` in `tools/tts_tool.py`, `_synthesise_and_
+        write` in `gateway/streaming_tts_consumer.py` — which is the
+        same not-enough we already had. Audio is not swallowed.
+
+        The exception still follows, for the caller that can use it: on
+        the gateway path a turn that stayed inaudible clears
+        `_suppress_whole_file`, so the reply is retried through the
+        whole-file provider, which raises into a visible error envelope
+        (`sync_provider.py`'s docstring). Nothing here ever reaches
+        another TTS backend — see `announce.py` on why that would be
+        the failure rather than a fallback.
+
+        The clip's bytes are NOT added to `bytes_yielded_per_clause`:
+        that list maps clause text to the audio for that text, and the
+        announcement is not something Samantha said. Plan 3's trim
+        therefore under-counts the audible bytes of a dead turn by the
+        clip's length — harmless, since a dead turn has no spoken words
+        to trim.
+        """
+        clip = announcement_pcm()
+        if clip:
+            logger.error(
+                "samantha-voice: no audio this turn — playing the "
+                f"pre-recorded announcement ({len(clip)} bytes of PCM)"
+            )
+            # Same 4 KB chunk size `samantha.tts.stream` reads with, so
+            # the clip reaches the consumer the way a clause does
+            # rather than as one large write.
+            for start in range(0, len(clip), _CLIP_CHUNK_BYTES):
+                yield clip[start : start + _CLIP_CHUNK_BYTES]
+        raise SilentTurnError(
+            "samantha-voice: the whole turn produced no audio "
+            f"({len(self.bytes_yielded_per_clause)} clause(s) attempted, "
+            f"0 bytes yielded); last failure: {failure!r}"
+        )
 
 
 async def _pcm_only(clause: str):
