@@ -16,6 +16,14 @@ from typing import Any, Dict
 
 _CLIENT_TYPES = {"chat", "listen"}
 
+# Nothing a person says out loud, or types on a screen with no keyboard in
+# front of it, comes near this. The cap exists because the socket is an
+# unauthenticated local listener (any process on the box can open it) and
+# whatever arrives goes straight into a metered LLM — aiohttp's own default
+# would accept 4 MB per frame. Generous enough that a real turn can never
+# hit it, small enough that a runaway one cannot cost anything.
+_MAX_MESSAGE_CHARS = 4000
+
 
 class ProtocolError(ValueError):
     """Raised for anything the kiosk should not have sent."""
@@ -40,6 +48,11 @@ def decode_client(raw: str) -> Dict[str, Any]:
         if not isinstance(message, str) or not message.strip():
             # An empty turn would reach the model as an empty prompt.
             raise ProtocolError("chat needs a non-blank message")
+        if len(message) > _MAX_MESSAGE_CHARS:
+            raise ProtocolError(
+                f"chat message is {len(message)} chars, over the "
+                f"{_MAX_MESSAGE_CHARS} cap"
+            )
 
         user_id = msg.get("user_id")
         if not isinstance(user_id, str) or not user_id.strip():

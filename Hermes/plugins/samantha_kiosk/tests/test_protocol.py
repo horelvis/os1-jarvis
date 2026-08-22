@@ -73,3 +73,16 @@ def test_encoders_match_the_frontend_contract():
         "type": "error",
         "error": "se me ha ido el hilo",
     }
+
+
+def test_an_absurdly_long_message_is_rejected():
+    # The socket is an unauthenticated local listener and whatever arrives
+    # goes straight into a metered LLM; aiohttp's own frame default is 4 MB.
+    raw = json.dumps({"type": "chat", "message": "a" * 4001, "user_id": "primary"})
+    with pytest.raises(ProtocolError):
+        decode_client(raw)
+
+
+def test_a_long_but_plausible_message_is_accepted():
+    raw = json.dumps({"type": "chat", "message": "a" * 4000, "user_id": "primary"})
+    assert decode_client(raw)["message"]
