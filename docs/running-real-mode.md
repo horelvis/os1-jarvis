@@ -311,24 +311,25 @@ export PYTHONPATH="$(pwd)/backend:$(pwd)"                   # samantha.* imports
 
 Expected in the log: `samantha-kiosk: serving <dist-path> on :7777`.
 
-**Undocumented-by-the-plan fourth requirement — user authorization.** The
-kiosk plugin registers as a generic Hermes platform (`Platform("samantha_kiosk")`)
-and does not declare its own `allowed_users_env`/`allow_all_env`, so the
-gateway's default-deny authz gate applies. Without an allowlist, every chat
-message is silently dropped with `Unauthorized user: primary (primary) on
-samantha_kiosk` in the gateway log and the WebSocket client hangs forever —
-no `error` frame, no closed socket, nothing. **Measured**: a raw WS client
-sending `{"type":"chat","message":"...","user_id":"primary"}` got zero
-frames back until this was set. Fix — also export before `hermes gateway`:
+**User authorization — no longer an exported variable.** Hermes
+default-denies any platform it has no allowlist for, so the first version of
+this plugin only answered if you remembered to export the *global*
+`GATEWAY_ALLOWED_USERS=primary` by hand. That is fixed in code:
+`register()` declares `allowed_users_env="SAMANTHA_KIOSK_ALLOWED_USERS"` and
+`allow_all_env="SAMANTHA_KIOSK_ALLOW_ALL_USERS"`, and defaults the former to
+`primary` — the `user_id` the frontend sends
+(`frontend/src/net/wsClient.ts:80`). **Measured** on Hermes 0.20.5 with every
+allowlist variable unset: `_is_user_authorized` returns True for `primary`
+and False for anything else. A fresh install needs no authorization
+environment at all.
 
-```bash
-export GATEWAY_ALLOWED_USERS=primary   # must match the `user_id` field the kiosk sends
-```
+Set `SAMANTHA_KIOSK_ALLOWED_USERS` only to change *which* id may talk; it is
+scoped to the kiosk, unlike `GATEWAY_ALLOWED_USERS`, which authorizes that id
+on every platform the gateway has enabled, now and in future.
 
-(`GATEWAY_ALLOW_ALL_USERS=true` also works and is what the "no allowlist
-configured" warning at gateway startup suggests, but it's global across
-every platform Hermes has enabled, not scoped to the kiosk — prefer the
-allowlist form for a dev box that might grow other plugins later.)
+Why this mattered more than a dropped message: with **no** allowlist anywhere,
+the unauthorized-DM default is `pair`, and Hermes answers the owner of the
+house on their own OS1 screen, in English, with a pairing code.
 
 **4. Verifying the round trip** (done here with a raw `aiohttp` WebSocket
 client rather than a browser — this session has no way to open one):
@@ -364,10 +365,14 @@ not for this.
 
 **Three failure signatures**, from the plan brief plus the one found above:
 
-- **The interface loads but nothing comes back.** The WebSocket connected
-  but dispatch didn't. Check the gateway log for `handle_message`. If
-  instead you see `Unauthorized user: ... on samantha_kiosk`, it's the
-  authz gap above, not a dispatch bug — set `GATEWAY_ALLOWED_USERS`.
+- **The interface loads but nothing comes back.** This can no longer hang
+  forever: every accepted `chat` frame now ends in exactly one `done` or one
+  `error`, and after `SAMANTHA_KIOSK_TURN_TIMEOUT` seconds (default 90) the
+  kiosk says *"Algo se ha quedado a medias. ¿Me lo repites?"* on screen and
+  logs `samantha-kiosk: no reply within 90s for turn <id>`. That log line is
+  the cue to look at the gateway log for the real cause — `Unauthorized user:
+  ... on samantha_kiosk`, a session-key mismatch, an unwired message handler,
+  or a dispatch error.
 - **A blank page.** `SAMANTHA_KIOSK_STATIC_ROOT` is wrong, or `pnpm build`
   was not run. Confirm with the two `curl` checks in step 4 above — a 404
   on the JS/CSS asset (not just `/`) is the same failure and easier to miss
@@ -376,13 +381,29 @@ not for this.
   this plan. `send()` delivers the finished reply as a single `token`
   frame; token-level streaming is plan 3b.
 
-**Known log noise, not a failure:** if the WebSocket client disconnects
-right after receiving `done` (a raw test client does this; a real browser
-tab sitting open does not), the gateway can log one
-`[samantha_kiosk] Error handling message: 'NoneType' object has no
-attribute 'success'` from `gateway/platforms/base.py:_send_with_retry` —
-it's a redundant delivery attempt finding nobody connected. It doesn't
-affect the reply already delivered before the socket closed.
+**Correction — the `'NoneType' object has no attribute 'success'` line was
+NOT log noise.** An earlier version of this document said it fired only when
+a client disconnected right after `done`. That diagnosis was wrong. `send()`
+returned `None` while `BasePlatformAdapter.send` is declared `-> SendResult`
+and `_send_with_retry` reads `result.success` with no guard
+(`gateway/platforms/base.py:5558`), so it raised on **every single reply**.
+It looked harmless only because `send()` writes both frames before it
+returns, so the reply was already on the wire when the exception fired.
+
+What it actually cost, per turn: `_process_message_background` aborted into
+its `except BaseException`, so `on_processing_complete` reported FAILURE for
+turns that had succeeded; `_record_delivery` never ran, so delivery
+bookkeeping was uniformly wrong; the retry and plain-text-fallback paths were
+dead code; and Hermes' own error handler then pushed
+`"Sorry, I encountered an error (AttributeError)… use /reset"` to the OS1
+screen as a second `token`+`done` pair, in English. That last one was
+invisible only by luck — the frontend deletes its handlers in the `done`
+handler, so the stale pair arrived with nobody listening.
+
+`send()` now returns a real `SendResult`. **Measured** against the real base
+class on Hermes 0.20.5: `_send_with_retry(chat_id="kiosk", content="hola")`
+returns `SendResult(success=True)` and the browser gets exactly one
+`token`+`done`.
 
 Port conflict: if `SAMANTHA_KIOSK_PORT` collides with a running FastAPI
 backend, the plugin fails fast (per the fix landing in `adapter.py` during
