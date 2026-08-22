@@ -3,7 +3,7 @@ import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognitio
 import { Wave } from "../components/Wave";
 import { useRoute } from "../core/router";
 import { useSamantha } from "../core/store";
-import { stripEmoji } from "../core/sanitize";
+import { stripEmoji, stripMarkers, stripMarkersStreaming } from "../core/sanitize";
 import { useBargeIn } from "../core/useBargeIn";
 import { useKeys } from "../core/useKeys";
 import { speak } from "../net/tts";
@@ -253,13 +253,18 @@ export function ConversationScreen() {
         reply += token;
         // Live transcript patch for the history view. Strip emojis so
         // the displayed text matches what Samantha will actually say
-        // (the TTS path strips them too — see the speak() call below).
-        patchMessage(replyId, stripEmoji(reply));
+        // (the TTS path strips them too — see the speak() call below),
+        // and expression markers, which are for the voice, not the eye.
+        patchMessage(replyId, stripMarkersStreaming(stripEmoji(reply)));
       });
-      const cleanReply = stripEmoji(result.reply);
-      patchMessage(replyId, cleanReply);
+      // Two readings of the same reply: `spoken` keeps the v6
+      // expression markers because CosyVoice turns them into sounds;
+      // `displayed` drops them so the transcript never shows a literal
+      // "[breath]". Emojis go from both (see stripEmoji's note).
+      const spoken = stripEmoji(result.reply);
+      patchMessage(replyId, stripMarkers(spoken));
 
-      const full = cleanReply.trim();
+      const full = spoken.trim();
       if (full && mountedRef.current) {
         setWaveMode("speaking");
         const ac = new AbortController();

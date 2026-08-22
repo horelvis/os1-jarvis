@@ -23,3 +23,37 @@ const EMOJI_RE = /[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1
 export function stripEmoji(text: string): string {
   return text.replace(EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
 }
+
+// Strip personality v6 expression markers from text before DISPLAY.
+//
+// Why display-only: the markers are deliberate output, not noise. The
+// prompt teaches them (backend/samantha/personality.py:56-62) and
+// CosyVoice 3 renders them as real sounds (backend/samantha/tts.py:6),
+// so the string handed to speak() must keep them intact. What must not
+// happen is the reader seeing a literal "[breath]" in the transcript —
+// it reads as a bug and breaks the persona the same way an emoji does.
+//
+// The set is closed and mirrors the prompt: three bracketed sounds,
+// plus the <laughter> wrapper whose enclosed words ARE spoken and so
+// survive — only the tags go. An unlisted marker is left visible on
+// purpose: better a stray "[risa]" on screen, telling us the model
+// invented one, than a generic /\[\w+\]/ silently eating real text.
+const SOUND_MARKER_RE = /\[(?:laughter|breath|sigh)\]/gi;
+const LAUGHTER_TAG_RE = /<\/?laughter>/gi;
+
+// A marker split across two streamed tokens ("[bre" + "ath]") would
+// flash on screen mid-word. Only ever applied to a partial buffer.
+const TRAILING_PARTIAL_RE = /(?:\[[a-z]*|<\/?[a-z]*)$/i;
+
+function tidy(text: string): string {
+  return text.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+([,.;:!?])/g, "$1").trim();
+}
+
+export function stripMarkers(text: string): string {
+  return tidy(text.replace(SOUND_MARKER_RE, "").replace(LAUGHTER_TAG_RE, ""));
+}
+
+/** stripMarkers for a still-growing buffer: also hides a half-arrived marker. */
+export function stripMarkersStreaming(text: string): string {
+  return tidy(stripMarkers(text).replace(TRAILING_PARTIAL_RE, ""));
+}
