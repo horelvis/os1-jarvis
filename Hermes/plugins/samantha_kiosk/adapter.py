@@ -12,6 +12,7 @@ The wire format is the frontend's existing one; see protocol.py.
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -21,14 +22,76 @@ from loguru import logger
 from .protocol import ProtocolError, decode_client, done, error, token
 
 try:
-    from gateway.platforms.base import BasePlatformAdapter
+    from gateway.config import Platform
+    from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType
 except ImportError:  # pragma: no cover - only without Hermes installed
+    from enum import Enum
+
+    class Platform:  # type: ignore[no-redef]
+        """Stand-in so these tests run on a machine with no Hermes."""
+
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+    class SessionSource:  # type: ignore[no-redef]
+        """Stand-in mirroring the fields build_source() below fills in.
+
+        The real one also resolves profile routing via a gateway runner;
+        none of that exists without Hermes installed, so this just carries
+        the attributes.
+        """
+
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
 
     class BasePlatformAdapter:  # type: ignore[no-redef]
         """Stand-in so these tests run on a machine with no Hermes."""
 
-        def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        def __init__(
+            self, config: Optional[Dict[str, Any]] = None, platform: Any = None
+        ) -> None:
             self.config = config or {}
+            self.platform = platform
+
+        def build_source(
+            self,
+            chat_id: str,
+            chat_name: Optional[str] = None,
+            chat_type: str = "dm",
+            user_id: Optional[str] = None,
+            user_name: Optional[str] = None,
+            **_kwargs: Any,
+        ) -> "SessionSource":
+            return SessionSource(
+                platform=self.platform,
+                chat_id=str(chat_id),
+                chat_name=chat_name,
+                chat_type=chat_type,
+                user_id=str(user_id) if user_id else None,
+                user_name=user_name,
+            )
+
+    class MessageType(Enum):  # type: ignore[no-redef]
+        """Stand-in mirroring gateway.platforms.base.MessageType."""
+
+        TEXT = "text"
+
+    class MessageEvent:  # type: ignore[no-redef]
+        """Stand-in mirroring gateway.platforms.base.MessageEvent."""
+
+        def __init__(
+            self,
+            text: str,
+            message_type: "MessageType" = None,
+            source: Any = None,
+            message_id: Optional[str] = None,
+        ) -> None:
+            self.text = text
+            self.message_type = (
+                message_type if message_type is not None else MessageType.TEXT
+            )
+            self.source = source
+            self.message_id = message_id
 
 
 # Spanish, in her voice — this reaches the screen.
@@ -45,8 +108,13 @@ _ENV_STATIC_ROOT = "SAMANTHA_KIOSK_STATIC_ROOT"
 class KioskAdapter(BasePlatformAdapter):
     name = "samantha_kiosk"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        super().__init__(config)
+    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
+        del kwargs
+        # The house pattern (plugins/platforms/irc/adapter.py:127-128): a
+        # subclass builds its OWN Platform and passes it up, rather than
+        # the registry doing it — build_source() below reads self.platform.
+        platform = Platform("samantha_kiosk")
+        super().__init__(config=config, platform=platform)
         cfg = config or {}
 
         # Environment first, then the config dict, then a default — the
@@ -161,6 +229,17 @@ class KioskAdapter(BasePlatformAdapter):
         return ws
 
     async def _handle_chat(self, message: str, user_id: str) -> None:
-        # Task 4 replaces this body with the real Hermes dispatch.
-        del user_id
-        await self.send("kiosk", f"He recibido: {message}")
+        source = self.build_source(
+            chat_id="kiosk",
+            chat_name="Kiosk",
+            chat_type="dm",
+            user_id=user_id,
+            user_name=user_id,
+        )
+        event = MessageEvent(
+            text=message,
+            message_type=MessageType.TEXT,
+            source=source,
+            message_id=str(uuid.uuid4()),
+        )
+        await self.handle_message(event)

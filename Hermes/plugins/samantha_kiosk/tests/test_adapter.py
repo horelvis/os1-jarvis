@@ -47,7 +47,18 @@ def test_serves_the_assets_directory(tmp_path):
     asyncio.run(go())
 
 
-def test_websocket_round_trip(tmp_path):
+def test_websocket_round_trip(tmp_path, monkeypatch):
+    # Since Task 4, _handle_chat no longer answers itself — it dispatches a
+    # MessageEvent to handle_message(), which is Hermes' job in production.
+    # Stand in for Hermes here to prove the wire still carries a reply back
+    # to the browser once something calls send().
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, f"echo: {event.text}")
+
+    monkeypatch.setattr(
+        KioskAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
     async def go():
         a = KioskAdapter(_cfg(tmp_path))
         await a.connect()
@@ -65,6 +76,33 @@ def test_websocket_round_trip(tmp_path):
             await a.disconnect()
 
     asyncio.run(go())
+
+
+def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
+    # The adapter must hand Hermes a TEXT MessageEvent, not answer itself.
+    import Hermes.plugins.samantha_kiosk.adapter as mod
+
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+
+    monkeypatch.setattr(
+        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            await a._handle_chat("hola", "primary")
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert len(seen) == 1
+    assert seen[0].text == "hola"
+    assert seen[0].message_type.value == "text"
 
 
 def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):

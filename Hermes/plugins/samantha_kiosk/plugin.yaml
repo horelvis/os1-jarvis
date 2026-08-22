@@ -1,0 +1,24 @@
+manifest_version: 2
+api_version: 1
+name: samantha-kiosk
+label: Samantha (kiosk)
+kind: platform
+version: 1.0.0
+description: >
+  Serves the OS1 interface and holds the single WebSocket the kiosk talks
+  over. Text only in this version; audio arrives in plan 3b.
+author: Horelvis Castillo
+
+# Declaration only — Hermes never installs these. See docs/running-real-mode.md.
+python_dependencies:
+  - aiohttp>=3.9
+
+optional_env:
+  - name: SAMANTHA_KIOSK_PORT
+    description: "Puerto donde se sirve la interfaz (por defecto 7777)"
+    prompt: "Puerto del kiosko"
+    password: false
+  - name: SAMANTHA_KIOSK_STATIC_ROOT
+    description: "Ruta al frontend construido (por defecto frontend/dist)"
+    prompt: "Ruta de frontend/dist"
+    password: false
