@@ -1,14 +1,49 @@
+manifest_version: 2
+api_version: 1
 name: samantha-voice
 label: Samantha (CosyVoice)
 kind: standalone
 version: 1.0.0
 description: >
-  Streaming TTS provider for Samantha's cloned voice. Synthesises via
-  CosyVoice 3 zero-shot on the 4090, emitting 24 kHz mono int16 PCM
-  clause by clause. No audio leaves the house.
+  TTS for Samantha's cloned voice, on both of Hermes' paths: a streaming
+  provider (clause by clause, 24 kHz mono int16 PCM) and a whole-file
+  provider (WAV). Both synthesise via CosyVoice 3 zero-shot on the 4090.
+  Synthesis never leaves the LAN while `tts.provider` is `cosyvoice` —
+  see the note below for the cases that are outside a plugin's reach.
 author: Horelvis Castillo
+
+# PRIVACY — what "nothing leaves the house" does and does not cover.
+#
+# Both of Hermes' TTS registries are claimed under the name `cosyvoice`:
+# the streaming one (`tools.tts_streaming._REGISTRY`, taken at import of
+# provider.py) and the whole-file one (`agent.tts_registry`, taken by
+# register() in __init__.py). Claiming only the first left every
+# whole-file path — including the gateway's auto-TTS after a turn that
+# produced no audible audio — falling through to Edge TTS, Microsoft's
+# cloud. See sync_provider.py's module docstring.
+#
+# Still outside this plugin's reach, because both are decided before
+# either registry is consulted:
+#   - `tts.provider` in config.yaml set to anything but `cosyvoice`
+#     (the default is `edge`, so this MUST be set);
+#   - an explicit per-call `provider=` override on the text_to_speech
+#     tool.
+# A CosyVoice failure is safe: it raises, and the dispatcher turns that
+# into an error envelope rather than retrying elsewhere.
+
+# Declaration only — Hermes never auto-installs plugin dependencies. It
+# warns at load when one is missing, which is the "No module named
+# loguru" failure this plugin hit on first install.
+python_dependencies:
+  - "loguru>=0.7,<1"
+  - "httpx>=0.27,<1"
+# Not pip-installable and therefore not declarable above: the `samantha`
+# package (this repo's `backend/`) must be importable by Hermes' Python,
+# e.g. PYTHONPATH=<repo>/backend. It carries the CosyVoice client
+# (samantha.tts) both providers call.
+
 optional_env:
-  - name: TTS_COSYVOICE_URL
+  - name: SAMANTHA_TTS_COSYVOICE_URL
     description: "CosyVoice 3 server base URL (default http://192.168.100.58:8093)"
     prompt: "CosyVoice URL"
     password: false
