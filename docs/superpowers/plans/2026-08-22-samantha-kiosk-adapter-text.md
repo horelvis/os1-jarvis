@@ -607,9 +607,22 @@ Run (from the repo root):
 `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_kiosk/tests/ -v`
 Expected: PASS, 13 tests.
 
-If `test_second_connection_replaces_the_first` hangs rather than failing,
-the close is happening while `_ws_handler`'s `async for` still owns the old
-socket — close the previous one before reassigning `self._ws`, not after.
+> **Correction, 2026-08-22 — this step originally carried a hint that
+> caused a bug.** It said that if the replace test hung, you should close
+> the previous socket *before* reassigning `self._ws` rather than after.
+> An implementer applied that pre-emptively, without ever seeing a hang,
+> and it introduced a race: `await previous.close()` is a yield point, so
+> a third near-simultaneous connection can complete its own swap and then
+> be clobbered when the first handler resumes — leaving a live, connected
+> socket untracked, its messages processed but its replies going out of
+> the wrong socket. **Keep the atomic ordering shown in the code above:
+> swap the reference first, then close.** Verified safe against aiohttp
+> 3.14.1's `web_ws.py`, where `close()` sets `_closed` synchronously and
+> explicitly supports being called from a different task.
+
+The sequential replace test above cannot catch that race. Add a
+concurrent one — open both connections with `asyncio.gather` and assert
+that `self._ws` ends up pointing at a socket that is actually open.
 
 - [ ] **Step 6: Lint and commit**
 
