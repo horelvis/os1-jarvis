@@ -39,28 +39,37 @@ stream into the synchronous iterator Hermes expects.
 - Comments and identifiers in English; any user-facing string in
   Spanish (CLAUDE.md §2.9).
 - `ruff check` and `ruff format` must pass before every commit.
-- New top-level directory `plugins/` — **requires the user's approval
-  under CLAUDE.md §3 before Task 2.** If refused, use
-  `backend/plugins/` and adjust every path below.
+- New top-level directory `Hermes/` — approved by the user 2026-08-22
+  under CLAUDE.md §3. Our plugins live in `Hermes/plugins/<name>/`.
+  (Every other top-level directory in this repo is lowercase; the
+  capital is the user's choice, kept deliberately.)
+- **The plugin imports `samantha.tts`, and Hermes runs from its own
+  isolated uv venv where that package does not exist.** Task 1 Step 1
+  installs Hermes with our backend made importable; if that is skipped
+  the plugin loads and then fails at first synthesis with
+  `ModuleNotFoundError: samantha`.
 
 ---
 
 ## File Structure
 
-- `plugins/samantha_voice/plugin.yaml` — manifest. Metadata only.
-- `plugins/samantha_voice/__init__.py` — `register(ctx)` entry point,
+- `Hermes/__init__.py`, `Hermes/plugins/__init__.py` — empty. They make
+  `Hermes.plugins.samantha_voice` importable from the repo root so the
+  unit tests below can run without Hermes installed.
+- `Hermes/plugins/samantha_voice/plugin.yaml` — manifest. Metadata only.
+- `Hermes/plugins/samantha_voice/__init__.py` — `register(ctx)` entry point,
   mirroring `plugins/platforms/irc/__init__.py` upstream.
-- `plugins/samantha_voice/chunking.py` — the clause guard. Pure
+- `Hermes/plugins/samantha_voice/chunking.py` — the clause guard. Pure
   functions, no I/O, no Hermes imports. Owns every rule about what text
   is safe to hand CosyVoice.
-- `plugins/samantha_voice/bridge.py` — async→sync PCM bridge. Owns the
+- `Hermes/plugins/samantha_voice/bridge.py` — async→sync PCM bridge. Owns the
   worker thread and its loop. No CosyVoice knowledge.
-- `plugins/samantha_voice/provider.py` — the `StreamingTTSProvider`
+- `Hermes/plugins/samantha_voice/provider.py` — the `StreamingTTSProvider`
   subclass. Wires chunking + bridge + `samantha.tts`. The only file
   that imports Hermes.
-- `plugins/samantha_voice/tests/test_chunking.py`
-- `plugins/samantha_voice/tests/test_bridge.py`
-- `plugins/samantha_voice/tests/test_provider.py`
+- `Hermes/plugins/samantha_voice/tests/test_chunking.py`
+- `Hermes/plugins/samantha_voice/tests/test_bridge.py`
+- `Hermes/plugins/samantha_voice/tests/test_provider.py`
 - `docs/superpowers/specs/hermes-contracts-v<version>.md` — created by
   Task 1; the verbatim contracts plans 2 and 3 are written against.
 
@@ -89,12 +98,25 @@ accurately from web documentation.
 - [ ] **Step 1: Install Hermes as a tool**
 
 ```bash
-uv tool install hermes-agent --with mcp
+uv tool install hermes-agent --with mcp --with-editable ./backend
 hermes --version
 ```
 
 Expected: a version at or above `0.20.5`. Record the exact string; it
 is the pin for everything that follows.
+
+`--with-editable ./backend` is not optional. Hermes gets its own
+isolated environment, and our provider imports `samantha.tts` from it.
+Verify immediately, because the failure otherwise surfaces much later
+as a dead voice:
+
+```bash
+"$(dirname "$(command -v hermes)")/python" -c "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"
+```
+
+Expected: `24000`. If the interpreter path is wrong, find it with
+`ls ~/.local/share/uv/tools/hermes-agent/bin/`. If the import fails,
+re-run the install with the editable flag before going further.
 
 - [ ] **Step 2: Locate the installed package**
 
@@ -171,19 +193,29 @@ The guard buffers with one-clause lookahead so the tail always merges
 into the final emission rather than trailing as a too-short fragment.
 
 **Files:**
-- Create: `plugins/samantha_voice/chunking.py`
-- Create: `plugins/samantha_voice/tests/test_chunking.py`
+- Create: `Hermes/plugins/samantha_voice/chunking.py`
+- Create: `Hermes/plugins/samantha_voice/tests/test_chunking.py`
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `safe_clauses(clauses: Iterable[str], min_chars: int = 40)
   -> Iterator[str]`. Later tasks call only this.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Create the package layout, then write the failing tests**
+
+The `__init__.py` markers make `Hermes.plugins.samantha_voice`
+importable from the repo root, which is what lets these tests run on a
+machine with no Hermes installed.
+
+```bash
+mkdir -p Hermes/plugins/samantha_voice/tests
+touch Hermes/__init__.py Hermes/plugins/__init__.py \
+      Hermes/plugins/samantha_voice/tests/__init__.py
+```
 
 ```python
-# plugins/samantha_voice/tests/test_chunking.py
-from plugins.samantha_voice.chunking import safe_clauses
+# Hermes/plugins/samantha_voice/tests/test_chunking.py
+from Hermes.plugins.samantha_voice.chunking import safe_clauses
 
 
 def test_long_clauses_pass_through_unchanged():
@@ -232,13 +264,13 @@ def test_empty_and_blank_clauses_are_dropped():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/test_chunking.py -v`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/test_chunking.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'plugins'`
 
 - [ ] **Step 3: Implement the guard**
 
 ```python
-# plugins/samantha_voice/chunking.py
+# Hermes/plugins/samantha_voice/chunking.py
 """Text safety rules between Hermes' sentence chunker and CosyVoice.
 
 Two upstream failures this prevents, both of which surface as HTTP 200
@@ -297,7 +329,7 @@ def safe_clauses(clauses: Iterable[str], min_chars: int = 40) -> Iterator[str]:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/test_chunking.py -v`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/test_chunking.py -v`
 Expected: PASS, 7 tests.
 
 If `test_tail_never_trails_short` fails, the lookahead is wrong: a
@@ -308,8 +340,9 @@ hold one emission back.
 - [ ] **Step 5: Lint and commit**
 
 ```bash
-cd backend && .venv/bin/ruff check ../plugins/samantha_voice && .venv/bin/ruff format ../plugins/samantha_voice
-cd .. && git add plugins/samantha_voice/chunking.py plugins/samantha_voice/tests/test_chunking.py
+backend/.venv/bin/ruff check Hermes/plugins/samantha_voice
+backend/.venv/bin/ruff format Hermes/plugins/samantha_voice
+git add Hermes/plugins/samantha_voice/chunking.py Hermes/plugins/samantha_voice/tests/test_chunking.py
 git commit -m "feat(voice): clause guard so CosyVoice never gets text that crashes it"
 ```
 
@@ -324,8 +357,8 @@ terminates cleanly when the consumer stops early, which is what happens
 on every barge-in.
 
 **Files:**
-- Create: `plugins/samantha_voice/bridge.py`
-- Create: `plugins/samantha_voice/tests/test_bridge.py`
+- Create: `Hermes/plugins/samantha_voice/bridge.py`
+- Create: `Hermes/plugins/samantha_voice/tests/test_bridge.py`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -335,13 +368,13 @@ on every barge-in.
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# plugins/samantha_voice/tests/test_bridge.py
+# Hermes/plugins/samantha_voice/tests/test_bridge.py
 import asyncio
 import threading
 
 import pytest
 
-from plugins.samantha_voice.bridge import iter_sync
+from Hermes.plugins.samantha_voice.bridge import iter_sync
 
 
 def _agen_factory(chunks, delay=0.0):
@@ -383,13 +416,13 @@ def test_early_stop_joins_the_worker_thread():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/test_bridge.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'plugins.samantha_voice.bridge'`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/test_bridge.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'Hermes.plugins.samantha_voice.bridge'`
 
 - [ ] **Step 3: Implement the bridge**
 
 ```python
-# plugins/samantha_voice/bridge.py
+# Hermes/plugins/samantha_voice/bridge.py
 """Run an async byte generator on a worker loop and yield synchronously.
 
 Hermes' StreamingTTSProvider.stream() is a sync Iterator[bytes]; our
@@ -467,19 +500,20 @@ def iter_sync(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/test_bridge.py -v`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/test_bridge.py -v`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Run the whole suite to check nothing regressed**
 
-Run: `cd backend && .venv/bin/python -m pytest -q`
+Run (from the repo root): `backend/.venv/bin/python -m pytest backend/tests -q`
 Expected: PASS. Record the count; it is the new baseline.
 
 - [ ] **Step 6: Lint and commit**
 
 ```bash
-cd backend && .venv/bin/ruff check ../plugins/samantha_voice && .venv/bin/ruff format ../plugins/samantha_voice
-cd .. && git add plugins/samantha_voice/bridge.py plugins/samantha_voice/tests/test_bridge.py
+backend/.venv/bin/ruff check Hermes/plugins/samantha_voice
+backend/.venv/bin/ruff format Hermes/plugins/samantha_voice
+git add Hermes/plugins/samantha_voice/bridge.py Hermes/plugins/samantha_voice/tests/test_bridge.py
 git commit -m "feat(voice): async-to-sync PCM bridge that shuts down on early stop"
 ```
 
@@ -488,10 +522,10 @@ git commit -m "feat(voice): async-to-sync PCM bridge that shuts down on early st
 ### Task 4: The provider and its manifest
 
 **Files:**
-- Create: `plugins/samantha_voice/provider.py`
-- Create: `plugins/samantha_voice/__init__.py`
-- Create: `plugins/samantha_voice/plugin.yaml`
-- Create: `plugins/samantha_voice/tests/test_provider.py`
+- Create: `Hermes/plugins/samantha_voice/provider.py`
+- Create: `Hermes/plugins/samantha_voice/__init__.py`
+- Create: `Hermes/plugins/samantha_voice/plugin.yaml`
+- Create: `Hermes/plugins/samantha_voice/tests/test_provider.py`
 
 **Interfaces:**
 - Consumes: `safe_clauses(clauses, min_chars)` from Task 2;
@@ -506,10 +540,10 @@ git commit -m "feat(voice): async-to-sync PCM bridge that shuts down on early st
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# plugins/samantha_voice/tests/test_provider.py
+# Hermes/plugins/samantha_voice/tests/test_provider.py
 import pytest
 
-from plugins.samantha_voice import provider as prov
+from Hermes.plugins.samantha_voice import provider as prov
 
 
 class _FakeTTS:
@@ -578,8 +612,8 @@ def test_records_bytes_yielded_per_clause(monkeypatch):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/test_provider.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'plugins.samantha_voice.provider'`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/test_provider.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'Hermes.plugins.samantha_voice.provider'`
 
 - [ ] **Step 3: Implement the provider**
 
@@ -587,7 +621,7 @@ Import the Hermes base class defensively so the tests above run on a
 machine without Hermes installed.
 
 ```python
-# plugins/samantha_voice/provider.py
+# Hermes/plugins/samantha_voice/provider.py
 """CosyVoice as a Hermes StreamingTTSProvider.
 
 Yields raw int16 little-endian mono PCM at 24 kHz — the format
@@ -658,7 +692,7 @@ CosyVoiceStreamingProvider = register("cosyvoice")(CosyVoiceStreamingProvider)
 - [ ] **Step 4: Write the entry point**
 
 ```python
-# plugins/samantha_voice/__init__.py
+# Hermes/plugins/samantha_voice/__init__.py
 """samantha-voice — CosyVoice streaming TTS for Hermes."""
 
 from .provider import CosyVoiceStreamingProvider
@@ -680,7 +714,7 @@ provider, match what it recorded and note the difference in the commit
 message.
 
 ```yaml
-# plugins/samantha_voice/plugin.yaml
+# Hermes/plugins/samantha_voice/plugin.yaml
 name: samantha-voice
 label: Samantha (CosyVoice)
 kind: standalone
@@ -699,14 +733,15 @@ optional_env:
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `cd backend && .venv/bin/python -m pytest ../plugins/samantha_voice/tests/ -v`
+Run (from the repo root): `backend/.venv/bin/python -m pytest Hermes/plugins/samantha_voice/tests/ -v`
 Expected: PASS, 17 tests across the three files.
 
 - [ ] **Step 7: Lint and commit**
 
 ```bash
-cd backend && .venv/bin/ruff check ../plugins/samantha_voice && .venv/bin/ruff format ../plugins/samantha_voice
-cd .. && git add plugins/samantha_voice
+backend/.venv/bin/ruff check Hermes/plugins/samantha_voice
+backend/.venv/bin/ruff format Hermes/plugins/samantha_voice
+git add Hermes/plugins/samantha_voice
 git commit -m "feat(voice): register CosyVoice as a Hermes streaming TTS provider"
 ```
 
@@ -719,7 +754,7 @@ assumption in the whole migration is confirmed or killed. Manual by
 necessity — the deliverable is a voice.
 
 **Files:**
-- Modify: `plugins/samantha_voice/provider.py` (only if tuning is
+- Modify: `Hermes/plugins/samantha_voice/provider.py` (only if tuning is
   needed — see Step 4)
 - Modify: `docs/running-real-mode.md`
 
@@ -740,7 +775,7 @@ nothing below can work without it.
 - [ ] **Step 2: Install the plugin and select it**
 
 ```bash
-ln -sfn "$(pwd)/plugins/samantha_voice" ~/.hermes/plugins/samantha_voice
+ln -sfn "$(pwd)/Hermes/plugins/samantha_voice" ~/.hermes/Hermes/plugins/samantha_voice
 hermes plugins
 ```
 
@@ -819,7 +854,7 @@ from Step 3 with what each one means.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add plugins/samantha_voice/provider.py docs/running-real-mode.md
+git add Hermes/plugins/samantha_voice/provider.py docs/running-real-mode.md
 git commit -m "feat(voice): tune clause minimum against the reference transcript, document setup"
 ```
 
