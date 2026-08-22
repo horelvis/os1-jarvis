@@ -189,8 +189,8 @@ image, or Nix"). Use the developer path Hermes' own error message
 recommends instead:
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
-cd /tmp/hermes-src
+git clone https://github.com/NousResearch/hermes-agent.git ~/hermes-src
+cd ~/hermes-src
 git checkout <pinned-commit>          # v2026.8.19 / pyproject 0.20.5 as of 2026-08-22
 ```
 

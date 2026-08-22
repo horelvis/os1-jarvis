@@ -80,8 +80,8 @@ constraint:** reading the contracts only requires the source tree, not
 a runtime.
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
-cd /tmp/hermes-src
+git clone https://github.com/NousResearch/hermes-agent.git ~/hermes-src
+cd ~/hermes-src
 git checkout fcbd1076a93841fa88855acce810e342a5b78101   # tag v2026.8.19
 ```
 
@@ -133,9 +133,9 @@ need to settle it properly before assuming either direction works.
 being avoided, per the ruling above):
 
 ```
-$ /tmp/hermes-src/.venv/bin/hermes --version
+$ ~/hermes-src/.venv/bin/hermes --version
 Hermes Agent v0.20.5 (2026.8.19) · upstream 9098f677
-Install directory: /private/tmp/hermes-src
+Install directory: /Users/horelvis/hermes-src
 Install method: git
 Python: 3.11.9
 OpenAI SDK: 1.99.1
@@ -707,9 +707,9 @@ read directly from the pinned commit.
    correct; filed here anyway since it's the closest thing to a
    "Corrections" home for it. Evidence:
    ```
-   $ /tmp/hermes-src/.venv/bin/hermes plugins
+   $ ~/hermes-src/.venv/bin/hermes plugins
    Interactive mode requires a terminal.
-   $ /tmp/hermes-src/.venv/bin/hermes plugins list
+   $ ~/hermes-src/.venv/bin/hermes plugins list
    [prints a table of ~30 bundled plugins]
    ```
 
