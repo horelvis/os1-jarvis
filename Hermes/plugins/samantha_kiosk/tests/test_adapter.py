@@ -147,6 +147,74 @@ def test_second_connection_replaces_the_first(tmp_path):
     asyncio.run(go())
 
 
+def test_concurrent_reconnects_dont_clobber_the_newest_socket(tmp_path, monkeypatch):
+    # Task 3 review: `previous = self._ws; await previous.close(); self._ws = ws`
+    # is not atomic. aiohttp's WebSocketResponse.close() marks `.closed` True
+    # synchronously before it awaits anything (see web_ws.py: `if self._closed:
+    # return False` / `self._set_closed()`, both ahead of the first await) —
+    # so a handler that reads `previous` while an older close() is still in
+    # flight sees `.closed` already True, skips its own close() entirely, and
+    # writes `self._ws` immediately. The earlier handler then resumes and
+    # overwrites `self._ws` unconditionally with ITS OWN (now-stale) socket,
+    # clobbering the newer one that never got closed — just untracked.
+    #
+    # Reproduce deterministically by slowing close() down (so a third
+    # connection reliably lands its swap while the second one's close is
+    # still in flight) and by recording server-side socket creation order (so
+    # "the newest socket" is verifiable by identity, not just by `.closed`ness
+    # — both the clobbering (wrong) socket and the orphaned (right) one are
+    # equally un-closed, so an open/closed check alone can't tell them apart).
+    created = []
+    real_init = aiohttp.web.WebSocketResponse.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        created.append(self)
+
+    async def slow_close(self, *args, **kwargs):
+        if self._closed:
+            return False
+        self._set_closed()
+        await asyncio.sleep(0.05)
+        return True
+
+    monkeypatch.setattr(aiohttp.web.WebSocketResponse, "__init__", tracking_init)
+    monkeypatch.setattr(aiohttp.web.WebSocketResponse, "close", slow_close)
+
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                ws1 = await s.ws_connect(f"http://127.0.0.1:{a.port}/ws")
+                # ws2's handler reads self._ws (= ws1's server peer) and
+                # starts closing it; slow_close holds that "in flight" for
+                # 50ms after marking it closed.
+                ws2 = await s.ws_connect(f"http://127.0.0.1:{a.port}/ws")
+                await asyncio.sleep(0.01)
+                # ws3 arrives while ws2's close of ws1 is still sleeping.
+                ws3 = await s.ws_connect(f"http://127.0.0.1:{a.port}/ws")
+
+                # Let ws2's delayed close() finish (and, if the race is
+                # present, clobber ws3's swap) before asserting.
+                await asyncio.sleep(0.1)
+
+                assert len(created) == 3
+                assert a._ws is created[2], (
+                    "self._ws must track the newest connection (ws3), not "
+                    "an earlier one left over from the race"
+                )
+                assert not a._ws.closed
+
+                await ws1.close()
+                await ws2.close()
+                await ws3.close()
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
 def test_disconnect_releases_the_port(tmp_path):
     async def go():
         a = KioskAdapter(_cfg(tmp_path))
@@ -157,6 +225,34 @@ def test_disconnect_releases_the_port(tmp_path):
         b = KioskAdapter({"port": port, "static_root": str(tmp_path)})
         assert await b.connect() is True
         await b.disconnect()
+
+    asyncio.run(go())
+
+
+def test_port_conflict_is_a_fatal_non_retryable_error(tmp_path):
+    # A taken port is a configuration error, not a transient blip — another
+    # process holds it for its lifetime. connect() must say so
+    # non-retryably instead of a bare `False`, which the gateway's
+    # reconnect watcher would otherwise retry forever at the backoff cap
+    # (api_server.py hit exactly this leak in production).
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        b = KioskAdapter({"port": a.port, "static_root": str(tmp_path)})
+        try:
+            ok = await b.connect()
+            assert ok is False
+            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+            assert b._fatal_error_retryable is False
+            # No leaked runner/site from the failed attempt.
+            assert b._runner is None
+            assert b._site is None
+        finally:
+            if (
+                b._runner is not None
+            ):  # pragma: no cover - only if the assert above failed
+                await b.disconnect()
+            await a.disconnect()
 
     asyncio.run(go())
 

@@ -11,6 +11,7 @@ The wire format is the frontend's existing one; see protocol.py.
 
 from __future__ import annotations
 
+import errno
 import os
 import uuid
 from pathlib import Path
@@ -70,6 +71,18 @@ except ImportError:  # pragma: no cover - only without Hermes installed
                 user_id=str(user_id) if user_id else None,
                 user_name=user_name,
             )
+
+        def _set_fatal_error(self, code: str, message: str, *, retryable: bool) -> None:
+            """Stand-in for the real base's reconnect-watcher signal.
+
+            The real one also flips `self._running` and writes a runtime
+            status file for `hermes status`/`/platform resume`; neither
+            exists without Hermes installed, so this just records the
+            fields tests can assert on.
+            """
+            self._fatal_error_code = code
+            self._fatal_error_message = message
+            self._fatal_error_retryable = retryable
 
     class MessageType(Enum):  # type: ignore[no-redef]
         """Stand-in mirroring gateway.platforms.base.MessageType."""
@@ -151,7 +164,34 @@ class KioskAdapter(BasePlatformAdapter):
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, "127.0.0.1", self._configured_port)
-        await self._site.start()
+        try:
+            await self._site.start()
+        except OSError as exc:
+            await self._runner.cleanup()
+            self._runner = None
+            self._site = None
+            if getattr(exc, "errno", None) == errno.EADDRINUSE:
+                # A port conflict is a configuration error, not a transient
+                # blip — another process holds the port for its lifetime.
+                # A bare `return False` here would make the gateway's
+                # reconnect watcher treat it as retryable and loop forever
+                # at the backoff cap, leaking a connection attempt each
+                # retry (api_server.py's own history, #52132/#38803).
+                # Non-retryable drops it from the reconnect queue; the
+                # operator recovers by freeing the port or setting
+                # SAMANTHA_KIOSK_PORT, then `/platform resume samantha_kiosk`.
+                self._set_fatal_error(
+                    "samantha_kiosk_port_in_use",
+                    f"Port {self._configured_port} already in use. Set "
+                    f"SAMANTHA_KIOSK_PORT to a different value, then "
+                    f"`/platform resume samantha_kiosk`.",
+                    retryable=False,
+                )
+            logger.error(
+                f"samantha-kiosk: could not bind 127.0.0.1:"
+                f"{self._configured_port}: {exc}"
+            )
+            return False
         self.port = self._actual_port()
         logger.info(f"samantha-kiosk: serving {self.static_root} on :{self.port}")
         return True
@@ -202,15 +242,23 @@ class KioskAdapter(BasePlatformAdapter):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
-        # Close the previous socket, then reassign — never the other way
-        # around. Reassigning first would leave the old `_ws_handler`'s
-        # `async for` still iterating a socket nothing points to anymore,
-        # so its `.close()` races the new connection instead of completing
-        # before it.
-        previous = self._ws
+        # Swap the reference first, then close the old socket — never the
+        # other way around. `close()` awaits (Task 3 review, MEDIUM-HIGH):
+        # reading self._ws, awaiting the old socket's close(), and only then
+        # writing self._ws leaves a window where a third near-simultaneous
+        # connection reads the same not-yet-overwritten `previous`, sees it
+        # already `.closed` (aiohttp's WebSocketResponse.close() marks that
+        # synchronously, ahead of its own await), skips closing it, and
+        # writes self._ws immediately — only to have this handler resume
+        # afterwards and overwrite self._ws unconditionally with its own,
+        # now-stale, socket. Swapping the reference in one step closes that
+        # window: any other handler reading self._ws afterwards always sees
+        # this connection, never a torn intermediate state. aiohttp's
+        # `close()` supports being awaited from a different task than the
+        # one that opened the socket, so closing after the swap is safe.
+        previous, self._ws = self._ws, ws
         if previous is not None and not previous.closed:
             await previous.close()
-        self._ws = ws
 
         async for msg in ws:
             if msg.type is not WSMsgType.TEXT:
