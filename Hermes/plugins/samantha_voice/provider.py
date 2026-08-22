@@ -14,6 +14,7 @@ from loguru import logger
 from samantha import tts
 
 from .bridge import iter_sync
+from .chunking import has_unclosed_tag
 
 try:  # Hermes is absent on dev machines that only run the unit tests.
     from tools.tts_streaming import StreamingTTSProvider, register
@@ -62,9 +63,10 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         # exception raised anywhere to catch it. Re-check that call site
         # before upgrading the pinned Hermes commit.
         self.bytes_yielded_per_clause: list[tuple[str, int]] = []
-        # Text carried over from a previous stream() call because it was
-        # still under MIN_CLAUSE_CHARS even after merging with everything
-        # seen so far this turn. See stream()'s docstring for why.
+        # Text carried over from a previous stream() call because,
+        # merged with everything seen so far this turn, it was still
+        # either under MIN_CLAUSE_CHARS or held an unclosed <laughter>
+        # tag. See stream()'s docstring for why.
         self._pending: str = ""
 
     @staticmethod
@@ -72,7 +74,8 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         return tts.is_available()
 
     def stream(self, text: str) -> Iterator[bytes]:
-        """Yield PCM chunks for `text`, merging short clauses across calls.
+        """Yield PCM chunks for `text`, merging clauses across calls until
+        each is safe to hand to CosyVoice.
 
         Hermes calls stream() once per already-atomic clause — its
         SentenceChunker is constructed with no arguments at all three
@@ -82,27 +85,34 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         below MIN_CLAUSE_CHARS: CosyVoice's hifigan vocoder crashes
         (silent 200 + empty body) when `tts_text` is much shorter than
         the ~131-char reference transcript, and a 20-40 char Hermes
-        clause is squarely in that danger band. So merging happens here,
-        across calls, via `self._pending` — merging a single clause
-        through `chunking.safe_clauses([text], ...)` cannot work: its
-        one-clause lookahead always falls through to final flush and
-        returns a one-item input unchanged, whatever its length.
+        clause is squarely in that danger band. So merging has to happen
+        here, across calls, via `self._pending`.
+
+        Two conditions hold a clause back rather than sending it:
+        - it is still under MIN_CLAUSE_CHARS, or
+        - it holds an unclosed `<laughter>` tag (see `chunking.
+          has_unclosed_tag`) — the SentenceChunker knows nothing about
+          this tag either, so it can split `<laughter>Ya. Claro</laughter>`
+          at the period, and a fragment with an opening tag and no close
+          hits the same silent CosyVoice failure as a too-short clause.
 
         LIMITATION: there is no end-of-reply signal available to this
-        provider, so a reply whose final clause(s) never accumulate past
-        MIN_CLAUSE_CHARS leaves that text stranded in `self._pending`
-        forever, unspoken. This is not a regression: today (pre-fix) a
-        too-short clause reaches CosyVoice as-is and dies with the
-        empty-body RuntimeError below, so it goes unheard either way.
-        Buffering is a strict improvement for every clause that does
-        accumulate past the threshold. Do not invent a flush for the
-        tail without an actual end-of-turn hook from Hermes.
+        provider, so a reply whose final clause(s) never clear both
+        conditions leaves that text stranded in `self._pending` forever,
+        unspoken — including a reply that ends with the tag still open,
+        which is malformed model output this provider cannot repair
+        either way. This is not a regression: today (pre-fix) such a
+        clause reaches CosyVoice as-is and dies with the empty-body
+        RuntimeError below, so it goes unheard either way. Buffering is
+        a strict improvement for every clause that does clear both
+        conditions. Do not invent a flush for the tail without an actual
+        end-of-turn hook from Hermes.
         """
         stripped = text.strip()
         if not stripped:
             return
         clause = f"{self._pending} {stripped}" if self._pending else stripped
-        if len(clause) < MIN_CLAUSE_CHARS:
+        if len(clause) < MIN_CLAUSE_CHARS or has_unclosed_tag(clause):
             self._pending = clause
             return
         self._pending = ""

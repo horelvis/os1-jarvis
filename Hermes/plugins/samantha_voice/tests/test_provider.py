@@ -97,6 +97,37 @@ def test_short_clause_followed_by_long_one_merges_and_synthesizes(monkeypatch):
     assert fake.calls == [merged]
 
 
+def test_open_tag_holds_even_when_long_enough_alone(monkeypatch):
+    # A clause can already clear MIN_CLAUSE_CHARS and still need holding:
+    # sending it as-is would hand CosyVoice an opening <laughter> with no
+    # matching close, which fails the same way a too-short clause does.
+    fake = _FakeTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Eso me hace mucha gracia, la verdad, <laughter>de verdad que sí"
+    assert len(first) >= prov.MIN_CLAUSE_CHARS
+    assert list(p.stream(first)) == []
+    assert fake.calls == []
+    assert p._pending == first
+
+
+def test_clause_that_closes_a_tag_merges_into_one_synthesis_call(monkeypatch):
+    fake = _FakeTTS(chunks=(b"q",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Eso me hace mucha gracia, la verdad, <laughter>de verdad que sí"
+    second = "me lo pareció</laughter>."
+
+    assert list(p.stream(first)) == []
+    out = list(p.stream(second))
+    merged = f"{first} {second}"
+    assert out == [b"q"]
+    assert fake.calls == [merged]
+    assert p.bytes_yielded_per_clause == [(merged, 1)]
+
+
 def test_short_clause_left_pending_at_end_is_absent_from_accounting(monkeypatch):
     # No end-of-reply signal reaches this provider (see stream()'s
     # docstring), so a final short clause is never spoken and must not
