@@ -270,4 +270,344 @@ def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
     a = KioskAdapter({"port": 9999, "static_root": str(tmp_path / "config-root")})
 
     assert a.port == 0
-    assert a.static_root == env_root
+    assert a.static_root == env_root.resolve()
+
+
+def test_send_returns_a_send_result_not_none(tmp_path):
+    # BasePlatformAdapter.send is declared `-> SendResult` and
+    # _send_with_retry reads `result.success` with no guard, so returning
+    # None raises AttributeError inside Hermes on EVERY reply — aborting
+    # _process_message_background, reporting FAILURE for turns that
+    # succeeded, and pushing Hermes' English error text onto the OS1 screen.
+    # This shipped once with a green suite because every test here runs
+    # against the shim. Assert the contract, not the shim.
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
+                    await asyncio.sleep(0.05)
+                    result = await a.send("kiosk", "hola")
+                    assert result is not None
+                    assert result.success is True
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_send_with_nobody_connected_is_a_retryable_failure(tmp_path):
+    # A browser mid-refresh must cost a retry, not the reply. Reporting
+    # success=True here would tell Hermes a message landed that went nowhere.
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            result = await a.send("kiosk", "hola")
+            assert result.success is False
+            assert result.retryable is True
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_a_turn_that_never_comes_back_gets_an_error_frame(tmp_path, monkeypatch):
+    # THE guarantee: every accepted `chat` frame ends in exactly one `done`
+    # or one `error`. Without it the frontend's `busy` never clears (it is
+    # only cleared in a `finally` on a promise that never settles), the wave
+    # stays in `thinking`, and the STT commit — gated on `busy` — dies with
+    # it. Only a page reload recovers.
+    async def never_answers(self, event):
+        return None
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+
+    async def go():
+        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    got = json.loads((await ws.receive(timeout=5)).data)
+                    assert got["type"] == "error"
+                    # Spanish, in her voice — this reaches the screen.
+                    assert (
+                        got["error"] == "Algo se ha quedado a medias. ¿Me lo repites?"
+                    )
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_a_reply_that_arrives_in_time_gets_no_watchdog_error(tmp_path, monkeypatch):
+    # The watchdog must not double-send. A turn answered normally sees
+    # exactly token+done and nothing after it.
+    async def answers(self, event):
+        await self.send(event.source.chat_id, "aquí estoy")
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", answers, raising=False)
+
+    async def go():
+        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
+                        "token"
+                    )
+                    assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
+                        "done"
+                    )
+                    # Past the watchdog deadline: nothing more may arrive.
+                    with pytest.raises(asyncio.TimeoutError):
+                        await ws.receive(timeout=0.6)
+                    assert a._turn is None
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
+    tmp_path, monkeypatch
+):
+    # Once the watchdog has apologised, the late reply must NOT be pushed:
+    # the frontend may already have re-armed its handlers for the next turn,
+    # where a stray token would be appended to the wrong bubble and its
+    # `done` would resolve the wrong promise with the wrong text.
+    async def never_answers(self, event):
+        return None
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+
+    async def go():
+        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
+                        "error"
+                    )
+                    result = await a.send("kiosk", "llego tarde")
+                    assert result.success is False
+                    assert result.retryable is False
+                    with pytest.raises(asyncio.TimeoutError):
+                        await ws.receive(timeout=0.3)
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_the_watchdog_leaves_no_task_behind(tmp_path, monkeypatch):
+    # One task per turn, cancelled when the turn settles. Over weeks of
+    # uptime nothing here may accumulate.
+    async def answers(self, event):
+        await self.send(event.source.chat_id, "vale")
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", answers, raising=False)
+
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
+                    await asyncio.sleep(0.05)
+                    before = len(asyncio.all_tasks())
+                    for _ in range(5):
+                        await a._handle_chat("hola", "primary")
+                    await asyncio.sleep(0.05)
+                    assert a._turn is None
+                    assert len(asyncio.all_tasks()) <= before
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_disconnect_cancels_a_pending_watchdog(tmp_path, monkeypatch):
+    async def never_answers(self, event):
+        return None
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+
+    async def go():
+        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 30})
+        await a.connect()
+        async with aiohttp.ClientSession() as s:
+            async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
+                await asyncio.sleep(0.05)
+                await a._handle_chat("hola", "primary")
+                turn = a._turn
+                assert turn is not None
+                await a.disconnect()
+                assert a._turn is None
+                assert turn.watchdog.cancelled() or turn.watchdog.cancelling()
+
+    asyncio.run(go())
+
+
+def test_a_dispatch_failure_reaches_the_screen(tmp_path, monkeypatch):
+    # An exception raised while dispatching used to kill the WebSocket
+    # handler mid-loop: no error frame, no `self._ws` reset, socket closed
+    # with nothing to show for it.
+    async def blows_up(self, event):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(KioskAdapter, "handle_message", blows_up, raising=False)
+
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    got = json.loads((await ws.receive(timeout=5)).data)
+                    assert got["type"] == "error"
+                    # And the socket survives it — the kiosk stays usable.
+                    assert not ws.closed
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_missing_static_root_is_a_fatal_non_retryable_error(tmp_path):
+    # aiohttp's add_static raises ValueError on a missing directory, which
+    # would escape connect() into the gateway watcher's `except Exception`,
+    # be logged at DEBUG, and retry forever on backoff — the exact shape the
+    # port-conflict branch exists to prevent, reached by the likelier road.
+    async def go():
+        a = KioskAdapter({"port": 0, "static_root": str(tmp_path / "nope")})
+        assert await a.connect() is False
+        assert a._fatal_error_code == "samantha_kiosk_static_root_missing"
+        assert a._fatal_error_retryable is False
+        # The message must name the path, or it is unactionable.
+        assert "nope" in a._fatal_error_message
+        assert a._runner is None
+
+    asyncio.run(go())
+
+
+def test_missing_index_html_is_fatal_too(tmp_path):
+    # assets/ present, index.html absent: aiohttp binds happily and serves a
+    # bare 404 on "/", so the kiosk paints a blank page with nothing to
+    # diagnose from. Same failure, same treatment.
+    (tmp_path / "assets").mkdir()
+
+    async def go():
+        a = KioskAdapter({"port": 0, "static_root": str(tmp_path)})
+        assert await a.connect() is False
+        assert a._fatal_error_code == "samantha_kiosk_static_root_missing"
+        assert "index.html" in a._fatal_error_message
+
+    asyncio.run(go())
+
+
+def test_a_foreign_origin_cannot_open_the_socket(tmp_path):
+    # WebSockets are exempt from the same-origin policy, so without this any
+    # local page could open ws://127.0.0.1/ws, assert a user_id, talk to an
+    # agent with tool access — and, because the newest connection wins,
+    # EVICT the real kiosk rather than merely eavesdrop.
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                with pytest.raises(aiohttp.WSServerHandshakeError) as exc:
+                    await s.ws_connect(
+                        f"http://127.0.0.1:{a.port}/ws",
+                        headers={"Origin": "http://evil.example"},
+                    )
+                assert exc.value.status == 403
+                # The kiosk's own origin still gets in.
+                async with s.ws_connect(
+                    f"http://127.0.0.1:{a.port}/ws",
+                    headers={"Origin": f"http://localhost:{a.port}"},
+                ) as ws:
+                    assert not ws.closed
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_a_local_page_on_another_port_cannot_open_the_socket(tmp_path):
+    # The dev box runs other things on loopback. "Local" is not enough —
+    # the origin must be the kiosk's own.
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                with pytest.raises(aiohttp.WSServerHandshakeError) as exc:
+                    await s.ws_connect(
+                        f"http://127.0.0.1:{a.port}/ws",
+                        headers={"Origin": f"http://127.0.0.1:{a.port + 1}"},
+                    )
+                assert exc.value.status == 403
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
+    # The gateway hands adapter_factory a PlatformConfig, not a dict
+    # (platform_registry.py:685). Calling .get() on it raises inside
+    # create_adapter's `except Exception`, which logs once and returns None —
+    # the platform never comes up and the screen is blank with nothing on the
+    # wire to explain it. Only the exported env vars were hiding this.
+    monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
+    monkeypatch.delenv("SAMANTHA_KIOSK_STATIC_ROOT", raising=False)
+    monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
+
+    class FakePlatformConfig:
+        """Shaped like gateway.config.PlatformConfig: settings live in .extra."""
+
+        enabled = True
+        extra = {"port": 0, "static_root": "/tmp/os1", "turn_timeout": 12}
+
+    a = KioskAdapter(FakePlatformConfig())
+    assert a.port == 0
+    assert a.turn_timeout == 12
+    assert a.static_root == Path("/tmp/os1").resolve()
+
+
+def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
+    monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
+    monkeypatch.delenv("SAMANTHA_KIOSK_STATIC_ROOT", raising=False)
+    monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
+
+    class Bare:
+        enabled = True
+
+    a = KioskAdapter(Bare())
+    assert a.port == 7777
+    assert a.turn_timeout == 90.0
