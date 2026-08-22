@@ -9,6 +9,46 @@ description: >
   over. Text only in this version; audio arrives in plan 3b.
 author: Horelvis Castillo
 
+# ─────────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# The house failure mode of this whole project is a turn that reaches
+# nothing and says nothing. The convention (same as samantha-voice's
+# manifest) is that the manifest names those ways, because the manifest is
+# the first file an operator opens.
+#
+# 1. AUTHORIZATION. Hermes default-denies a platform it has no allowlist
+#    for; a denied kiosk turn is a log warning and nothing on the screen.
+#    register() declares SAMANTHA_KIOSK_ALLOWED_USERS and defaults it to
+#    "primary" — the user id frontend/src/net/wsClient.ts:80 sends. Change
+#    one without the other and every turn is dropped. With NO allowlist at
+#    all the default is worse than silence: Hermes greets the owner in
+#    English with a pairing code, on their own screen.
+#
+# 2. NO BUILT FRONTEND. A missing index.html or assets/ under
+#    SAMANTHA_KIOSK_STATIC_ROOT is a blank screen. connect() now refuses
+#    non-retryably (samantha_kiosk_static_root_missing) instead of letting
+#    aiohttp's ValueError escape into the gateway's retry-forever loop,
+#    where it was logged at DEBUG only.
+#
+# 3. A TURN THAT NEVER COMES BACK. The gateway answers asynchronously, so
+#    nothing downstream guarantees a reply. The adapter arms a watchdog per
+#    accepted `chat` frame (SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
+#    pushes an `error` frame if nothing closed the turn. Without it the
+#    frontend hangs forever — `busy` never clears, and because the STT
+#    commit is gated on `busy`, VOICE input dies with it.
+#
+# 4. NOBODY LISTENING. If the browser is mid-refresh, send() reports
+#    success=False/retryable=True so Hermes retries rather than losing the
+#    reply. If the browser died without a FIN the socket looks alive in
+#    Python; heartbeat=30 turns that into a normal close instead of a sink
+#    that swallows every reply with no log line.
+#
+# 5. THE VOICE IS NOT HERS YET. Replies come from Hermes' own SOUL.md
+#    persona, not backend/samantha/personality.py. Known, out of scope for
+#    plan 3a; see docs/running-real-mode.md.
+# ─────────────────────────────────────────────────────────────────────────
+
 # Declaration only — Hermes never installs these. See docs/running-real-mode.md.
 python_dependencies:
   - aiohttp>=3.9
@@ -21,4 +61,22 @@ optional_env:
   - name: SAMANTHA_KIOSK_STATIC_ROOT
     description: "Ruta al frontend construido (por defecto frontend/dist)"
     prompt: "Ruta de frontend/dist"
+    password: false
+  - name: SAMANTHA_KIOSK_ALLOWED_USERS
+    description: >
+      Quién puede hablar por el kiosko (por defecto "primary", que es el
+      user_id que envía la interfaz)
+    prompt: "user_id autorizado"
+    password: false
+  - name: SAMANTHA_KIOSK_ALLOW_ALL_USERS
+    description: >
+      Deja pasar a cualquiera por el kiosko. No hace falta en un aparato de
+      una sola persona; existe para depurar
+    prompt: "¿Permitir a cualquiera? (true/false)"
+    password: false
+  - name: SAMANTHA_KIOSK_TURN_TIMEOUT
+    description: >
+      Segundos que espera antes de decir que algo se ha quedado a medias
+      (por defecto 90)
+    prompt: "Segundos de espera por respuesta"
     password: false
