@@ -1,13 +1,24 @@
 """Text safety rules between Hermes' sentence chunker and CosyVoice.
 
-Two upstream failures this prevents, both of which surface as HTTP 200
-with an empty body (see backend/samantha/tts.py:213-217):
+Hermes' SentenceChunker already merges fragments under min_len=20 chars
+into the next sentence, but this floor is below what CosyVoice tolerates.
+CosyVoice's hifigan vocoder crashes when `tts_text` is much shorter than
+`prompt_text`, returning HTTP 200 with an empty body (see
+backend/samantha/tts.py:213-217). This guard enforces a minimum length
+and prevents clause boundaries inside expression markers (which can
+trigger the same silent failure).
 
-  1. `tts_text` much shorter than `prompt_text` crashes hifigan.
-  2. A clause boundary inside an expression marker.
+Two rules enforced:
+
+  1. Each emission is at least `min_chars` long (default 40).
+  2. Expression marker tags are never split across clause boundaries.
 
 Markers are exactly `[laughter]`, `[breath]`, `[sigh]` and
 `<laughter>...</laughter>` (backend/samantha/personality.py:58-61).
+
+Note: The final flush does not recheck tag balance, so a malformed
+stream with an unclosed `<laughter>` will emit it broken. This is
+inherent — no further input arrives to fix it.
 """
 
 from __future__ import annotations
