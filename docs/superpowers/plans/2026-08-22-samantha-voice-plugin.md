@@ -11,7 +11,7 @@ clause by clause, with no cloud TTS involved.
 **Architecture:** A Hermes plugin registers a `StreamingTTSProvider`
 subclass that wraps the existing `samantha.tts` CosyVoice client. Two
 pieces sit between them: a clause guard that prevents Hermes' sentence
-chunker from emitting text that crashes CosyVoice's vocoder or splits
+chunker from emitting text CosyVoice handles badly or that splits
 an expression marker, and a thread bridge that turns our async byte
 stream into the synchronous iterator Hermes expects.
 
@@ -188,6 +188,26 @@ crashes when `tts_text` is much shorter than `prompt_text`, returning
 detects this and raises. A clause boundary landing inside
 `<laughter>…</laughter>` produces the same silent failure. This task
 prevents both.
+
+> **Correction, 2026-08-22 — measured against the live server, after this
+> plan was written.** Two claims above are wrong, and the corrected code
+> comments in `Hermes/plugins/samantha_voice/` are authoritative over this
+> paragraph.
+> 1. `SentenceChunker` does **not** emit arbitrarily short clauses: it
+>    already merges anything under `min_len=20` into the following
+>    sentence (`tools/tts_streaming.py:95-100`). A floor exists upstream.
+> 2. The vocoder does **not** crash on short text. The server logs
+>    `this may lead to bad performance` and proceeds — degraded quality,
+>    not failure. Nothing between 10 and 80 characters failed in 76 calls.
+>    The real failure is content-specific and intermittent: the isolated
+>    word "no" failed 2 of 6 attempts, while `Sí.`, `Ya.` and
+>    `No, claro.` never failed. It surfaces as
+>    `peer closed connection without sending complete message body` — an
+>    httpx transport error, **not** the empty-body case `tts.py` detects.
+>
+> The task's conclusion survives: merging still fixes the real failure,
+> since the same word inside a longer clause is fine. Only the reason
+> changes. See the ledger's empirical-findings block for the full data.
 
 The guard buffers with one-clause lookahead so the tail always merges
 into the final emission rather than trailing as a too-short fragment.
@@ -809,17 +829,27 @@ generating. Listen for three specific failures:
 
 - [ ] **Step 4: Tune the minimum clause length**
 
-Compare against the actual reference transcript, since the crash
-condition is relative to it:
+> **Corrected 2026-08-22.** This step originally said to raise
+> `MIN_CLAUSE_CHARS` to at least half the reference transcript (~65).
+> Measurement against the live server inverts that instruction — do not
+> follow it.
+
+The reference transcript is 130 characters, but the server prepends
+`"You are a helpful assistant.<|endofprompt|>"` before comparing, so the
+effective prompt is ~173. Either way, length is not what drives failure:
 
 ```bash
 wc -m ~/.samantha/voices/ref/samantha.txt
 ```
 
-Set `MIN_CLAUSE_CHARS` in `provider.py` to at least half that count,
-re-run Step 3, and repeat until no clause fails. Record the final value
-and the transcript length together in the commit message — the number
-is meaningless without it.
+Nothing between 10 and 80 characters failed in 76 measured calls. So
+**try LOWERING `MIN_CLAUSE_CHARS` toward 20-25**, not raising it. A
+higher minimum only makes the provider hold text more often, and text
+still held at the end of a turn is never spoken — so an over-high
+minimum silently costs words. Judge by ear: raise it only if short
+clauses sound noticeably worse, and record the value you settled on
+together with what you heard, because the number means nothing without
+the judgement behind it.
 
 - [ ] **Step 5: Test a deliberately short reply**
 
