@@ -27,6 +27,7 @@ import os
 import random
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -75,19 +76,32 @@ if TYPE_CHECKING:
 # the actual initialization window.
 
 _memory: "Memory | None" = None
-_memory_init_failed: bool = False
+# Monotonic timestamp of the last failed init, or None. Failures are
+# NOT permanent: the persist dir may live on a volume that mounts late
+# during boot, so we retry after a backoff window instead of latching.
+_memory_init_failed_at: float | None = None
 _memory_lock = threading.Lock()
+
+MEMORY_INIT_RETRY_S = 30.0
+
+
+def _init_backoff_active() -> bool:
+    return (
+        _memory_init_failed_at is not None
+        and (time.monotonic() - _memory_init_failed_at) < MEMORY_INIT_RETRY_S
+    )
 
 
 def get_memory() -> "Memory | None":
     """Lazily initialize the persistent memory store.
 
     Returns None if memory is disabled (config.memory_enabled=False) or
-    if initialization fails — never raise into the request path.
+    while the retry backoff after a failed init is active — never raise
+    into the request path.
     """
-    global _memory, _memory_init_failed
-    # Fast path: already initialized (or permanently failed/disabled).
-    if not config.memory_enabled or _memory_init_failed:
+    global _memory, _memory_init_failed_at
+    # Fast path: disabled, cooling down after a failure, or ready.
+    if not config.memory_enabled or _init_backoff_active():
         return None
     if _memory is not None:
         return _memory
@@ -95,69 +109,28 @@ def get_memory() -> "Memory | None":
     # fastembed ONNX session and one chroma open happen.
     with _memory_lock:
         # Re-check inside the lock — another thread may have won the race.
-        if _memory_init_failed:
-            return None
         if _memory is not None:
             return _memory
+        if _init_backoff_active():
+            return None
         try:
             from .memory import Memory
 
             persist = os.path.expanduser(config.memory_persist_dir)
             _memory = Memory(persist_dir=persist)
-        except Exception as e:  # pragma: no cover — defensive
-            logger.error(f"memory: failed to initialize, disabling: {e}")
-            _memory_init_failed = True
+            _memory_init_failed_at = None
+        except Exception as e:
+            logger.error(f"memory: init failed, retrying in {MEMORY_INIT_RETRY_S:.0f}s: {e}")
+            _memory_init_failed_at = time.monotonic()
             return None
     return _memory
 
 
-def _collect_facts(mem: "Memory", *, user_id: str) -> list[dict]:
-    """Gather the facts surfaced into the system prompt.
-
-    Order matters for prompt readability:
-        1. name (identity anchor)
-        2. five Big-Five trait answers (E / O / C / A / N)
-        3. onboarding_completed_at (timestamp, last so it doesn't
-           crowd out the personality signal)
-
-    Future preference facts land here too — keep the list short so the
-    prompt stays scannable for the LLM.
-    """
-    from .profile import BIG5_FACT_KINDS
-
-    kinds = ("name", *BIG5_FACT_KINDS, "onboarding_completed_at")
-    out: list[dict] = []
-    for kind in kinds:
-        f = mem.get_fact(kind, user_id=user_id)
-        if f is not None:
-            out.append(f)
-    return out
-
+from .context import gather_context as _gather_context  # noqa: E402
 
 # ============================================================
 # Token streaming (dispatches on config.mode)
 # ============================================================
-
-
-async def _gather_context(
-    mem: "Memory", message: str, user_id: str
-) -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
-    """Collect facts + recall + short-term and persist the user turn,
-    off the event loop (embedding + ChromaDB + SQLite are all sync and
-    CPU-bound; running them inline stalls /ping and TTS streaming).
-
-    Ordering matters: context FIRST, remember AFTER, so the ring never
-    contains the current message (the LLM payload appends it itself).
-    """
-
-    def _work() -> "tuple[list[dict], list[MemoryChunk], list[MemoryChunk]]":
-        facts = _collect_facts(mem, user_id=user_id)
-        recall = mem.recall(message, k=config.memory_top_k, user_id=user_id)
-        short = mem.short_term(user_id=user_id)
-        mem.remember("user", message, user_id=user_id)
-        return facts, recall, short
-
-    return await asyncio.to_thread(_work)
 
 
 async def _stream_tokens(
@@ -201,10 +174,28 @@ async def _stream_tokens(
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 INDEX_FILE = FRONTEND_DIST / "index.html"
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Startup is lazy (memory and HTTP clients init on first use);
+    shutdown releases whatever got created: the shared LLM httpx
+    client and the memory store (SQLite ring connection)."""
+    global _memory
+    yield
+    from . import real_llm, tts
+
+    await real_llm.aclose()
+    await tts.aclose()
+    if _memory is not None:
+        await asyncio.to_thread(_memory.close)
+        _memory = None
+
+
 app = FastAPI(
     title="Samantha Backend",
     version=__version__,
     description="Backend local para Samantha. Solo accesible desde localhost.",
+    lifespan=_lifespan,
 )
 
 # Frontend served from same origin → no CORS needed.
@@ -233,6 +224,15 @@ FAKE_TRANSCRIPTS: list[str] = [
 # Mirror ChatRequest's max_length — the WS path must not accept
 # unbounded input the HTTP path rejects.
 MAX_WS_MESSAGE_CHARS = 8000
+
+
+class _ClientGone(Exception):
+    """A websocket SEND failed because the client disconnected.
+
+    Distinguishes send-side RuntimeErrors (client vanished mid-reply)
+    from generator-side RuntimeErrors (httpx client closed, event loop
+    closed) — the latter are real LLM faults the client must hear about.
+    """
 
 
 # ========================================================================
@@ -280,7 +280,7 @@ async def get_profile_endpoint() -> ProfileResponse:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    profile = _get_profile(mem)
+    profile = await asyncio.to_thread(_get_profile, mem)
     if profile is None:
         raise HTTPException(status_code=404, detail="not_onboarded")
     return ProfileResponse(**profile)
@@ -301,7 +301,7 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    if _is_onboarded(mem):
+    if await asyncio.to_thread(_is_onboarded, mem):
         raise HTTPException(status_code=409, detail="already_paired")
 
     first_answer = (req.answers[0].a or "").strip() if req.answers else ""
@@ -312,7 +312,10 @@ async def create_profile_endpoint(req: ProfileCreateRequest) -> ProfileResponse:
         raise HTTPException(status_code=422, detail="name_required")
 
     try:
-        profile = _complete_onboarding(
+        # 6 fastembed embeddings + ~13 Chroma writes — seconds of CPU.
+        # Must not stall /ping, the WS, or /speak streaming.
+        profile = await asyncio.to_thread(
+            _complete_onboarding,
             mem,
             name=name,
             answers=[a.model_dump() for a in req.answers],
@@ -329,7 +332,7 @@ async def delete_profile_endpoint() -> dict:
     mem = await asyncio.to_thread(get_memory)
     if mem is None:
         raise HTTPException(status_code=503, detail="memory_disabled")
-    deleted = _delete_profile(mem)
+    deleted = await asyncio.to_thread(_delete_profile, mem)
     return {"deleted": deleted}
 
 
@@ -391,7 +394,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
-    """Mock transcription. Phase 5 swaps in faster-whisper."""
+    """Mock-only transcription. STT lives in the browser (Web Speech
+    API, CLAUDE.md §2.8); in real mode this endpoint is explicitly
+    unimplemented instead of returning a canned transcript."""
+    if config.mode == "real":
+        raise HTTPException(status_code=501, detail="stt_not_implemented")
     contents = await audio.read()
     size = len(contents)
     logger.info(f"transcribe: received {size} bytes")
@@ -503,10 +510,16 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
             message, facts=facts, recall=recall, short_term=short, user_id=user_id
         ):
             reply_chunks.append(token)
-            await websocket.send_text(json.dumps({"type": "token", "token": token}))
-    except (WebSocketDisconnect, RuntimeError):
-        # Client went away mid-reply — not an LLM error; don't try to
-        # talk to a dead socket. The endpoint loop handles the close.
+            try:
+                await websocket.send_text(json.dumps({"type": "token", "token": token}))
+            except (WebSocketDisconnect, RuntimeError) as e:
+                # ONLY send failures mean "client gone". Anything the
+                # generator raises falls through to the branches below.
+                raise _ClientGone() from e
+    except _ClientGone:
+        # Don't try to talk to a dead socket; the endpoint loop closes.
+        raise
+    except WebSocketDisconnect:
         raise
     except Exception as e:
         logger.exception("Error in websocket chat stream")
@@ -528,11 +541,15 @@ async def _ws_stream_chat(websocket: WebSocket, message: str, user_id: str) -> N
 
 
 async def _ws_handle_listen(websocket: WebSocket) -> None:
-    """Placeholder for the future audio-driven listen turn (Phase 5).
+    """Deprecated listen turn (browser Web Speech replaced it).
 
-    For now: simulate a short capture, then send back a fake transcription.
-    The frontend's mic button drives this; it never opens the browser mic.
+    Mock mode still returns the clearly-labeled fake transcription for
+    UI development; real mode reports an error frame instead of
+    pretending to have heard the user.
     """
+    if config.mode == "real":
+        await websocket.send_text(json.dumps({"type": "error", "error": "stt_not_implemented"}))
+        return
     await asyncio.sleep(random.uniform(0.8, 1.6))
     text = random.choice(FAKE_TRANSCRIPTS)
     logger.info(f"ws listen: returning fake transcription '{text}'")
@@ -600,8 +617,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 )
     except WebSocketDisconnect:
         logger.info("ws: client disconnected")
-    except RuntimeError:
-        # send on an already-closed socket (client vanished mid-reply)
+    except (_ClientGone, RuntimeError):
+        # _ClientGone: token send failed mid-reply. Bare RuntimeError
+        # here can only come from sends issued by this loop itself
+        # (error frames / the `done` frame) on an already-closed socket.
         logger.info("ws: connection closed mid-send")
 
 

@@ -1,0 +1,527 @@
+import asyncio
+
+import httpx
+import pytest
+
+from Hermes.plugins.samantha_voice import announce
+from Hermes.plugins.samantha_voice import provider as prov
+from Hermes.plugins.samantha_voice.markers import has_unclosed_tag
+
+
+class _LoopBoundClient:
+    """Fake HTTP client with the one property that matters here:
+
+    an httpx.AsyncClient may only be used on the event loop that created
+    it. Everything else about httpx is irrelevant to this plugin's
+    correctness; this is the property the bridge's one-loop-per-clause
+    design keeps breaking, so the fake models it and nothing else.
+    """
+
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.closed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.closed = True
+        return False
+
+
+class _FakeTTS:
+    OUTPUT_SAMPLE_RATE = 24000
+
+    def __init__(self, available=True, chunks=(b"\x00\x01" * 100,)):
+        self._available = available
+        self._chunks = chunks
+        self.calls: list[str] = []
+        self.clients: list[_LoopBoundClient] = []
+        self._shared: _LoopBoundClient | None = None
+
+    def is_available(self):
+        return self._available
+
+    def new_client(self):
+        client = _LoopBoundClient()
+        self.clients.append(client)
+        return client
+
+    def _resolve(self, client):
+        """Mirror tts.stream(): no client → the shared module-global one,
+        created on whichever loop happened to ask for it first."""
+        if client is None:
+            if self._shared is None:
+                self._shared = _LoopBoundClient()
+            client = self._shared
+        if client.loop is not asyncio.get_running_loop():
+            # What httpx does when a client outlives its loop.
+            raise RuntimeError("Event loop is closed")
+
+    async def stream(self, text, *, client=None):
+        self.calls.append(text)
+        self._resolve(client)
+        for c in self._chunks:
+            yield c, "cosyvoice"
+
+
+def test_declares_the_format_cosyvoice_actually_emits():
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    assert p.sample_rate == 24000
+    assert p.channels == 1
+    assert p.sample_width == 2
+
+
+def test_init_stores_config_and_section_per_contract_1():
+    # Hermes constructs every StreamingTTSProvider with (tts_config,
+    # section) and expects them retained — see
+    # docs/superpowers/specs/hermes-contracts-v0.20.5.md, Contract 1.
+    tts_config = {"provider": "cosyvoice"}
+    section = {"enabled": True}
+    p = prov.CosyVoiceStreamingProvider(tts_config, section)
+    assert p.tts_config is tts_config
+    assert p.section is section
+
+
+def test_available_follows_the_tts_module(monkeypatch):
+    monkeypatch.setattr(prov, "tts", _FakeTTS(available=False))
+    assert prov.CosyVoiceStreamingProvider.available() is False
+    monkeypatch.setattr(prov, "tts", _FakeTTS(available=True))
+    assert prov.CosyVoiceStreamingProvider.available() is True
+
+
+def test_stream_yields_pcm_bytes_not_tuples(monkeypatch):
+    fake = _FakeTTS(chunks=(b"aa", b"bb"))
+    monkeypatch.setattr(prov, "tts", fake)
+    text = "Hola, ¿qué tal estás hoy? Cuéntame cómo te ha ido todo."
+    assert len(text) >= prov.MIN_CLAUSE_CHARS  # one call must be enough to speak
+    out = list(prov.CosyVoiceStreamingProvider({}, {}).stream(text))
+    assert out == [b"aa", b"bb"]
+
+
+def test_two_short_clauses_merge_into_one_synthesis_call(monkeypatch):
+    # Hermes calls stream() once per already-atomic clause and never
+    # with a batch, so merging short clauses up to MIN_CLAUSE_CHARS has
+    # to happen across calls, via self._pending — not within a single
+    # call. Neither clause alone is long enough to be safe to synthesise;
+    # merged, they are.
+    fake = _FakeTTS(chunks=(b"xy",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Sí,"
+    second = "ya lo veo."
+    assert len(first) < prov.MIN_CLAUSE_CHARS
+    assert len(second) < prov.MIN_CLAUSE_CHARS
+    assert len(first) + 1 + len(second) >= prov.MIN_CLAUSE_CHARS
+
+    assert list(p.stream(first)) == []
+    assert fake.calls == []  # still buffering, nothing sent yet
+
+    out = list(p.stream(second))
+    merged = f"{first} {second}"
+    assert out == [b"xy"]
+    assert fake.calls == [merged]
+    assert p.bytes_yielded_per_clause == [(merged, 2)]
+
+
+def test_short_clause_followed_by_long_one_merges_and_synthesizes(monkeypatch):
+    fake = _FakeTTS(chunks=(b"z",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Vale."
+    second = "Cuéntame qué tal ha ido tu día, con todo detalle."
+    assert len(first) < prov.MIN_CLAUSE_CHARS
+    assert len(second) >= prov.MIN_CLAUSE_CHARS  # already safe alone
+
+    assert list(p.stream(first)) == []
+    out = list(p.stream(second))
+    merged = f"{first} {second}"
+    assert out == [b"z"]
+    assert fake.calls == [merged]
+
+
+def test_open_tag_holds_even_when_long_enough_alone(monkeypatch):
+    # A clause can already clear MIN_CLAUSE_CHARS and still need holding:
+    # sending it as-is would hand CosyVoice an opening <laughter> with no
+    # matching close, which fails the same way a too-short clause does.
+    fake = _FakeTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Eso me hace mucha gracia, la verdad, <laughter>de verdad que sí"
+    assert len(first) >= prov.MIN_CLAUSE_CHARS
+    assert list(p.stream(first)) == []
+    assert fake.calls == []
+    assert p._pending == first
+
+
+def test_clause_that_closes_a_tag_merges_into_one_synthesis_call(monkeypatch):
+    fake = _FakeTTS(chunks=(b"q",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Eso me hace mucha gracia, la verdad, <laughter>de verdad que sí"
+    second = "me lo pareció</laughter>."
+
+    assert list(p.stream(first)) == []
+    out = list(p.stream(second))
+    merged = f"{first} {second}"
+    assert out == [b"q"]
+    assert fake.calls == [merged]
+    assert p.bytes_yielded_per_clause == [(merged, 1)]
+
+
+def test_unclosed_tag_releases_once_pending_hits_the_cap(monkeypatch):
+    # If the model never closes a <laughter> tag, has_unclosed_tag stays
+    # true forever — without a cap, every further clause would merge
+    # into _pending and the rest of the turn would go unspoken. Once
+    # _pending reaches MAX_PENDING_CHARS it must release regardless of
+    # tag balance, so the clauses that follow still get synthesised.
+    fake = _FakeTTS(chunks=(b"r",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    opener = "<laughter>" + " ".join(["muy"] * 20)  # unclosed, already long
+    assert has_unclosed_tag(opener)
+    assert len(opener) < prov.MAX_PENDING_CHARS
+    assert list(p.stream(opener)) == []
+    assert fake.calls == []  # still held: unclosed tag, under the cap
+
+    filler = " ".join(["gracioso"] * 35)  # no closing tag; pushes past the cap
+    merged = f"{opener} {filler}"
+    assert has_unclosed_tag(merged)
+    assert len(merged) >= prov.MAX_PENDING_CHARS
+    out = list(p.stream(filler))
+    # Without the fix, this clause would stay pending forever and the
+    # rest of the reply would never reach CosyVoice.
+    assert out == [b"r"]
+    assert fake.calls == [merged]
+    assert p.bytes_yielded_per_clause == [(merged, 1)]
+    assert p._pending == ""
+
+    # The turn keeps speaking after the release.
+    next_clause = "Y ahora seguimos hablando con toda normalidad, ¿verdad?"
+    assert len(next_clause) >= prov.MIN_CLAUSE_CHARS
+    out2 = list(p.stream(next_clause))
+    assert out2 == [b"r"]
+    assert fake.calls == [merged, next_clause]
+
+
+def test_short_clause_left_pending_at_end_is_absent_from_accounting(monkeypatch):
+    # No end-of-reply signal reaches this provider (see stream()'s
+    # docstring), so a final short clause is never spoken and must not
+    # be recorded as if it had been attempted.
+    fake = _FakeTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    tail = "Sí."
+    assert len(tail) < prov.MIN_CLAUSE_CHARS
+    assert list(p.stream(tail)) == []
+    assert fake.calls == []
+    assert p.bytes_yielded_per_clause == []
+    assert p._pending == tail
+
+
+def test_empty_text_makes_no_call(monkeypatch):
+    fake = _FakeTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    assert list(prov.CosyVoiceStreamingProvider({}, {}).stream("   ")) == []
+    assert fake.calls == []
+
+
+def test_records_bytes_yielded_per_clause(monkeypatch):
+    # Plan 3 needs this to trim an interrupted reply to what was heard.
+    monkeypatch.setattr(prov, "tts", _FakeTTS(chunks=(b"a" * 10,)))
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    list(p.stream("Una frase lo bastante larga como para pasar el guardia."))
+    assert p.bytes_yielded_per_clause == [
+        ("Una frase lo bastante larga como para pasar el guardia.", 10)
+    ]
+
+
+def test_records_zero_bytes_for_a_clause_that_raises(monkeypatch):
+    # The accounting must include a clause that failed and yielded no
+    # audio — Plan 3's trim rule needs every attempted clause present,
+    # not just the successful ones.
+    class _RaisingTTS(_FakeTTS):
+        async def stream(self, text, *, client=None):
+            self.calls.append(text)
+            raise RuntimeError("CosyVoice returned 200 with no audio")
+            yield b""  # pragma: no cover - unreachable, keeps this an async gen
+
+    monkeypatch.setattr(prov, "tts", _RaisingTTS())
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    clause = "Una frase lo bastante larga como para pasar el guardia."
+    out = list(p.stream(clause))
+    assert out == []
+    assert p.bytes_yielded_per_clause == [(clause, 0)]
+
+
+def test_transport_error_is_treated_like_a_failed_clause(monkeypatch):
+    # httpx transport failures (timeout, connection refused, protocol
+    # error) are httpx.HTTPError, not RuntimeError — catching only
+    # RuntimeError would let one of these abort the whole reply instead
+    # of just the clause that hit it.
+    class _TimingOutTTS(_FakeTTS):
+        async def stream(self, text, *, client=None):
+            self.calls.append(text)
+            raise httpx.ReadTimeout("cosyvoice took too long")
+            yield b""  # pragma: no cover - unreachable, keeps this an async gen
+
+    monkeypatch.setattr(prov, "tts", _TimingOutTTS())
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    clause = "Una frase lo bastante larga como para pasar el guardia."
+    out = list(p.stream(clause))
+    assert out == []
+    assert p.bytes_yielded_per_clause == [(clause, 0)]
+
+
+def test_successive_clauses_all_get_synthesised(monkeypatch):
+    """The regression this whole per-clause-client design exists for.
+
+    `bridge.iter_sync` runs every clause on a NEW event loop in a worker
+    thread, and an httpx.AsyncClient may only be used on the loop that
+    created it. While the provider took the client from `tts`'s shared
+    module global, clause 1 created it on loop 1 and every clause after
+    that used a client whose loop was already closed — measured against
+    the live CosyVoice server, 7 of 15 clauses yielded zero bytes.
+
+    Nothing failed loudly: stream() catches the error per clause so one
+    bad clause can't kill a reply, so half the words went missing behind
+    a log line. This test fails against that code (clauses 2..n yield
+    nothing) and passes once each clause owns a client built on its own
+    loop.
+    """
+    fake = _FakeTTS(chunks=(b"pcm",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    clauses = [
+        "Hoy he estado pensando en lo que me contaste ayer.",
+        "Me dejó dándole vueltas un buen rato, la verdad.",
+        "No sé si te pasa a ti también con esas cosas.",
+        "Cuéntame cómo lo llevas ahora, si te apetece.",
+    ]
+    for clause in clauses:
+        assert list(p.stream(clause)) == [b"pcm"], f"clause went silent: {clause}"
+
+    assert fake.calls == clauses
+    assert p.bytes_yielded_per_clause == [(c, 3) for c in clauses]
+
+
+def test_each_clause_closes_the_client_it_opened(monkeypatch):
+    # A client built on a worker loop can never be closed later — that
+    # loop is gone — so it has to be closed before the clause ends, or
+    # every clause of every turn leaks a connection pool for weeks.
+    fake = _FakeTTS(chunks=(b"pcm",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    long_enough = (
+        "Una frase suficientemente larga para hablar.",
+        "Y otra igual de larga.",
+    )
+    assert all(len(c) >= prov.MIN_CLAUSE_CHARS for c in long_enough)
+    for clause in long_enough:
+        list(p.stream(clause))
+    assert len(fake.clients) == 2
+    assert all(c.closed for c in fake.clients)
+
+
+class _DeadServerTTS(_FakeTTS):
+    """Every clause fails the way a powered-off 4090 fails.
+
+    `httpx.ConnectError` is what a host that refuses the connection
+    gives; the observed case on 2026-08-22 was the whole machine off
+    mid-measurement, all 15 clauses swallowed and nothing raised.
+    """
+
+    def __init__(self, exc=None):
+        super().__init__()
+        self._exc = exc or httpx.ConnectError("[Errno 61] Connection refused")
+
+    async def stream(self, text, *, client=None):
+        self.calls.append(text)
+        raise self._exc
+        yield b""  # pragma: no cover - unreachable, keeps this an async gen
+
+
+def test_one_failed_clause_stays_quiet_and_the_reply_keeps_speaking(monkeypatch):
+    # The policy that must NOT change: losing a clause beats losing the
+    # reply. A single failure — the intermittent, content-specific kind
+    # measured against the live server — is logged and skipped, the
+    # rest of the turn is spoken, and nothing is raised at the caller.
+    class _OneBadClauseTTS(_FakeTTS):
+        async def stream(self, text, *, client=None):
+            self.calls.append(text)
+            if len(self.calls) == 2:
+                raise httpx.RemoteProtocolError(
+                    "peer closed connection without sending complete message body"
+                )
+            yield b"pcm", "cosyvoice"
+
+    fake = _OneBadClauseTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    clauses = [
+        "Hoy he estado pensando en lo que me contaste ayer.",
+        "Me dejó dándole vueltas un buen rato, la verdad.",
+        "Cuéntame cómo lo llevas ahora, si te apetece.",
+    ]
+    spoken = [list(p.stream(c)) for c in clauses]
+
+    assert spoken == [[b"pcm"], [], [b"pcm"]]
+    assert fake.calls == clauses  # the failure did not abort the turn
+    assert p.bytes_yielded_per_clause == [
+        (clauses[0], 3),
+        (clauses[1], 0),
+        (clauses[2], 3),
+    ]
+
+
+def test_a_turn_with_no_audio_at_all_raises(monkeypatch):
+    # The bug this change exists for: with the server down, every clause
+    # was swallowed by the same `except` that implements the policy
+    # above, and the turn ended in silence with nothing raised anywhere.
+    # Against the old code this test fails — stream() returns [] and
+    # never raises.
+    fake = _DeadServerTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    monkeypatch.setattr(prov, "announcement_pcm", lambda: b"")
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    clause = "Hoy he estado pensando en lo que me contaste ayer."
+    with pytest.raises(prov.SilentTurnError):
+        list(p.stream(clause))
+    assert p.bytes_yielded_per_clause == [(clause, 0)]
+
+
+def test_an_unreachable_server_is_loud_on_the_very_first_clause(monkeypatch):
+    # Her replies are one to three sentences by design, so a turn is
+    # often a single clause: waiting for a second one to fail would let
+    # the commonest reply length stay silent forever. A connect-level
+    # failure never reached the server, so the clause's content cannot
+    # be the cause and no later clause would fare better.
+    for exc in (
+        httpx.ConnectError("connection refused"),
+        httpx.ConnectTimeout("no route to host"),
+        httpx.PoolTimeout("no free connection"),
+    ):
+        monkeypatch.setattr(prov, "tts", _DeadServerTTS(exc))
+        monkeypatch.setattr(prov, "announcement_pcm", lambda: b"")
+        p = prov.CosyVoiceStreamingProvider({}, {})
+        with pytest.raises(prov.SilentTurnError):
+            list(p.stream("Cuéntame cómo lo llevas ahora, si te apetece."))
+
+
+def test_a_server_that_answers_without_audio_needs_two_silent_clauses(monkeypatch):
+    # Not every failure proves the server is gone. A 200-with-no-audio
+    # or a mid-response disconnect is the ordinary, content-specific
+    # failure, so the first one is swallowed as before; only a second
+    # clause with still nothing audible declares the turn dead.
+    class _NoAudioTTS(_FakeTTS):
+        async def stream(self, text, *, client=None):
+            self.calls.append(text)
+            raise RuntimeError("cosyvoice returned 200 but no audio")
+            yield b""  # pragma: no cover - unreachable, keeps this an async gen
+
+    fake = _NoAudioTTS()
+    monkeypatch.setattr(prov, "tts", fake)
+    monkeypatch.setattr(prov, "announcement_pcm", lambda: b"")
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    first = "Hoy he estado pensando en lo que me contaste ayer."
+    assert list(p.stream(first)) == []  # swallowed, exactly as before
+
+    with pytest.raises(prov.SilentTurnError):
+        list(p.stream("Me dejó dándole vueltas un buen rato, la verdad."))
+
+
+def test_a_turn_that_was_partly_audible_is_not_declared_dead(monkeypatch):
+    # Two failures in a turn that already spoke is a lost tail, not a
+    # dead server — the user heard Samantha, so telling her she has no
+    # voice would be a lie.
+    class _FailsAfterFirstTTS(_FakeTTS):
+        async def stream(self, text, *, client=None):
+            self.calls.append(text)
+            if len(self.calls) > 1:
+                raise RuntimeError("cosyvoice returned 200 but no audio")
+            yield b"pcm", "cosyvoice"
+
+    monkeypatch.setattr(prov, "tts", _FailsAfterFirstTTS())
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    assert list(p.stream("Hoy he estado pensando en lo que me contaste.")) == [b"pcm"]
+    assert list(p.stream("Me dejó dándole vueltas un buen rato, la verdad.")) == []
+    assert list(p.stream("Cuéntame cómo lo llevas ahora, si te apetece.")) == []
+
+
+def test_the_prerecorded_clip_is_spoken_before_the_exception(monkeypatch):
+    # The exception alone does not reach a human: both Hermes call sites
+    # turn it into a log line. The clip does, because audio is written
+    # to the speaker as it is yielded.
+    monkeypatch.setattr(prov, "tts", _DeadServerTTS())
+    monkeypatch.setattr(prov, "announcement_pcm", lambda: b"clip-pcm")
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    heard = []
+    with pytest.raises(prov.SilentTurnError):
+        for chunk in p.stream("Cuéntame cómo lo llevas ahora, si te apetece."):
+            heard.append(chunk)
+    assert heard == [b"clip-pcm"]
+
+
+def test_the_announcement_plays_once_per_turn(monkeypatch):
+    # A dead server fails every remaining clause too. Repeating the clip
+    # (and the exception) once per clause would turn one failure into a
+    # stutter; after the first, the turn is already known dead.
+    monkeypatch.setattr(prov, "tts", _DeadServerTTS())
+    monkeypatch.setattr(prov, "announcement_pcm", lambda: b"clip-pcm")
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    with pytest.raises(prov.SilentTurnError):
+        list(p.stream("Hoy he estado pensando en lo que me contaste ayer."))
+    assert list(p.stream("Me dejó dándole vueltas un buen rato, la verdad.")) == []
+    assert list(p.stream("Cuéntame cómo lo llevas ahora, si te apetece.")) == []
+
+
+def test_silent_turn_error_is_not_caught_as_a_failed_clause():
+    # stream() catches RuntimeError to skip a bad clause, and
+    # samantha.tts raises RuntimeError for exactly that. If the
+    # turn-level error were a RuntimeError too, one edit to that
+    # handler would silently swallow the loud path.
+    assert not issubclass(prov.SilentTurnError, RuntimeError)
+
+
+def test_a_missing_clip_still_raises_rather_than_going_quiet(monkeypatch):
+    # The clip does not exist yet (announce.py: it needs CosyVoice to
+    # record). Absent, the loud path degrades to an exception — never to
+    # synthesising the line through another backend.
+    monkeypatch.setattr(prov, "tts", _DeadServerTTS())
+    monkeypatch.setattr(announce, "ANNOUNCEMENT_CLIP_PATH", "/nonexistent/sin-voz.pcm")
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    heard = []
+    with pytest.raises(prov.SilentTurnError):
+        for chunk in p.stream("Cuéntame cómo lo llevas ahora, si te apetece."):
+            heard.append(chunk)
+    assert heard == []
+
+
+def test_the_clip_is_handed_out_in_stream_sized_chunks(monkeypatch):
+    # One large write is not what the rest of this provider yields, and
+    # the consumers downstream are written for clause-sized chunks.
+    monkeypatch.setattr(prov, "tts", _DeadServerTTS())
+    clip = b"\x07\x08" * prov._CLIP_CHUNK_BYTES  # 4x the chunk size
+    monkeypatch.setattr(prov, "announcement_pcm", lambda: clip)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    heard = []
+    with pytest.raises(prov.SilentTurnError):
+        for chunk in p.stream("Cuéntame cómo lo llevas ahora, si te apetece."):
+            heard.append(chunk)
+    assert all(len(c) <= prov._CLIP_CHUNK_BYTES for c in heard)
+    assert b"".join(heard) == clip

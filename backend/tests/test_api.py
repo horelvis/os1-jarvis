@@ -91,6 +91,20 @@ def test_transcribe_returns_text():
     assert data["duration_s"] > 0
 
 
+def test_transcribe_real_mode_returns_501(monkeypatch):
+    """Real mode has no server-side STT (browser Web Speech per
+    CLAUDE.md §2.8) — a fake transcript presented as real is a lie."""
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod.config, "mode", "real")
+    r = client.post(
+        "/transcribe",
+        files={"audio": ("test.wav", b"\x00" * 100, "audio/wav")},
+    )
+    assert r.status_code == 501
+    assert "stt_not_implemented" in r.text
+
+
 # ========================================================================
 # /speak
 # ========================================================================
@@ -197,6 +211,27 @@ def test_ws_chat_handles_streaming_exception(monkeypatch):
         assert "Simulated streaming error" in msg["error"]
 
 
+def test_ws_chat_reports_generator_runtime_error(monkeypatch):
+    """httpx raises RuntimeError for real faults (client closed, event
+    loop closed). Those come from the token GENERATOR, not from the
+    socket — the client must receive an error frame, not silence."""
+    from samantha import api
+
+    async def mock_stream_tokens(*args, **kwargs):
+        if False:
+            yield ""
+        raise RuntimeError("Cannot send a request, as the client has been closed")
+
+    monkeypatch.setattr(api, "_stream_tokens", mock_stream_tokens)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "chat", "message": "hola"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "llm_error" in msg["error"]
+        assert "client has been closed" in msg["error"]
+
+
 def test_ws_listen_returns_transcription():
     """A `listen` turn returns a single `transcription` message."""
     with client.websocket_connect("/ws") as ws:
@@ -205,6 +240,16 @@ def test_ws_listen_returns_transcription():
         assert msg["type"] == "transcription"
         assert isinstance(msg["text"], str)
         assert msg["text"]
+
+
+def test_ws_listen_real_mode_returns_error(monkeypatch):
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod.config, "mode", "real")
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "listen"})
+        msg = ws.receive_json()
+        assert msg == {"type": "error", "error": "stt_not_implemented"}
 
 
 def test_ws_rejects_unknown_type():
@@ -541,6 +586,58 @@ def test_memory_get_fact_returns_newest(tmp_path):
     assert fact["value"] == "New Name"
 
 
+def test_memory_latest_facts_batches_kinds(tmp_path):
+    """One call, several kinds, newest entry per kind; missing kinds
+    are simply absent."""
+    import time
+
+    from samantha.memory import Memory
+
+    mem = Memory(persist_dir=str(tmp_path / "mem"))
+    mem.set_fact("name", "Old Name", user_id="u1")
+    time.sleep(1.1)
+    mem.set_fact("name", "New Name", user_id="u1")
+    mem.set_fact("big5_openness", "alta", user_id="u1")
+
+    out = mem.latest_facts(("name", "big5_openness", "missing_kind"), user_id="u1")
+    assert out["name"]["value"] == "New Name"
+    assert out["big5_openness"]["value"] == "alta"
+    assert "missing_kind" not in out
+
+
+def test_collect_facts_uses_single_batched_query():
+    """_collect_facts must issue ONE latest_facts call, never per-kind
+    get_fact calls (7 Chroma scans per turn)."""
+    from samantha.context import _collect_facts
+
+    class FakeMem:
+        def __init__(self):
+            self.latest_calls = 0
+            self.get_fact_calls = 0
+
+        def latest_facts(self, kinds, *, user_id="primary"):
+            self.latest_calls += 1
+            return {
+                "name": {
+                    "id": "f1",
+                    "kind": "name",
+                    "value": "Ana",
+                    "text": "El usuario se llama Ana",
+                    "timestamp": 1,
+                }
+            }
+
+        def get_fact(self, *args, **kwargs):
+            self.get_fact_calls += 1
+            return None
+
+    mem = FakeMem()
+    facts = _collect_facts(mem, user_id="primary")
+    assert mem.latest_calls == 1
+    assert mem.get_fact_calls == 0
+    assert [f["kind"] for f in facts] == ["name"]
+
+
 def test_memory_facts_excluded_from_conversational_recall(tmp_path):
     from samantha.memory import Memory
 
@@ -694,7 +791,7 @@ def test_profile_endpoints_full_cycle(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     r = client.get("/profile")
     assert r.status_code == 404
@@ -754,7 +851,7 @@ def test_profile_post_rejects_empty_first_answer(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     body = {
         "name": "tú",  # frontend fallback we must reject
@@ -780,7 +877,7 @@ def test_profile_post_rejects_re_pairing(tmp_path, monkeypatch):
     mem = Memory(persist_dir=str(tmp_path / "mem"), short_term_capacity=2)
     monkeypatch.setattr(api_mod, "_memory", mem)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
-    api_mod._memory_init_failed = False
+    api_mod._memory_init_failed_at = None
 
     body = {
         "name": "Alice",
@@ -906,7 +1003,7 @@ def test_chat_does_not_duplicate_current_message(tmp_path, monkeypatch):
 
     mem = Memory(persist_dir=str(tmp_path / "memory"))
     monkeypatch.setattr(api_mod, "_memory", mem)
-    monkeypatch.setattr(api_mod, "_memory_init_failed", False)
+    monkeypatch.setattr(api_mod, "_memory_init_failed_at", None)
     monkeypatch.setattr(api_mod.config, "memory_enabled", True)
     monkeypatch.setattr(api_mod.config, "mode", "real")
 
@@ -1080,3 +1177,156 @@ def test_ws_binary_frame_returns_error():
                 break
             else:
                 raise AssertionError(f"unexpected message after recovery: {msg}")
+
+
+# ========================================================================
+# /profile — blocking Memory work must run off the event loop
+# ========================================================================
+
+
+def test_profile_endpoints_run_memory_work_off_event_loop(monkeypatch):
+    """The profile helpers do fastembed + Chroma work (seconds of CPU).
+    Inside asyncio.to_thread there is no running loop, so
+    get_running_loop() raising RuntimeError proves we're off-loop."""
+    import asyncio as aio
+
+    from samantha import api as api_mod
+
+    violations: list[str] = []
+
+    def _record_if_on_loop(label: str) -> None:
+        try:
+            aio.get_running_loop()
+            violations.append(label)
+        except RuntimeError:
+            pass  # worker thread — correct
+
+    class FakeMem:
+        pass
+
+    monkeypatch.setattr(api_mod, "_memory", FakeMem())
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+
+    onboarded = {"value": False}
+    profile = {"name": "Ana", "onboarding_completed_at": 123, "answers": []}
+
+    def fake_is_onboarded(mem):
+        _record_if_on_loop("is_onboarded")
+        return onboarded["value"]
+
+    def fake_get_profile(mem):
+        _record_if_on_loop("get_profile")
+        return profile if onboarded["value"] else None
+
+    def fake_complete_onboarding(mem, name, answers):
+        _record_if_on_loop("complete_onboarding")
+        onboarded["value"] = True
+        return {**profile, "name": name, "answers": answers}
+
+    def fake_delete_profile(mem):
+        _record_if_on_loop("delete_profile")
+        onboarded["value"] = False
+        return True
+
+    monkeypatch.setattr(api_mod, "_is_onboarded", fake_is_onboarded)
+    monkeypatch.setattr(api_mod, "_get_profile", fake_get_profile)
+    monkeypatch.setattr(api_mod, "_complete_onboarding", fake_complete_onboarding)
+    monkeypatch.setattr(api_mod, "_delete_profile", fake_delete_profile)
+
+    body = {
+        "name": "Ana",
+        "answers": [
+            {"q": "¿Cómo te llamo?", "a": "Ana"},
+            {"q": "¿Cómo estás hoy?", "a": "bien"},
+            {"q": "¿Qué te gusta?", "a": "leer"},
+            {"q": "¿Algo que te ilusione?", "a": "viajar"},
+            {"q": "¿Algo que te ronde?", "a": "trabajo"},
+            {"q": "¿Directa o cuidadosa?", "a": "directa"},
+        ],
+    }
+    assert client.post("/profile", json=body).status_code == 200
+    assert client.get("/profile").status_code == 200
+    assert client.delete("/profile").status_code == 200
+    assert violations == [], f"ran on the event loop: {violations}"
+
+
+# ========================================================================
+# lifespan — shutdown must release long-lived resources
+# ========================================================================
+
+
+def test_lifespan_closes_llm_client():
+    """real_llm.aclose() exists but was never wired to the app
+    lifecycle — the shared httpx client must be released on shutdown."""
+    from samantha import api as api_mod
+    from samantha import real_llm
+
+    with TestClient(api_mod.app):
+        real_llm._get_client()
+        assert real_llm._client is not None
+    assert real_llm._client is None
+
+
+def test_lifespan_closes_memory():
+    """Shutdown closes the memory store (SQLite ring connection) and
+    drops the singleton so a restart re-initializes cleanly."""
+    from samantha import api as api_mod
+
+    closed = {"value": False}
+
+    class FakeMem:
+        def close(self):
+            closed["value"] = True
+
+    with TestClient(api_mod.app):
+        api_mod._memory = FakeMem()
+    assert closed["value"] is True
+    assert api_mod._memory is None
+
+
+def test_memory_init_failure_retries_after_backoff(monkeypatch):
+    """A failed init (e.g. external volume not yet mounted at boot)
+    must not disable memory forever — retry after the backoff window."""
+    import samantha.memory as memory_mod
+    from samantha import api as api_mod
+
+    monkeypatch.setattr(api_mod, "_memory", None)
+    monkeypatch.setattr(api_mod, "_memory_init_failed_at", None)
+    monkeypatch.setattr(api_mod.config, "memory_enabled", True)
+
+    calls = {"n": 0}
+
+    class FlakyMemory:
+        def __init__(self, persist_dir):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("volume not mounted")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(memory_mod, "Memory", FlakyMemory)
+
+    # First call fails and latches the failure timestamp.
+    assert api_mod.get_memory() is None
+    # Within the backoff window: no new attempt.
+    assert api_mod.get_memory() is None
+    assert calls["n"] == 1
+    # Simulate the window elapsing.
+    monkeypatch.setattr(
+        api_mod,
+        "_memory_init_failed_at",
+        api_mod._memory_init_failed_at - api_mod.MEMORY_INIT_RETRY_S - 1,
+    )
+    assert api_mod.get_memory() is not None
+    assert calls["n"] == 2
+
+
+def test_lifespan_closes_tts_client():
+    from samantha import api as api_mod
+    from samantha import tts as tts_mod
+
+    with TestClient(api_mod.app):
+        tts_mod._get_client()
+        assert tts_mod._client is not None
+    assert tts_mod._client is None

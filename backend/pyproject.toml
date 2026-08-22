@@ -12,23 +12,12 @@ dependencies = [
     "httpx>=0.27",                # cliente OpenAI-compat para llama-server (real mode)
     "chromadb>=0.5.0",            # memoria semántica persistente (Phase 6)
     "fastembed>=0.5",             # multilingual ONNX embedder for memory recall (Phase 1)
+    "pipecat-ai[silero]>=0.0.89,<0.1.0",  # Phase 11 — voice pipeline framework + Silero VAD
+    "faster-whisper>=1.0.3",      # Phase 11 — STT
+    "numpy>=1.26,<2",             # Phase 11 — audio resampling (<2 for ctranslate2/torch compat)
 ]
 
 [project.optional-dependencies]
-# Dependencias que SOLO se necesitan cuando integremos modelos reales.
-# Durante desarrollo con el mock, no las instalamos.
-#
-# Nota: llama.cpp corre como binario separado (llama-server), no como
-# dependencia de Python. Aquí sólo viven las cosas Python-side de fases
-# posteriores (STT, TTS).
-real = [
-    "faster-whisper>=1.0.3",       # Phase 5 — STT
-    "piper-tts>=1.2.0",            # Phase 5 — TTS
-    "sentence-transformers>=3.0",  # better Spanish embeddings (swap-in for memoria)
-    "silero-vad>=5.1",             # Phase 5 — VAD
-    "sounddevice>=0.4.7",          # Phase 5 — captura de audio
-    "numpy>=2.0",
-]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",  # cliente HTTP para tests
