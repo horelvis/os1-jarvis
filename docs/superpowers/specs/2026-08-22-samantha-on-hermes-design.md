@@ -62,6 +62,28 @@ adapter.write_streaming_tts() → WS → browser playback
 The existing FastAPI backend keeps running untouched until step 7 of
 §8. There is a working Samantha at every point in the migration.
 
+> **Note added 2026-08-22:** this diagram and §5 predate a probe into
+> Hermes' own web surface. Hermes actually has three independent server
+> surfaces, and none hosts another: `hermes dashboard` serves Hermes'
+> SPA but hosts no platform adapters; `hermes serve` is headless (no
+> SPA, no adapters); `hermes gateway` hosts platform adapters but serves
+> no SPA. Our systemd unit runs `hermes gateway`
+> (`systemd/samantha-hermes.service:31`), which is why the diagram above
+> is correct as drawn — but it means the SPA has to come from somewhere,
+> and it isn't the dashboard.
+>
+> The design's choice stands: `samantha-kiosk` opens its own HTTP server
+> for the OS1 frontend inside the gateway process, rather than shipping
+> the UI as a plugin into `hermes dashboard`. This was a considered
+> choice, not an oversight — the user reaffirmed it on 2026-08-22 after
+> being offered the dashboard-plugin alternative explicitly. Reason: the
+> OS1 interface is the product, and the dashboard shell paints a
+> persistent HERMES wordmark on every route with no chromeless mode;
+> hosting our screen there would mean winning the look back by covering
+> theirs, every release. See
+> `docs/superpowers/specs/2026-08-22-hermes-dashboard-probe.md` for the
+> full comparison.
+
 ---
 
 ## 3. `samantha-voice` — the CosyVoice provider
@@ -214,6 +236,11 @@ What `sync_turn` receives is **not** what it should store — see §6.
 
 ## 5. `samantha-kiosk` — the platform adapter
 
+> **Note added 2026-08-22:** see the topology note in §2 — this adapter
+> runs inside `hermes gateway` and opens its own HTTP server for the
+> frontend; it is not a plugin into `hermes dashboard`. That is a
+> considered, reaffirmed choice, not a gap.
+
 Modelled on `plugins/platforms/irc/`, the smallest worked example.
 `plugin.yaml` with `kind: platform`; `adapter.py` exposing
 `register(ctx)` which calls `ctx.register_platform(...)`.
@@ -320,6 +347,44 @@ finished sounding, and the assistant text is trimmed there before it
 reaches `sync_turn()`. Granularity is the clause, not the word — honest,
 cheap, and good enough. Hermes' own history keeps whatever it keeps;
 ours, the one that feeds recall, does not.
+
+> **Correction, 2026-08-22:** the paragraph above is stale against the
+> merged-clause code that landed after it was written
+> (`Hermes/plugins/samantha_voice/provider.py`; see the decision
+> record's rulings 14-17 in
+> `docs/superpowers/specs/2026-08-22-samantha-voice-decision-record.md`).
+> Three things plan 3 needs to know before it is written:
+>
+> - **Granularity is the merged clause, not the clause.** Since the
+>   `_pending` buffer landed, a key in `bytes_yielded_per_clause` records
+>   the *merged* clause, which can be up to `MAX_PENDING_CHARS` (400
+>   characters) of text, not one clause. An interruption can only be
+>   trimmed back to the start of the merged block that was sounding when
+>   it was cut — so up to 400 characters of text she never actually
+>   finished saying can still be recorded as heard. That is the opposite
+>   direction of error from the one this section exists to prevent (the
+>   risk was persisting words she never spoke); plan 3 must accept that
+>   bound rather than assume single-clause precision.
+> - **The map's keys are not the assistant's reply text**, and cannot be
+>   reassembled into it by concatenation or substring match. Three
+>   independent reasons: Hermes strips markdown before the text reaches
+>   the provider (`~/hermes-src/gateway/streaming_tts_consumer.py:322`);
+>   our provider merges held clauses with an inserted space
+>   (`Hermes/plugins/samantha_voice/provider.py`); and text still sitting
+>   in `_pending` at end of turn is never yielded at all, so it appears
+>   under no key. The trim implementation needs its own mapping back to
+>   the original reply text — it cannot treat the map's keys as that
+>   text.
+> - **Bytes yielded is not bytes heard.** This section is right to take
+>   `playedMs` from the adapter (§5.1, reported by the browser) rather
+>   than from `samantha-voice`'s own byte counter — that choice must
+>   stay. On the speaker path Hermes prefetches audio up to three
+>   sentences ahead of playback (`~/hermes-src/tools/tts_tool.py` around
+>   line 4290, `_prefetch_sem = threading.Semaphore(3)`), so bytes the
+>   provider has already yielded can be well ahead of what has actually
+>   played. The byte counter is a synthesis-progress counter, not a
+>   playback-position counter; nobody should later "simplify" the trim
+>   by reading it as one.
 
 **Resolved from source, 2026-08-22.** Read the actual call sites in
 `~/hermes-src` (tag v2026.8.19) rather than the docstrings:
