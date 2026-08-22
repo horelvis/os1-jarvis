@@ -101,14 +101,22 @@ def iter_sync(
                     except BaseException:
                         pass
 
-        loop = asyncio.new_event_loop()
+        # `new_event_loop()` is INSIDE the try on purpose: it allocates
+        # file descriptors (selector + self-pipe) and this runs once per
+        # clause, per turn, for weeks — under fd exhaustion it raises.
+        # Outside the try, that exception would kill the thread before
+        # the `finally` below ever put the sentinel, and the consumer's
+        # unbounded `out.get()` would block forever.
+        loop = None
         try:
+            loop = asyncio.new_event_loop()
             loop.run_until_complete(pump())
         except BaseException as exc:  # surfaced to the consumer below
             _put_or_abandon(out, exc, stop)
         finally:
             try:
-                loop.close()
+                if loop is not None:
+                    loop.close()
             finally:
                 _put_or_abandon(out, _SENTINEL, stop)
 

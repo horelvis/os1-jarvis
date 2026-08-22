@@ -93,3 +93,30 @@ def test_hanging_aclose_does_not_leak_the_worker_thread():
     assert elapsed < _ACLOSE_TIMEOUT_S + 0.5, f"close() took {elapsed:.2f}s"
     leaked = [t for t in threading.enumerate() if t.name == "samantha-tts"]
     assert not leaked, f"samantha-tts worker thread(s) still alive: {leaked}"
+
+
+def test_event_loop_creation_failure_still_releases_the_consumer(monkeypatch):
+    # The worker allocates a fresh event loop per clause (fds: selector +
+    # self-pipe). If that allocation raises, the consumer must see the
+    # exception, not block forever on an unbounded out.get().
+    import Hermes.plugins.samantha_voice.bridge as bridge
+
+    def _boom():
+        raise OSError("too many open files")
+
+    monkeypatch.setattr(bridge.asyncio, "new_event_loop", _boom)
+
+    result: list[object] = []
+
+    def consume():
+        try:
+            list(iter_sync(_agen_factory([b"a"])))
+        except BaseException as exc:  # noqa: BLE001 — recorded for the assert
+            result.append(exc)
+
+    consumer = threading.Thread(target=consume, daemon=True)
+    consumer.start()
+    consumer.join(timeout=5.0)
+
+    assert not consumer.is_alive(), "consumer blocked forever on out.get()"
+    assert result and isinstance(result[0], OSError)
