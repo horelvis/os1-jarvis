@@ -183,6 +183,51 @@ onboarding marker (the six answer chunks survive; nothing is truly deleted).
 That endpoint is currently unauthenticated; the improvement sweep puts it
 behind `SAMANTHA_ADMIN_TOKEN`.
 
+## Moving Samantha to another machine
+
+Cloning the repo is not enough. Two things live outside git in
+`~/.samantha/`, and without them nothing works — one of them is
+irreplaceable.
+
+**Her voice — `~/.samantha/voices/ref/`.** Two files: `samantha.wav`
+(~384 KB, the zero-shot reference CosyVoice clones from) and
+`samantha.txt` (133 bytes, its transcript, which is sent on every
+synthesis call for prosodic conditioning). Without both,
+`tts.is_available()` returns False, so `resolve_streaming_provider`
+never selects our provider at all and Hermes falls through to its
+default — which is Edge TTS, Microsoft's cloud. The failure is silent:
+you get a voice, just not hers.
+
+**Her memory — `~/.samantha/memory/`.** About 2.4 MB: the ChromaDB
+store and the SQLite ring buffer. Her name, the onboarding answers, and
+every conversation you have had. The store is append-only by design and
+there is no export path — this directory *is* the record. **Copy it
+before anything else, and keep a copy.** Losing it is losing her, and
+nothing in the repository can rebuild it.
+
+**Also worth copying, but regenerable:**
+`~/.samantha/voices/announcements/sin-voz.pcm` — the pre-recorded clip
+she plays when synthesis is unreachable (see
+`Hermes/plugins/samantha_voice/announce.py`, whose docstring carries the
+one-command recipe to record it again).
+
+**Do not copy** `~/.samantha/qwen3-tts/` (~6.5 GB). It is a model from
+the abandoned vllm-omni path and nothing reads it.
+
+```bash
+# on the old machine
+tar czf samantha-state.tgz -C ~ .samantha/voices/ref .samantha/memory \
+    .samantha/voices/announcements
+
+# on the new one
+tar xzf samantha-state.tgz -C ~
+ls ~/.samantha/voices/ref/samantha.wav ~/.samantha/memory
+```
+
+`~/.samantha/.env` is not in that list on purpose: it holds API keys.
+Move it deliberately, by hand, or set the variables fresh on the new
+machine.
+
 ## Installing Hermes locally (for the plugin work)
 
 **Status: verified 2026-08-22**, dev Mac (Intel, macOS Ventura 13.5).
