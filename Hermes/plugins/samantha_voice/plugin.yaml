@@ -1,0 +1,14 @@
+name: samantha-voice
+label: Samantha (CosyVoice)
+kind: standalone
+version: 1.0.0
+description: >
+  Streaming TTS provider for Samantha's cloned voice. Synthesises via
+  CosyVoice 3 zero-shot on the 4090, emitting 24 kHz mono int16 PCM
+  clause by clause. No audio leaves the house.
+author: Horelvis Castillo
+optional_env:
+  - name: TTS_COSYVOICE_URL
+    description: "CosyVoice 3 server base URL (default http://192.168.100.58:8093)"
+    prompt: "CosyVoice URL"
+    password: false
