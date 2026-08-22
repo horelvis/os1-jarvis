@@ -56,24 +56,53 @@ boundary.
 
 ## 1. Blocking question 1 — can a custom adapter carry audio?
 
-**Outbound: yes.** PR #73862 ("streaming TTS — clause-by-clause
-synthesis for CLI voice mode and gateway adapters") adds an opt-in seam
-to `gateway/platforms/base.py`:
+**Outbound: yes.** The source comment directly above these methods cites
+`(#60671)` ("streaming TTS — clause-by-clause synthesis for CLI voice
+mode and gateway adapters"); this spike originally cited PR #73862,
+which does not match the source comment (see correction note below).
+This adds an opt-in seam to `gateway/platforms/base.py`:
 
+```python
+def supports_streaming_tts(self, chat_id: str, audio_format: AudioFormat) -> bool
+
+async def begin_streaming_tts(
+    self,
+    chat_id: str,
+    audio_format: AudioFormat,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[StreamingTTSHandle]
+
+async def write_streaming_tts(self, handle: StreamingTTSHandle, chunk: bytes) -> None
+
+async def finish_streaming_tts(self, handle: StreamingTTSHandle, *, interrupted: bool = False) -> None
+
+async def abort_streaming_tts(self, handle: StreamingTTSHandle, error: Optional[str] = None) -> None
 ```
-supports_streaming_tts() -> bool
-begin_streaming_tts(handle: StreamingTTSHandle, format: AudioFormat)
-write_streaming_tts(handle: StreamingTTSHandle, pcm_chunk: bytes)
-finish_streaming_tts(handle: StreamingTTSHandle)
-abort_streaming_tts(handle: StreamingTTSHandle)
-```
+
+> **Correction, 2026-08-22:** every signature originally shown here was
+> wrong — all five were shown as plain `def` (four of the five are
+> actually `async def`), `supports_streaming_tts()` was shown taking no
+> arguments (it takes `chat_id`/`audio_format`), `begin_streaming_tts`
+> was shown *receiving* a handle (it **returns**
+> `Optional[StreamingTTSHandle]` — the adapter constructs the handle,
+> the caller does not hand it one), and `finish_streaming_tts`/
+> `abort_streaming_tts` were shown with no keyword arguments (they carry
+> `interrupted: bool = False` and `error: Optional[str] = None`
+> respectively). Corrected against source; see
+> `docs/superpowers/specs/hermes-contracts-v0.20.5.md` (Contract 5),
+> captured verbatim and independently re-verified.
 
 `AudioFormat` carries sample_rate / channels / sample_width.
 `StreamingTTSHandle` is opaque with `audible` / `aborted` flags — i.e.
-**abort is part of the contract**, which is what barge-in needs. A
-`StreamingTTSConsumer` bridges agent deltas to the adapter's audio sink
-through the existing `SentenceChunker` and serialises clause playback in
-order. All five methods default to no-op, so the contract is additive.
+**abort is part of the contract**, which is what barge-in needs;
+`abort_streaming_tts` must be idempotent (late chunks arriving after
+abort are dropped silently, not raised). `finish_streaming_tts` carries
+`interrupted: bool = False` — Hermes' own seam for signalling that a
+reply was cut off, relevant to the design doc's §6 "record only what was
+heard" rule. A `StreamingTTSConsumer` bridges agent deltas to the
+adapter's audio sink through the existing `SentenceChunker` and
+serialises clause playback in order. All five methods default to
+no-op/False/None, so the contract is additive.
 
 Claimed effect: perceived voice latency ~2–3.5 s → ~500–800 ms.
 

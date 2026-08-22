@@ -161,9 +161,29 @@ Registration arguments that matter for us:
   copy-paste.
 
 Abstract methods: `connect()` (opens the HTTP + WS server),
-`disconnect()`, `send()`. Plus the opt-in streaming seam:
-`supports_streaming_tts()` → `True`, and `begin/write/finish/
-abort_streaming_tts()` writing PCM frames to the socket.
+`disconnect()`, `send()`. Plus the opt-in streaming seam — four of the
+five methods are `async def`, and `begin_streaming_tts` **returns** the
+handle rather than receiving one:
+
+```python
+def supports_streaming_tts(self, chat_id, audio_format) -> bool          # → True
+async def begin_streaming_tts(self, chat_id, audio_format, metadata=None) -> Optional[StreamingTTSHandle]
+async def write_streaming_tts(self, handle, chunk: bytes) -> None
+async def finish_streaming_tts(self, handle, *, interrupted: bool = False) -> None
+async def abort_streaming_tts(self, handle, error: Optional[str] = None) -> None
+```
+
+> **Correction, 2026-08-22:** the capability map §1 this section draws
+> on originally showed all five methods as plain `def`, with
+> `begin_streaming_tts` receiving a handle instead of returning one and
+> no `interrupted`/`error` keyword arguments. Both documents corrected
+> against source; see
+> `docs/superpowers/specs/hermes-contracts-v0.20.5.md` (Contract 5).
+> Practically: `begin_streaming_tts` is where the adapter constructs and
+> returns the `StreamingTTSHandle`; `write_streaming_tts` writes PCM
+> frames to the socket keyed off that handle; `abort_streaming_tts` must
+> be idempotent — late chunks arriving after abort are dropped silently,
+> not raised — which our async/sync bridge (§3) must respect.
 
 ### 5.1 The WebSocket protocol
 
@@ -206,7 +226,9 @@ The browser's Silero VAD is armed for **the whole turn**, not only
 during playback. On `onSpeechStart` it sends `interrupt`. The adapter:
 
 - calls `agent.interrupt()` if the turn is still generating,
-- calls `abort_streaming_tts()` if audio is playing,
+- calls `abort_streaming_tts()` if audio is playing — idempotent per
+  the real contract, so it is safe even if a race lets one more
+  `write_streaming_tts` land after it,
 - and records `playedMs` for §6.
 
 ---
@@ -229,6 +251,22 @@ finished sounding, and the assistant text is trimmed there before it
 reaches `sync_turn()`. Granularity is the clause, not the word — honest,
 cheap, and good enough. Hermes' own history keeps whatever it keeps;
 ours, the one that feeds recall, does not.
+
+**Note, 2026-08-22:** the real `finish_streaming_tts` signature carries
+a keyword-only `interrupted: bool = False`
+(`docs/superpowers/specs/hermes-contracts-v0.20.5.md`, Contract 5) —
+Hermes' own seam for signalling a barge-in to the adapter, which the
+capability map's original (wrong) signature omitted entirely, so this
+design was written without knowing it existed. It's not yet settled
+from source alone whether Hermes calls
+`finish_streaming_tts(interrupted=True)` on barge-in, relies on
+`abort_streaming_tts()` for that path, or both in different
+circumstances — worth confirming before build step 5 (§8), since the
+adapter may be able to read `interrupted` off a call it already
+receives rather than only inferring cutoff from the browser's
+`playedMs` message. It does not change the trim rule itself:
+`interrupted` says a cutoff happened, not *where* — `playedMs`/the
+clause→ms map is still what selects the trim point.
 
 ---
 
