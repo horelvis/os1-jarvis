@@ -51,7 +51,7 @@ author: Horelvis Castillo
 
 # Declaration only — Hermes never installs these. See docs/running-real-mode.md.
 python_dependencies:
-  - aiohttp>=3.9
+  - "aiohttp>=3.9,<4"   # upper bound per Hermes dependency policy (plugins doctor warns without it)
 
 optional_env:
   - name: SAMANTHA_KIOSK_PORT

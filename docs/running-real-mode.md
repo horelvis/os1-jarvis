@@ -228,89 +228,68 @@ ls ~/.samantha/voices/ref/samantha.wav ~/.samantha/memory
 Move it deliberately, by hand, or set the variables fresh on the new
 machine.
 
-## Installing Hermes locally (for the plugin work)
+## Installing Hermes (inside the project)
 
-**Status: verified 2026-08-22**, dev Mac (Intel, macOS Ventura 13.5).
-Full captured contracts:
-[`docs/superpowers/specs/hermes-contracts-v0.20.5.md`](superpowers/specs/hermes-contracts-v0.20.5.md).
-
-Do **not** `uv tool install hermes-agent` — PyPI is stuck at a stale
-`0.19.0` that predates the streaming-TTS module this project needs, and
-`uv tool install` from a git URL is explicitly blocked by Hermes' own
-build backend ("Hermes is distributed via the shell installer, Docker
-image, or Nix"). Use the developer path Hermes' own error message
-recommends instead:
+**Status: verified 2026-08-22** on the 4090 box (Linux). Hermes lives *in the
+repo* as of that date. One command installs it:
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git ~/hermes-src
-cd ~/hermes-src
-git checkout <pinned-commit>          # v2026.8.19 / pyproject 0.20.5 as of 2026-08-22
+Hermes/setup-runtime.sh
 ```
 
-That's enough to read source (what Task 1 needed). If you also want a
-runtime — `hermes --version`, `hermes plugins list` — `uv sync --python
-3.11` builds one (needs `uv self update` first; 0.8.15 can't parse this
-repo's `pyproject.toml`/`uv.lock`). **Do not** add `--with-editable
-<repo>/backend` to get `samantha` importable inside it — that pulls in
-`backend`'s `pipecat-ai[silero]` dependency, which drags in `numba`,
-which on Intel Mac resolves to an `llvmlite` version with no `x86_64`
-wheel and tries to build LLVM from source. That's not a Hermes problem;
-`pipecat-ai` itself is dead weight from an abandoned approach this
-project is dropping, so don't pin around it — just don't combine the
-two environments.
+It clones `hermes-agent` into `.hermes/src` at the commit this project is
+written against, builds its venv on Python 3.11, installs the three
+dependencies Hermes declares but never installs (`loguru`, `httpx`,
+`aiohttp`), creates `.hermes/home` as HERMES_HOME with the two plugins
+symlinked in, and enables both. It is idempotent — re-run it after moving the
+pin. `.hermes/` is gitignored; the pin itself lives in the script.
 
-**Getting `samantha` importable inside a Hermes plugin environment is
-UNRESOLVED.** The cheap workaround, confirmed from the repo's own venv
-without touching Hermes at all:
+The pin is `v2026.8.19` = commit `fcbd1076a93841fa88855acce810e342a5b78101`,
+whose `pyproject.toml` reads `0.20.5`. Note that `git ls-remote --tags` prints
+the *annotated tag object's* hash (`b05e680e…`), not the commit — ask for
+`"v2026.8.19^{}"` to get the one above.
+
+Run it through the wrapper, never a bare `hermes`:
 
 ```bash
-PYTHONPATH="<repo>/backend" backend/.venv/bin/python -c \
-  "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"   # 24000
+Hermes/run-gateway.sh                 # starts the gateway
+Hermes/run-gateway.sh --version       # v0.20.5 (2026.8.19), install dir in-repo
+Hermes/run-gateway.sh plugins list    # both samantha-* reading "enabled"
 ```
 
-`PYTHONPATH` is the likely answer for the real plugin runtime too — a
-plugin under `~/.hermes/plugins/samantha_voice/` presumably needs
-`sys.path` or `PYTHONPATH` pointed at `<repo>/backend` at plugin load
-time, not a `pip install -e` merge of the two dependency trees. Whoever
-picks up the plugin task should settle this properly; it wasn't chased
-further here.
+The wrapper exports `HERMES_HOME=.hermes/home` and
+`PYTHONPATH=<repo>/backend:<repo>`. Both are load-bearing: without the first,
+Hermes reads whatever personal `~/.hermes` the machine's owner has (a
+different version, a shared `state.db`); without the second, the plugins
+cannot import `samantha.tts` and Hermes logs a warning and carries on with
+the whole-file path falling through to Edge TTS.
 
-Avoid the shell installer (`install.sh`) entirely on a daily-driver
-machine — it builds Node.js, ripgrep, and ffmpeg via Homebrew, and on a
-Tier-3 Homebrew platform (no bottles) that means compiling LLVM/ffmpeg
-from source. Attempting it here ran 20+ minutes without finishing,
-nearly filled the disk, and twice broke system `git` when the runaway
-background build was killed mid-cleanup (repaired both times). The
-plain `git clone` above is the only install step this project should
-run against this machine; nothing that writes outside the repo or
-scratch, no `brew`, no `curl | bash`.
+**`samantha` importable inside a plugin — RESOLVED.** An earlier version of
+this document left this open. `PYTHONPATH` was indeed the answer, and
+`run-gateway.sh` is where it now lives. **Measured 2026-08-22:**
+`Hermes/run-gateway.sh plugins doctor samantha_voice` prints a
+`samantha.config` log line and then "runtime discovery, manifest parsing,
+import, and registration passed".
 
-Verify a Hermes runtime, if you built one via `uv sync`:
+Two naming traps, both measured:
 
-```bash
-.venv/bin/hermes --version         # Hermes Agent v0.20.5 (2026.8.19)
-.venv/bin/hermes plugins list      # NOT bare `hermes plugins` — that opens an interactive TUI
-```
+- `plugins enable` / `plugins list` take the **kebab-case manifest name**
+  (`samantha-voice`); `plugins doctor` takes the **snake_case directory name**
+  (`samantha_voice`) and answers `not found` for the other.
+- `plugins enable` prompts for tool-override capability. `--no-allow-tool-override`
+  answers "no" without a prompt, which is what both plugins declare.
 
-### Hermes plugin dependencies (manual install)
+**What is NOT touched:** the machine owner's `~/.hermes`, their
+`~/.local/bin/hermes`, and any gateway already running under them. Samantha's
+Hermes and the owner's are separate installs with separate state.
 
-Hermes parses `python_dependencies` declared in plugin manifests but does
-**not** install them automatically — it only warns when one is missing, and
-the plugin still appears as "enabled" in `hermes plugins list` (which reads
-the manifest file only, never probes the runtime). Missing imports fail at
-runtime with `ModuleNotFoundError`.
+**Do not** `uv tool install hermes-agent` — PyPI is stuck on a stale `0.19.0`
+that predates the streaming-TTS module, and Hermes' own build backend blocks
+installing from a git URL. And avoid the shell installer (`install.sh`)
+entirely: it builds Node, ripgrep and ffmpeg via the system package manager.
 
-**Install manually into the Hermes venv** before running a plugin that needs
-them. The form is:
-
-```bash
-cd ~/hermes-src
-uv pip install --python .venv/bin/python <package> [<package> ...]
-```
-
-Packages needed so far:
-- `loguru` (already installed in venv)
-- `aiohttp` (version 3.14.3, installed 2026-08-22)
+`uv` must be recent enough to parse Hermes' `uv.lock`; 0.8.15 cannot. Run
+`uv self update` first (0.12.5 verified working).
 
 ## Kiosk (OS1 interface served through the Hermes gateway)
 
@@ -335,13 +314,14 @@ though the directory is snake_case (`samantha_kiosk`). `hermes plugins list`
 shows it as `not enabled` until you run:
 
 ```bash
-~/hermes-src/.venv/bin/hermes plugins enable samantha-kiosk
+Hermes/run-gateway.sh plugins enable samantha-kiosk --no-allow-tool-override
 ```
 
-It prompts to grant tool-override capability — decline (`n`/Enter), same as
-`samantha-voice`'s `allow_tool_override: false`. This writes to
-`~/.hermes/config.yaml`'s `plugins.enabled` list; it's a one-time step per
-machine, not per session. `hermes plugins doctor samantha_kiosk` confirms
+`--no-allow-tool-override` declines the tool-override capability without a
+prompt, matching `samantha-voice`'s `allow_tool_override: false`. This writes
+to `.hermes/home/config.yaml`'s `plugins.enabled` list — the repo's own
+HERMES_HOME, not the machine owner's. `Hermes/setup-runtime.sh` already does
+this, so it is normally not needed at all. `hermes plugins doctor samantha_kiosk` confirms
 runtime discovery/import/registration but does **not** confirm enablement —
 only `hermes plugins list` shows enabled/not-enabled state.
 
@@ -350,8 +330,8 @@ only `hermes plugins list` shows enabled/not-enabled state.
 ```bash
 export SAMANTHA_KIOSK_STATIC_ROOT="$(pwd)/frontend/dist"   # default: frontend/dist
 export SAMANTHA_KIOSK_PORT=7777                             # default: 7777
-export PYTHONPATH="$(pwd)/backend:$(pwd)"                   # samantha.* imports
-~/hermes-src/.venv/bin/hermes gateway
+# run-gateway.sh exports PYTHONPATH and HERMES_HOME itself.
+Hermes/run-gateway.sh
 ```
 
 Expected in the log: `samantha-kiosk: serving <dist-path> on :7777`.
@@ -392,7 +372,7 @@ WebSocket, connecting to `ws://localhost:7777/ws` and sending
 {"type": "done", "thinking_ms": 0}
 ```
 
-**Measured caveat:** the reply comes from Hermes' stock `~/.hermes/SOUL.md`
+**Measured caveat:** the reply comes from Hermes' stock `SOUL.md`
 persona ("Eres Hermes Agent..."), not from Samantha's personality
 (`backend/samantha/personality.py`) — one reply during testing literally
 opened with "Soy Hermes, tu asistente." The kiosk plugin routes text into

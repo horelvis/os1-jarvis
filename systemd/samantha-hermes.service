@@ -1,8 +1,11 @@
 # Samantha agentic brain — hermes gateway daemon
 #
 # Install:
-#   1. Install hermes-agent inside Samantha's workspace or system-wide using uv:
-#      uv tool install hermes-agent --with mcp
+#   1. Install the pinned runtime into the repo: Hermes/setup-runtime.sh
+#      (clones hermes-agent at the commit this project is written against,
+#      builds its venv, links the plugins and enables them). Do NOT
+#      `uv tool install hermes-agent` — PyPI is stale, and a mismatched
+#      version fails the plugin contracts silently.
 #   2. Copy this file to ~/.config/systemd/user/, then:
 #        systemctl --user daemon-reload
 #        systemctl --user enable --now samantha-hermes.service
@@ -18,7 +21,9 @@ After=network.target
 [Service]
 Type=simple
 
-# API Server configuration. Environment variables override config.yaml / ~/.hermes/.env.
+# API Server configuration. Environment variables override the config.yaml and
+# .env inside the repo's own HERMES_HOME (.hermes/home/), which run-gateway.sh
+# sets — never the machine owner's ~/.hermes.
 Environment=API_SERVER_ENABLED=true
 Environment=API_SERVER_PORT=8642
 Environment=API_SERVER_HOST=127.0.0.1
@@ -28,8 +33,11 @@ Environment=API_SERVER_HOST=127.0.0.1
 #   [Service]
 #   Environment=API_SERVER_KEY=<new key>
 
-# Path to the hermes executable (adjust if installed in a virtualenv or custom location)
-ExecStart=/usr/bin/env hermes gateway
+# run-gateway.sh, not a bare `hermes`: /usr/bin/env would pick up whatever
+# hermes is on PATH — on a machine with a personal install, that is a
+# different version with a different HERMES_HOME. The wrapper pins both, and
+# exports the PYTHONPATH the plugins need to import `samantha`.
+ExecStart=%h/git/os1-samantha/Hermes/run-gateway.sh
 
 Restart=on-failure
 RestartSec=5

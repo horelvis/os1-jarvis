@@ -11,12 +11,15 @@ happens, and nothing says why. Each check below exists because that specific
 failure has actually happened, and each one names what you would otherwise
 have seen instead.
 
-Paths assume the repo at `$REPO` and Hermes at `~/hermes-src`.
+Paths assume the repo at `$REPO`. Hermes lives *inside* it since
+2026-08-22 — `Hermes/setup-runtime.sh` pins it at `.hermes/src` with its
+HERMES_HOME at `.hermes/home`, and `Hermes/run-gateway.sh` is the only
+entry point that exports the right environment. A bare `hermes` on PATH is
+somebody else's install, on a version these plugins are not written against.
 
 ```bash
 export REPO="$HOME/git/os1-samantha"      # adjust
-export HERMES="$HOME/hermes-src"
-export PYTHONPATH="$REPO/backend:$REPO"
+cd "$REPO"
 ```
 
 ---
@@ -58,11 +61,14 @@ somewhere else.
 ## 3. Hermes runs, and knows about our plugins
 
 ```bash
-"$HERMES/.venv/bin/hermes" --version
-"$HERMES/.venv/bin/hermes" plugins list | grep -i samantha
+Hermes/run-gateway.sh --version
+Hermes/run-gateway.sh plugins list | grep -i samantha
 ```
 
-Expect 0.20.5 or later and both `samantha-voice` and `samantha-kiosk`.
+Expect `v0.20.5 (2026.8.19)`, an install directory inside the repo, and both
+`samantha-voice` and `samantha-kiosk` reading `enabled`. If the version is
+older, or the install directory is under `$HOME`, you are talking to a
+different Hermes — re-run `Hermes/setup-runtime.sh`.
 
 **"enabled" here proves only that the manifest parsed.** It does not mean the
 code imported. That distinction cost this project half a day, which is why
@@ -70,19 +76,28 @@ the next check exists separately.
 
 ## 4. The plugins actually import
 
+**Use the snake_case directory name here, not the kebab-case manifest name**
+— `doctor` resolves a path or a directory id, so `samantha-voice` answers
+`Plugin 'samantha-voice' was not found` while the plugin is loading fine.
+Measured 2026-08-22; the two commands take different names and always have.
+
 ```bash
-"$HERMES/.venv/bin/hermes" plugins doctor samantha-voice
-"$HERMES/.venv/bin/hermes" plugins doctor samantha-kiosk
+Hermes/run-gateway.sh plugins doctor samantha_voice
+Hermes/run-gateway.sh plugins doctor samantha_kiosk
 ```
 
 Expect discovery, manifest parsing, import and registration all passing.
+`samantha_voice` printing a `samantha.config` log line on the way is the
+proof that PYTHONPATH reached it — that import is the whole point.
 
 **If import fails:** it is almost always a missing dependency. Hermes
 declares `python_dependencies` and never installs them. Fix with:
 
 ```bash
-uv pip install --python "$HERMES/.venv/bin/python" loguru aiohttp
+uv pip install --python "$REPO/.hermes/src/.venv/bin/python" loguru httpx aiohttp
 ```
+
+Re-running `Hermes/setup-runtime.sh` does this for you; it is idempotent.
 
 **And know what the failure looks like if you skip this:** Hermes logs a
 warning, carries on, and every reply comes out of Edge TTS in a stranger's
@@ -91,16 +106,20 @@ voice.
 ## 5. The kiosk platform is enabled
 
 ```bash
-"$HERMES/.venv/bin/hermes" plugins list | grep samantha-kiosk
+Hermes/run-gateway.sh plugins list | grep samantha-kiosk
 ```
 
-`kind: platform` plugins are opt-in. If it says "not enabled":
+`kind: platform` plugins are opt-in. `setup-runtime.sh` enables both for you,
+so this should already read `enabled`. If it does not:
 
 ```bash
-"$HERMES/.venv/bin/hermes" plugins enable samantha-kiosk
+Hermes/run-gateway.sh plugins enable samantha-kiosk --no-allow-tool-override
 ```
 
-Note the **hyphenated manifest name**, not the underscored directory name.
+Note the **hyphenated manifest name**, not the underscored directory name
+`doctor` wants in check 4. `--no-allow-tool-override` answers the capability
+prompt with "no", which is what this plugin declares and what makes the step
+scriptable — neither plugin replaces a built-in tool.
 Until this runs the gateway serves nothing while the listing still shows the
 plugin, so "not enabled" reads as a state rather than as the reason.
 
@@ -109,16 +128,30 @@ plugin, so "not enabled" reads as a state rather than as the reason.
 This is the privacy check. Hermes has two separate registries and claiming
 only one leaves every fallback path going to Microsoft.
 
+**`discover_plugins()`, not a bare import.** The whole-file registry is
+populated by `ctx.register_tts_provider()` inside the plugin's `register(ctx)`,
+and only Hermes' loader calls that (`hermes_cli/plugins.py:2653, 4758`).
+Importing the package alone runs the streaming side's `@register` decorator
+and nothing else, so it reports `whole-file: NoneType` on a perfectly healthy
+install — a false alarm on the one check that is supposed to mean "audio is
+leaving the house". Measured 2026-08-22.
+
 ```bash
-cd "$HERMES" && ./.venv/bin/python -c "
+cd "$REPO/.hermes/src" && HERMES_HOME="$REPO/.hermes/home" \
+  PYTHONPATH="$REPO/backend:$REPO" ./.venv/bin/python -c "
+from hermes_cli.plugins import discover_plugins
+discover_plugins(force=True)
 from tools.tts_streaming import resolve_streaming_provider
 from agent.tts_registry import get_provider
-import Hermes.plugins.samantha_voice
 cfg = {'provider':'cosyvoice','streaming':{'provider':'cosyvoice'}}
 print('streaming :', type(resolve_streaming_provider(cfg)).__name__)
 print('whole-file:', type(get_provider('cosyvoice')).__name__)
 "
 ```
+
+`HERMES_HOME` matters here too: `get_provider` scopes its lookup by home
+(`agent/tts_registry.py:135`), so a check run against the wrong home reports
+a miss that the gateway would not have.
 
 Expect `CosyVoiceStreamingProvider` and `CosyVoiceSyncProvider`.
 

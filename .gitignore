@@ -42,3 +42,6 @@ Thumbs.db
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# Hermes runtime pinned by Hermes/setup-runtime.sh (source, venv and HERMES_HOME)
+.hermes/
