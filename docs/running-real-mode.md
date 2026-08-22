@@ -247,6 +247,26 @@ Verify a Hermes runtime, if you built one via `uv sync`:
 .venv/bin/hermes plugins list      # NOT bare `hermes plugins` — that opens an interactive TUI
 ```
 
+### Hermes plugin dependencies (manual install)
+
+Hermes parses `python_dependencies` declared in plugin manifests but does
+**not** install them automatically — it only warns when one is missing, and
+the plugin still appears as "enabled" in `hermes plugins list` (which reads
+the manifest file only, never probes the runtime). Missing imports fail at
+runtime with `ModuleNotFoundError`.
+
+**Install manually into the Hermes venv** before running a plugin that needs
+them. The form is:
+
+```bash
+cd ~/hermes-src
+uv pip install --python .venv/bin/python <package> [<package> ...]
+```
+
+Packages needed so far:
+- `loguru` (already installed in venv)
+- `aiohttp` (version 3.14.3, installed 2026-08-22)
+
 ## Not verified
 
 - Whether Chromium's Web Speech API (the STT path) can reach Google's servers
