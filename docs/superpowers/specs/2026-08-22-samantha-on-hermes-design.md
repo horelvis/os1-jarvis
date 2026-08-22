@@ -252,21 +252,54 @@ reaches `sync_turn()`. Granularity is the clause, not the word — honest,
 cheap, and good enough. Hermes' own history keeps whatever it keeps;
 ours, the one that feeds recall, does not.
 
-**Note, 2026-08-22:** the real `finish_streaming_tts` signature carries
-a keyword-only `interrupted: bool = False`
-(`docs/superpowers/specs/hermes-contracts-v0.20.5.md`, Contract 5) —
-Hermes' own seam for signalling a barge-in to the adapter, which the
-capability map's original (wrong) signature omitted entirely, so this
-design was written without knowing it existed. It's not yet settled
-from source alone whether Hermes calls
-`finish_streaming_tts(interrupted=True)` on barge-in, relies on
-`abort_streaming_tts()` for that path, or both in different
-circumstances — worth confirming before build step 5 (§8), since the
-adapter may be able to read `interrupted` off a call it already
-receives rather than only inferring cutoff from the browser's
-`playedMs` message. It does not change the trim rule itself:
-`interrupted` says a cutoff happened, not *where* — `playedMs`/the
-clause→ms map is still what selects the trim point.
+**Resolved from source, 2026-08-22.** Read the actual call sites in
+`/tmp/hermes-src` (tag v2026.8.19) rather than the docstrings:
+`gateway/streaming_tts_consumer.py` (the only caller of both methods)
+and its own caller, `gateway/run.py`.
+
+- **On barge-in, only `abort_streaming_tts` fires — never
+  `finish_streaming_tts`.** `gateway/run.py:28766-28772` (repeated at
+  ~29057 and ~29159) detects an interrupt, calls `agent.interrupt(...)`,
+  then `consumer.abort("barge-in")`. `StreamingTTSConsumer.abort()`
+  (`gateway/streaming_tts_consumer.py:384-411`) sets `self._aborted =
+  True` and schedules `self._safe_abort(reason)`, which calls
+  `adapter.abort_streaming_tts(handle, error=reason)`
+  (`streaming_tts_consumer.py:368-373`; `error` here is literally the
+  string `"barge-in"`). The drain loop's only call to
+  `finish_streaming_tts` is gated by `if not self._aborted and
+  self._handle is not None:` (`streaming_tts_consumer.py:275-278`) — a
+  synchronous check with no `await` between it and the call, so once
+  `abort()` has set `_aborted = True` that branch cannot run. Barge-in
+  and normal completion are mutually exclusive paths to two different
+  methods, not one method with a flag.
+- **`interrupted=True` is not a signal we can use — the one call site
+  that passes it is gated to never fire it.** The single call is
+  `finish_streaming_tts(self._handle, interrupted=self._aborted)`
+  (`streaming_tts_consumer.py:278`), reached only when the surrounding
+  `if not self._aborted` (line 275) already holds — so `self._aborted`,
+  and therefore `interrupted`, reads `False` on every call that actually
+  happens. This corrects the capability map §1 correction's own
+  speculation: the kwarg exists in the signature but is, in this call
+  site, effectively dead — barring a sub-microsecond cross-thread race
+  between the flag check and the argument evaluation, which no adapter
+  should design around. Treat `finish_streaming_tts`'s `interrupted` as
+  unusable for barge-in detection; `abort_streaming_tts` firing (or not)
+  is the real signal.
+- **Nothing tells the caller how much audio was played before the cut.**
+  `abort_streaming_tts(handle, error=reason)` carries only a free-text
+  `error` string (here, `"barge-in"`) — no duration, no byte/sample
+  count. `StreamingTTSHandle.audible` is a plain bool ("was any audio
+  ever written"), not an amount. No other value crosses this seam. This
+  is the answer that matters most: Hermes supplies **nothing**
+  quantitative about playback progress, so the trim rule below is not
+  optional plumbing — it is the only source of "how much did she
+  actually say", and it must be computed on our side exactly as
+  described.
+
+Confirms and sharpens the trim rule rather than replacing it:
+`abort_streaming_tts` firing is when to trim; `playedMs`/the clause→ms
+map (computed by us, from bytes `samantha-voice` itself wrote) is what
+decides where.
 
 ---
 

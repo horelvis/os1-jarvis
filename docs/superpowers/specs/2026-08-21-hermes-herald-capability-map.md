@@ -319,8 +319,11 @@ Samantha rather than on plumbing we would happily let churn.
 **The argument in favour, which is the decisive one (user, 2026-08-21):
 Hermes updates transparently.** Staying out of the core is what buys
 this. Every upstream release — new voice work, new providers, latency
-wins like PR #73862 — arrives by upgrading a dependency, not by
-re-merging a fork. Against a project shipping weekly, the compounding
+wins like the streaming-TTS seam (source comment cites `#60671`; this
+document originally cited PR #73862 from a web search — corrected
+2026-08-22 against `docs/superpowers/specs/hermes-contracts-v0.20.5.md`)
+— arrives by upgrading a dependency, not by re-merging a fork. Against a
+project shipping weekly, the compounding
 difference between "plugin" and "fork" is not close, and it is the
 whole reason to prefer the extension shape over vendoring pieces of
 Hermes into our backend.
@@ -651,7 +654,14 @@ Primary, read directly:
 - Releases index and v0.20.0 notes —
   https://github.com/NousResearch/hermes-agent/releases
 - PR #73862, streaming TTS adapter seam —
-  https://github.com/NousResearch/hermes-agent/pull/73862
+  https://github.com/NousResearch/hermes-agent/pull/73862 —
+  **correction, 2026-08-22:** this number came from a web search and
+  does not match the source. The comment directly above the methods in
+  `gateway/platforms/base.py` cites `(#60671)`; see
+  `docs/superpowers/specs/hermes-contracts-v0.20.5.md`. Left here,
+  struck through in effect rather than deleted, so the record of what
+  was cited and why shows the correction rather than silently
+  disappearing.
 - `website/docs/user-guide/features/tts.md`
 - `website/docs/user-guide/features/voice-mode.md`
 - Adding a Platform Adapter (developer guide)
