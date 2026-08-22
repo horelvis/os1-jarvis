@@ -9,11 +9,17 @@ gets prosodic conditioning. Honors personality v6 inline markers
 Public API:
 
     OUTPUT_SAMPLE_RATE: int = 24000 — the rate of every yielded chunk
-    stream(text)   → async generator yielding (pcm_chunk, "cosyvoice").
+    stream(text, client=None)
+                   → async generator yielding (pcm_chunk, "cosyvoice").
                      PCM is raw int16 little-endian at 24 kHz mono.
+                     Pass `client=new_client()` unless you are on the
+                     process's single long-lived loop (see `_client`).
+    new_client()   → an httpx.AsyncClient with the CosyVoice timeouts,
+                     for callers that own their event loop.
     synth(text)    → sync wrapper; collects the stream and returns
                      (wav_bytes, "cosyvoice"). WAV header at 24 kHz.
-                     Test-only convenience; /speak uses stream().
+                     Runs its own loop and its own client; /speak uses
+                     stream().
     is_available() → True iff the ref WAV and transcript are on disk.
 """
 
@@ -38,36 +44,90 @@ class VoiceMissingError(RuntimeError):
 OUTPUT_SAMPLE_RATE = 24000
 
 
+# THE CONSTRAINT THIS FILE IS SHAPED AROUND: an httpx.AsyncClient may
+# only be used on the event loop that created it. Its connection pool
+# holds transports bound to that loop; issuing a request from a second
+# loop fails (or, worse, fails intermittently and silently for the
+# caller who swallows it).
+#
+# So there are two client policies here, and callers pick:
+#   - no `client=` argument → the shared module-global pool below. Only
+#     correct for a caller that lives on ONE long-lived loop for the
+#     process's lifetime. That is exactly uvicorn/FastAPI, where the
+#     shared pool is a deliberate optimisation (no TCP handshake per
+#     /speak) and must stay.
+#   - `client=new_client()` → a client the caller creates, uses and
+#     closes on its own loop. Required for anything that runs on a
+#     short-lived or per-call loop: `synth()`'s own `asyncio.run()`, and
+#     the Hermes voice plugin, whose bridge spins up a fresh loop in a
+#     worker thread for every clause.
 _client: httpx.AsyncClient | None = None
+# The loop `_client` was created on, or None if it was built outside a
+# running loop. Used only to detect the misuse described above.
+_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+def new_client() -> httpx.AsyncClient:
+    """Build an AsyncClient with the configured CosyVoice timeouts.
+
+    Call this from a loop you own, and close it on that same loop (the
+    constraint above). It exists so callers that cannot use the shared
+    pool don't have to duplicate the timeout policy.
+
+    `read` is httpx's per-read-operation (inter-chunk) timeout, not a
+    whole-body cap: a healthy stream that keeps emitting chunks never
+    trips it, while a wedged server (CUDA hang) fails loudly instead
+    of freezing the caller forever.
+    """
+    timeout = httpx.Timeout(
+        connect=config.tts_cosyvoice_timeout_s,
+        read=config.tts_cosyvoice_timeout_s,
+        write=config.tts_cosyvoice_timeout_s,
+        pool=config.tts_cosyvoice_timeout_s,
+    )
+    return httpx.AsyncClient(timeout=timeout)
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def _get_client() -> httpx.AsyncClient:
     """Shared AsyncClient: one connection pool for all synthesis calls
     instead of a fresh client (and TCP handshake) per /speak.
 
-    `read` is httpx's per-read-operation (inter-chunk) timeout, not a
-    whole-body cap: a healthy stream that keeps emitting chunks never
-    trips it, while a wedged server (CUDA hang) fails loudly instead
-    of freezing /speak forever.
+    Safety net, not a strategy: if the cached client belongs to a
+    different loop than the caller's, it is unusable here (see the
+    constraint above), so it is dropped and rebuilt rather than handed
+    out to fail. The stale client cannot be awaited closed — its loop is
+    typically already gone — so it is left to GC. That leak is why this
+    only ever fires as a warning: a caller off the uvicorn loop should
+    be passing its own `client=`.
     """
-    global _client
-    if _client is None:
-        timeout = httpx.Timeout(
-            connect=config.tts_cosyvoice_timeout_s,
-            read=config.tts_cosyvoice_timeout_s,
-            write=config.tts_cosyvoice_timeout_s,
-            pool=config.tts_cosyvoice_timeout_s,
+    global _client, _client_loop
+    loop = _running_loop()
+    if _client is not None and _client_loop is not loop:
+        logger.warning(
+            "tts: shared HTTP client belongs to another event loop — rebuilding. "
+            "A caller on its own loop should pass client=tts.new_client() instead."
         )
-        _client = httpx.AsyncClient(timeout=timeout)
+        _client = None
+    if _client is None:
+        _client = new_client()
+        _client_loop = loop
     return _client
 
 
 async def aclose() -> None:
     """Release the shared HTTP client. Called from api.py's lifespan."""
-    global _client
+    global _client, _client_loop
     if _client is not None:
         await _client.aclose()
         _client = None
+        _client_loop = None
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -84,24 +144,33 @@ def is_available() -> bool:
     )
 
 
-async def stream(text: str) -> AsyncIterator[tuple[bytes, str]]:
+async def stream(
+    text: str, *, client: httpx.AsyncClient | None = None
+) -> AsyncIterator[tuple[bytes, str]]:
     """Yield (pcm_chunk, "cosyvoice") tuples.
 
     Every chunk is raw 24 kHz mono int16 little-endian PCM, no header.
     Empty input yields nothing. Exceptions propagate so the caller can
     surface a real error instead of silence.
+
+    `client` selects the HTTP client policy — see the note above
+    `_client`. Omit it only from a caller that lives on one long-lived
+    event loop (uvicorn); pass `new_client()` from anywhere else,
+    because an httpx.AsyncClient may only be used on the loop that
+    created it.
     """
     if not text or not text.strip():
         return
-    async for chunk in _stream_cosyvoice(text.strip()):
+    async for chunk in _stream_cosyvoice(text.strip(), client=client):
         yield chunk, "cosyvoice"
 
 
 def synth(text: str) -> tuple[bytes, str]:
     """Synchronous wrapper around stream(). Returns (wav_bytes, backend).
 
-    Test-only convenience; /speak uses stream() via StreamingResponse
-    so audio starts flowing before synthesis ends.
+    Used by the Hermes whole-file provider and by tests; /speak uses
+    stream() via StreamingResponse so audio starts flowing before
+    synthesis ends.
     """
     if not text or not text.strip():
         return b"", "empty"
@@ -109,10 +178,18 @@ def synth(text: str) -> tuple[bytes, str]:
 
 
 async def _consolidate(text: str) -> tuple[bytes, str]:
-    try:
+    # synth() runs in its own short-lived asyncio.run() loop, so it owns
+    # its client outright: created and closed here, on this loop. It
+    # deliberately does NOT touch the shared pool — an AsyncClient may
+    # only be used on the loop that created it, and this function used
+    # to enforce that by closing the global on the way out, which meant
+    # a whole-file call could yank the client out from under a /speak
+    # request (or another thread) mid-stream. Owning one removes both
+    # the loop mismatch and that race.
+    async with new_client() as client:
         chunks: list[bytes] = []
         backend: str = ""
-        async for chunk, label in stream(text):
+        async for chunk, label in stream(text, client=client):
             chunks.append(chunk)
             backend = label
 
@@ -127,11 +204,6 @@ async def _consolidate(text: str) -> tuple[bytes, str]:
             wf.setframerate(OUTPUT_SAMPLE_RATE)
             wf.writeframes(pcm)
         return buf.getvalue(), backend
-    finally:
-        # synth() runs in its own asyncio.run() loop — close the shared
-        # client here so it can't outlive that loop and poison the next
-        # caller. /speak (uvicorn's single loop) is unaffected.
-        await aclose()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -173,7 +245,9 @@ def _load_cosyvoice_refs() -> tuple[str, bytes, str]:
     return _cosyvoice_ref_transcript, _cosyvoice_ref_wav_bytes, wav_path.name
 
 
-async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
+async def _stream_cosyvoice(
+    text: str, *, client: httpx.AsyncClient | None = None
+) -> AsyncIterator[bytes]:
     """POST tts_text + ref transcript + ref WAV to /inference_zero_shot;
     yield raw 24 kHz mono int16 PCM chunks.
 
@@ -211,7 +285,8 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
         "prompt_wav": (wav_name, wav_bytes, "audio/wav"),
     }
 
-    client = _get_client()
+    if client is None:
+        client = _get_client()
     async with client.stream("POST", url, files=files) as resp:
         if resp.status_code != 200:
             err = await resp.aread()

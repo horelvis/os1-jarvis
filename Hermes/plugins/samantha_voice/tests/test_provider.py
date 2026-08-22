@@ -1,7 +1,30 @@
+import asyncio
+
 import httpx
 
 from Hermes.plugins.samantha_voice import provider as prov
 from Hermes.plugins.samantha_voice.markers import has_unclosed_tag
+
+
+class _LoopBoundClient:
+    """Fake HTTP client with the one property that matters here:
+
+    an httpx.AsyncClient may only be used on the event loop that created
+    it. Everything else about httpx is irrelevant to this plugin's
+    correctness; this is the property the bridge's one-loop-per-clause
+    design keeps breaking, so the fake models it and nothing else.
+    """
+
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.closed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.closed = True
+        return False
 
 
 class _FakeTTS:
@@ -11,12 +34,31 @@ class _FakeTTS:
         self._available = available
         self._chunks = chunks
         self.calls: list[str] = []
+        self.clients: list[_LoopBoundClient] = []
+        self._shared: _LoopBoundClient | None = None
 
     def is_available(self):
         return self._available
 
-    async def stream(self, text):
+    def new_client(self):
+        client = _LoopBoundClient()
+        self.clients.append(client)
+        return client
+
+    def _resolve(self, client):
+        """Mirror tts.stream(): no client → the shared module-global one,
+        created on whichever loop happened to ask for it first."""
+        if client is None:
+            if self._shared is None:
+                self._shared = _LoopBoundClient()
+            client = self._shared
+        if client.loop is not asyncio.get_running_loop():
+            # What httpx does when a client outlives its loop.
+            raise RuntimeError("Event loop is closed")
+
+    async def stream(self, text, *, client=None):
         self.calls.append(text)
+        self._resolve(client)
         for c in self._chunks:
             yield c, "cosyvoice"
 
@@ -203,7 +245,7 @@ def test_records_zero_bytes_for_a_clause_that_raises(monkeypatch):
     # audio — Plan 3's trim rule needs every attempted clause present,
     # not just the successful ones.
     class _RaisingTTS(_FakeTTS):
-        async def stream(self, text):
+        async def stream(self, text, *, client=None):
             self.calls.append(text)
             raise RuntimeError("CosyVoice returned 200 with no audio")
             yield b""  # pragma: no cover - unreachable, keeps this an async gen
@@ -222,7 +264,7 @@ def test_transport_error_is_treated_like_a_failed_clause(monkeypatch):
     # RuntimeError would let one of these abort the whole reply instead
     # of just the clause that hit it.
     class _TimingOutTTS(_FakeTTS):
-        async def stream(self, text):
+        async def stream(self, text, *, client=None):
             self.calls.append(text)
             raise httpx.ReadTimeout("cosyvoice took too long")
             yield b""  # pragma: no cover - unreachable, keeps this an async gen
@@ -233,3 +275,54 @@ def test_transport_error_is_treated_like_a_failed_clause(monkeypatch):
     out = list(p.stream(clause))
     assert out == []
     assert p.bytes_yielded_per_clause == [(clause, 0)]
+
+
+def test_successive_clauses_all_get_synthesised(monkeypatch):
+    """The regression this whole per-clause-client design exists for.
+
+    `bridge.iter_sync` runs every clause on a NEW event loop in a worker
+    thread, and an httpx.AsyncClient may only be used on the loop that
+    created it. While the provider took the client from `tts`'s shared
+    module global, clause 1 created it on loop 1 and every clause after
+    that used a client whose loop was already closed — measured against
+    the live CosyVoice server, 7 of 15 clauses yielded zero bytes.
+
+    Nothing failed loudly: stream() catches the error per clause so one
+    bad clause can't kill a reply, so half the words went missing behind
+    a log line. This test fails against that code (clauses 2..n yield
+    nothing) and passes once each clause owns a client built on its own
+    loop.
+    """
+    fake = _FakeTTS(chunks=(b"pcm",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    clauses = [
+        "Hoy he estado pensando en lo que me contaste ayer.",
+        "Me dejó dándole vueltas un buen rato, la verdad.",
+        "No sé si te pasa a ti también con esas cosas.",
+        "Cuéntame cómo lo llevas ahora, si te apetece.",
+    ]
+    for clause in clauses:
+        assert list(p.stream(clause)) == [b"pcm"], f"clause went silent: {clause}"
+
+    assert fake.calls == clauses
+    assert p.bytes_yielded_per_clause == [(c, 3) for c in clauses]
+
+
+def test_each_clause_closes_the_client_it_opened(monkeypatch):
+    # A client built on a worker loop can never be closed later — that
+    # loop is gone — so it has to be closed before the clause ends, or
+    # every clause of every turn leaks a connection pool for weeks.
+    fake = _FakeTTS(chunks=(b"pcm",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+    long_enough = (
+        "Una frase suficientemente larga para hablar.",
+        "Y otra igual de larga.",
+    )
+    assert all(len(c) >= prov.MIN_CLAUSE_CHARS for c in long_enough)
+    for clause in long_enough:
+        list(p.stream(clause))
+    assert len(fake.clients) == 2
+    assert all(c.closed for c in fake.clients)

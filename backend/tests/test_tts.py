@@ -52,3 +52,46 @@ def test_tts_shared_client_reused_and_closed():
     assert c1 is c2
     asyncio.run(tts.aclose())
     assert tts._client is None
+
+
+def test_synth_does_not_touch_the_shared_client(monkeypatch):
+    """synth() must own its client, not borrow and close the shared one.
+
+    An httpx.AsyncClient may only be used on the loop that created it,
+    and synth() runs its own asyncio.run() loop. It used to reconcile
+    that by closing the module global on the way out — which, now that
+    the Hermes whole-file provider calls synth() on a live path, could
+    yank the pool out from under a /speak stream mid-request. It now
+    creates and closes its own client instead.
+    """
+    seen: list[object] = []
+
+    async def fake_stream_cosyvoice(text, *, client=None):
+        seen.append(client)
+        yield b"\x00\x01" * 8
+
+    sentinel = object()
+    monkeypatch.setattr(tts, "_stream_cosyvoice", fake_stream_cosyvoice)
+    monkeypatch.setattr(tts, "_client", sentinel)
+
+    wav, backend = tts.synth("Hola, ¿qué tal estás?")
+    assert backend == "cosyvoice"
+    assert wav.startswith(b"RIFF")
+    assert seen and all(c is not None and c is not sentinel for c in seen)
+    assert tts._client is sentinel  # untouched, still usable by /speak
+
+
+def test_shared_client_is_rebuilt_when_the_running_loop_changed():
+    """The safety net for the constraint above: a cached client whose
+    loop is gone is unusable, so _get_client() drops it rather than
+    handing it out to fail."""
+    import asyncio
+
+    async def grab():
+        return tts._get_client()
+
+    first = asyncio.run(grab())  # created on a loop that is now closed
+    second = asyncio.run(grab())
+    assert first is not second
+    asyncio.run(tts.aclose())
+    assert tts._client is None

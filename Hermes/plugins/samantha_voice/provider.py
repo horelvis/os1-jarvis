@@ -205,9 +205,26 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
 
 
 async def _pcm_only(clause: str):
-    """Drop tts.stream()'s backend label; the provider only wants bytes."""
-    async for chunk, _backend in tts.stream(clause):
-        yield chunk
+    """Drop tts.stream()'s backend label; the provider only wants bytes.
+
+    An httpx.AsyncClient may only be used on the event loop that created
+    it. `iter_sync` runs every clause on a NEW loop in a worker thread,
+    so `tts`'s shared module-global client — correct for the FastAPI
+    backend, which lives on one uvicorn loop forever — is bound to a
+    loop that is already closed by the time the second clause of a turn
+    asks for it. That failure surfaces as a transport error that
+    `stream()` catches and logs as "clause failed, skipping": measured
+    against the live CosyVoice server on 2026-08-22, 7 of 15 clauses
+    yielded zero bytes, and half the reply went unspoken with every test
+    still green.
+
+    So each clause owns its client: created on this loop, closed on this
+    loop. The cost is one TCP handshake per clause to a LAN server;
+    measured failure rate with a per-clause client was 0 of 15.
+    """
+    async with tts.new_client() as client:
+        async for chunk, _backend in tts.stream(clause, client=client):
+            yield chunk
 
 
 CosyVoiceStreamingProvider = register("cosyvoice")(CosyVoiceStreamingProvider)
