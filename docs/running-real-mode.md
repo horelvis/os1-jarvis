@@ -142,10 +142,18 @@ is Samantha freezing for a minute rather than erroring. Not yet fixed.
 abbreviations and symbols are not expanded — expect "2026", "Dr.", "%" to be
 read oddly. **Measured** at container start.
 
-**Short text breaks synthesis.** CosyVoice zero-shot conditions on the
-reference transcript (~130 chars). When `tts_text` is much shorter, hifigan
-returns a 200 with an empty body and `tts.py` raises. One-word replies are
-affected. Use long sentences when testing by hand.
+**Short text degrades quality; isolated single words sometimes fail.**
+CosyVoice zero-shot conditions on the reference transcript (~130 chars, ~173
+once the server prepends its own prefix). When `tts_text` is much shorter the
+server logs "this may lead to bad performance" and returns audio anyway — it
+does **not** crash (an earlier version of this document said hifigan crashed;
+measurement on 2026-08-22 disproved it). What does fail is an isolated
+one-or-two-word utterance, intermittently and content-specifically: `'No.'`
+failed 2 of 6 calls and bare `'No'` 1 of 6, while `'Sí.'`, `'Ya.'` and
+`'No, claro.'` never failed in 6 each, and nothing between 10 and 80 chars
+failed in 76 calls. The failure arrives as `peer closed connection without
+sending complete message body` (an httpx `RemoteProtocolError`), not as the
+empty-body case. Use whole sentences when testing by hand.
 
 **Time-to-first-audio is the whole reply.** The CosyVoice log shows a single
 `yield speech len 7.0` — audio is delivered in one piece at the end, not

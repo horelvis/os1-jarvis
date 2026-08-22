@@ -303,7 +303,7 @@ So the extension shape is roughly:
 | memory (Chroma + ring + facts) | memory provider plugin |
 | CosyVoice voice | TTS plugin provider overriding `stream()` |
 | personality | `~/.hermes/SOUL.md` + `transform_llm_output` hook |
-| spoken-text shaping (the CosyVoice expression markers, short-text crash guard) | `pre_transcription` / output hooks |
+| spoken-text shaping (the CosyVoice expression markers, isolated-fragment merge guard) | `pre_transcription` / output hooks |
 | OS1 frontend | stays ours, unchanged |
 
 **The cost of this shape, stated plainly:** it binds Samantha's identity

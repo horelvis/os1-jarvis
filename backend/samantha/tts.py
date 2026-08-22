@@ -181,11 +181,24 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
     `"You are a helpful assistant.<|endofprompt|>"` to prompt_text
     so we send plain Spanish here.
 
-    Failure modes:
-      - tts_text much shorter than prompt_text → hifigan crashes with a
-        kernel-size error; server returns 200 + empty body. Detected and
-        raised as a useful error.
-      - Unrecognized marker → same silent 200+empty failure.
+    Failure modes, as measured against the live server on 2026-08-22
+    (this replaces an earlier account that said short text crashes
+    hifigan — it does not, for this server build):
+      - tts_text much shorter than prompt_text → the server logs
+        "... too short than prompt text ..., this may lead to bad
+        performance" and returns audio anyway. Degraded quality, not a
+        failure.
+      - Isolated one-or-two-word utterances fail intermittently and
+        content-specifically: 'No.' failed 2/6 calls and bare 'No' 1/6,
+        while 'Sí.', 'Ya.' and 'No, claro.' never failed in 6 each, and
+        nothing between 10 and 80 chars failed in 76 calls. The failure
+        arrives as the server closing the connection mid-response ("peer
+        closed connection without sending complete message body"), which
+        httpx raises as RemoteProtocolError — it never reaches the
+        empty-body check below.
+      - 200 with an empty body: still guarded below, but not reproduced
+        in that measurement. An unrecognized marker is the remaining
+        suspect.
     """
     transcript, wav_bytes, wav_name = _load_cosyvoice_refs()
 
@@ -212,7 +225,11 @@ async def _stream_cosyvoice(text: str) -> AsyncIterator[bytes]:
                 yield chunk
         if not got_any:
             raise RuntimeError(
-                "cosyvoice returned 200 but no audio — most likely "
-                "tts_text shorter than prompt_text (hifigan kernel "
-                "size 4), or an unrecognized expression marker"
+                "cosyvoice returned 200 but no audio — cause unconfirmed; "
+                "an unrecognized expression marker is the main suspect. "
+                "NOT the old 'text shorter than the reference prompt' "
+                "story: short text only degrades quality (the server says "
+                "so and returns audio), and the real short-text failure is "
+                "an intermittent mid-response disconnect that surfaces as "
+                "httpx.RemoteProtocolError, not this. Check the server log."
             )

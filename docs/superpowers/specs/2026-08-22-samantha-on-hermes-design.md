@@ -92,20 +92,21 @@ robotic. This is settled from earlier work; do not revisit.
 come from existing knowledge and neither of which the Hermes side knows
 about:
 
-1. **Short-text crash.** CosyVoice's hifigan crashes when `tts_text` is
-   much shorter than `prompt_text`. *(Correction, 2026-08-22, against
-   `/tmp/hermes-src/tools/tts_streaming.py:95-100`: `SentenceChunker`
-   does **not** hand out arbitrarily short clauses — it already merges
-   any fragment shorter than `min_len` (default 20 chars) into the
-   *following* sentence. A floor exists on Hermes' side. The real
-   hazard is narrower: 20 chars can still sit well below whatever
-   length `tts_text` needs to be *relative to `prompt_text`* for
-   CosyVoice's own reference transcript, which is not something
-   `SentenceChunker` knows or is trying to satisfy.)* The provider must
-   still pad, merge or hold back sub-threshold clauses rather than
-   passing them through — the conclusion is unchanged, only the reason
-   is — and this remains the single most likely cause of a broken first
-   demo.
+1. **Isolated short fragments.** *(Rewritten 2026-08-22 after measuring
+   against the live server — see "Empirical findings" below. The
+   original claim here, "CosyVoice's hifigan crashes when `tts_text` is
+   much shorter than `prompt_text`", is false for this server build and
+   should not be repeated.)* Short text does not crash: the server logs
+   "this may lead to bad performance" and returns audio. What does fail
+   is narrower and content-specific — an isolated one-or-two-word
+   utterance, intermittently, arriving as a mid-response disconnect.
+   A floor already exists on Hermes' side: `SentenceChunker` merges any
+   fragment shorter than `min_len` (default 20 chars) into the
+   *following* sentence (`~/hermes-src/tools/tts_streaming.py:95-100`).
+   The provider still merges sub-threshold clauses rather than passing
+   them through, but the reason is "never send a bare 'No.' alone", not
+   a length cutoff — and merging costs the tail, so the threshold
+   should be low (see the findings).
 2. **Split expression markers.** `[laughter]` renders as a sound;
    `<laughter>palabra</laughter>` renders as smiled speech. A clause
    boundary landing inside either form produces garbage. The provider
@@ -124,6 +125,66 @@ with the server down `/speak` hangs for the full timeout instead of
 failing fast. Here, `available()` is documented as making no network
 calls, so cheap-and-local is correct — but the *streaming* path needs a
 short connect timeout so a dead 4090 surfaces in a second, not sixty.
+*(Status: not implemented. All four httpx timeout legs in
+`backend/samantha/tts.py` are still `tts_cosyvoice_timeout_s` (60 s), so
+with CosyVoice down every clause blocks a minute. Considered and
+deferred, not overlooked.)*
+
+### 3.1 Empirical findings against the live CosyVoice, 2026-08-22
+
+Measured directly against the server on the 4090 during plan 1. **These
+contradict the premise plan 1 was written on.** Read them before tuning
+anything, and re-measure rather than trusting the numbers blindly — they
+can drift with the server build.
+
+1. **The short-text crash does not reproduce.** The server warns and
+   proceeds. Its own log: `WARNING synthesis text Me alegro mucho. too
+   short than prompt text You are a helpful assistant.<|endofprompt|>…,
+   this may lead to bad performance`. Degraded quality, not a crash.
+
+2. **The effective reference prompt is ~173 chars, not 130.** The server
+   prepends `"You are a helpful assistant.<|endofprompt|>"` (44 chars) to
+   `prompt_text` (our 130-char transcript) before the length comparison.
+   Every "relative to the reference" calculation using 130/131 is off.
+
+3. **Failures are content-specific, not length-driven.** Zero failures at
+   ~15 chars (16 calls), ~30 (16), ~50 (16), ~80 (8), and at 3-4, 6-8 and
+   10-13 chars (20 each). But isolated `'No.'` failed 2/6 and bare `'No'`
+   1/6, while `'Sí.'`, `'Ya.'` and `'No, claro.'` never failed in 6 each.
+   So it is the isolated one-or-two-word utterance, intermittently
+   (~20-33%), not the length.
+
+4. **The failure mode is a transport error, not an empty body.** It
+   arrives as `peer closed connection without sending complete message
+   body` — httpx `RemoteProtocolError` — so a provider that catches only
+   `RuntimeError` (tts.py's 200-with-no-audio case) lets it abort the
+   whole reply. Catch `httpx.HTTPError` too.
+
+5. **Merging fixes it, but a high threshold costs the tail.** `'No,
+   claro.'` never failed, so merging an isolated fragment into its
+   neighbour is the right guard. But held text at the end of a turn is
+   *never spoken* — there is no end-of-reply hook — so for a tail, held
+   = 100% lost against sent = ~33% lost. Keep the merge threshold low
+   (~20-25); Hermes' own `SentenceChunker` already merges under 20.
+   Confirmed in use: a 38-char final sentence, "¿Quieres que hablemos de
+   ello un rato?", was held under `MIN_CLAUSE_CHARS = 40` and never
+   spoken, on the very first three-sentence test.
+
+6. **Clause-by-clause synthesis flattens the voice.** The user's verdict
+   on the shipped plugin: "suena bien, un pelín artificial comparado con
+   otras versiones de voz", and against an A/B with the same text
+   synthesised whole, "mucho mejor" — each clause is synthesised with no
+   knowledge of its neighbours, so intonation does not carry across a
+   sentence. The trade is latency against naturalness; middle options
+   exist (chunk by sentence rather than clause; speak sentence one fast
+   and the remainder as one piece behind it). Ruled: proceed as-is, tune
+   later.
+
+7. **Hermes' environment needs our dependencies, not just PYTHONPATH.**
+   `httpx` was already in Hermes' venv; `loguru` was not, and the plugin
+   failed to import until it was installed there. Declare them in
+   `plugin.yaml`'s `python_dependencies`. Plan 2 additionally needs
+   `chromadb`, `fastembed` and `numpy`, none of which are present.
 
 ---
 
@@ -261,7 +322,7 @@ cheap, and good enough. Hermes' own history keeps whatever it keeps;
 ours, the one that feeds recall, does not.
 
 **Resolved from source, 2026-08-22.** Read the actual call sites in
-`/tmp/hermes-src` (tag v2026.8.19) rather than the docstrings:
+`~/hermes-src` (tag v2026.8.19) rather than the docstrings:
 `gateway/streaming_tts_consumer.py` (the only caller of both methods)
 and its own caller, `gateway/run.py`.
 
