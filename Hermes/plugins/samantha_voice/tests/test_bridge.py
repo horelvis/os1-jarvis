@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from Hermes.plugins.samantha_voice.bridge import iter_sync
+from Hermes.plugins.samantha_voice.bridge import _ACLOSE_TIMEOUT_S, iter_sync
 
 
 def _agen_factory(chunks, delay=0.0):
@@ -56,8 +56,40 @@ def test_early_stop_joins_the_worker_thread():
         it = iter_sync(_agen_factory([b"a"] * 200), queue_size=1)
         assert next(it) == b"a"
         it.close()
-        # it.close()'s finally already does thread.join(timeout=2.0); give
-        # a slow scheduler a brief extra moment before asserting the exit.
-        time.sleep(0.02)
+        # it.close()'s finally already does thread.join(timeout=2.0)
+        # synchronously, so the thread is gone (or truly leaked) by now.
         leaked = [t for t in threading.enumerate() if t.name == "samantha-tts"]
         assert not leaked, f"samantha-tts worker thread(s) still alive: {leaked}"
+
+
+def test_hanging_aclose_does_not_leak_the_worker_thread():
+    # aclose() has no caller-side timeout protecting it (unlike the read
+    # loop, which real CosyVoice bounds via httpx — see bridge.py's
+    # module docstring). A generator whose aclose() hangs forever must
+    # still let the worker thread exit, bounded by _ACLOSE_TIMEOUT_S.
+    class _HangingAcloseAgen:
+        def __init__(self, chunks):
+            self._it = iter(chunks)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._it)
+            except StopIteration:
+                raise StopAsyncIteration
+
+        async def aclose(self):
+            await asyncio.sleep(999)  # simulates a wedged close
+
+    it = iter_sync(lambda: _HangingAcloseAgen([b"a", b"b", b"c"]))
+    assert next(it) == b"a"
+
+    start = time.monotonic()
+    it.close()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < _ACLOSE_TIMEOUT_S + 0.5, f"close() took {elapsed:.2f}s"
+    leaked = [t for t in threading.enumerate() if t.name == "samantha-tts"]
+    assert not leaked, f"samantha-tts worker thread(s) still alive: {leaked}"

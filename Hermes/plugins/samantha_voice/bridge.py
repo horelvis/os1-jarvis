@@ -12,6 +12,23 @@ is exactly the failure mode a barge-in triggers: the consumer takes one
 chunk and walks away, leaving a full, undrained queue, and a blind put
 against that queue never returns. One leaked thread per interruption is
 not tolerable on a device meant to run for weeks.
+
+Two other places could stall `pump()` and, with it, the cleanup that
+`thread.join()` is waiting on: the read loop (`async for chunk in agen`)
+and `agen.aclose()`.
+
+- The read loop is deliberately left unguarded here. For the real
+  client (`samantha.tts.stream`), every `httpx` read is already bounded
+  by `config.tts_cosyvoice_timeout_s` (default 60s — see
+  `backend/samantha/tts.py`), so a wedged connection raises instead of
+  hanging forever. That bound is per-read, not a whole-body cap — a
+  server dribbling one byte every few seconds would never trip it —
+  but that's a property of the producer's own timeout configuration,
+  not something this generic thread/queue adapter can guess at
+  (`agen_factory` need not be CosyVoice at all). The drip-feed gap
+  belongs in `tts.py`'s response handling, not here.
+- `aclose()` has no such caller-side protection — it sits entirely on
+  bridge.py's own cleanup path, so it gets an explicit timeout below.
 """
 
 from __future__ import annotations
@@ -23,9 +40,10 @@ from typing import AsyncIterator, Callable, Iterator
 
 _SENTINEL = object()
 _POLL_INTERVAL = 0.1
+_ACLOSE_TIMEOUT_S = 1.0  # comfortably under the consumer's 2s join budget
 
 
-def _put_or_abandon(out: "queue.Queue", item: object, stop: threading.Event) -> None:
+def _put_or_abandon(out: queue.Queue, item: object, stop: threading.Event) -> None:
     """Put `item` on `out`, retrying until it fits or `stop` is set.
 
     Used for chunks, the re-raised exception, and the sentinel alike, so
@@ -70,13 +88,16 @@ def iter_sync(
             finally:
                 # An early return/break above leaves `agen` un-exhausted;
                 # aclose() releases whatever it's holding (e.g. an open
-                # HTTP stream to CosyVoice) instead of waiting on GC.
-                # Swallow errors from aclose() itself so they never mask
-                # a real exception already propagating out of the loop.
+                # HTTP stream to CosyVoice) instead of waiting on GC. This
+                # is the cleanup path — it must never hang, and unlike the
+                # read loop above, nothing upstream bounds it — so wrap it
+                # in its own timeout. Swallow both a timeout and any other
+                # error from aclose() itself so neither can mask a real
+                # exception already propagating out of the loop.
                 aclose = getattr(agen, "aclose", None)
                 if aclose is not None:
                     try:
-                        await aclose()
+                        await asyncio.wait_for(aclose(), timeout=_ACLOSE_TIMEOUT_S)
                     except BaseException:
                         pass
 
