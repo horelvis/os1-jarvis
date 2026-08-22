@@ -393,10 +393,12 @@ correction.
 
 ## Contract 4 — `PluginContext.register_platform`
 
-Source: `hermes_cli/plugins.py`, lines 2779–2818 (signature + docstring;
-body continues to ~2853 registering into `platform_registry`).
+Source: `hermes_cli/plugins.py`, lines 2778–2818 (decorator + signature
++ docstring; body continues to ~2853 registering into
+`platform_registry`).
 
 ```python
+@_serialized_replacement
 def register_platform(
     self,
     name: str,
@@ -640,7 +642,7 @@ read directly from the pinned commit.
    contract Tasks 2–4 subclass.
 
 2. **The PR citation is likely wrong.** The map cites "PR #73862" for
-   this seam. The actual source comment at `gateway/platforms/base.py:589`
+   this seam. The actual source comment at `gateway/platforms/base.py:588`
    says `(#60671)`. Neither number was independently verified against
    GitHub's PR list (network access to the PR itself wasn't checked),
    but the two numbers disagree and the source comment should be
@@ -695,19 +697,92 @@ read directly from the pinned commit.
 
 6. **`hermes plugins` (bare) does not list plugins** — it launches an
    interactive TUI. The listing command is `hermes plugins list` (or
-   `ls`). Minor, but it's literally the brief's own Step 5 verification
-   command, so anyone re-running the brief as written will see
-   `Interactive mode requires a terminal.` and may read that as
-   Hermes being broken rather than a wrong subcommand.
+   `ls`). **This corrects the task-1 brief's Step 5, not the capability
+   map** — the map never mentions `hermes plugins` at all
+   (`grep -in "hermes plugins" docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md`
+   returns nothing). Filed here anyway since it's the closest thing to
+   a "Corrections" home for it. Evidence:
+   ```
+   $ /tmp/hermes-src/.venv/bin/hermes plugins
+   Interactive mode requires a terminal.
+   $ /tmp/hermes-src/.venv/bin/hermes plugins list
+   [prints a table of ~30 bundled plugins]
+   ```
 
-7. **Everything else confirmed, not corrected:** `MessageType` members,
-   `MessageEvent` fields, `register_platform` signature and behavior,
-   the `irc` template (with the `is_connected` param addendum noted in
-   Contract 4), the five `kind` values, `SentenceChunker`'s role, and
-   the `StreamingTTSProvider` ABC + registry mechanism. The map's core
-   architectural read (outbound streaming yes / inbound streaming no,
-   the plugin-not-fork recommendation) is unaffected by any correction
-   above.
+7. **HIGH — a fabricated discrepancy in an earlier draft, now removed:
+   `is_connected` was never omitted from the map.** An earlier draft of
+   Contract 4 claimed `is_connected=is_connected` "is passed and was
+   omitted from the map's copy." That was false — the map has it too:
+   ```
+   $ grep -n is_connected docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md
+   417:        is_connected=is_connected,
+   ```
+   Same failure shape as Correction 3's `get_config_schema` claim — an
+   invented discrepancy where the map was actually right. The false
+   claim has been removed from Contract 4, which now quotes the real
+   `irc.register()` call in full instead of a lossy prose restatement,
+   so this class of error can't recur silently there.
+
+8. **MEDIUM — Contract 4's `register_platform` quote dropped its
+   decorator.** Real source:
+   ```
+   $ sed -n '2778,2779p' hermes_cli/plugins.py
+       @_serialized_replacement
+       def register_platform(
+   ```
+   `@_serialized_replacement` (defined at `hermes_cli/plugins.py:550`,
+   docstring "Make snapshot → write → lease attachment one atomic
+   transaction") wraps the call in `replacement_coordinator
+   .transaction()` — it makes plugin (re)registration atomic against
+   concurrent hot-reload/replacement, which is behavior, not
+   ornamentation, for anyone calling `register_platform` from a plugin
+   that might be reloaded. Now included in Contract 4's code block.
+
+9. **Everything else checked this round and confirmed, not corrected:**
+   - `MessageType` members (Contract 3) — map lines 102–112 match
+     source `gateway/platforms/base.py:2278-2288` exactly, both lists
+     `TEXT, LOCATION, PHOTO, VIDEO, AUDIO, VOICE, DOCUMENT, STICKER,
+     COMMAND`.
+   - `MessageEvent`'s `metadata` and `allow_gateway_control` fields —
+     the map cites both (line ~115); Contract 3's quote stopped before
+     line 2345 and only asserted these "unchanged from the map's
+     description" without re-showing them. Verified now:
+     `grep -n "^    metadata: Dict\|^    allow_gateway_control:"
+     gateway/platforms/base.py` returns `2380:    metadata: Dict[str,
+     Any] = field(default_factory=dict)` and `2389:
+     allow_gateway_control: bool = True` — both present and matching
+     the map.
+   - The five `kind` values — map line 391-392
+     (`grep -n "kind. values:" docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md`)
+     lists `standalone, backend, exclusive, platform, model-provider`;
+     source (`hermes_cli/plugins.py` lines 1063/3950/3996/3968) matches.
+   - `SentenceChunker`'s existence — map line 75 names it as "the
+     existing `SentenceChunker`"; confirmed as a real class at
+     `tools/tts_streaming.py:89`. The map does not describe its
+     internals (min_len merging, `<think>`-stripping), so there is
+     nothing there to contradict — Contract 1's fuller description is
+     new information, not a correction.
+   - The `StreamingTTSProvider` ABC + `@register("name")` registry
+     mechanism (Contract 1's non-signature prose) — map §2 describes
+     the same shape (static `available()`, abstract `stream()`,
+     `@register` decorator, `resolve_streaming_provider`); source
+     matches, already quoted in full in Contract 1.
+
+   **Not independently re-verified this round, called out rather than
+   silently assumed:** the map's paraphrase of `register_platform`'s
+   overall behavior ("handles adapter creation, config parsing, user
+   authorization, env auto-enable, cron delivery, and CLI UI
+   integration automatically" — map lines 245-247) was not traced
+   through the actual call chain (`platform_registry.register()` and
+   downstream) to confirm each clause; only the signature and the
+   `irc` template's field-for-field usage were checked. Flagging this
+   distinction — checked-in-full vs. plausible-and-unchallenged —
+   deliberately, per the standard the rest of this section is now held
+   to.
+
+   The map's core architectural read (outbound streaming yes / inbound
+   streaming no, the plugin-not-fork recommendation) is unaffected by
+   any correction above.
 
 ---
 
