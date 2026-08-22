@@ -157,7 +157,12 @@ The code is in git. The environment is not. A fresh machine needs:
 3. `PYTHONPATH` carrying both `<repo>/backend` and the repo root, so the
    plugins can import `samantha.*`.
 4. Both plugins symlinked into `~/.hermes/plugins/`, and the platform one
-   enabled — it is opt-in.
+   enabled — it is opt-in. The command is
+   `hermes plugins enable samantha-kiosk`, using the **hyphenated manifest
+   name**, not the directory name. It writes a `plugins.enabled` entry plus an
+   `entries.samantha-kiosk` block into `~/.hermes/config.yaml`. Until this is
+   done the gateway serves nothing, while `hermes plugins list` still shows
+   the plugin — "not enabled" there is a state, not an error.
 5. `~/.hermes/config.yaml` with `tts.provider` and `tts.streaming.provider`
    set to `cosyvoice`. The default is `edge`, which is Microsoft's cloud; see
    plan 1's record and `Hermes/plugins/samantha_voice/plugin.yaml` for the
