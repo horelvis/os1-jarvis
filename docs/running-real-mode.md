@@ -267,11 +267,136 @@ Packages needed so far:
 - `loguru` (already installed in venv)
 - `aiohttp` (version 3.14.3, installed 2026-08-22)
 
+## Kiosk (OS1 interface served through the Hermes gateway)
+
+**Status: verified 2026-08-22**, dev Mac. This is the plan-3/text-only path:
+the OS1 frontend is served by the `samantha-kiosk` Hermes plugin
+(`Hermes/plugins/samantha_kiosk/`) instead of the FastAPI backend, and the
+one WebSocket the kiosk holds is dispatched into Hermes' own agent, not into
+`backend/samantha/real_llm.py`. No audio is involved — that's plan 3b. The
+existing FastAPI backend (§ above) is untouched by any of this and can run
+at the same time on a different port.
+
+**1. Build the frontend** — pnpm only, never npm (CLAUDE.md §5):
+
+```bash
+cd frontend && pnpm install && pnpm build && cd ..
+ls frontend/dist/index.html
+```
+
+**2. Enable the plugin.** Unlike `samantha-voice`, `kind: platform` plugins
+are opt-in and the manifest name is kebab-case (`samantha-kiosk`) even
+though the directory is snake_case (`samantha_kiosk`). `hermes plugins list`
+shows it as `not enabled` until you run:
+
+```bash
+~/hermes-src/.venv/bin/hermes plugins enable samantha-kiosk
+```
+
+It prompts to grant tool-override capability — decline (`n`/Enter), same as
+`samantha-voice`'s `allow_tool_override: false`. This writes to
+`~/.hermes/config.yaml`'s `plugins.enabled` list; it's a one-time step per
+machine, not per session. `hermes plugins doctor samantha_kiosk` confirms
+runtime discovery/import/registration but does **not** confirm enablement —
+only `hermes plugins list` shows enabled/not-enabled state.
+
+**3. Environment and start command:**
+
+```bash
+export SAMANTHA_KIOSK_STATIC_ROOT="$(pwd)/frontend/dist"   # default: frontend/dist
+export SAMANTHA_KIOSK_PORT=7777                             # default: 7777
+export PYTHONPATH="$(pwd)/backend:$(pwd)"                   # samantha.* imports
+~/hermes-src/.venv/bin/hermes gateway
+```
+
+Expected in the log: `samantha-kiosk: serving <dist-path> on :7777`.
+
+**Undocumented-by-the-plan fourth requirement — user authorization.** The
+kiosk plugin registers as a generic Hermes platform (`Platform("samantha_kiosk")`)
+and does not declare its own `allowed_users_env`/`allow_all_env`, so the
+gateway's default-deny authz gate applies. Without an allowlist, every chat
+message is silently dropped with `Unauthorized user: primary (primary) on
+samantha_kiosk` in the gateway log and the WebSocket client hangs forever —
+no `error` frame, no closed socket, nothing. **Measured**: a raw WS client
+sending `{"type":"chat","message":"...","user_id":"primary"}` got zero
+frames back until this was set. Fix — also export before `hermes gateway`:
+
+```bash
+export GATEWAY_ALLOWED_USERS=primary   # must match the `user_id` field the kiosk sends
+```
+
+(`GATEWAY_ALLOW_ALL_USERS=true` also works and is what the "no allowlist
+configured" warning at gateway startup suggests, but it's global across
+every platform Hermes has enabled, not scoped to the kiosk — prefer the
+allowlist form for a dev box that might grow other plugins later.)
+
+**4. Verifying the round trip** (done here with a raw `aiohttp` WebSocket
+client rather than a browser — this session has no way to open one):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:7777/            # 200, OS1 index.html
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:7777/assets/<name>.js   # 200 — the exact file index.html references
+```
+
+WebSocket, connecting to `ws://localhost:7777/ws` and sending
+`{"type":"chat","message":"Hola, ¿qué tal estás?","user_id":"primary"}`:
+
+```
+{"type": "token", "token": "Sigo bien. Si me oyes, dime algo más, lo que sea."}
+{"type": "done", "thinking_ms": 0}
+```
+
+**Measured caveat:** the reply comes from Hermes' stock `~/.hermes/SOUL.md`
+persona ("Eres Hermes Agent..."), not from Samantha's personality
+(`backend/samantha/personality.py`) — one reply during testing literally
+opened with "Soy Hermes, tu asistente." The kiosk plugin routes text into
+Hermes' own agent loop, not into `real_llm.py`/Grok. Wiring Samantha's
+voice into that loop (system prompt, memory) is not part of this plan;
+tasks 1–4 only proved the transport. Whoever picks up personality
+integration should start there.
+
+Refresh behavior (close the socket, open a new one, send again) was also
+verified — two throwaway sockets opened and closed, then a third socket on
+the same `user_id` still got a normal reply (`"Sí, sigo aquí. El refresco
+no me ha borrado. ¿Qué necesitas?"`). The `/platform resume samantha_kiosk`
+command mentioned in the adapter's source exists for the port-conflict case,
+not for this.
+
+**Three failure signatures**, from the plan brief plus the one found above:
+
+- **The interface loads but nothing comes back.** The WebSocket connected
+  but dispatch didn't. Check the gateway log for `handle_message`. If
+  instead you see `Unauthorized user: ... on samantha_kiosk`, it's the
+  authz gap above, not a dispatch bug — set `GATEWAY_ALLOWED_USERS`.
+- **A blank page.** `SAMANTHA_KIOSK_STATIC_ROOT` is wrong, or `pnpm build`
+  was not run. Confirm with the two `curl` checks in step 4 above — a 404
+  on the JS/CSS asset (not just `/`) is the same failure and easier to miss
+  by eye, since the page still paints a blank body successfully.
+- **The reply arrives all at once rather than streaming.** Expected for
+  this plan. `send()` delivers the finished reply as a single `token`
+  frame; token-level streaming is plan 3b.
+
+**Known log noise, not a failure:** if the WebSocket client disconnects
+right after receiving `done` (a raw test client does this; a real browser
+tab sitting open does not), the gateway can log one
+`[samantha_kiosk] Error handling message: 'NoneType' object has no
+attribute 'success'` from `gateway/platforms/base.py:_send_with_retry` —
+it's a redundant delivery attempt finding nobody connected. It doesn't
+affect the reply already delivered before the socket closed.
+
+Port conflict: if `SAMANTHA_KIOSK_PORT` collides with a running FastAPI
+backend, the plugin fails fast (per the fix landing in `adapter.py` during
+this work) rather than silently binding — use a different port on either
+side; this plan does not remove the FastAPI backend.
+
 ## Not verified
 
 - Whether Chromium's Web Speech API (the STT path) can reach Google's servers
   from this machine — never exercised.
 - A full browser round trip: mic → transcript → LLM → speech.
+- The kiosk's actual browser rendering — the WebSocket/HTTP checks above were
+  run from a raw client, not Chromium; `http://localhost:7777/` was never
+  opened in an actual browser during this work.
 - The exact HTTP status x.ai returns for an unauthenticated request (inferred
   as 401, never sent).
 - Anything on the kiosk box itself; this covers the Mac + 4090 dev setup only.
