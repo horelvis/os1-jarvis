@@ -33,13 +33,22 @@ except ImportError:  # pragma: no cover - exercised only without Hermes
 
 
 # Below this length a clause is held and merged into the next one.
-# The value is NOT empirically derived — it was picked before anything
-# was measured, and the measurement (see stream()'s docstring) points
-# the other way: lower it toward 20-25. Every char of this floor makes
-# holding more likely, and held text at the end of a reply is never
-# spoken at all. Changing the value is the user's call and has its own
-# task; do not raise it.
-MIN_CLAUSE_CHARS = 40
+#
+# 12 is deliberate and low. Hermes' own SentenceChunker already merges
+# anything under 20 chars into the FOLLOWING sentence, so mid-reply we
+# never receive a fragment shorter than that — which means this floor
+# only ever fires on the last fragment of a reply, where holding is
+# strictly worse than sending: held text is never spoken (100% lost),
+# while sending it risks only the intermittent isolated-fragment
+# failure (~33% for the worst case measured, 0% for everything from 10
+# chars up in 76 calls). See stream()'s docstring for the numbers.
+#
+# So the floor is set just above the band where failures actually live,
+# not high enough to hijack anything Hermes already considers a
+# sentence. Raising it does not buy safety; it buys lost endings.
+# Lowered from 40 to 12 on 2026-08-22 after a three-sentence test
+# silently dropped a perfectly ordinary 38-char closing question.
+MIN_CLAUSE_CHARS = 12
 # Ceiling on `_pending`, so an unclosed <laughter> tag cannot swallow
 # the rest of the turn: past this length the buffer is released whatever
 # the tag balance, risking one malformed clause instead of silence for

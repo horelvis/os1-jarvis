@@ -66,7 +66,7 @@ def test_two_short_clauses_merge_into_one_synthesis_call(monkeypatch):
     p = prov.CosyVoiceStreamingProvider({}, {})
 
     first = "Sí,"
-    second = "eso es justo lo que pensaba decirte."
+    second = "ya lo veo."
     assert len(first) < prov.MIN_CLAUSE_CHARS
     assert len(second) < prov.MIN_CLAUSE_CHARS
     assert len(first) + 1 + len(second) >= prov.MIN_CLAUSE_CHARS
