@@ -41,6 +41,26 @@ def test_rejects_a_blank_message():
         decode_client('{"type": "chat", "message": "   ", "user_id": "x"}')
 
 
+def test_rejects_chat_without_user_id():
+    with pytest.raises(ProtocolError):
+        decode_client('{"type": "chat", "message": "hola"}')
+
+
+def test_rejects_chat_with_non_string_user_id():
+    with pytest.raises(ProtocolError):
+        decode_client('{"type": "chat", "message": "hola", "user_id": 42}')
+
+
+def test_rejects_chat_with_blank_user_id():
+    with pytest.raises(ProtocolError):
+        decode_client('{"type": "chat", "message": "hola", "user_id": "   "}')
+
+
+def test_rejects_json_that_is_not_an_object():
+    with pytest.raises(ProtocolError):
+        decode_client("[1, 2, 3]")
+
+
 def test_listen_needs_no_fields():
     assert decode_client('{"type": "listen"}') == {"type": "listen"}
 

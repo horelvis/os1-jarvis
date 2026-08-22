@@ -41,6 +41,11 @@ def decode_client(raw: str) -> Dict[str, Any]:
             # An empty turn would reach the model as an empty prompt.
             raise ProtocolError("chat needs a non-blank message")
 
+        user_id = msg.get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip():
+            # user_id flows into Hermes' build_source(), so validation is critical.
+            raise ProtocolError("chat needs a non-blank user_id")
+
     return msg
 
 
