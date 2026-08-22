@@ -15,6 +15,17 @@ wherever the two disagree — that map was built from web-fetched docs and
 partial reads; this was read straight from the pinned source. See
 **Corrections** at the end for every place they diverge.
 
+**Quoting convention:** every method/class **signature** below is
+verbatim, character-for-character, from the pinned commit. Docstrings
+are sometimes condensed for length — where that happens it's noted
+inline, but not every elision is marked with `...`, so treat prose
+around a code block as paraphrase and the code block's signatures (not
+necessarily every line of every docstring) as the source of truth. If a
+docstring detail matters for an implementation decision, re-read it
+from `agent/memory_provider.py` / `gateway/platforms/base.py` /
+`hermes_cli/plugins.py` directly rather than trusting the condensed
+version here.
+
 ---
 
 ## How this was installed
@@ -208,9 +219,10 @@ spoken-text shaping needs to compose with it rather than duplicate it.
 ## Contract 2 — `MemoryProvider`
 
 Source: `agent/memory_provider.py`, lines 1–260 (module docstring
-through `sync_turn`; `get_tool_schemas` / `handle_tool_call` /
-`shutdown` / the optional hooks continue to line 404 and are
-summarized, not quoted in full, below).
+through `sync_turn`) plus `get_config_schema` (330–349) and
+`save_config` (352–367); `get_tool_schemas` / `handle_tool_call` /
+`shutdown` and the remaining optional hooks (367–404) are summarized,
+not quoted in full, below.
 
 ```python
 class MemoryProvider(ABC):
@@ -229,7 +241,9 @@ class MemoryProvider(ABC):
         """Called once at agent startup.
 
         kwargs always include:
-          - hermes_home (str)
+          - hermes_home (str): The active HERMES_HOME directory path.
+            Use this for profile-scoped storage instead of hardcoding
+            ~/.hermes.
           - platform (str): "cli", "telegram", "discord", "cron", etc.
         kwargs may also include:
           - agent_context (str): "primary", "subagent", "cron", or "flush".
@@ -263,6 +277,25 @@ class MemoryProvider(ABC):
     def get_tool_schemas(self) -> List[Dict[str, Any]]: ...
     def handle_tool_call(self, tool_name, args, **kwargs) -> str: ...
     def shutdown(self) -> None: ...
+
+    def get_config_schema(self) -> List[Dict[str, Any]]:
+        """Return config fields this provider needs for setup.
+        Used by 'hermes memory setup' to walk the user through
+        configuration. Each field dict may carry: key, description,
+        secret (default False), required (default False), default,
+        choices, type (text/integer/number/boolean), minimum, maximum,
+        step, url, env_var. Return [] if no config needed."""
+        return []
+
+    def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
+        """Write non-secret config to the provider's native location.
+        Called by 'hermes memory setup' after collecting user inputs;
+        ``values`` holds only non-secret fields (secrets go to .env).
+        Providers with native config files should override this; env-var-
+        only providers can leave the default no-op. Every new memory
+        provider plugin MUST implement one of: save_config() for native
+        config files, OR env-var-only config (get_config_schema() fields
+        all carry env_var, this stays no-op)."""
 ```
 
 **Registration:** "Plugins ship in `plugins/memory/<name>/` and are
@@ -392,20 +425,52 @@ def register_platform(
     ``setup_fn``, ``emoji``, ``allowed_users_env``, ``platform_hint``,
     ``ensure_deps_fn``).  Unknown keys raise TypeError from the
     dataclass constructor.
+
+    Example::
+
+        ctx.register_platform(
+            name="irc",
+            label="IRC",
+            adapter_factory=lambda cfg: IRCAdapter(cfg),
+            check_fn=lambda: True,
+            emoji="💬",
+            setup_fn=irc_interactive_setup,
+        )
     """
 ```
 
+(The docstring's own `Example::` above is a minimal illustration, not
+the real `irc` plugin's actual call — that one is longer, quoted next.)
+
 Confirmed real end-to-end against `plugins/platforms/irc/adapter.py`
 (lines 953–989 at this commit) — the template the capability map cited
-still exists and still ends with `register(ctx): ctx.register_platform(
-name="irc", label="IRC", adapter_factory=..., check_fn=...,
-is_connected=..., required_env=[...], install_hint=..., setup_fn=...,
-env_enablement_fn=..., cron_deliver_env_var=..., standalone_sender_fn=...,
-allowed_users_env=..., allow_all_env=..., max_message_length=450,
-emoji="💬", pii_safe=False, allow_update_command=True,
-platform_hint="...")`. One addition vs. the capability map's quoted
-excerpt: `is_connected=is_connected` is passed and was omitted from the
-map's copy — minor, not a correction, just incomplete quoting there.
+still exists. Its actual `register(ctx)` call, in full:
+
+```python
+def register(ctx):
+    ctx.register_platform(
+        name="irc",
+        label="IRC",
+        adapter_factory=lambda cfg: IRCAdapter(cfg),
+        check_fn=check_requirements,
+        validate_config=validate_config,
+        is_connected=is_connected,
+        required_env=["IRC_SERVER", "IRC_CHANNEL", "IRC_NICKNAME"],
+        install_hint="No extra packages needed (stdlib only)",
+        setup_fn=interactive_setup,
+        env_enablement_fn=_env_enablement,
+        cron_deliver_env_var="IRC_HOME_CHANNEL",
+        standalone_sender_fn=_standalone_send,
+        allowed_users_env="IRC_ALLOWED_USERS",
+        allow_all_env="IRC_ALLOW_ALL_USERS",
+        max_message_length=450,
+        emoji="💬",
+        pii_safe=False,
+        allow_update_command=True,
+        platform_hint="...",
+    )
+```
+
 `irc`'s `plugin.yaml` (`kind: platform`, `requires_env`/`optional_env`
 with `name`/`description`/`prompt`/`password` per entry, no
 `manifest_version`/`api_version`) also verified unchanged.
@@ -582,20 +647,31 @@ read directly from the pinned commit.
    trusted over the map's citation if anyone needs to look up review
    history.
 
-3. **`MemoryProvider` has substantially more surface than documented.**
-   The map's §4b.1 lists `name`, `is_available`, `initialize`,
-   `prefetch`, `sync_turn`, `get_tool_schemas`/`handle_tool_call`,
-   `get_config_schema`/`save_config`. Real source (Contract 2 above)
-   also has `system_prompt_block()`, `unavailable_reason()`,
-   `queue_prefetch()`, `recall_status()` → `RecallStatus`, and seven
-   optional hooks (`on_turn_start`, `on_session_end`,
+3. **`MemoryProvider` has substantially more surface than documented —
+   but the map was RIGHT about `get_config_schema`/`save_config`,
+   correcting an earlier draft of this document that wrongly called
+   them not found.** The map's §4b.1 lists `name`, `is_available`,
+   `initialize`, `prefetch`, `sync_turn`,
+   `get_tool_schemas`/`handle_tool_call`, `get_config_schema`/
+   `save_config` — all confirmed present, verbatim, in Contract 2 above:
+   `get_config_schema()` at `agent/memory_provider.py:330-349`,
+   `save_config(values, hermes_home)` at `:352-367`, both unbroken
+   methods of `MemoryProvider` (the class runs 104–404 with no
+   intervening `class` boundary). An earlier draft of this document
+   claimed these "were not found... searched the full 404-line file" —
+   that was false; a plain `grep -n "def get_config_schema\|def
+   save_config" agent/memory_provider.py` finds both immediately.
+   Correcting the record: the map was accurate here, and
+   `get_config_schema` is the field-collection contract `hermes memory
+   setup` walks — real, usable surface for a config-plugin UX, not
+   something to assume unavailable.
+
+   Beyond those two (which the map did list), real source also has
+   `system_prompt_block()`, `unavailable_reason()`, `queue_prefetch()`,
+   `recall_status()` → `RecallStatus`, and seven optional hooks not in
+   the map at all: `on_turn_start`, `on_session_end`,
    `on_session_switch`, `on_pre_compress`, `on_memory_write`,
-   `on_delegation`, `backup_paths`). Note also: `get_config_schema()`
-   and `save_config()`, which the map lists, were **not found** in
-   `agent/memory_provider.py` at this commit (searched the full
-   404-line file) — they may live on a different base class or be
-   config-plugin-only; flagging as **not found**, not corrected, since
-   I didn't chase down where the map got them from.
+   `on_delegation`, `backup_paths`.
 
 4. **The trivial-prompt gate is new information, not a correction, but
    is important enough to flag loudly**: `MemoryManager` skips
@@ -637,11 +713,6 @@ read directly from the pinned commit.
 
 ## What I could not find / did not verify
 
-- `get_config_schema()` / `save_config(values, hermes_home)` on
-  `MemoryProvider` — not present in `agent/memory_provider.py` at this
-  commit (see Correction 3). Did not search elsewhere in the tree for
-  where these might actually live; flagged as a gap for whoever writes
-  the `MemoryProvider` subclass in a later task.
 - Whether PR #73862 or #60671 (or both, on different repos) is the
   correct upstream reference — not checked against GitHub's PR API.
 - Full plugin-discovery search-path precedence (`<repo>/plugins/` vs
