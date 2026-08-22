@@ -14,7 +14,7 @@ from loguru import logger
 from samantha import tts
 
 from .bridge import iter_sync
-from .chunking import has_unclosed_tag
+from .markers import has_unclosed_tag
 
 try:  # Hermes is absent on dev machines that only run the unit tests.
     from tools.tts_streaming import StreamingTTSProvider, register
@@ -105,9 +105,10 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         ("... too short than prompt text ..., this may lead to bad
         performance") and still returns audio. Its actual reference
         prompt, `prompt_text`, is `~/.samantha/voices/ref/samantha.txt`
-        (131 chars) with `"You are a helpful assistant.<|endofprompt|>"`
-        (44 chars) prepended before the length comparison — an
-        effective ~173 chars, not 131. So most short clauses just
+        (130 chars once stripped) with
+        `"You are a helpful assistant.<|endofprompt|>"` (44 chars)
+        prepended before the length comparison — an effective ~173
+        chars, not 130. So most short clauses just
         degrade quality, they don't fail.
 
         The real failure is narrower and content-specific, not simply
@@ -135,7 +136,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
 
         Two conditions hold a clause back rather than sending it:
         - it is still under MIN_CLAUSE_CHARS, or
-        - it holds an unclosed `<laughter>` tag (see `chunking.
+        - it holds an unclosed `<laughter>` tag (see `markers.
           has_unclosed_tag`) — the SentenceChunker knows nothing about
           this tag either, so it can split `<laughter>Ya. Claro</laughter>`
           at the period, leaving a fragment with an opening tag and no
@@ -150,7 +151,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         tag balance; it's released as a single malformed clause, which
         may hit the failure described above and be lost — but only that
         one clause instead of the rest of the turn. See also
-        `chunking.py`'s note on the inverse case: a legitimate long
+        `markers.py`'s note on the inverse case: a legitimate long
         `<laughter>` span could trip this same cap before it closes.
 
         LIMITATION — and for the tail, buffering is a net LOSS: there is

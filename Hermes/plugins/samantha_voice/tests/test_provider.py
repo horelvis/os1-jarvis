@@ -1,7 +1,7 @@
 import httpx
 
 from Hermes.plugins.samantha_voice import provider as prov
-from Hermes.plugins.samantha_voice.chunking import has_unclosed_tag
+from Hermes.plugins.samantha_voice.markers import has_unclosed_tag
 
 
 class _FakeTTS:
