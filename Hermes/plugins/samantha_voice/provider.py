@@ -32,6 +32,11 @@ except ImportError:  # pragma: no cover - exercised only without Hermes
         return lambda cls: cls
 
 
+# Not empirically derived — picked as "clearly above the shortest
+# fragments that failed in measurement" (see stream()'s docstring),
+# not tuned against actual audio quality. Task 5 raises this by ear
+# against real synthesis and should replace this comment with what it
+# finds.
 MIN_CLAUSE_CHARS = 40
 # Hard ceiling on how large `_pending` may grow while held for an
 # unclosed <laughter> tag. Without this, a tag the model never closes
@@ -39,17 +44,20 @@ MIN_CLAUSE_CHARS = 40
 # further clause merges into `_pending` and nothing after the open tag
 # is ever synthesised — Samantha goes silent for the rest of her reply.
 # Once `_pending` reaches this length it is released regardless of tag
-# balance; CosyVoice will most likely reject that one malformed clause
-# with the empty-body error already handled below, so exactly one
-# clause is lost instead of the rest of the turn — the same blast
-# radius as before the tag guard existed.
+# balance; that release clause is once again an isolated fragment, the
+# shape measurement showed failing intermittently (see stream()'s
+# docstring), so it may be lost — but only that one clause, not the
+# rest of the turn, the same blast radius as before the tag guard
+# existed.
 #
 # Picked well clear of ordinary sentence lengths so normal merges never
-# reach it (131 chars is the reference-prompt length that anchors "too
-# short" in the first place; a handful of merged real sentences still
-# won't approach 4x that), and well clear of MIN_CLAUSE_CHARS so a
-# later, larger MIN_CLAUSE_CHARS (tuned by ear against real audio)
-# doesn't start tripping this cap on ordinary merges.
+# reach it: CosyVoice's own effective reference prompt is ~173 chars
+# (see stream()'s docstring), so 400 is roughly 2.3x that, and roughly
+# 3x the 131-char prompt text alone — a handful of merged real
+# sentences won't approach either figure. Also well clear of
+# MIN_CLAUSE_CHARS so a later, larger MIN_CLAUSE_CHARS (tuned by ear
+# against real audio, see Task 5) doesn't start tripping this cap on
+# ordinary merges.
 MAX_PENDING_CHARS = 400
 
 
@@ -100,39 +108,73 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         call sites (tools/tts_tool.py:4107, hermes_cli/web_server.py:5404,
         gateway/streaming_tts_consumer.py:79), so its `min_len=20` floor
         is hardcoded and out of reach for this plugin. That floor sits
-        below MIN_CLAUSE_CHARS: CosyVoice's hifigan vocoder crashes
-        (silent 200 + empty body) when `tts_text` is much shorter than
-        the ~131-char reference transcript, and a 20-40 char Hermes
-        clause is squarely in that danger band. So merging has to happen
-        here, across calls, via `self._pending`.
+        below MIN_CLAUSE_CHARS, and a 20-40 char Hermes clause is
+        squarely in the range that measurement against the live server
+        (2026-08-22) showed as risky. Numbers below can drift with the
+        server build; re-measure rather than trust them blindly.
+
+        The server does NOT crash on short text — it logs a warning
+        ("... too short than prompt text ..., this may lead to bad
+        performance") and still returns audio. Its actual reference
+        prompt, `prompt_text`, is `~/.samantha/voices/ref/samantha.txt`
+        (131 chars) with `"You are a helpful assistant.<|endofprompt|>"`
+        (44 chars) prepended before the length comparison — an
+        effective ~173 chars, not 131. So most short clauses just
+        degrade quality, they don't fail.
+
+        The real failure is narrower and content-specific, not simply
+        "too short relative to the reference": isolated one-or-two-word
+        utterances fail intermittently — measured `'No.'` failing 2/6
+        calls and bare `'No'` 1/6 — while `'Sí.'` and `'Ya.'` never
+        failed in 6 calls each, and the longer `'No, claro.'` never
+        failed either. Length alone didn't predict it either: 0
+        failures across 16 calls at ~15 chars, 16 at ~30, 16 at ~50, 8
+        at ~80, and 20 each at 3-4, 6-8, and 10-13 chars. So the merge
+        below isn't defending against a length cutoff so much as making
+        sure an isolated short utterance like a bare "No." never reaches
+        CosyVoice alone — the same word merged into a longer clause was
+        fine every time it was tested. So merging has to happen here,
+        across calls, via `self._pending`.
+
+        And when the isolated-fragment failure does happen, it doesn't
+        look like the empty-body case tts.py already detects: the
+        observed failure is the server closing the connection mid-
+        response (`peer closed connection without sending complete
+        message body`), which httpx surfaces as `RemoteProtocolError` —
+        a transport error, not an HTTP 200 with an empty body. That's
+        why the except clause below has to catch `httpx.HTTPError`
+        alongside `RuntimeError`, not just the latter.
 
         Two conditions hold a clause back rather than sending it:
         - it is still under MIN_CLAUSE_CHARS, or
         - it holds an unclosed `<laughter>` tag (see `chunking.
           has_unclosed_tag`) — the SentenceChunker knows nothing about
           this tag either, so it can split `<laughter>Ya. Claro</laughter>`
-          at the period, and a fragment with an opening tag and no close
-          hits the same silent CosyVoice failure as a too-short clause.
+          at the period, leaving a fragment with an opening tag and no
+          close — the same isolated-fragment shape measured above as
+          intermittently unreliable.
 
         The unclosed-tag hold is capped at MAX_PENDING_CHARS: if the
         model never closes the tag, `has_unclosed_tag` stays true for
         the rest of the turn and would otherwise merge every remaining
         clause into `_pending` forever, going silent for the rest of
         the reply. Past the cap, the clause is released regardless of
-        tag balance — CosyVoice will most likely reject it with the
-        empty-body error handled below, losing that one clause instead
-        of the rest of the turn.
+        tag balance; it's released as a single malformed clause, which
+        may hit the failure described above and be lost — but only that
+        one clause instead of the rest of the turn. See also
+        `chunking.py`'s note on the inverse case: a legitimate long
+        `<laughter>` span could trip this same cap before it closes.
 
         LIMITATION: there is no end-of-reply signal available to this
         provider, so a reply whose final clause(s) never clear the
         MIN_CLAUSE_CHARS condition (and stay under MAX_PENDING_CHARS)
         leaves that text stranded in `self._pending` forever, unspoken.
         This is not a regression: today (pre-fix) such a clause reaches
-        CosyVoice as-is and dies with the empty-body RuntimeError below,
-        so it goes unheard either way. Buffering is a strict improvement
-        for every clause that does clear both conditions. Do not invent
-        a flush for the tail without an actual end-of-turn hook from
-        Hermes.
+        CosyVoice as-is, unmerged, and risks the same isolated-fragment
+        failure described above, so it goes unheard either way. Buffering
+        is a strict improvement for every clause that does clear both
+        conditions. Do not invent a flush for the tail without an actual
+        end-of-turn hook from Hermes.
         """
         stripped = text.strip()
         if not stripped:
@@ -154,12 +196,15 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
             # RuntimeError: tts.py raises this for a non-200 response and
             # for the documented CosyVoice-returns-200-with-no-audio case.
             # httpx.HTTPError: the base for every httpx transport failure
-            # (timeout, connection refused, protocol error) — none of
-            # which are RuntimeError subclasses, so without this they'd
-            # propagate past this try and abort the whole reply instead
-            # of just this clause. On an appliance meant to keep talking,
-            # a half-spoken reply beats a silent one; losing one clause
-            # beats losing the rest of what's already been generated.
+            # (timeout, connection refused, protocol error) — this is the
+            # one that actually fires for the isolated-fragment failure
+            # measured in stream()'s docstring: the server closes the
+            # connection mid-response and httpx raises RemoteProtocolError,
+            # an HTTPError subclass, not a RuntimeError. Without this catch
+            # it would propagate past this try and abort the whole reply
+            # instead of just this clause. On an appliance meant to keep
+            # talking, a half-spoken reply beats a silent one; losing one
+            # clause beats losing the rest of what's already been generated.
             logger.warning(f"samantha-voice: clause failed, skipping — {exc}")
         finally:
             self.bytes_yielded_per_clause.append((clause, emitted))
