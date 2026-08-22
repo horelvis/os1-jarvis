@@ -192,31 +192,51 @@ recommends instead:
 git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
 cd /tmp/hermes-src
 git checkout <pinned-commit>          # v2026.8.19 / pyproject 0.20.5 as of 2026-08-22
-uv self update                        # 0.8.15 cannot parse this repo's pyproject.toml/uv.lock
-uv sync --python 3.11
-uv pip install --python .venv/bin/python -e "<repo>/backend" --resolution lowest-direct
 ```
 
-`--resolution lowest-direct` matters on Intel Mac: an unconstrained
-resolve of `backend`'s `pipecat-ai` dependency picks
-`numba==0.67.0`/`llvmlite==0.49.0`, and `llvmlite` 0.49 ships **no
-x86_64 macOS wheel** (arm64-only). The lowest-direct resolution lands on
-`numba==0.61.2`/`llvmlite==0.44.0`, which does have one.
+That's enough to read source (what Task 1 needed). If you also want a
+runtime — `hermes --version`, `hermes plugins list` — `uv sync --python
+3.11` builds one (needs `uv self update` first; 0.8.15 can't parse this
+repo's `pyproject.toml`/`uv.lock`). **Do not** add `--with-editable
+<repo>/backend` to get `samantha` importable inside it — that pulls in
+`backend`'s `pipecat-ai[silero]` dependency, which drags in `numba`,
+which on Intel Mac resolves to an `llvmlite` version with no `x86_64`
+wheel and tries to build LLVM from source. That's not a Hermes problem;
+`pipecat-ai` itself is dead weight from an abandoned approach this
+project is dropping, so don't pin around it — just don't combine the
+two environments.
 
-Avoid the shell installer (`install.sh`) unless you also want Node.js,
-ripgrep, and ffmpeg built from Homebrew source — on a Tier-3 Homebrew
-platform (no bottles) that ran 20+ minutes without finishing and nearly
-filled the disk. The git+`uv sync` path above skips all of that; it
-gets you the `hermes` CLI and importable package without the browser
-automation / audio-conversion tooling, which isn't needed for reading
-contracts or running the backend's own tests.
-
-Verify the install:
+**Getting `samantha` importable inside a Hermes plugin environment is
+UNRESOLVED.** The cheap workaround, confirmed from the repo's own venv
+without touching Hermes at all:
 
 ```bash
-.venv/bin/hermes --version                                    # Hermes Agent v0.20.5 (2026.8.19)
-.venv/bin/python -c "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"   # 24000
-.venv/bin/hermes plugins list                                 # NOT bare `hermes plugins` — that opens an interactive TUI
+PYTHONPATH="<repo>/backend" backend/.venv/bin/python -c \
+  "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"   # 24000
+```
+
+`PYTHONPATH` is the likely answer for the real plugin runtime too — a
+plugin under `~/.hermes/plugins/samantha_voice/` presumably needs
+`sys.path` or `PYTHONPATH` pointed at `<repo>/backend` at plugin load
+time, not a `pip install -e` merge of the two dependency trees. Whoever
+picks up the plugin task should settle this properly; it wasn't chased
+further here.
+
+Avoid the shell installer (`install.sh`) entirely on a daily-driver
+machine — it builds Node.js, ripgrep, and ffmpeg via Homebrew, and on a
+Tier-3 Homebrew platform (no bottles) that means compiling LLVM/ffmpeg
+from source. Attempting it here ran 20+ minutes without finishing,
+nearly filled the disk, and twice broke system `git` when the runaway
+background build was killed mid-cleanup (repaired both times). The
+plain `git clone` above is the only install step this project should
+run against this machine; nothing that writes outside the repo or
+scratch, no `brew`, no `curl | bash`.
+
+Verify a Hermes runtime, if you built one via `uv sync`:
+
+```bash
+.venv/bin/hermes --version         # Hermes Agent v0.20.5 (2026.8.19)
+.venv/bin/hermes plugins list      # NOT bare `hermes plugins` — that opens an interactive TUI
 ```
 
 ## Not verified

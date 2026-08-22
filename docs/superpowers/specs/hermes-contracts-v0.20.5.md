@@ -47,59 +47,79 @@ neither of which is specific to this machine:
    This is intentional on their end (`hermes_cli`/setup.py raises it on
    purpose) — Hermes is not meant to be `pip install`-ed as a library.
 
-The actual current distribution channel is `curl -fsSL
+The documented distribution channel is `curl -fsSL
 https://hermes-agent.nousresearch.com/install.sh | bash`, which clones
 the repo to `~/.hermes/hermes-agent/` and builds a venv with `uv sync
 --locked`. That installer also bootstraps Node.js, ripgrep, and ffmpeg
 via Homebrew/apt, which on this machine (Intel Mac, macOS Ventura 13.5,
 Homebrew Tier 3 — no bottles) meant compiling LLVM, ffmpeg, and Node
-from source. That ran for 20+ minutes without finishing, consumed
-enough disk that the machine's shared APFS container dropped to ~140MB
-free at one point, and was abandoned. **This is the single biggest
-practical risk for anyone repeating this install on non-mainstream
-hardware** — budget for it or use Docker/Nix instead of the shell
-installer's default path.
+from source. Attempted and abandoned after 20+ minutes without
+finishing; it also consumed enough disk that the machine's shared APFS
+container dropped to ~140MB free, and twice broke system `git` when the
+runaway background build was killed mid-cleanup (both times repaired
+and confirmed working: `git --version` → 2.40.1, `brew doctor` clean).
+**Ruling (team lead, 2026-08-22): no more installers that write outside
+this repo or scratch on this machine — no `brew`, no `curl | bash`,
+nothing system-modifying.** That closes off the shell installer as an
+option here entirely; Docker or Nix would be the way to get a full
+Hermes runtime on this machine if one is ever needed.
 
-**What actually worked**, and is the same route the installer's own
-error message recommends for developers:
+**What this task actually needed, and what worked within that
+constraint:** reading the contracts only requires the source tree, not
+a runtime.
 
 ```bash
 git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
 cd /tmp/hermes-src
 git checkout fcbd1076a93841fa88855acce810e342a5b78101   # tag v2026.8.19
-uv sync --python 3.11        # needs uv >= ~0.12; 0.8.15 cannot parse
-                              # this repo's pyproject.toml/uv.lock (see below)
-uv pip install --python .venv/bin/python -e "<repo>/backend"
 ```
 
-Two more environment notes, neither Hermes-specific but both
-load-bearing for whoever runs this next:
+Everything in this document was read from that checkout. A `hermes`
+CLI runtime is possible on top of it (`uv sync --python 3.11` builds a
+pure-Python venv for hermes-agent itself with no native compilation —
+confirmed working, see `hermes --version`/`hermes plugins list` output
+below) but is **not required** to capture contracts, and this task
+does not depend on it.
 
-- **`uv` must be reasonably current.** The `uv` on this machine was
-  0.8.15 and failed with `TOML parse error ... failed to parse "14 d"
-  as year` on `exclude-newer = "14 days"` in Hermes' `pyproject.toml`,
-  then a second parse error on `uv.lock`. `uv self update` (0.8.15 →
-  0.12.5) fixed both with no other changes.
-- **`--with-editable ./backend` needs a numba/llvmlite pin on Intel
-  Mac.** `backend`'s `pipecat-ai` dependency pulls `numba`, and an
-  unconstrained resolve picks `numba==0.67.0` → `llvmlite==0.49.0`,
-  which **ships no `x86_64` macOS wheel** (arm64-only) and fails
-  building from source without a working `LLVM_DIR`/cmake toolchain.
-  Fix: `uv pip install ... --resolution lowest-direct` (or pin
-  `numba==0.61.2 llvmlite==0.44.0` explicitly), which matches
-  `pipecat-ai`'s own declared floor (`numba<1,>=0.61.2`) and does have
-  x86_64 wheels.
+`uv` itself needed upgrading regardless: the `uv` on this machine was
+0.8.15 and failed with `TOML parse error ... failed to parse "14 d" as
+year` on `exclude-newer = "14 days"` in Hermes' `pyproject.toml`, then a
+second parse error on `uv.lock`. `uv self update` (0.8.15 → 0.12.5)
+fixed both with no other changes. (This is a `uv` version bump inside
+scratch tooling, not a system install, so it doesn't fall under the
+no-installers ruling — flagging in case that reasoning is wrong.)
 
-**Verification (the brief's required check):**
+**Do not combine this with `--with-editable <repo>/backend`.** That was
+tried initially and pulls in `backend`'s `pipecat-ai[silero]`
+dependency, which drags in `numba`, which on Intel Mac resolves to an
+`llvmlite` version with no `x86_64` wheel and tries to build LLVM from
+source — the thing that triggered the disk/git trouble above.
+**Ruling (team lead): this is not Hermes' fault and not worth pinning
+around** — `pipecat-ai` is dead weight from an abandoned voice-pipeline
+approach that this plan deletes. Don't merge the two dependency trees;
+see "Getting `samantha` importable" below for the actual answer.
+
+**Getting `samantha` importable — UNRESOLVED for a real Hermes plugin
+environment.** What's confirmed instead, cheaply, using the repo's own
+venv and touching nothing Hermes-related:
 
 ```
-$ /tmp/hermes-src/.venv/bin/python -c "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"
-2026-08-22 08:59:57.339 | DEBUG | samantha.config:_load_env_file:49 - Loaded env overrides from /Users/horelvis/.samantha/.env
+$ PYTHONPATH="<repo>/backend" backend/.venv/bin/python -c \
+  "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"
+2026-08-22 09:04:14.263 | DEBUG | samantha.config:_load_env_file:49 - Loaded env overrides from /Users/horelvis/.samantha/.env
 24000
 ```
 
-`import samantha.tts` succeeds inside Hermes' own interpreter;
-`OUTPUT_SAMPLE_RATE == 24000` as expected.
+`PYTHONPATH` (or an equivalent `sys.path` insert at plugin load time)
+is the likely mechanism for the real `samantha_voice` plugin too — a
+Hermes plugin directory under `~/.hermes/plugins/` presumably needs
+`backend` on its path, not a merged `pip install -e` dependency tree
+with Hermes' own deps. This was **not chased further** here; Tasks 2-4
+need to settle it properly before assuming either direction works.
+
+`hermes --version` below is from the plain `uv sync` runtime (no
+`backend`, no `samantha` import inside it — that combination is the one
+being avoided, per the ruling above):
 
 ```
 $ /tmp/hermes-src/.venv/bin/hermes --version
