@@ -1,6 +1,7 @@
 import httpx
 
 from Hermes.plugins.samantha_voice import provider as prov
+from Hermes.plugins.samantha_voice.chunking import has_unclosed_tag
 
 
 class _FakeTTS:
@@ -126,6 +127,42 @@ def test_clause_that_closes_a_tag_merges_into_one_synthesis_call(monkeypatch):
     assert out == [b"q"]
     assert fake.calls == [merged]
     assert p.bytes_yielded_per_clause == [(merged, 1)]
+
+
+def test_unclosed_tag_releases_once_pending_hits_the_cap(monkeypatch):
+    # If the model never closes a <laughter> tag, has_unclosed_tag stays
+    # true forever — without a cap, every further clause would merge
+    # into _pending and the rest of the turn would go unspoken. Once
+    # _pending reaches MAX_PENDING_CHARS it must release regardless of
+    # tag balance, so the clauses that follow still get synthesised.
+    fake = _FakeTTS(chunks=(b"r",))
+    monkeypatch.setattr(prov, "tts", fake)
+    p = prov.CosyVoiceStreamingProvider({}, {})
+
+    opener = "<laughter>" + " ".join(["muy"] * 20)  # unclosed, already long
+    assert has_unclosed_tag(opener)
+    assert len(opener) < prov.MAX_PENDING_CHARS
+    assert list(p.stream(opener)) == []
+    assert fake.calls == []  # still held: unclosed tag, under the cap
+
+    filler = " ".join(["gracioso"] * 35)  # no closing tag; pushes past the cap
+    merged = f"{opener} {filler}"
+    assert has_unclosed_tag(merged)
+    assert len(merged) >= prov.MAX_PENDING_CHARS
+    out = list(p.stream(filler))
+    # Without the fix, this clause would stay pending forever and the
+    # rest of the reply would never reach CosyVoice.
+    assert out == [b"r"]
+    assert fake.calls == [merged]
+    assert p.bytes_yielded_per_clause == [(merged, 1)]
+    assert p._pending == ""
+
+    # The turn keeps speaking after the release.
+    next_clause = "Y ahora seguimos hablando con toda normalidad, ¿verdad?"
+    assert len(next_clause) >= prov.MIN_CLAUSE_CHARS
+    out2 = list(p.stream(next_clause))
+    assert out2 == [b"r"]
+    assert fake.calls == [merged, next_clause]
 
 
 def test_short_clause_left_pending_at_end_is_absent_from_accounting(monkeypatch):

@@ -33,6 +33,24 @@ except ImportError:  # pragma: no cover - exercised only without Hermes
 
 
 MIN_CLAUSE_CHARS = 40
+# Hard ceiling on how large `_pending` may grow while held for an
+# unclosed <laughter> tag. Without this, a tag the model never closes
+# keeps `has_unclosed_tag` true for the rest of the turn, so every
+# further clause merges into `_pending` and nothing after the open tag
+# is ever synthesised — Samantha goes silent for the rest of her reply.
+# Once `_pending` reaches this length it is released regardless of tag
+# balance; CosyVoice will most likely reject that one malformed clause
+# with the empty-body error already handled below, so exactly one
+# clause is lost instead of the rest of the turn — the same blast
+# radius as before the tag guard existed.
+#
+# Picked well clear of ordinary sentence lengths so normal merges never
+# reach it (131 chars is the reference-prompt length that anchors "too
+# short" in the first place; a handful of merged real sentences still
+# won't approach 4x that), and well clear of MIN_CLAUSE_CHARS so a
+# later, larger MIN_CLAUSE_CHARS (tuned by ear against real audio)
+# doesn't start tripping this cap on ordinary merges.
+MAX_PENDING_CHARS = 400
 
 
 class CosyVoiceStreamingProvider(StreamingTTSProvider):
@@ -66,7 +84,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         # Text carried over from a previous stream() call because,
         # merged with everything seen so far this turn, it was still
         # either under MIN_CLAUSE_CHARS or held an unclosed <laughter>
-        # tag. See stream()'s docstring for why.
+        # tag under MAX_PENDING_CHARS. See stream()'s docstring for why.
         self._pending: str = ""
 
     @staticmethod
@@ -96,23 +114,33 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
           at the period, and a fragment with an opening tag and no close
           hits the same silent CosyVoice failure as a too-short clause.
 
+        The unclosed-tag hold is capped at MAX_PENDING_CHARS: if the
+        model never closes the tag, `has_unclosed_tag` stays true for
+        the rest of the turn and would otherwise merge every remaining
+        clause into `_pending` forever, going silent for the rest of
+        the reply. Past the cap, the clause is released regardless of
+        tag balance — CosyVoice will most likely reject it with the
+        empty-body error handled below, losing that one clause instead
+        of the rest of the turn.
+
         LIMITATION: there is no end-of-reply signal available to this
-        provider, so a reply whose final clause(s) never clear both
-        conditions leaves that text stranded in `self._pending` forever,
-        unspoken — including a reply that ends with the tag still open,
-        which is malformed model output this provider cannot repair
-        either way. This is not a regression: today (pre-fix) such a
-        clause reaches CosyVoice as-is and dies with the empty-body
-        RuntimeError below, so it goes unheard either way. Buffering is
-        a strict improvement for every clause that does clear both
-        conditions. Do not invent a flush for the tail without an actual
-        end-of-turn hook from Hermes.
+        provider, so a reply whose final clause(s) never clear the
+        MIN_CLAUSE_CHARS condition (and stay under MAX_PENDING_CHARS)
+        leaves that text stranded in `self._pending` forever, unspoken.
+        This is not a regression: today (pre-fix) such a clause reaches
+        CosyVoice as-is and dies with the empty-body RuntimeError below,
+        so it goes unheard either way. Buffering is a strict improvement
+        for every clause that does clear both conditions. Do not invent
+        a flush for the tail without an actual end-of-turn hook from
+        Hermes.
         """
         stripped = text.strip()
         if not stripped:
             return
         clause = f"{self._pending} {stripped}" if self._pending else stripped
-        if len(clause) < MIN_CLAUSE_CHARS or has_unclosed_tag(clause):
+        too_short = len(clause) < MIN_CLAUSE_CHARS
+        unclosed = len(clause) < MAX_PENDING_CHARS and has_unclosed_tag(clause)
+        if too_short or unclosed:
             self._pending = clause
             return
         self._pending = ""
