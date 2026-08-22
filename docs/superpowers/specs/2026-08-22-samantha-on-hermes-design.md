@@ -93,11 +93,19 @@ come from existing knowledge and neither of which the Hermes side knows
 about:
 
 1. **Short-text crash.** CosyVoice's hifigan crashes when `tts_text` is
-   much shorter than `prompt_text`. Hermes' `SentenceChunker` exists to
-   produce short clauses — so the streaming path walks straight into
-   this. The provider must pad, merge or hold back sub-threshold clauses
-   rather than passing them through. This is the single most likely
-   cause of a broken first demo.
+   much shorter than `prompt_text`. *(Correction, 2026-08-22, against
+   `/tmp/hermes-src/tools/tts_streaming.py:95-100`: `SentenceChunker`
+   does **not** hand out arbitrarily short clauses — it already merges
+   any fragment shorter than `min_len` (default 20 chars) into the
+   *following* sentence. A floor exists on Hermes' side. The real
+   hazard is narrower: 20 chars can still sit well below whatever
+   length `tts_text` needs to be *relative to `prompt_text`* for
+   CosyVoice's own reference transcript, which is not something
+   `SentenceChunker` knows or is trying to satisfy.)* The provider must
+   still pad, merge or hold back sub-threshold clauses rather than
+   passing them through — the conclusion is unchanged, only the reason
+   is — and this remains the single most likely cause of a broken first
+   demo.
 2. **Split expression markers.** `[laughter]` renders as a sound;
    `<laughter>palabra</laughter>` renders as smiled speech. A clause
    boundary landing inside either form produces garbage. The provider
