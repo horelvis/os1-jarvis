@@ -32,32 +32,20 @@ except ImportError:  # pragma: no cover - exercised only without Hermes
         return lambda cls: cls
 
 
-# Not empirically derived — picked as "clearly above the shortest
-# fragments that failed in measurement" (see stream()'s docstring),
-# not tuned against actual audio quality. Task 5 raises this by ear
-# against real synthesis and should replace this comment with what it
-# finds.
+# Below this length a clause is held and merged into the next one.
+# The value is NOT empirically derived — it was picked before anything
+# was measured, and the measurement (see stream()'s docstring) points
+# the other way: lower it toward 20-25. Every char of this floor makes
+# holding more likely, and held text at the end of a reply is never
+# spoken at all. Changing the value is the user's call and has its own
+# task; do not raise it.
 MIN_CLAUSE_CHARS = 40
-# Hard ceiling on how large `_pending` may grow while held for an
-# unclosed <laughter> tag. Without this, a tag the model never closes
-# keeps `has_unclosed_tag` true for the rest of the turn, so every
-# further clause merges into `_pending` and nothing after the open tag
-# is ever synthesised — Samantha goes silent for the rest of her reply.
-# Once `_pending` reaches this length it is released regardless of tag
-# balance; that release clause is once again an isolated fragment, the
-# shape measurement showed failing intermittently (see stream()'s
-# docstring), so it may be lost — but only that one clause, not the
-# rest of the turn, the same blast radius as before the tag guard
-# existed.
-#
-# Picked well clear of ordinary sentence lengths so normal merges never
-# reach it: CosyVoice's own effective reference prompt is ~173 chars
-# (see stream()'s docstring), so 400 is roughly 2.3x that, and roughly
-# 3x the 131-char prompt text alone — a handful of merged real
-# sentences won't approach either figure. Also well clear of
-# MIN_CLAUSE_CHARS so a later, larger MIN_CLAUSE_CHARS (tuned by ear
-# against real audio, see Task 5) doesn't start tripping this cap on
-# ordinary merges.
+# Ceiling on `_pending`, so an unclosed <laughter> tag cannot swallow
+# the rest of the turn: past this length the buffer is released whatever
+# the tag balance, risking one malformed clause instead of silence for
+# the remainder of the reply. 400 is ~2.3x CosyVoice's effective
+# ~173-char reference prompt and well clear of both ordinary merges and
+# MIN_CLAUSE_CHARS. Rationale in full: stream()'s docstring.
 MAX_PENDING_CHARS = 400
 
 
@@ -165,16 +153,19 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         `chunking.py`'s note on the inverse case: a legitimate long
         `<laughter>` span could trip this same cap before it closes.
 
-        LIMITATION: there is no end-of-reply signal available to this
-        provider, so a reply whose final clause(s) never clear the
-        MIN_CLAUSE_CHARS condition (and stay under MAX_PENDING_CHARS)
-        leaves that text stranded in `self._pending` forever, unspoken.
-        This is not a regression: today (pre-fix) such a clause reaches
-        CosyVoice as-is, unmerged, and risks the same isolated-fragment
-        failure described above, so it goes unheard either way. Buffering
-        is a strict improvement for every clause that does clear both
-        conditions. Do not invent a flush for the tail without an actual
-        end-of-turn hook from Hermes.
+        LIMITATION — and for the tail, buffering is a net LOSS: there is
+        no end-of-reply signal available to this provider, so a reply
+        whose final clause(s) never clear the MIN_CLAUSE_CHARS condition
+        (and stay under MAX_PENDING_CHARS) leaves that text stranded in
+        `self._pending` forever, unspoken. Held is 100% lost; sent, for
+        the worst measured string ("No."), is ~33% lost. So buffering is
+        an improvement only for a clause that later clears both
+        conditions, and strictly worse for one that never does. This is
+        not hypothetical: the first real three-sentence test lost
+        "¿Quieres que hablemos de ello un rato?" (38 chars) exactly this
+        way. Lowering MIN_CLAUSE_CHARS is the cheap mitigation; do not
+        invent a flush for the tail without a real end-of-turn hook from
+        Hermes.
         """
         stripped = text.strip()
         if not stripped:
@@ -193,18 +184,11 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
                 emitted += len(chunk)
                 yield chunk
         except (RuntimeError, httpx.HTTPError) as exc:
-            # RuntimeError: tts.py raises this for a non-200 response and
-            # for the documented CosyVoice-returns-200-with-no-audio case.
-            # httpx.HTTPError: the base for every httpx transport failure
-            # (timeout, connection refused, protocol error) — this is the
-            # one that actually fires for the isolated-fragment failure
-            # measured in stream()'s docstring: the server closes the
-            # connection mid-response and httpx raises RemoteProtocolError,
-            # an HTTPError subclass, not a RuntimeError. Without this catch
-            # it would propagate past this try and abort the whole reply
-            # instead of just this clause. On an appliance meant to keep
-            # talking, a half-spoken reply beats a silent one; losing one
-            # clause beats losing the rest of what's already been generated.
+            # Both shapes a failed clause arrives as (see stream()'s
+            # docstring): RuntimeError from tts.py, and httpx.HTTPError —
+            # the one that actually fires, as RemoteProtocolError. Caught
+            # so one lost clause doesn't abort the rest of the reply: on
+            # an appliance, half a reply beats silence.
             logger.warning(f"samantha-voice: clause failed, skipping — {exc}")
         finally:
             self.bytes_yielded_per_clause.append((clause, emitted))
