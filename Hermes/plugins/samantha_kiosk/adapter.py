@@ -274,6 +274,23 @@ class KioskAdapter(BasePlatformAdapter):
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
         del is_reconnect
+        # Clear any fatal state from a PREVIOUS connect() attempt before
+        # trying again — a reused adapter instance (`/platform resume`, or a
+        # reconnect path that doesn't build a fresh adapter) must be able to
+        # come back once the operator has fixed the underlying problem. This
+        # used to live at the end of disconnect(), which looks equivalent but
+        # is not: the gateway's startup path calls disconnect() and THEN
+        # reads has_fatal_error (gateway/run.py:12985-12986) to decide
+        # whether a failed connect() is retryable, so clearing it in
+        # disconnect() erased the signal before anyone read it — the fatal
+        # path silently degraded into "retry forever", which is the exact
+        # failure mode it exists to prevent. Clearing here instead means the
+        # flags are live for as long as they need to be (from the failed
+        # connect() until the next attempt) and never during the window a
+        # caller might read them.
+        self._fatal_error_code = None
+        self._fatal_error_message = None
+        self._fatal_error_retryable = None
         # Both of these are checked BEFORE anything is bound or started.
         # `add_static` raises ValueError on a missing directory (measured on
         # aiohttp 3.14.1), which would escape connect() entirely; the
@@ -371,12 +388,12 @@ class KioskAdapter(BasePlatformAdapter):
             await self._runner.cleanup()
         self._runner = None
         self._site = None
-        # The gateway builds a fresh adapter per reconnect today, so a stale
-        # fatal error is inert — but only by accident of the caller. Clearing
-        # it here means a reused instance can actually come back.
-        self._fatal_error_code = None
-        self._fatal_error_message = None
-        self._fatal_error_retryable = None
+        # Fatal-error state is intentionally NOT cleared here — see the
+        # comment at the top of connect(). The gateway's startup path (and
+        # the secondary-profile reconnect path) calls disconnect() and then
+        # reads has_fatal_error to decide whether the connect() that just
+        # failed should be retried; clearing the flags here would erase that
+        # signal before it's read.
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         """The kiosk has exactly one chat — the screen it renders on."""
@@ -417,9 +434,24 @@ class KioskAdapter(BasePlatformAdapter):
                 f"samantha-kiosk: dropping a reply that arrived after the "
                 f"{self.turn_timeout:.0f}s watchdog already closed the turn"
             )
+            # The error string MUST read as a timeout to
+            # BasePlatformAdapter._send_with_retry (base.py:5566,
+            # `_is_timeout_error`): that is the one branch that returns the
+            # failure as-is. Every other branch either retries (delivering
+            # the same stale reply into the wrong bubble) or falls through to
+            # a plain-text fallback send — which calls back into this same
+            # send() with turn already None, so it isn't caught by the
+            # `turn.timed_out` guard above and gets pushed to the screen: a
+            # stray, English "(Response formatting failed, plain text:)"
+            # message after the user already got Samantha's own apology.
+            # Dropping the reply is still the right call — see the comment
+            # above — this just keeps Hermes from working around the drop.
             return SendResult(
                 success=False,
-                error="kiosk turn already closed by the watchdog",
+                error=(
+                    "kiosk turn timed out waiting for a reply; the watchdog "
+                    "already closed it"
+                ),
                 retryable=False,
             )
 

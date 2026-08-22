@@ -257,6 +257,35 @@ def test_port_conflict_is_a_fatal_non_retryable_error(tmp_path):
     asyncio.run(go())
 
 
+def test_fatal_error_survives_disconnect(tmp_path):
+    # The gateway's startup path calls disconnect() BEFORE reading
+    # has_fatal_error (gateway/run.py:12985-12986): a fatal connect()
+    # failure is disconnected, then the adapter is asked whether it was
+    # fatal. If disconnect() clears the flags, has_fatal_error is always
+    # False there and a non-retryable failure (bad port, missing static
+    # root) gets requeued and retried forever instead of being dropped —
+    # exactly the retry-forever shape connect()'s fatal path exists to
+    # prevent. Clearing on disconnect() undoes the fix silently, because
+    # no other test calls disconnect() after a fatal connect().
+    async def go():
+        a = KioskAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            b = KioskAdapter({"port": a.port, "static_root": str(tmp_path)})
+            assert await b.connect() is False
+            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+
+            await b.disconnect()
+
+            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+            assert b._fatal_error_message is not None
+            assert b._fatal_error_retryable is False
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
 def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
     # SAMANTHA_KIOSK_PORT / SAMANTHA_KIOSK_STATIC_ROOT (declared in Task 4's
     # manifest, exported by Task 5's manual test) must win over whatever the
@@ -411,6 +440,13 @@ def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
                     result = await a.send("kiosk", "llego tarde")
                     assert result.success is False
                     assert result.retryable is False
+                    # The error text must read as a timeout to Hermes'
+                    # BasePlatformAdapter._send_with_retry — that's the only
+                    # branch that returns the failure as-is instead of
+                    # retrying or falling back to a plain-text resend, which
+                    # would call send() again and land a stray English
+                    # message on the kiosk after this drop.
+                    assert "timed out" in result.error
                     with pytest.raises(asyncio.TimeoutError):
                         await ws.receive(timeout=0.3)
         finally:
