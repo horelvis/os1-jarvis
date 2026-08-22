@@ -1,0 +1,632 @@
+# Hermes contracts, captured from source — v0.20.5
+
+**Date:** 2026-08-22
+**Method:** `git clone https://github.com/NousResearch/hermes-agent.git`,
+checked out at commit `fcbd1076a93841fa88855acce810e342a5b78101` (tag
+`v2026.8.19`, `pyproject.toml` version `0.20.5`) — see "How this was
+installed" below for why this replaced the brief's literal Step 1
+command. Every quote in this document is verbatim from that checkout;
+file paths and line numbers are given so they can be re-verified against
+the same commit.
+
+This document supersedes
+`docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md`
+wherever the two disagree — that map was built from web-fetched docs and
+partial reads; this was read straight from the pinned source. See
+**Corrections** at the end for every place they diverge.
+
+---
+
+## How this was installed
+
+The brief's Step 1 (`uv tool install hermes-agent --with mcp
+--with-editable ./backend`) does not work, for two independent reasons,
+neither of which is specific to this machine:
+
+1. **PyPI's `hermes-agent` is stale.** Latest on PyPI is `0.19.0`
+   (= source tag `v2026.7.20`). It **predates the streaming-TTS feature
+   entirely** — `tools/tts_streaming.py` does not exist in that
+   checkout, confirmed by `find_spec('tools.tts_streaming')` returning
+   `None` and a filesystem search of the installed package turning up
+   nothing. Installing from PyPI silently gets you a Hermes that cannot
+   do the one thing this whole plugin plan depends on.
+2. **`uv tool install` from git source is explicitly blocked upstream.**
+   `uv tool install "git+https://github.com/NousResearch/hermes-agent.git@v2026.8.19"`
+   fails at the build-wheel step with:
+
+   ```
+   RuntimeError: Building wheels or sdists for hermes-agent is not
+   supported.
+   Hermes is distributed via the shell installer, Docker image, or Nix.
+   See: https://hermes-agent.nousresearch.com/docs/getting-started/installation
+
+   If you are developing, use an editable install instead:
+     uv sync          # or: uv pip install -e .
+   ```
+
+   This is intentional on their end (`hermes_cli`/setup.py raises it on
+   purpose) — Hermes is not meant to be `pip install`-ed as a library.
+
+The actual current distribution channel is `curl -fsSL
+https://hermes-agent.nousresearch.com/install.sh | bash`, which clones
+the repo to `~/.hermes/hermes-agent/` and builds a venv with `uv sync
+--locked`. That installer also bootstraps Node.js, ripgrep, and ffmpeg
+via Homebrew/apt, which on this machine (Intel Mac, macOS Ventura 13.5,
+Homebrew Tier 3 — no bottles) meant compiling LLVM, ffmpeg, and Node
+from source. That ran for 20+ minutes without finishing, consumed
+enough disk that the machine's shared APFS container dropped to ~140MB
+free at one point, and was abandoned. **This is the single biggest
+practical risk for anyone repeating this install on non-mainstream
+hardware** — budget for it or use Docker/Nix instead of the shell
+installer's default path.
+
+**What actually worked**, and is the same route the installer's own
+error message recommends for developers:
+
+```bash
+git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
+cd /tmp/hermes-src
+git checkout fcbd1076a93841fa88855acce810e342a5b78101   # tag v2026.8.19
+uv sync --python 3.11        # needs uv >= ~0.12; 0.8.15 cannot parse
+                              # this repo's pyproject.toml/uv.lock (see below)
+uv pip install --python .venv/bin/python -e "<repo>/backend"
+```
+
+Two more environment notes, neither Hermes-specific but both
+load-bearing for whoever runs this next:
+
+- **`uv` must be reasonably current.** The `uv` on this machine was
+  0.8.15 and failed with `TOML parse error ... failed to parse "14 d"
+  as year` on `exclude-newer = "14 days"` in Hermes' `pyproject.toml`,
+  then a second parse error on `uv.lock`. `uv self update` (0.8.15 →
+  0.12.5) fixed both with no other changes.
+- **`--with-editable ./backend` needs a numba/llvmlite pin on Intel
+  Mac.** `backend`'s `pipecat-ai` dependency pulls `numba`, and an
+  unconstrained resolve picks `numba==0.67.0` → `llvmlite==0.49.0`,
+  which **ships no `x86_64` macOS wheel** (arm64-only) and fails
+  building from source without a working `LLVM_DIR`/cmake toolchain.
+  Fix: `uv pip install ... --resolution lowest-direct` (or pin
+  `numba==0.61.2 llvmlite==0.44.0` explicitly), which matches
+  `pipecat-ai`'s own declared floor (`numba<1,>=0.61.2`) and does have
+  x86_64 wheels.
+
+**Verification (the brief's required check):**
+
+```
+$ /tmp/hermes-src/.venv/bin/python -c "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"
+2026-08-22 08:59:57.339 | DEBUG | samantha.config:_load_env_file:49 - Loaded env overrides from /Users/horelvis/.samantha/.env
+24000
+```
+
+`import samantha.tts` succeeds inside Hermes' own interpreter;
+`OUTPUT_SAMPLE_RATE == 24000` as expected.
+
+```
+$ /tmp/hermes-src/.venv/bin/hermes --version
+Hermes Agent v0.20.5 (2026.8.19) · upstream 9098f677
+Install directory: /private/tmp/hermes-src
+Install method: git
+Python: 3.11.9
+OpenAI SDK: 1.99.1
+```
+
+`0.20.5` is at/above the brief's `0.20.5` floor and matches
+`pyproject.toml`'s `version = "0.20.5"` exactly (line 5). **Pin this
+commit** (`fcbd1076a93841fa88855acce810e342a5b78101`, tag `v2026.8.19`)
+for everything that follows — Hermes ships multiple releases a week.
+
+---
+
+## Contract 1 — `StreamingTTSProvider`
+
+Source: `tools/tts_streaming.py`, lines 1–220 (module docstring through
+the registry helpers; the four cloud providers that follow at lines
+220–488 are reference implementations, not part of the contract).
+
+```python
+class StreamingTTSProvider(ABC):
+    """Yields raw int16, little-endian, mono PCM chunks at ``sample_rate``."""
+
+    sample_rate: int = 24000
+    channels: int = 1
+    sample_width: int = 2  # bytes/sample (int16)
+
+    def __init__(self, tts_config: Dict, section: Dict):
+        self.tts_config = tts_config
+        self.section = section
+
+    @staticmethod
+    @abstractmethod
+    def available() -> bool:
+        """True when this provider's credentials/SDK are usable right now."""
+
+    @abstractmethod
+    def stream(self, text: str) -> Iterator[bytes]:
+        """Yield PCM chunks for ``text``. Raise on failure (caller logs)."""
+
+
+_REGISTRY: Dict[str, type[StreamingTTSProvider]] = {}
+
+
+def register(name: str) -> Callable[[type[StreamingTTSProvider]], type[StreamingTTSProvider]]:
+    def _wrap(cls: type[StreamingTTSProvider]) -> type[StreamingTTSProvider]:
+        _REGISTRY[name] = cls
+        return cls
+    return _wrap
+```
+
+`resolve_streaming_provider(tts_config, preferred=None)` (same file,
+~line 176) picks a provider by `tts.streaming.provider` config
+(`auto` walks a hard-coded priority list `["elevenlabs", "gemini",
+"openai", "xai"]`; a pinned name returns that streamer or `None`; unset
+falls back to the configured non-streaming TTS provider). "We never
+silently swap to a different provider just to get streaming" is a
+direct quote from its docstring — matches the capability map's
+description exactly.
+
+This matches the capability map's §2 quote closely — confirmed, not
+corrected.
+
+Also in this file (not previously documented): an **interruption
+latch**. `mark_speech_interrupted()` / `take_speech_interrupted()`
+(lines ~57–78) let the surface flag a barge-in; the next turn's submit
+path prepends `SPEECH_INTERRUPTED_NOTE` — *"[Note: the user interrupted
+your previous spoken reply before it finished.]"* — to the model-bound
+message, with a 120s TTL. This is API-call-local, never persisted. This
+is the exact mechanism §4c of the capability map inferred existed
+("the release notes describe the softer mechanism") — now confirmed
+from source, and it does **not** trim the assistant's stored message to
+what was actually spoken, exactly as §4c predicted.
+
+`SentenceChunker` (same file, ~line 89) is the shared sentence-boundary
+cutter — strips `<think>` blocks, merges fragments under `min_len=20`
+chars into the next sentence. Worth knowing if Samantha's own
+spoken-text shaping needs to compose with it rather than duplicate it.
+
+---
+
+## Contract 2 — `MemoryProvider`
+
+Source: `agent/memory_provider.py`, lines 1–260 (module docstring
+through `sync_turn`; `get_tool_schemas` / `handle_tool_call` /
+`shutdown` / the optional hooks continue to line 404 and are
+summarized, not quoted in full, below).
+
+```python
+class MemoryProvider(ABC):
+    """Abstract base class for memory providers."""
+
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """... Should not make network calls — just check config and installed deps."""
+
+    @abstractmethod
+    def initialize(self, session_id: str, **kwargs) -> None:
+        """Called once at agent startup.
+
+        kwargs always include:
+          - hermes_home (str)
+          - platform (str): "cli", "telegram", "discord", "cron", etc.
+        kwargs may also include:
+          - agent_context (str): "primary", "subagent", "cron", or "flush".
+            Providers should skip writes for non-primary contexts.
+          - agent_identity, agent_workspace, parent_session_id,
+            user_id, user_id_alt
+        """
+
+    def unavailable_reason(self) -> str: ...          # default ""
+    def system_prompt_block(self) -> str: ...          # default ""
+
+    def prefetch(self, query: str, *, session_id: str = "") -> str:
+        """Called before each API call. Return formatted text to inject,
+        or "" if nothing relevant. Should be fast."""
+        return ""
+
+    def queue_prefetch(self, query: str, *, session_id: str = "") -> None: ...
+    def recall_status(self) -> Optional[RecallStatus]: ...  # default None
+
+    def sync_turn(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """Called after each turn. Should be non-blocking."""
+
+    @abstractmethod
+    def get_tool_schemas(self) -> List[Dict[str, Any]]: ...
+    def handle_tool_call(self, tool_name, args, **kwargs) -> str: ...
+    def shutdown(self) -> None: ...
+```
+
+**Registration:** "Plugins ship in `plugins/memory/<name>/` and are
+activated via the `memory.provider` config key" (module docstring,
+line ~19). "The `MemoryManager` enforces a one-external-provider limit"
+(line 4) — this is the source of the capability map's "`kind:
+exclusive`, single-select" claim; confirmed, though the word
+"exclusive" itself is a `kind` value defined in `hermes_cli/plugins.py`
+(§ below), not in this file.
+
+**Not in the capability map at all — worth flagging as new surface:**
+
+- `prefetch()` returns a plain `str` to inject, not a structured
+  object. The capability map's gloss ("This is `gather_context()`") is
+  our own annotation for what we'd map it to, not something the
+  contract says.
+- A whole family of **optional hooks** past line 260:
+  `on_turn_start(turn_number, message, **kwargs)`,
+  `on_session_end(messages)`, `on_session_switch(new_session_id,
+  **kwargs)`, `on_pre_compress(messages) -> str`, `on_memory_write(...)`,
+  `on_delegation(task, result, **kwargs)`, `backup_paths() -> list[str]`.
+  None of these appear in the capability map; `on_session_end` in
+  particular is a plausible integration point for anything that wants
+  end-of-session batch writes distinct from per-turn `sync_turn`.
+- A module-level **trivial-prompt gate**: `TRIVIAL_PROMPT_RE` /
+  `is_trivial_prompt(text)` (lines ~66–96). Bare greetings,
+  acknowledgements ("ok", "gracias" — well, English list shown, no
+  Spanish variants), and empty/slash-command input are classified
+  trivial and **`MemoryManager` skips `prefetch`/injection for them
+  entirely** ("saving a blocking network round-trip"). This directly
+  affects how often Samantha's memory gets consulted per turn, and it's
+  an English-only regex — worth checking whether it fires correctly (or
+  at all) against Spanish trivial turns ("vale", "gracias", "hola").
+- `RecallStatus` (`provider_label`, `count`, `glyph`) drives a
+  deterministic "🧠 recalled N memories" UI indicator, independent of
+  whether the model chooses to mention recall. Not previously
+  documented.
+
+---
+
+## Contract 3 — `MessageType` / `MessageEvent`
+
+Source: `gateway/platforms/base.py`, lines 2278–2345.
+
+```python
+class MessageType(Enum):
+    """Types of incoming messages."""
+    TEXT = "text"
+    LOCATION = "location"
+    PHOTO = "photo"
+    VIDEO = "video"
+    AUDIO = "audio"
+    VOICE = "voice"
+    DOCUMENT = "document"
+    STICKER = "sticker"
+    COMMAND = "command"  # /command style
+
+
+class ProcessingOutcome(Enum):
+    """Result classification for message-processing lifecycle hooks."""
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class MessageEvent:
+    """Incoming message from a platform. Normalized representation
+    that all adapters produce."""
+    text: str
+    message_type: MessageType = MessageType.TEXT
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    source: SessionSource = None
+    raw_message: Any = None
+    message_id: Optional[str] = None
+    platform_update_id: Optional[int] = None
+    media_urls: List[str] = field(default_factory=list)
+    media_types: List[str] = field(default_factory=list)
+    reply_to_message_id: Optional[str] = None
+    reply_to_text: Optional[str] = None
+    reply_to_author_id: Optional[str] = None
+    reply_to_author_name: Optional[str] = None
+    reply_to_is_own_message: bool = False
+    # (fields continue past line 2345 — reply threading and
+    #  allow_gateway_control per the capability map; not re-quoted here,
+    #  their existence is unchanged from the map's description)
+```
+
+This matches the capability map's §1 quote exactly — `AUDIO`/`VOICE`
+members, `media_urls`/`media_types`, confirmed unchanged. Not a
+correction.
+
+---
+
+## Contract 4 — `PluginContext.register_platform`
+
+Source: `hermes_cli/plugins.py`, lines 2779–2818 (signature + docstring;
+body continues to ~2853 registering into `platform_registry`).
+
+```python
+def register_platform(
+    self,
+    name: str,
+    label: str,
+    adapter_factory: Callable,
+    check_fn: Callable,
+    validate_config: Callable | None = None,
+    required_env: list | None = None,
+    install_hint: str = "",
+    **entry_kwargs: Any,
+) -> Optional[PluginRegistration]:
+    """Register a gateway platform adapter.
+
+    The adapter_factory receives a ``PlatformConfig`` and returns a
+    ``BasePlatformAdapter`` subclass instance.
+
+    ``check_fn`` is a PASSIVE dependency probe — "are deps importable
+    right now?".  It must never install anything: status displays and
+    config loading call it freely.  If your platform's SDK is
+    lazy-installable, pass the ACTIVE installer separately as
+    ``ensure_deps_fn`` (forwarded via ``entry_kwargs``); the gateway
+    calls it from ``create_adapter()`` when ``check_fn`` is False,
+    right before connecting the platform.
+
+    Extra keyword arguments are forwarded to ``PlatformEntry`` (e.g.
+    ``setup_fn``, ``emoji``, ``allowed_users_env``, ``platform_hint``,
+    ``ensure_deps_fn``).  Unknown keys raise TypeError from the
+    dataclass constructor.
+    """
+```
+
+Confirmed real end-to-end against `plugins/platforms/irc/adapter.py`
+(lines 953–989 at this commit) — the template the capability map cited
+still exists and still ends with `register(ctx): ctx.register_platform(
+name="irc", label="IRC", adapter_factory=..., check_fn=...,
+is_connected=..., required_env=[...], install_hint=..., setup_fn=...,
+env_enablement_fn=..., cron_deliver_env_var=..., standalone_sender_fn=...,
+allowed_users_env=..., allow_all_env=..., max_message_length=450,
+emoji="💬", pii_safe=False, allow_update_command=True,
+platform_hint="...")`. One addition vs. the capability map's quoted
+excerpt: `is_connected=is_connected` is passed and was omitted from the
+map's copy — minor, not a correction, just incomplete quoting there.
+`irc`'s `plugin.yaml` (`kind: platform`, `requires_env`/`optional_env`
+with `name`/`description`/`prompt`/`password` per entry, no
+`manifest_version`/`api_version`) also verified unchanged.
+
+`kind` values confirmed live in `hermes_cli/plugins.py`:
+`standalone` (default, line 1063), `backend`, `exclusive` (line 3950,
+memory providers), `platform` (line 3996), `model-provider` (line
+3968) — exactly the five the capability map listed.
+
+---
+
+## Contract 5 (not in the brief, but load-bearing) — streaming-TTS
+## adapter methods on `BasePlatformAdapter`
+
+The brief's Step 3 only asked to `grep -rn "streaming_tts"
+gateway/platforms/base.py`, which surfaces this contract — capturing it
+in full because **every signature in the capability map's §1 quote of
+it is wrong** in a way that would break a naive implementation. See
+Corrections below for the diff; this section is the corrected version.
+
+Source: `gateway/platforms/base.py`, lines 588–622 (`AudioFormat` /
+`StreamingTTSHandle`) and 4611–4655 (the five methods on
+`BasePlatformAdapter`).
+
+```python
+@dataclass
+class AudioFormat:
+    """Declared PCM format for a streaming-TTS session.
+
+    All chunks delivered via ``write_streaming_tts`` must conform to this
+    format: raw little-endian PCM at the declared sample rate, channels,
+    and sample width.
+    """
+    sample_rate: int = 24000
+    channels: int = 1
+    sample_width: int = 2  # bytes per sample (int16 = 2)
+
+
+@dataclass
+class StreamingTTSHandle:
+    """Opaque handle returned by ``begin_streaming_tts``.
+
+    Adapters may subclass or extend this with platform-specific state
+    (track IDs, buffers, etc.).  The base fields are used by the consumer
+    for bookkeeping and cancellation.
+    """
+    chat_id: str = ""
+    audio_format: AudioFormat = field(default_factory=AudioFormat)
+    audible: bool = False   # True once the first PCM chunk has been written
+    aborted: bool = False   # True after abort_streaming_tts; late chunks dropped
+```
+
+```python
+# ------------------------------------------------------------------
+# Streaming TTS adapter contract (#60671)
+# ------------------------------------------------------------------
+# Voice-capable adapters (LiveKit, Discord voice, …) override these to
+# accept PCM audio chunks while the LLM is still generating.  The default
+# implementations report "unsupported" so existing adapters are
+# source-compatible and keep the whole-file auto-TTS fallback.
+
+def supports_streaming_tts(self, chat_id: str, audio_format: AudioFormat) -> bool:
+    """Return True when this adapter can accept streaming PCM for *chat_id*.
+    Default: False (whole-file auto-TTS path remains). Override to opt in."""
+    return False
+
+async def begin_streaming_tts(
+    self,
+    chat_id: str,
+    audio_format: AudioFormat,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[StreamingTTSHandle]:
+    """Open a streaming-audio session for *chat_id*.
+    Returns an opaque handle passed to subsequent write/finish/abort
+    calls, or None to decline (caller falls back to whole-file TTS)."""
+    return None
+
+async def write_streaming_tts(self, handle: StreamingTTSHandle, chunk: bytes) -> None:
+    """Write one PCM chunk to the adapter's outbound audio track."""
+
+async def finish_streaming_tts(self, handle: StreamingTTSHandle, *, interrupted: bool = False) -> None:
+    """Signal normal end of the audio stream."""
+
+async def abort_streaming_tts(self, handle: StreamingTTSHandle, error: Optional[str] = None) -> None:
+    """Abort the stream due to an error or cancellation.
+    Must be idempotent: late producer chunks after abort must be
+    silently dropped, not raise. Restores adapter state to "not streaming"."""
+```
+
+All five default to no-op/False/None on `BasePlatformAdapter`, so the
+contract is additive — confirms the capability map's "all five methods
+default to no-op" claim.
+
+---
+
+## Step 5 — plugin discovery
+
+The brief's literal command, bare `hermes plugins`, does **not** list
+plugins — it launches an interactive TUI and fails non-interactively:
+
+```
+$ hermes plugins
+Interactive mode requires a terminal.
+```
+
+The correct listing command, discovered from `hermes plugins --help`,
+is a subcommand:
+
+```
+$ hermes plugins list
+```
+
+which ran cleanly and printed a table of bundled plugins (`Name /
+Status / Version / Description / Source`, ~30 rows: browser-*, chronos,
+disk-cleanup, security-guidance, google_meet, kanban/dashboard,
+hermes-achievements, spotify, image_gen/*, teams_pipeline, etc.), all
+`not enabled` by default with `Source: bundled`. **Use `hermes plugins
+list` for later verification, not bare `hermes plugins`.** Other
+subcommands relevant later: `install`, `enable`, `disable`,
+`capabilities` (declared vs. granted per plugin), `doctor` (validates a
+plugin against the real runtime contracts — useful for checking our own
+plugin before shipping it), `show`/`info`.
+
+`mkdir -p ~/.hermes/plugins` (the brief's setup step) still matches the
+user-plugin discovery path documented in the capability map §4b —
+unchanged.
+
+---
+
+## Corrections against `2026-08-21-hermes-herald-capability-map.md`
+
+Treat every item below as source overriding the map. The map was
+built from documentation and web-fetched summaries; this document was
+read directly from the pinned commit.
+
+1. **Streaming-TTS adapter contract — every signature was wrong.** The
+   map's §1 quote:
+
+   ```
+   supports_streaming_tts() -> bool
+   begin_streaming_tts(handle: StreamingTTSHandle, format: AudioFormat)
+   write_streaming_tts(handle: StreamingTTSHandle, pcm_chunk: bytes)
+   finish_streaming_tts(handle: StreamingTTSHandle)
+   abort_streaming_tts(handle: StreamingTTSHandle)
+   ```
+
+   vs. the real contract (Contract 5 above):
+   - `supports_streaming_tts` takes `(chat_id, audio_format)`, not
+     nothing.
+   - `begin_streaming_tts` **returns** `Optional[StreamingTTSHandle]`
+     — it does not receive one as a parameter. The map had the data
+     flow backwards: the adapter constructs the handle, the caller
+     doesn't hand it one.
+   - `write_streaming_tts`'s second parameter is named `chunk`, not
+     `pcm_chunk`.
+   - `finish_streaming_tts` takes a keyword-only `interrupted: bool =
+     False` the map didn't mention.
+   - `abort_streaming_tts` takes a keyword-only `error: Optional[str] =
+     None` the map didn't mention.
+   - **All four besides `supports_streaming_tts` are `async def`.**
+     The map's code block used bare `def`, which would silently break
+     under `await`-based dispatch if copied as-is.
+
+   A plugin author who copy-pasted the map's version would ship
+   something that doesn't match the real ABI at all. This is the
+   single most important correction in this document — it's the exact
+   contract Tasks 2–4 subclass.
+
+2. **The PR citation is likely wrong.** The map cites "PR #73862" for
+   this seam. The actual source comment at `gateway/platforms/base.py:589`
+   says `(#60671)`. Neither number was independently verified against
+   GitHub's PR list (network access to the PR itself wasn't checked),
+   but the two numbers disagree and the source comment should be
+   trusted over the map's citation if anyone needs to look up review
+   history.
+
+3. **`MemoryProvider` has substantially more surface than documented.**
+   The map's §4b.1 lists `name`, `is_available`, `initialize`,
+   `prefetch`, `sync_turn`, `get_tool_schemas`/`handle_tool_call`,
+   `get_config_schema`/`save_config`. Real source (Contract 2 above)
+   also has `system_prompt_block()`, `unavailable_reason()`,
+   `queue_prefetch()`, `recall_status()` → `RecallStatus`, and seven
+   optional hooks (`on_turn_start`, `on_session_end`,
+   `on_session_switch`, `on_pre_compress`, `on_memory_write`,
+   `on_delegation`, `backup_paths`). Note also: `get_config_schema()`
+   and `save_config()`, which the map lists, were **not found** in
+   `agent/memory_provider.py` at this commit (searched the full
+   404-line file) — they may live on a different base class or be
+   config-plugin-only; flagging as **not found**, not corrected, since
+   I didn't chase down where the map got them from.
+
+4. **The trivial-prompt gate is new information, not a correction, but
+   is important enough to flag loudly**: `MemoryManager` skips
+   `prefetch()` entirely for turns matching `is_trivial_prompt()` — an
+   English-only regex covering things like "ok", "thanks", "hi". If
+   this gate runs upstream of our provider, Spanish trivial turns
+   ("vale", "gracias", "hola") either aren't recognized (so they DO
+   trigger prefetch — wasted work, not a correctness bug) or need a
+   locale-aware override. Worth checking which, before assuming
+   `prefetch()` fires on every turn.
+
+5. **PyPI distribution is stale and non-viable — new information not
+   in the map at all.** The map never discusses how Hermes is
+   installed (out of scope for a documentation spike), but this blocks
+   the install recipe implied throughout: `pip`/`uv install
+   hermes-agent` gets `0.19.0`, which **predates
+   `tools/tts_streaming.py` existing at all**. Anyone following the
+   map's contract descriptions while installing from PyPI would get
+   `ModuleNotFoundError` and no explanation why. Install from source at
+   a pinned commit (see "How this was installed" above).
+
+6. **`hermes plugins` (bare) does not list plugins** — it launches an
+   interactive TUI. The listing command is `hermes plugins list` (or
+   `ls`). Minor, but it's literally the brief's own Step 5 verification
+   command, so anyone re-running the brief as written will see
+   `Interactive mode requires a terminal.` and may read that as
+   Hermes being broken rather than a wrong subcommand.
+
+7. **Everything else confirmed, not corrected:** `MessageType` members,
+   `MessageEvent` fields, `register_platform` signature and behavior,
+   the `irc` template (with the `is_connected` param addendum noted in
+   Contract 4), the five `kind` values, `SentenceChunker`'s role, and
+   the `StreamingTTSProvider` ABC + registry mechanism. The map's core
+   architectural read (outbound streaming yes / inbound streaming no,
+   the plugin-not-fork recommendation) is unaffected by any correction
+   above.
+
+---
+
+## What I could not find / did not verify
+
+- `get_config_schema()` / `save_config(values, hermes_home)` on
+  `MemoryProvider` — not present in `agent/memory_provider.py` at this
+  commit (see Correction 3). Did not search elsewhere in the tree for
+  where these might actually live; flagged as a gap for whoever writes
+  the `MemoryProvider` subclass in a later task.
+- Whether PR #73862 or #60671 (or both, on different repos) is the
+  correct upstream reference — not checked against GitHub's PR API.
+- Full plugin-discovery search-path precedence (`<repo>/plugins/` vs
+  `~/.hermes/plugins/` vs `.hermes/plugins/` vs pip entry points) was
+  not re-verified from source this session — only `hermes plugins
+  list` was run, which doesn't reveal search order. The capability
+  map's description of this is carried forward unverified, not
+  corrected.

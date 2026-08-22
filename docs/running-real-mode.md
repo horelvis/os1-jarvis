@@ -175,6 +175,50 @@ onboarding marker (the six answer chunks survive; nothing is truly deleted).
 That endpoint is currently unauthenticated; the improvement sweep puts it
 behind `SAMANTHA_ADMIN_TOKEN`.
 
+## Installing Hermes locally (for the plugin work)
+
+**Status: verified 2026-08-22**, dev Mac (Intel, macOS Ventura 13.5).
+Full captured contracts:
+[`docs/superpowers/specs/hermes-contracts-v0.20.5.md`](superpowers/specs/hermes-contracts-v0.20.5.md).
+
+Do **not** `uv tool install hermes-agent` — PyPI is stuck at a stale
+`0.19.0` that predates the streaming-TTS module this project needs, and
+`uv tool install` from a git URL is explicitly blocked by Hermes' own
+build backend ("Hermes is distributed via the shell installer, Docker
+image, or Nix"). Use the developer path Hermes' own error message
+recommends instead:
+
+```bash
+git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-src
+cd /tmp/hermes-src
+git checkout <pinned-commit>          # v2026.8.19 / pyproject 0.20.5 as of 2026-08-22
+uv self update                        # 0.8.15 cannot parse this repo's pyproject.toml/uv.lock
+uv sync --python 3.11
+uv pip install --python .venv/bin/python -e "<repo>/backend" --resolution lowest-direct
+```
+
+`--resolution lowest-direct` matters on Intel Mac: an unconstrained
+resolve of `backend`'s `pipecat-ai` dependency picks
+`numba==0.67.0`/`llvmlite==0.49.0`, and `llvmlite` 0.49 ships **no
+x86_64 macOS wheel** (arm64-only). The lowest-direct resolution lands on
+`numba==0.61.2`/`llvmlite==0.44.0`, which does have one.
+
+Avoid the shell installer (`install.sh`) unless you also want Node.js,
+ripgrep, and ffmpeg built from Homebrew source — on a Tier-3 Homebrew
+platform (no bottles) that ran 20+ minutes without finishing and nearly
+filled the disk. The git+`uv sync` path above skips all of that; it
+gets you the `hermes` CLI and importable package without the browser
+automation / audio-conversion tooling, which isn't needed for reading
+contracts or running the backend's own tests.
+
+Verify the install:
+
+```bash
+.venv/bin/hermes --version                                    # Hermes Agent v0.20.5 (2026.8.19)
+.venv/bin/python -c "import samantha.tts; print(samantha.tts.OUTPUT_SAMPLE_RATE)"   # 24000
+.venv/bin/hermes plugins list                                 # NOT bare `hermes plugins` — that opens an interactive TUI
+```
+
 ## Not verified
 
 - Whether Chromium's Web Speech API (the STT path) can reach Google's servers
