@@ -698,10 +698,14 @@ read directly from the pinned commit.
 6. **`hermes plugins` (bare) does not list plugins** — it launches an
    interactive TUI. The listing command is `hermes plugins list` (or
    `ls`). **This corrects the task-1 brief's Step 5, not the capability
-   map** — the map never mentions `hermes plugins` at all
-   (`grep -in "hermes plugins" docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md`
-   returns nothing). Filed here anyway since it's the closest thing to
-   a "Corrections" home for it. Evidence:
+   map.** Precisely: `grep -in "hermes plugins"
+   docs/superpowers/specs/2026-08-21-hermes-herald-capability-map.md`
+   returns one hit, line 49 — `"...adopt, as a set of Hermes
+   plugins..."`, prose about the plugin architecture in general, not a
+   reference to the `hermes plugins` CLI subcommand. The map makes no
+   claim about that command either way, so there is nothing there to
+   correct; filed here anyway since it's the closest thing to a
+   "Corrections" home for it. Evidence:
    ```
    $ /tmp/hermes-src/.venv/bin/hermes plugins
    Interactive mode requires a terminal.
