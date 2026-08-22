@@ -163,7 +163,7 @@ loads correctly.
 ## 7. CosyVoice answers, and produces real audio
 
 ```bash
-curl -sS -o /dev/null -w 'http %{http_code}\n' http://192.168.100.58:8093/ --max-time 5
+curl -sS -o /dev/null -w 'http %{http_code}\n' http://127.0.0.1:8093/ --max-time 5
 ```
 
 A 404 is healthy — `/` is not a route. Connection refused means the container

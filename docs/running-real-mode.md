@@ -1,7 +1,9 @@
 # Running Samantha in real mode
 
-> **Status: verified 2026-08-07** on the dev Mac (192.168.100.19) against the
-> 4090 box (192.168.100.58). This describes how startup works *today*. It is
+> **Status: verified 2026-08-07** on the dev Mac against a separate GPU box;
+> re-verified 2026-08-22 with everything — backend, GPU, container and Hermes
+> — on a single machine, which is how it runs now. This describes how startup
+> works *today*. It is
 > expected to change — Phase 11 moves the voice loop server-side, and the
 > improvement sweep on `improvement-sweep-2026-08-04` is still in flight.
 > Anything below marked **measured** was observed directly; anything marked
@@ -14,13 +16,13 @@ itself.
 
 | Piece | Where | Required for | Started how |
 |---|---|---|---|
-| FastAPI backend | dev Mac, `127.0.0.1:7777` | everything | `python -m samantha.api` |
-| CosyVoice 3 | 4090 box, `:8093` | any speech output | `docker compose up -d` |
+| FastAPI backend | `127.0.0.1:7777` | everything | `python -m samantha.api` |
+| CosyVoice 3 | same box, `:8093` | any speech output | `docker compose up -d` |
 | LLM | X.AI Grok API (default) | conversation | nothing to start — it's a remote API |
 
 Two things you do **not** need for a normal run:
 
-- **llama-server** (`:8000` on the 4090) is the *alternative* to the Grok API,
+- **llama-server** (`:8000`) is the *alternative* to the Grok API,
   not a companion to it. Start it only if you want a fully local LLM; then
   point `SAMANTHA_LLM_SERVER_URL` at it and leave the API key empty.
 - **hermes-agent** (`:8642`) is only used when `llm_provider=hermes`. The

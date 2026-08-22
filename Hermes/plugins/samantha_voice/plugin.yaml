@@ -65,6 +65,6 @@ python_dependencies:
 
 optional_env:
   - name: SAMANTHA_TTS_COSYVOICE_URL
-    description: "CosyVoice 3 server base URL (default http://192.168.100.58:8093)"
+    description: "CosyVoice 3 server base URL (default http://127.0.0.1:8093)"
     prompt: "CosyVoice URL"
     password: false

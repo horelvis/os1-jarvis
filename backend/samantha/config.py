@@ -83,7 +83,7 @@ class Config:
     # content now leaves the device when llm_api_key is set.
     #
     # To stay fully local, override at runtime:
-    #   SAMANTHA_LLM_SERVER_URL=http://192.168.100.58:8000
+    #   SAMANTHA_LLM_SERVER_URL=http://127.0.0.1:8000
     #   SAMANTHA_LLM_MODEL=qwen3-8b
     #   SAMANTHA_LLM_API_KEY=                        # empty
     #
@@ -115,7 +115,7 @@ class Config:
     memory_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     # === TTS — CosyVoice 3 ===
-    # CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the 4090 at port 8093.
+    # CosyVoice 3 (Fun-CosyVoice3-0.5B-2512) on the GPU box at port 8093.
     # Voice cloning via inference_zero_shot with the reference WAV +
     # its transcript. Honors personality v6 inline markers ([laughter],
     # <laughter>palabras</laughter>, [breath], [sigh]).
@@ -126,11 +126,14 @@ class Config:
     # the `<|endofprompt|>` system marker per request, so the client
     # sends plain Spanish.
     #
-    # ⚠ 192.168.100.58 is THIS deployment's 4090 box on the LAN.
-    # Any other install (CI, laptop, new hardware) MUST override it:
+    # Loopback since 2026-08-22: backend, GPU and container all live on one
+    # machine now. It used to be 192.168.100.58 — that box's own LAN address,
+    # which worked but routed a local call through the network stack and
+    # broke whenever DHCP moved the box.
+    #
+    # Split the two apart again (CI, a laptop driving a remote GPU) with:
     #   SAMANTHA_TTS_COSYVOICE_URL=http://<your-gpu-host>:8093
-    # Kept as the default so the kiosk box needs zero env config.
-    tts_cosyvoice_url: str = "http://192.168.100.58:8093"
+    tts_cosyvoice_url: str = "http://127.0.0.1:8093"
     tts_cosyvoice_timeout_s: float = 60.0
     # Reference WAV (~8 s of Samantha's voice).
     tts_cosyvoice_ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
