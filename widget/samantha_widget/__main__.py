@@ -14,8 +14,9 @@ class SamanthaApp(Gtk.Application):
         super().__init__(application_id="com.horelvis.samantha.widget")
 
     def do_activate(self) -> None:
-        window = Gtk.ApplicationWindow(application=self)
-        window.set_default_size(600, 96)
+        from .window import StripWindow
+
+        window = StripWindow(self)
         window.present()
 
 
