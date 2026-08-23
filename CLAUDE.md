@@ -87,6 +87,11 @@ as the primary interaction mode.
    things in the house: control it, remember, remind, look something up
    when the conversation needs it.
 
+   Since 2026-08-23 she also **sees**: the house's cameras, through
+   YOLO, close enough to notice somebody outside. Seeing obeys the same
+   rule as acting — she mentions what she noticed, in her words, and
+   never reports a detection.
+
    The order in that sentence is the principle. Acting serves the
    conversation, never replaces it. She does not announce her tools, does
    not narrate steps, does not offer menus of what she can do. If a
@@ -776,6 +781,44 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-23 — Samantha can see: BarnDoor's cameras, reused not integrated
+
+**Decision:** the widget watches the house's cameras. What comes from
+`~/git/barndoor` is the RTSP layout and a YOLOv9 model already converted
+to ONNX — and nothing else. No Frigate, no MQTT, no Telegram, no second
+agent. The two projects stay separate.
+
+**Why it belongs in the widget rather than in a service of its own:**
+zero new dependencies. `onnxruntime` was already there for Silero and
+PyAV arrived with faster-whisper, so a widget that could already hear
+was one import away from being able to look.
+
+**The design decision that matters:** a detection does not become
+speech. It becomes a `chat` frame with a prompt asking her to mention
+what she noticed, in one short line, forbidding any reference to cameras
+or detections. "Persona detectada en exterior" would be a machine
+talking, and §1 says she never performs using her tools. Measured:
+
+    cámara: alguien
+    ← Oye. Hay alguien fuera de casa.
+
+**What the user's suggestion to read BarnDoor's app was worth:** its
+`agent/rules.py` had the numbers, arrived at against these very
+cameras, that would otherwise have been guessed — confidence floor 0.7
+(the guess was 0.45), anti-spam of 180 s per label, and a person during
+quiet hours overriding that silence. Without the anti-spam a camera
+says "alguien" every three seconds for as long as somebody stands in
+the driveway.
+
+**Cost:** a model call per event, affordable only because those rules
+make events rare. And the privacy line moves again: what the cameras see
+is described to a cloud LLM, in the same "eyes open, not absolute"
+sense §1 already carries for conversation.
+
+**Not done:** she cannot be asked what she sees. The camera speaks; it
+cannot be questioned. That wants the vision path exposed as a Hermes
+tool rather than a thread pushing prompts.
 
 ### 2026-08-23 — Electron reconsidered for the widget, and rejected again
 

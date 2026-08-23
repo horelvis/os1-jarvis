@@ -344,6 +344,66 @@ and it makes every failure a two-library failure.
 
 ---
 
+## 5.7 Eyes — added 2026-08-23
+
+The widget can look at the house's cameras. Reuse, not integration:
+from `~/git/barndoor` come the RTSP layout and a YOLOv9 model already
+converted to ONNX, and nothing else of that project — no Frigate, no
+MQTT, no Telegram, no second agent.
+
+It costs no new dependency, which is why it belongs here rather than in
+a service of its own: `onnxruntime` is already present for Silero and
+PyAV arrived with faster-whisper.
+
+- **Detector**: YOLOv9-t at 320 px, eight classes out of COCO's eighty.
+  A driveway does not need to be told about a potted plant, and every
+  extra class is another way to interrupt somebody for nothing.
+- **CameraStream**: the sub-stream, sampled every tenth frame. Cameras
+  push 15-30 fps and nothing in a house moves that fast; the GPU belongs
+  to Whisper and CosyVoice, which are on the critical path of a
+  conversation. A camera is not.
+- **Watcher**: when it is worth speaking at all.
+
+### 5.7.1 She is told, not made to recite
+
+A detection does not become speech directly. It becomes a `chat` frame,
+through the same path as anything the user says:
+
+> Acabas de ver alguien fuera de casa. Coméntalo en una frase corta, con
+> tus palabras, como si te hubieras dado cuenta tú. No menciones cámaras,
+> detecciones ni sistemas.
+
+What comes back is hers, in her tone, with her memory of the
+conversation. Measured on a real clip from the exterior camera:
+
+    cámara: alguien
+    ← Oye. Hay alguien fuera de casa.
+
+"Persona detectada en exterior" would be a machine talking, and §1 says
+she never performs using her tools. It costs a model call, which is
+affordable precisely because the Watcher makes it rare.
+
+### 5.7.2 The rules for keeping quiet
+
+Detecting is the easy half. These numbers are not guesses — they come
+from BarnDoor's `agent/rules.py`, already run against these very
+cameras:
+
+| Rule | Value | Why |
+|---|---|---|
+| Confidence floor | 0.7 | 0.45 was a guess and it announces shadows. |
+| Anti-spam | 180 s per label | Otherwise a camera says "alguien" every three seconds for as long as somebody stands there. |
+| Quiet hours | 23:00-07:00 | A person at night overrides the anti-spam. **People only** — a parked car would talk all night. |
+
+### 5.7.3 What is not done
+
+Nothing asks her what she can see: there is no "¿hay alguien fuera?" —
+the camera speaks, but it cannot be questioned. That wants the vision
+path exposed as a Hermes tool rather than a thread pushing prompts, and
+it is a bigger change than it looks.
+
+---
+
 ## 6. Project structure
 
 A new top-level directory:
@@ -366,6 +426,8 @@ widget/
 │   ├── stt.py               ← faster-whisper
 │   ├── speech.py            ← clause chunking + CosyVoice synthesis
 │   ├── gateway.py           ← the WebSocket client
+│   ├── vision.py            ← cameras: YOLO + when it is worth saying
+│   ├── fake_mic.py          ← synthesised speech through the mic path
 │   └── turn.py              ← the state machine tying it together
 ├── tools/                   ← hand-run probes, not tests
 └── tests/
