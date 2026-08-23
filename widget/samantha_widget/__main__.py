@@ -116,7 +116,12 @@ class SamanthaApp(Gtk.Application):
 
         from .audio import Microphone, Player, describe_devices
         from .gateway import GatewayClient
-        from .speech import ClauseChunker, Speaker, is_system_message
+        from .speech import (
+            ClauseChunker,
+            Speaker,
+            is_system_message,
+            unwrap_delivery,
+        )
         from .stt import Transcriber
         from .turn import TurnMachine
         from .vad import SileroDetector, UtteranceDetector
@@ -178,6 +183,12 @@ class SamanthaApp(Gtk.Application):
                 print(f"(sistema) {token[:60]}", file=sys.stderr, flush=True)
                 return
             print(f"← {token}", file=sys.stderr, flush=True)
+            # A scheduled delivery arrives wrapped in scaffolding — job
+            # id, dashes, an English footer — and she would read all of
+            # it aloud.
+            token = unwrap_delivery(token)
+            if not token:
+                return
             machine.token(token)
             for clause in chunker.push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
