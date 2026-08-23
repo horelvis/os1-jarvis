@@ -1,5 +1,139 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-23 — Widget plan 2: the voice turn ⏸ blocked on hardware
+
+Everything between the microphone and her voice is built, wired and
+running: VAD, transcription, the WebSocket to Hermes, clause-by-clause
+synthesis and playback, and the state machine that drives the wave.
+**It has never heard anybody**, because this machine has no microphone
+plugged in — the input captures digital silence (RMS exactly 0.0000 on
+an unmuted source). Task 8 of the plan is the only one left, and it
+needs a microphone, not code.
+
+**Design:** `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md`
+**Plan:** `docs/superpowers/plans/2026-08-23-samantha-widget-voice-turn.md`
+**Probe:** `docs/superpowers/specs/2026-08-23-widget-gateway-probe.md`
+
+**Changed files:** `widget/samantha_widget/{gateway,vad,stt,speech,audio,
+turn,__main__}.py`, `widget/tools/probe_gateway.py`,
+`widget/tests/test_{gateway,vad,stt,speech,turn}.py`,
+`widget/{pyproject.toml,README.md}`, `systemd/samantha-widget.service`,
+`systemd/samantha-hermes.service`, and the probe write-up.
+
+**Tests:** 72 passed in `widget/`, ruff clean.
+
+**Measured, not assumed:**
+- CosyVoice synthesises 3.52 s of audio in 1.0 s; Whisper transcribes it
+  in 0.23 s and loads in 81 s the first time (~1 s after).
+- Whisper sits at ~2.5 GB of VRAM next to CosyVoice (5.3 → 7.8 GB).
+- The loop was closed without a microphone by having CosyVoice speak a
+  sentence and Whisper transcribe it back.
+
+**Notes — what this cost and what it found:**
+
+- **Samantha's words were being sent to Microsoft.** The agent's own
+  `text_to_speech` tool was synthesising through Edge TTS, because
+  Hermes' default `tts.provider` is `edge` and the repo's Hermes config
+  had no `tts:` section. Found by checking the format of the cache file
+  (MP3 = Edge; CosyVoice yields WAV/PCM). Fixed and verified. **The
+  config is git-ignored, so this must be redone on the appliance.**
+- **The committed `samantha-hermes.service` could not start.** systemd
+  runs it from `%h`, so the adapter's relative `frontend/dist` resolved
+  to `~/frontend/dist`. Fixed with `WorkingDirectory=`.
+- **A second Hermes was running** — the machine's personal one, the old
+  remote access to Samantha — holding the profile the repo's pinned
+  gateway wanted. Stopped and disabled at the user's request.
+- **The gateway narrates itself in English, with emoji**, through
+  ordinary token frames, and each carries its own `done` (one turn had
+  six). Both would have reached her voice and her wave. Filter added,
+  and `done` no longer ends a turn on its own.
+- **PortAudio's `callback=` mode segfaults** under GTK: no traceback,
+  and it surfaces inside whatever unrelated `import` happens to be
+  running, which sent this after concurrent imports for three rounds.
+  Reading blocking from our own thread fixes it. `SAMANTHA_WIDGET_NO_MIC`
+  exists because isolating the microphone is what found it.
+- **`--system-site-packages` also exposes `~/.local/lib`**, and numpy /
+  anyio / websockets were being loaded from there at mismatched
+  versions. `PYTHONNOUSERSITE=1` plus `pip install --ignore-installed`.
+  `pip list --local` is the only honest view of what the venv holds.
+- **Clauses were being synthesised concurrently** and their PCM chunks
+  interleaved in the player. They are strictly sequential now.
+- **Hermes still answers as "Hermes, tu asistente"** and offers `/help`
+  to a person with no keyboard. Plan 3's problem, and the likeliest
+  reason the widget fails to convince.
+
+---
+
+
+## 2026-08-23 — Widget plan 1: the strip ✅
+
+A borderless, transparent, always-on-top bar along the bottom edge of the
+screen, with Samantha's wave animating through four states, running as a
+systemd user service. First step of replacing the Chromium kiosk with a
+native GTK4 desktop widget (decision taken 2026-08-22, written up today).
+
+**Design:** `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md`
+**Plan:** `docs/superpowers/plans/2026-08-23-samantha-widget-strip.md`
+
+**Changed files:**
+- `widget/` (new top-level directory, approved by the user 2026-08-23):
+  `pyproject.toml`, `README.md`, `samantha_widget/{__init__,__main__,theme,
+  geometry,ewmh,window,wave_model,wave}.py`, `tools/render_wave.py`,
+  `tests/{test_imports,test_ewmh,test_geometry,test_wave_model}.py`
+- `systemd/samantha-widget.service` (new)
+- `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md` (new,
+  §4 revised during execution)
+- `docs/superpowers/plans/2026-08-23-samantha-widget-strip.md` (new, tasks 1,
+  6 and 7 annotated with what actually happened)
+- `docs/superpowers/plans/2026-08-23-samantha-widget-voice-turn.md` (new,
+  plan 2 — not started)
+
+**Tests:** 20 passed in `widget/`, ruff clean. `backend/`, `frontend/`,
+`Hermes/` and `tts-server/` untouched — verified by diff, not by assertion.
+
+**Notes — what the plan got wrong, which is most of what was learned:**
+
+- **Cairo does not work on this machine.** PyGObject needs `gi._gi_cairo`
+  from the system package `python3-gi-cairo` to hand a `cairo.Context` to a
+  draw function. `python3-cairo` IS installed, which makes it misleading:
+  the failure is a `TypeError` raised inside the draw callback, where GTK
+  swallows it — the strip appears, never draws, and logs nothing. Replaced
+  with `Gsk.PathBuilder` + `Gtk.Snapshot.append_stroke` (GTK 4.14), which
+  needs no extra package and composites on the GPU. Spec §4 revised.
+- **`--system-site-packages` makes pip treat system packages as satisfying
+  a requirement**, so `pip install pytest` was a silent no-op and the venv
+  was using the system's runner. `--ignore-installed` pins it locally.
+- **systemd needs the package installed, not just present.** Every start
+  died with `No module named samantha_widget` while running it by hand from
+  `widget/` worked — the current directory was covering for it.
+  `pip install -e .` is now in the plan and the README.
+- **E402 is off in ruff's default set**, so the `# noqa: E402` that
+  PyGObject's require_version-before-import pattern demands was itself
+  flagged as unused (RUF100). Enabled explicitly.
+- **Verification kept lying.** `xdotool` is not installed, so states cannot
+  be photographed by sending a keystroke — hence `SAMANTHA_WIDGET_STATE`.
+  Then the screen locked mid-run and every screenshot silently captured the
+  lock screen instead of the strip: a plausible image of the wrong thing.
+  `tools/render_wave.py` renders each state offscreen, immune to that.
+- **Shape changed twice during the run, at the user's request:** from a
+  floating 1100 px terracotta card to a full-width bar, then to a
+  transparent background with the terracotta moved into the line itself.
+  `theme.STRIP_MAX_WIDTH` and `theme.BACKGROUND` are the two knobs back.
+- **GNOME places it at x=66, width 1854, not 0/1920.** The Ubuntu dock
+  reserves those pixels from normal windows. Taking them needs
+  `_NET_WM_WINDOW_TYPE_DOCK`, which also gives up keyboard focus; the user
+  chose to leave it.
+- **Two things not verified.** That it survives a workspace switch (would
+  have moved the user's desktop while they were working), and the service
+  running from the canonical path — the installed unit currently points at
+  the worktree, because `widget/` does not exist on `development` yet.
+- **The kiosk was never installed on this machine.**
+  `systemctl --user is-enabled samantha-ui.service` returns `not-found`, so
+  the "leave the fallback intact" constraint had nothing to preserve here.
+  Nothing was removed regardless.
+
+---
+
 ## 2026-06-20 — Bugfix Sweep (2026-06-11 plan) ✅
 
 23-task sweep fixing the daily-conversation path, backend robustness, frontend robustness, and deploy issues found in a full-project review.

@@ -21,6 +21,14 @@ After=network.target
 [Service]
 Type=simple
 
+# systemd starts the process in %h, and samantha-kiosk's default static
+# root is the RELATIVE path "frontend/dist" — which then resolves to
+# ~/frontend/dist and the gateway refuses to start with
+# "no frontend at /home/<user>/frontend/dist". Every relative default in
+# every plugin has the same problem, so the fix is the working directory
+# rather than one more Environment= line per path.
+WorkingDirectory=%h/git/os1-samantha
+
 # API Server configuration. Environment variables override the config.yaml and
 # .env inside the repo's own HERMES_HOME (.hermes/home/), which run-gateway.sh
 # sets — never the machine owner's ~/.hermes.
