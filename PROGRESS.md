@@ -1,5 +1,70 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-23 — Widget plan 2: the voice turn ⏸ blocked on hardware
+
+Everything between the microphone and her voice is built, wired and
+running: VAD, transcription, the WebSocket to Hermes, clause-by-clause
+synthesis and playback, and the state machine that drives the wave.
+**It has never heard anybody**, because this machine has no microphone
+plugged in — the input captures digital silence (RMS exactly 0.0000 on
+an unmuted source). Task 8 of the plan is the only one left, and it
+needs a microphone, not code.
+
+**Design:** `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md`
+**Plan:** `docs/superpowers/plans/2026-08-23-samantha-widget-voice-turn.md`
+**Probe:** `docs/superpowers/specs/2026-08-23-widget-gateway-probe.md`
+
+**Changed files:** `widget/samantha_widget/{gateway,vad,stt,speech,audio,
+turn,__main__}.py`, `widget/tools/probe_gateway.py`,
+`widget/tests/test_{gateway,vad,stt,speech,turn}.py`,
+`widget/{pyproject.toml,README.md}`, `systemd/samantha-widget.service`,
+`systemd/samantha-hermes.service`, and the probe write-up.
+
+**Tests:** 72 passed in `widget/`, ruff clean.
+
+**Measured, not assumed:**
+- CosyVoice synthesises 3.52 s of audio in 1.0 s; Whisper transcribes it
+  in 0.23 s and loads in 81 s the first time (~1 s after).
+- Whisper sits at ~2.5 GB of VRAM next to CosyVoice (5.3 → 7.8 GB).
+- The loop was closed without a microphone by having CosyVoice speak a
+  sentence and Whisper transcribe it back.
+
+**Notes — what this cost and what it found:**
+
+- **Samantha's words were being sent to Microsoft.** The agent's own
+  `text_to_speech` tool was synthesising through Edge TTS, because
+  Hermes' default `tts.provider` is `edge` and the repo's Hermes config
+  had no `tts:` section. Found by checking the format of the cache file
+  (MP3 = Edge; CosyVoice yields WAV/PCM). Fixed and verified. **The
+  config is git-ignored, so this must be redone on the appliance.**
+- **The committed `samantha-hermes.service` could not start.** systemd
+  runs it from `%h`, so the adapter's relative `frontend/dist` resolved
+  to `~/frontend/dist`. Fixed with `WorkingDirectory=`.
+- **A second Hermes was running** — the machine's personal one, the old
+  remote access to Samantha — holding the profile the repo's pinned
+  gateway wanted. Stopped and disabled at the user's request.
+- **The gateway narrates itself in English, with emoji**, through
+  ordinary token frames, and each carries its own `done` (one turn had
+  six). Both would have reached her voice and her wave. Filter added,
+  and `done` no longer ends a turn on its own.
+- **PortAudio's `callback=` mode segfaults** under GTK: no traceback,
+  and it surfaces inside whatever unrelated `import` happens to be
+  running, which sent this after concurrent imports for three rounds.
+  Reading blocking from our own thread fixes it. `SAMANTHA_WIDGET_NO_MIC`
+  exists because isolating the microphone is what found it.
+- **`--system-site-packages` also exposes `~/.local/lib`**, and numpy /
+  anyio / websockets were being loaded from there at mismatched
+  versions. `PYTHONNOUSERSITE=1` plus `pip install --ignore-installed`.
+  `pip list --local` is the only honest view of what the venv holds.
+- **Clauses were being synthesised concurrently** and their PCM chunks
+  interleaved in the player. They are strictly sequential now.
+- **Hermes still answers as "Hermes, tu asistente"** and offers `/help`
+  to a person with no keyboard. Plan 3's problem, and the likeliest
+  reason the widget fails to convince.
+
+---
+
+
 ## 2026-08-23 — Widget plan 1: the strip ✅
 
 A borderless, transparent, always-on-top bar along the bottom edge of the
