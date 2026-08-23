@@ -14,6 +14,18 @@ Environment=DISPLAY=:1
 # Unbuffered, so `journalctl --user -u samantha-widget -f` shows a
 # traceback at the moment it happens rather than at exit.
 Environment=PYTHONUNBUFFERED=1
+# The venv is --system-site-packages (it needs the system's PyGObject),
+# and that also exposes ~/.local/lib, where a different numpy / anyio /
+# websockets may live. Mixing the two crashes the process inside an
+# unrelated import with no traceback. Everything this widget needs is
+# installed IN the venv (pip install --ignore-installed), so the user
+# site directory is simply switched off.
+Environment=PYTHONNOUSERSITE=1
+# samantha.tts (CosyVoice) and Hermes' markers.py, the same way
+# Hermes/run-gateway.sh reaches them. Without this she runs and is mute:
+# speech.py falls back to a local copy of has_unclosed_tag, so the only
+# symptom is silence.
+Environment=PYTHONPATH=%h/git/os1-samantha/backend:%h/git/os1-samantha
 ExecStart=%h/git/os1-samantha/widget/.venv/bin/python -m samantha_widget
 Restart=on-failure
 RestartSec=3
