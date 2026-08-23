@@ -21,6 +21,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
 # Set to any of the four state names to freeze the wave there and skip
@@ -38,6 +39,17 @@ _NO_MIC = os.environ.get("SAMANTHA_WIDGET_NO_MIC") == "1"
 # — its own threads, its own queue, its own player — on a machine with
 # no microphone, where no turn can ever begin.
 _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
+
+# Speak this INTO the widget, as if into a microphone: it is synthesised,
+# resampled to 16 kHz and pushed through the same on_frame the real
+# microphone calls. Everything after that is real — Silero, Whisper, the
+# WebSocket to Hermes, and her reply spoken back. Only the air is faked.
+_FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
+
+# Write every utterance the VAD closes to this directory as a WAV.
+# Diagnostic only: when a transcription comes back as nonsense there is
+# no way to tell from the text whether the audio was bad or Whisper was.
+_DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
 
 
 class SamanthaApp(Gtk.Application):
@@ -138,9 +150,21 @@ class SamanthaApp(Gtk.Application):
         )
 
         async def dispatch(pcm: bytes) -> None:
+            seconds = len(pcm) / 2 / INPUT_RATE
+            print(
+                f"oído: {seconds:.1f}s de voz (whisper listo: {transcriber.ready})",
+                file=sys.stderr,
+                flush=True,
+            )
+            if _DUMP_DIR:
+                _dump_utterance(pcm)
             text = await asyncio.to_thread(transcriber.transcribe, pcm)
             if not text:
-                machine.error("")  # nothing was said; settle quietly
+                # Either Whisper is not up yet, or it heard nothing it
+                # believed. Both end the turn quietly; neither is an error
+                # the user should hear about.
+                print("transcripción vacía", file=sys.stderr, flush=True)
+                machine.error("")
                 return
             print(f"→ {text}", file=sys.stderr, flush=True)
             await client.send_chat(text)
@@ -152,12 +176,15 @@ class SamanthaApp(Gtk.Application):
                 # hers to say — and its `done` must not end the turn.
                 print(f"(sistema) {token[:60]}", file=sys.stderr, flush=True)
                 return
+            print(f"← {token}", file=sys.stderr, flush=True)
             machine.token(token)
             for clause in chunker.push(token):
+                print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 speaker.enqueue(clause)
 
         def on_done(_ms: int) -> None:
             for clause in chunker.flush():
+                print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 speaker.enqueue(clause)
             machine.done()
 
@@ -221,9 +248,34 @@ class SamanthaApp(Gtk.Application):
 
         threading.Thread(target=loop.run_forever, daemon=True).start()
         loop.call_soon_threadsafe(_boot)
-        threading.Thread(target=transcriber.load, daemon=True).start()
 
-        if _NO_MIC:
+        def _load_whisper() -> None:
+            import time
+
+            started = time.monotonic()
+            try:
+                transcriber.load()
+            except Exception as exc:
+                # A daemon thread that raises takes the traceback with it
+                # and the strip just never hears anything.
+                print(f"whisper NO cargó: {exc!r}", file=sys.stderr, flush=True)
+                return
+            print(
+                f"whisper listo en {time.monotonic() - started:.0f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        threading.Thread(target=_load_whisper, daemon=True).start()
+
+        if _FAKE_MIC_TEXT:
+            threading.Thread(
+                target=_feed_fake_mic,
+                args=(_FAKE_MIC_TEXT, on_frame, transcriber),
+                name="fake-microphone",
+                daemon=True,
+            ).start()
+        elif _NO_MIC:
             print("micrófono: desactivado", file=sys.stderr, flush=True)
         else:
             Microphone(on_frame).start()
@@ -271,6 +323,67 @@ class SamanthaApp(Gtk.Application):
 
 
 _LIVE = {WaveState.LISTENING, WaveState.SPEAKING}
+
+
+def _dump_utterance(pcm: bytes) -> None:
+    import wave
+    from pathlib import Path
+
+    directory = Path(_DUMP_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"utterance-{len(list(directory.glob('*.wav'))):02d}.wav"
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(INPUT_RATE)
+        out.writeframes(pcm)
+    print(f"volcado: {path}", file=sys.stderr, flush=True)
+
+
+def _feed_fake_mic(text: str, on_frame, transcriber) -> None:
+    """Push synthesised speech through the microphone path, in real time.
+
+    The pacing matters. Dumping every frame at once would hand Silero a
+    whole utterance in a millisecond, and the VAD's timing — 3 frames to
+    start, 0.7 s of silence to end — is expressed in frames, so it would
+    still work but nothing else would be tested at a realistic rate.
+    One frame per 32 ms is what the hardware would do.
+    """
+    import time
+
+    from .fake_mic import frames_for
+
+    print(f"micrófono falso: {text!r}", file=sys.stderr, flush=True)
+
+    # Wait for Whisper. A real person talks whenever they like and a turn
+    # that arrives too early is simply lost — documented behaviour, and
+    # exactly what happened the first time this test ran: the utterance
+    # reached a transcriber that was not up, came back empty, and the
+    # whole thing looked like silence.
+    waited = 0.0
+    while not transcriber.ready and waited < 180:
+        time.sleep(1.0)
+        waited += 1.0
+    if not transcriber.ready:
+        print(
+            "micrófono falso: whisper nunca estuvo listo", file=sys.stderr, flush=True
+        )
+        return
+    try:
+        frames = list(frames_for(text))
+    except Exception as exc:
+        print(f"micrófono falso falló: {exc}", file=sys.stderr, flush=True)
+        return
+
+    print(f"micrófono falso: {len(frames)} frames", file=sys.stderr, flush=True)
+    period = FRAME_SAMPLES / INPUT_RATE
+    next_at = time.monotonic()
+    for frame in frames:
+        on_frame(frame)
+        next_at += period
+        delay = next_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _preload() -> None:

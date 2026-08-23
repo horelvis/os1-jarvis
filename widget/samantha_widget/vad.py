@@ -16,6 +16,18 @@ INPUT_RATE = 16000
 FRAME_SAMPLES = 512
 _FRAME_SECONDS = FRAME_SAMPLES / INPUT_RATE
 
+# Silero v5 does not take the frame on its own: it wants the 64 samples
+# BEFORE it as well, so the tensor handed to the model is 576 long.
+#
+# Getting this wrong is SILENT. With a bare 512 the model runs, returns
+# numbers, and reports no speech ever. Measured against audio that
+# Whisper transcribes word for word: a 512-sample window peaked at
+# p=0.09 and called nothing speech, while the same audio at 576 peaked
+# at 1.00 and called 76 of 136 frames speech. No error, no warning — the
+# widget simply never hears anybody, which looks exactly like a dead
+# microphone. It was found only because the microphone was faked.
+_CONTEXT_SAMPLES = 64
+
 _THRESHOLD = 0.5
 _START_FRAMES = 3
 _SILENCE_SECONDS = 0.7
@@ -126,14 +138,23 @@ class SileroDetector:
         self._session = ort.InferenceSession(str(path), sess_options=options)
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._sr = np.array(INPUT_RATE, dtype=np.int64)
+        # The tail of the previous frame. Zeros for the first one, which
+        # costs nothing — 64 samples is 4 ms.
+        self._context = np.zeros(_CONTEXT_SAMPLES, dtype=np.float32)
 
     def reset(self) -> None:
         self._state = self._np.zeros((2, 1, 128), dtype=self._np.float32)
+        self._context = self._np.zeros(_CONTEXT_SAMPLES, dtype=self._np.float32)
 
     def speech_probability(self, frame: bytes) -> float:
         audio = self._np.frombuffer(frame, dtype=self._np.int16)
-        audio = (audio.astype(self._np.float32) / 32768.0).reshape(1, -1)
+        audio = audio.astype(self._np.float32) / 32768.0
+
+        # 64 samples of context + this frame = the 576 the model wants.
+        window = self._np.concatenate((self._context, audio)).reshape(1, -1)
+        self._context = audio[-_CONTEXT_SAMPLES:].copy()
+
         out, self._state = self._session.run(
-            None, {"input": audio, "state": self._state, "sr": self._sr}
+            None, {"input": window, "state": self._state, "sr": self._sr}
         )
         return float(out[0][0])
