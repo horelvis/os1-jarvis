@@ -227,7 +227,12 @@ def test_the_newest_sound_is_in_the_middle() -> None:
 
 
 def _peak_count(heights: list[float], floor: float = 0.15) -> int:
-    """How many separate blips are on the row."""
+    """How many separate blips are on the row, counted circularly.
+
+    A pulse mid-crossing shows as two stubs, one at each end — that is
+    the point of the wrap, not two tasks. So the row is walked as a ring
+    and the two stubs count once.
+    """
     count, inside = 0, False
     for value in heights:
         if value >= floor and not inside:
@@ -235,6 +240,8 @@ def _peak_count(heights: list[float], floor: float = 0.15) -> int:
             inside = True
         elif value < floor:
             inside = False
+    if count > 1 and heights[0] >= floor and heights[-1] >= floor:
+        count -= 1  # the same pulse, seen at both ends
     return count
 
 
@@ -302,3 +309,36 @@ def test_more_tasks_than_can_be_counted_are_capped() -> None:
     model.advance(0.25)
 
     assert _peak_count(model.heights()) <= MAX_VISIBLE_TASKS
+
+
+def test_a_pulse_never_gets_cut_off_at_the_edge() -> None:
+    """The bug the user caught: the pulse vanished mid-stride.
+
+    Centred on `head` with a plain difference, the bump loses its right
+    half as `head` approaches 1.0 — on screen it does not leave the strip,
+    it is amputated by it. Measured the short way round the circle, the
+    total amount of light on the row stays roughly constant no matter
+    where the pulse happens to be.
+    """
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(1)
+
+    totals = []
+    for _ in range(240):  # several full crossings
+        model.advance(1 / 60)
+        totals.append(sum(model.heights()))
+
+    assert min(totals) > 0.6 * max(totals)
+
+
+def test_the_thinking_pulse_does_not_get_cut_off_either() -> None:
+    model = BarsModel()
+    model.state = WaveState.THINKING
+
+    totals = []
+    for _ in range(240):
+        model.advance(1 / 60)
+        totals.append(sum(model.heights()))
+
+    assert min(totals) > 0.6 * max(totals)

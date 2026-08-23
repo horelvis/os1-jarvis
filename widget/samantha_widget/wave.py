@@ -43,6 +43,16 @@ _BAR_MIN_WIDTH_PX = 2.0
 # row of bars at rest rather than as an empty strip.
 _BAR_MIN_PX = 1.5
 
+# Breathing room inside the strip, as a fraction of it.
+#
+# Without these, a bar at full scale is exactly half the strip high and
+# lands flush on the top and bottom edges, where it reads as CUT OFF
+# rather than as loud — the WORKING pulses hit 1.0 routinely and looked
+# clipped. The horizontal one keeps the first and last bar off the very
+# edge for the same reason.
+_VERTICAL_HEADROOM = 0.86
+_HORIZONTAL_PAD_PX = 6.0
+
 
 class WaveArea(Gtk.Widget):
     def __init__(self) -> None:
@@ -114,8 +124,9 @@ class WaveArea(Gtk.Widget):
         heights: list[float],
     ) -> None:
         centre = height / 2
-        span = height / 2
-        slot = width / len(heights)
+        span = (height / 2) * _VERTICAL_HEADROOM
+        usable = max(1.0, width - 2 * _HORIZONTAL_PAD_PX)
+        slot = usable / len(heights)
         bar_width = max(_BAR_MIN_WIDTH_PX, slot * _BAR_FILL)
         # Centres each bar inside its own slot, so the row reads as
         # evenly spaced lines rather than as blocks butted together.
@@ -126,7 +137,12 @@ class WaveArea(Gtk.Widget):
             rect = Graphene.Rect()
             # Mirrored about the centre line: a bar chart standing on the
             # bottom edge reads as a chart; this reads as an object.
-            rect.init(i * slot + offset, centre - half, bar_width, half * 2)
+            rect.init(
+                _HORIZONTAL_PAD_PX + i * slot + offset,
+                centre - half,
+                bar_width,
+                half * 2,
+            )
             snapshot.append_color(self._colour, rect)
 
     def _snapshot_line(

@@ -87,7 +87,10 @@ class WaveModel:
 
         if self.state is WaveState.THINKING:
             head = (self._t / _PACKET_SECONDS) % 1.0
-            d = (u - head) / _PACKET_WIDTH
+            # The short way round, so the packet leaves one edge as it
+            # arrives at the other instead of being cut in half there.
+            gap = abs(u - head)
+            d = min(gap, 1.0 - gap) / _PACKET_WIDTH
             packet = math.exp(-d * d)
             carrier = math.sin(2 * math.pi * 6 * (u - head))
             return _THINKING_GAIN * edge * packet * carrier

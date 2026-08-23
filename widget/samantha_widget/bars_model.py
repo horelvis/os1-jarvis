@@ -54,6 +54,20 @@ _PACKET_SECONDS = 1.6
 _PACKET_WIDTH = 0.16
 
 
+def _wrapped_distance(position: float, head: float) -> float:
+    """Distance from `position` to `head` around a circle of length 1.
+
+    A travelling pulse is a bump centred on `head`, and with a plain
+    `position - head` the bump is CUT IN HALF at both ends of the row:
+    as the centre approaches 1.0 the right half falls off the edge and
+    the pulse vanishes mid-stride instead of leaving on one side and
+    arriving on the other. Measuring the short way round the circle
+    makes it continuous.
+    """
+    gap = abs(position - head)
+    return min(gap, 1.0 - gap)
+
+
 def mirror(values: list[float]) -> list[float]:
     """[a, b, c] -> [c, b, a, a, b, c]: index 0 lands beside the centre.
 
@@ -139,7 +153,7 @@ class BarsModel:
             head = ((self._t / period) + task / tasks) % 1.0
             for i in range(width):
                 u = i / max(1, width - 1)
-                d = (u - head) / _WORK_PULSE_WIDTH
+                d = _wrapped_distance(u, head) / _WORK_PULSE_WIDTH
                 # Pulses add where they cross, so two tasks meeting make
                 # a taller blip — but never taller than the strip.
                 out[i] = min(1.0, out[i] + _WORK_GAIN * math.exp(-d * d))
@@ -152,7 +166,7 @@ class BarsModel:
         out = []
         for i in range(width):
             u = i / max(1, width - 1)
-            d = (u - head) / _PACKET_WIDTH
+            d = _wrapped_distance(u, head) / _PACKET_WIDTH
             out.append(_THINKING_GAIN * math.exp(-d * d))
         return out
 
@@ -227,7 +241,7 @@ class WaveformModel:
             out = []
             for i in range(self.length):
                 u = i / max(1, self.length - 1)
-                d = (u - head) / _PACKET_WIDTH
+                d = _wrapped_distance(u, head) / _PACKET_WIDTH
                 out.append(_THINKING_GAIN * math.exp(-d * d))
             return out
         if self.state is WaveState.IDLE:
