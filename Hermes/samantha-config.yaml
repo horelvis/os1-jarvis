@@ -1,0 +1,85 @@
+# Hermes settings Samantha needs, and cannot be without.
+#
+# `.hermes/home/` is git-ignored — it holds auth.json, state.db, the
+# session history and the pairing store, none of which belongs in a
+# repository. But a handful of settings inside its config.yaml are not
+# local state at all: they are part of how Samantha works, and losing
+# them breaks her in ways that are hard to see. This file is those
+# settings, and `apply-config.sh` merges it in.
+#
+# Every one of these was learned by something going wrong. Read the
+# comments before changing any of them.
+
+# ── Plugins ───────────────────────────────────────────────────────────
+# `kind: platform` and `kind: standalone` plugins are opt-in. Without
+# samantha-kiosk the strip has nothing to talk to; without
+# samantha-voice, TTS falls through to Edge — Microsoft's cloud.
+plugins:
+  enabled:
+    - samantha-kiosk
+    - samantha-voice
+  entries:
+    samantha-voice:
+      allow_tool_override: false
+    samantha-kiosk:
+      allow_tool_override: false
+
+# ── TTS ───────────────────────────────────────────────────────────────
+# Hermes' default provider is `edge` — Microsoft's cloud. Measured
+# 2026-08-23: without this, the agent's own text_to_speech tool
+# synthesised there, and the evidence was the cache file's format (MP3
+# 48 kbps = Edge; CosyVoice yields WAV/PCM 24 kHz). Samantha's words were
+# leaving the house to be spoken.
+tts:
+  provider: cosyvoice
+  streaming:
+    provider: cosyvoice
+
+voice:
+  # The gateway speaking on its own. The widget does the speaking, from
+  # CosyVoice, so this must stay off — and it does NOT stay off by
+  # itself: it was found set to true on 2026-08-23 without anyone
+  # setting it deliberately.
+  auto_tts: false
+
+# No wake word by design (widget decision 4, 2026-08-23): the strip
+# listens always and a local VAD decides when someone is talking.
+wake_word:
+  enabled: false
+
+agent:
+  # The widget speaks. With the tts toolset available the agent answers
+  # BY VOICE instead: Hermes writes a WAV, the text-only kiosk adapter
+  # cannot deliver it, and the widget receives no reply text at all —
+  # so Samantha simply stays silent.
+  disabled_toolsets:
+    - tts
+
+# ── Which tools the strip may use ─────────────────────────────────────
+# Per PLATFORM, resolved by gateway/run.py::
+# _resolve_enabled_toolsets_for_source. `agent.enabled_toolsets` is NOT a
+# config key — it is a Python argument, and writing it here does nothing.
+#
+# Samantha may act, but never visibly (CLAUDE.md §1, §12). These are the
+# toolsets that need no credentials; homeassistant, spotify, discord and
+# web search wait on tokens.
+#
+# Deliberately absent: terminal, file, code_execution, browser. She lives
+# in a living room, and none of them can be used without narrating what
+# she is doing.
+platform_toolsets:
+  samantha_kiosk:
+    - memory
+    - session_search
+    - cronjob
+    - todo
+    - clarify
+
+# ── Model ─────────────────────────────────────────────────────────────
+# The gateway resolves its own per request and works without this. Cron
+# jobs do not: a job fires, finds model.default empty, and dies with
+# "has no model configured". The reminder never arrives and nothing says
+# why. Pin cron jobs themselves too (`--provider`/`--model`), or a later
+# change to this value makes Hermes skip them to avoid unintended spend.
+model:
+  default: grok-4.6
