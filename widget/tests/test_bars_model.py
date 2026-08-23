@@ -13,10 +13,14 @@ def _settle(model: BarsModel, frames: int = 120) -> None:
         model.advance(1 / 60)
 
 
-def test_there_is_one_height_per_band() -> None:
+def test_every_band_is_drawn_twice_mirrored() -> None:
+    """The row is symmetric: low bands meet in the middle, high bands
+    taper off to both edges."""
     model = BarsModel()
 
-    assert len(model.heights()) == BAND_COUNT
+    heights = model.heights()
+    assert len(heights) == 2 * BAND_COUNT
+    assert heights == heights[::-1]
 
 
 def test_heights_never_exceed_the_half_height() -> None:
@@ -37,7 +41,24 @@ def test_a_loud_band_is_taller_than_a_quiet_one() -> None:
     _settle(model)
 
     heights = model.heights()
-    assert heights[10] > 5 * heights[0]
+    # Band 10 is drawn at BAND_COUNT + 10 (and mirrored at its opposite);
+    # the outermost bar is the highest band, which is quiet here.
+    assert heights[BAND_COUNT + 10] > 5 * heights[0]
+
+
+def test_the_lowest_band_sits_at_the_centre() -> None:
+    """Speech energy is low and mid; against one edge it looks lopsided."""
+    model = BarsModel()
+    model.state = WaveState.SPEAKING
+    bands = [0.05] * BAND_COUNT
+    bands[0] = 0.9
+    model.set_bands(bands)
+    _settle(model)
+
+    heights = model.heights()
+    centre = len(heights) // 2
+    assert heights[centre] > 5 * heights[0]
+    assert heights[centre - 1] > 5 * heights[-1]
 
 
 def test_bars_fall_back_when_the_sound_stops() -> None:

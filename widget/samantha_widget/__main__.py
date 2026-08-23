@@ -237,6 +237,34 @@ class SamanthaApp(Gtk.Application):
                     speaker.enqueue(clause)
                 for clause in chunker.flush():
                     speaker.enqueue(clause)
+                # In a real turn the gateway sends `done` and the wave
+                # settles. Nothing sends one here, so without this the
+                # strip stays in `speaking` forever, frozen on the last
+                # thing it drew — which looks exactly like a bug.
+                GLib.timeout_add(200, _settle_when_quiet)
+
+            watch = {"started": False, "quiet_ticks": 0}
+            # 200 ms per tick. Long enough to outlast the gap between two
+            # clauses, which is however long CosyVoice takes to
+            # synthesise the next one — during that gap the player is
+            # empty and looks exactly like "finished".
+            quiet_ticks_needed = 10
+
+            def _settle_when_quiet() -> bool:
+                # Wait for it to START before watching for it to stop:
+                # the first clause takes about a second to synthesise,
+                # and until then "not busy" means "not begun".
+                if player.busy:
+                    watch["started"] = True
+                    watch["quiet_ticks"] = 0
+                    return True
+                if not watch["started"]:
+                    return True
+                watch["quiet_ticks"] += 1
+                if watch["quiet_ticks"] < quiet_ticks_needed:
+                    return True
+                machine.done()
+                return False
 
             # After _boot, so the Speaker's worker is already running.
             loop.call_soon_threadsafe(loop.call_later, 3.0, _say_it)

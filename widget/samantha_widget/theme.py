@@ -31,7 +31,7 @@ BACKGROUND = "transparent"
 #   "waveform" — one bar per instant, newest in the MIDDLE and older
 #                travelling out to both edges (user's choice 2026-08-23)
 #   "line"     — the horizontal wave of CLAUDE.md §12
-VISUALIZER = "waveform"
+VISUALIZER = "bars"
 
 STRIP_HEIGHT = 96
 # A fixed width, centred (user, 2026-08-23). It went full-width earlier

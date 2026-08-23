@@ -16,10 +16,12 @@ import math
 
 from .wave_model import WaveState
 
-# More, and thinner, so the row reads as light rather than as a chart
-# (user, 2026-08-23). The FFT resolution at 20 ms / 24 kHz is 50 Hz, so
-# 64 log bands between 80 Hz and 8 kHz still map to distinct bins.
-BAND_COUNT = 64
+# Each band is drawn TWICE — mirrored about the centre — so the row
+# holds 2 * BAND_COUNT bars. Speech energy lives in the low and mid
+# bands, which packed them all against the left edge and left the right
+# half dead; mirrored, the loud end sits in the middle and the quiet
+# high end tapers off to both edges (user, 2026-08-23).
+BAND_COUNT = 40
 
 # Per second. A bar snaps up almost immediately and falls back slowly
 # enough to be watchable — the asymmetry is what makes an equaliser look
@@ -39,6 +41,16 @@ _SILENCE_FLOOR = 0.04
 _IDLE_BREATH_HZ = 0.16
 _PACKET_SECONDS = 1.6
 _PACKET_WIDTH = 0.16
+
+
+def mirror(values: list[float]) -> list[float]:
+    """[a, b, c] -> [c, b, a, a, b, c]: index 0 lands beside the centre.
+
+    Used by both visualisers, for the same reason in each: whatever is
+    most interesting — the newest sound, or the loudest frequencies —
+    belongs in the middle where the eye already is, not against one edge.
+    """
+    return values[::-1] + list(values)
 
 
 class BarsModel:
@@ -79,27 +91,23 @@ class BarsModel:
             return self._packet()
         if self.state is WaveState.IDLE:
             return self._breath()
-        # Same editor-style auto-gain as the waveform: speech peaks well
-        # under full scale, and drawn literally the equaliser barely
-        # leaves the floor.
-        loudest = max(self._drawn)
-        if loudest < _SILENCE_FLOOR:
-            return [_LIVE_GAIN * value for value in self._drawn]
-        return [min(1.0, _LIVE_GAIN * value / loudest) for value in self._drawn]
+        # No auto-gain here, unlike the waveform: the bands already
+        # arrive in decibels against a calibrated window, and
+        # normalising them again would undo that and make quiet passages
+        # look as loud as shouting.
+        return mirror([_LIVE_GAIN * value for value in self._drawn])
 
     def _breath(self) -> list[float]:
         breath = 0.5 + 0.5 * math.sin(2 * math.pi * _IDLE_BREATH_HZ * self._t)
-        out = []
-        for i in range(self.band_count):
-            u = i / max(1, self.band_count - 1)
-            out.append(_IDLE_GAIN * (0.4 + 0.6 * math.sin(math.pi * u)) * breath)
-        return out
+        return mirror([_IDLE_GAIN * breath] * self.band_count)
 
     def _packet(self) -> list[float]:
+        """Thinking: one travelling bump, drawn across the mirrored row."""
+        width = 2 * self.band_count
         head = (self._t / _PACKET_SECONDS) % 1.0
         out = []
-        for i in range(self.band_count):
-            u = i / max(1, self.band_count - 1)
+        for i in range(width):
+            u = i / max(1, width - 1)
             d = (u - head) / _PACKET_WIDTH
             out.append(_THINKING_GAIN * math.exp(-d * d))
         return out

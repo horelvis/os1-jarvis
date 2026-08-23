@@ -34,36 +34,77 @@ _LEVEL_BLOCK_MS = 12
 _LEVEL_BLOCK_SAMPLES = OUTPUT_RATE * _LEVEL_BLOCK_MS // 1000
 _LEVEL_BLOCK_BYTES = _LEVEL_BLOCK_SAMPLES * 2
 
-# Speech lives between roughly these two. Going lower wastes bars on
-# rumble the speakers cannot produce; going higher wastes them on
-# sibilance that barely moves.
-_BAND_LOW_HZ = 80.0
-_BAND_HIGH_HZ = 8000.0
-# Full-scale reference for a band's magnitude. Speech at a normal level
-# lands well under 1.0 without it, and the bars barely leave the floor.
-_BAND_REFERENCE = 12.0
+# The band this visualiser covers. NOT the 80 Hz - 8 kHz of a general
+# audio meter: everything drawn here is one woman's voice, and speech
+# occupies a much narrower range than music does.
+#
+#   ~165-255 Hz  fundamental of a female voice
+#   ~300-3500 Hz the formants that carry intelligibility
+#   >4 kHz       sibilance only — /s/, /f/ — and nothing else
+#
+# With the wider range, the top half of the bars sat dead through every
+# sentence, because there is simply no energy up there in speech. 150 Hz
+# also puts the noise floor and mains hum below the first bar instead of
+# giving them one of their own.
+_BAND_LOW_HZ = 150.0
+_BAND_HIGH_HZ = 4000.0
+
+# The FFT runs over a power-of-two window of the most recent audio,
+# NOT over the 12 ms write block. At 24 kHz a 288-sample block resolves
+# 83 Hz per bin, which puts every band below ~400 Hz into the same bin —
+# the first third of the bars then move as one. 1024 samples resolve
+# 23 Hz and cover 43 ms, inside the 32-64 Hz refresh the technique is
+# usually described with.
+#   https://dlbeer.co.nz/articles/fftvis.html
+_FFT_SIZE = 1024
+
+# Frequency warping, gentler than the gamma=2 the general-audio article
+# suggests: that value is there to squeeze several decades onto one
+# screen, and 150 Hz - 4 kHz is under five octaves. Warping it that hard
+# would crowd the formants — the part that actually moves when somebody
+# talks — into the middle few bars.
+_BAND_GAMMA = 1.5
+
+# Magnitudes become decibels, because loudness is logarithmic and a
+# linear bar spends its life near the floor. This window is what maps
+# to "bar at the bottom" .. "bar at full height".
+# Speech has a narrower dynamic range than music, and a synthesised
+# voice narrower still — it arrives already levelled, with no quiet
+# passages to preserve.
+_DB_FLOOR = -66.0
+_DB_CEILING = -18.0
 
 
-def _band_edges(block_samples: int, rate: int) -> list[tuple[int, int]]:
-    """FFT bin ranges for BAND_COUNT logarithmically-spaced bands.
-
-    Logarithmic because hearing is: linear bands put three quarters of
-    the bars above 3 kHz, where speech has almost nothing, and the
-    equaliser looks dead while somebody is talking.
-    """
+def _band_edges(window_samples: int, rate: int) -> list[tuple[int, int]]:
+    """FFT bin ranges for BAND_COUNT gamma-warped bands."""
     import numpy as np
 
-    freqs = np.fft.rfftfreq(block_samples, 1 / rate)
+    freqs = np.fft.rfftfreq(window_samples, 1 / rate)
     edges: list[tuple[int, int]] = []
-    ratio = (_BAND_HIGH_HZ / _BAND_LOW_HZ) ** (1 / BAND_COUNT)
-    low = _BAND_LOW_HZ
-    for _ in range(BAND_COUNT):
-        high = low * ratio
+    previous_stop = 0
+    for i in range(BAND_COUNT):
+        low = _warp(i / BAND_COUNT)
+        high = _warp((i + 1) / BAND_COUNT)
         start = int(np.searchsorted(freqs, low))
-        stop = max(start + 1, int(np.searchsorted(freqs, high)))
-        edges.append((start, min(stop, len(freqs))))
-        low = high
+        stop = int(np.searchsorted(freqs, high))
+        # Every band must own at least one bin nobody else has. The
+        # warped low bands are only a few Hz wide — narrower than one
+        # bin at any window size worth using — so without this the first
+        # eight bars carry the SAME number and move as one block, which
+        # was measured at 34% of frames before this line existed.
+        start = max(start, previous_stop)
+        stop = max(stop, start + 1)
+        start = min(start, len(freqs) - 1)
+        stop = min(stop, len(freqs))
+        previous_stop = stop
+        edges.append((start, stop))
     return edges
+
+
+def _warp(position: float) -> float:
+    """Bar position 0..1 → frequency, gamma-warped."""
+    span = _BAND_HIGH_HZ - _BAND_LOW_HZ
+    return _BAND_LOW_HZ + span * (position**_BAND_GAMMA)
 
 
 def describe_devices() -> str:
@@ -151,6 +192,10 @@ class Player:
         self.history: list[float] = [0.0] * HISTORY_LEN
         self._edges: list[tuple[int, int]] | None = None
         self._window = None
+        # The last _FFT_SIZE samples, oldest first — the analysis window,
+        # kept separate from the write block so the two can have
+        # different sizes.
+        self._recent = None
 
     def start(self) -> None:
         self._stream = sd.RawOutputStream(
@@ -235,18 +280,33 @@ class Player:
                 self.bands = [0.0] * BAND_COUNT
 
     def _analyse(self, samples, np) -> list[float]:
-        """One block of audio → BAND_COUNT magnitudes, each 0..1."""
-        if self._edges is None or len(samples) != len(self._window):
-            self._edges = _band_edges(len(samples), OUTPUT_RATE)
-            # Hann, so a block boundary in the middle of a vowel does not
-            # smear energy across every band.
-            self._window = np.hanning(len(samples))
+        """The newest audio → BAND_COUNT magnitudes, each 0..1.
 
-        spectrum = np.abs(np.fft.rfft(samples * self._window))
+        Follows the technique in dlbeer.co.nz/articles/fftvis.html: a
+        power-of-two window, a Hamming taper, gamma-warped bands, and the
+        PEAK of each band in decibels rather than its average — an
+        average hides exactly the peaks that make the bars look like they
+        belong to the sound. Time smoothing, which that article calls the
+        single most important part, lives in BarsModel.
+        """
+        if self._edges is None:
+            self._edges = _band_edges(_FFT_SIZE, OUTPUT_RATE)
+            self._window = np.hamming(_FFT_SIZE)
+            self._recent = np.zeros(_FFT_SIZE, dtype=np.float32)
+
+        # Slide the newest block into the analysis window.
+        take = min(len(samples), _FFT_SIZE)
+        self._recent = np.concatenate((self._recent[take:], samples[-take:]))
+
+        spectrum = np.abs(np.fft.rfft(self._recent * self._window))
+        # Normalise so a full-scale sine reads as 1.0 regardless of size.
+        spectrum = spectrum * (2.0 / _FFT_SIZE)
+
         out = []
         for start, stop in self._edges:
             band = spectrum[start:stop]
-            magnitude = float(band.max()) if band.size else 0.0
-            out.append(min(1.0, magnitude / _BAND_REFERENCE))
+            peak = float(band.max()) if band.size else 0.0
+            db = 20.0 * np.log10(peak + 1e-9)
+            out.append(min(1.0, max(0.0, (db - _DB_FLOOR) / (_DB_CEILING - _DB_FLOOR))))
         return out
         self.level = 0.0
