@@ -126,3 +126,17 @@ Nothing about this program's appearance is provable from a test. Capture
 the screen and look at it:
 
     ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
+
+## Cambiar la personalidad
+
+`Hermes/jarvis-soul.md` es la identidad. Si la cambias y no notas nada:
+
+    # por el kiosko, en este orden
+    /new
+    /approve
+
+El prompt de sistema se fija cuando **nace la sesión**. Editar el
+fichero, el `platform_hint` o la memoria no toca una sesión que ya
+existe, y reiniciar el gateway tampoco: la sesión vive en `state.db` y
+se reanuda tal cual. Hermes Desktop parece obedecer al instante sólo
+porque abre una sesión propia.

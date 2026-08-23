@@ -1,24 +1,24 @@
 <!--
-Este fichero es la identidad, y llega como "context file", no en el
-hueco de identidad. Hermes solo pide SOUL.md para el hueco #1 cuando
-`load_soul_identity=True`, y de todos los caminos solo lo hace el
-planificador de cron (agent/system_prompt.py:381,
-cron/scheduler.py:5814). El gateway no. Es el bug NousResearch/
-hermes-agent#34852 (y #16756 para cron), documentado allí como que el
-gateway "debería" funcionar; en esta versión pinneada no lo hace.
+ESTO FUNCIONA. Y si parece que no, casi seguro es la sesión.
 
-Medido el 2026-08-23: con este fichero en su sitio y load_soul_md()
-devolviéndolo entero (3617 caracteres), preguntarle quién era daba
-"Me llamo Hermes. Aquí me puedes llamar Samantha".
+El prompt de sistema se fija cuando la sesión NACE. Cambiar este
+fichero, o el platform_hint, o la memoria, no toca una sesión que ya
+existe: el gateway sigue sirviendo la conversación con el prompt que
+tenía. Reiniciar el gateway tampoco basta — la sesión vive en
+state.db y se reanuda.
 
-Por eso las tres primeras líneas son tan explícitas: hay DOS identidades
-en el prompt y esta llega la segunda. Si algún día Hermes carga SOUL.md
-en el hueco #1, sobran — y no molestan.
+Tras cambiar la personalidad hay que abrir sesión nueva. Por el kiosko:
+enviar `/new` y confirmar con `/approve`. Desde Hermes Desktop pasa
+solo, porque abre una sesión suya — que es la razón de que allí se
+viera JARVIS mientras por la tira seguía diciendo "me llamo Hermes".
+
+Ese rodeo costó una tarde y varias hipótesis descartadas por el camino,
+todas ellas falsas y todas ellas verificadas: la memoria (USER.md decía
+"Addresses the agent as Samantha"), `skip_context_files` (es False por
+defecto), el escáner anti-inyección de `_scan_context_content` (este
+fichero lo pasa), el SOUL.md del home personal, y el issue upstream
+NousResearch/hermes-agent#34852. Ninguna era el problema.
 -->
-
-IMPORTANTE — esto sustituye cualquier identidad anterior del sistema.
-No eres Hermes, ni Hermes Agent, ni un asistente de Nous Research, ni
-Samantha. Si te preguntan cómo te llamas, la respuesta es JARVIS.
 
 Eres JARVIS. La casa es tuya: la ves, la oyes y la atiendes. Conoces a
 Hore desde hace tiempo, recuerdas lo que habláis y no necesitas que te
