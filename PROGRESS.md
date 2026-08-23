@@ -1,5 +1,74 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-23 — Widget plan 1: the strip ✅
+
+A borderless, transparent, always-on-top bar along the bottom edge of the
+screen, with Samantha's wave animating through four states, running as a
+systemd user service. First step of replacing the Chromium kiosk with a
+native GTK4 desktop widget (decision taken 2026-08-22, written up today).
+
+**Design:** `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md`
+**Plan:** `docs/superpowers/plans/2026-08-23-samantha-widget-strip.md`
+
+**Changed files:**
+- `widget/` (new top-level directory, approved by the user 2026-08-23):
+  `pyproject.toml`, `README.md`, `samantha_widget/{__init__,__main__,theme,
+  geometry,ewmh,window,wave_model,wave}.py`, `tools/render_wave.py`,
+  `tests/{test_imports,test_ewmh,test_geometry,test_wave_model}.py`
+- `systemd/samantha-widget.service` (new)
+- `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md` (new,
+  §4 revised during execution)
+- `docs/superpowers/plans/2026-08-23-samantha-widget-strip.md` (new, tasks 1,
+  6 and 7 annotated with what actually happened)
+- `docs/superpowers/plans/2026-08-23-samantha-widget-voice-turn.md` (new,
+  plan 2 — not started)
+
+**Tests:** 20 passed in `widget/`, ruff clean. `backend/`, `frontend/`,
+`Hermes/` and `tts-server/` untouched — verified by diff, not by assertion.
+
+**Notes — what the plan got wrong, which is most of what was learned:**
+
+- **Cairo does not work on this machine.** PyGObject needs `gi._gi_cairo`
+  from the system package `python3-gi-cairo` to hand a `cairo.Context` to a
+  draw function. `python3-cairo` IS installed, which makes it misleading:
+  the failure is a `TypeError` raised inside the draw callback, where GTK
+  swallows it — the strip appears, never draws, and logs nothing. Replaced
+  with `Gsk.PathBuilder` + `Gtk.Snapshot.append_stroke` (GTK 4.14), which
+  needs no extra package and composites on the GPU. Spec §4 revised.
+- **`--system-site-packages` makes pip treat system packages as satisfying
+  a requirement**, so `pip install pytest` was a silent no-op and the venv
+  was using the system's runner. `--ignore-installed` pins it locally.
+- **systemd needs the package installed, not just present.** Every start
+  died with `No module named samantha_widget` while running it by hand from
+  `widget/` worked — the current directory was covering for it.
+  `pip install -e .` is now in the plan and the README.
+- **E402 is off in ruff's default set**, so the `# noqa: E402` that
+  PyGObject's require_version-before-import pattern demands was itself
+  flagged as unused (RUF100). Enabled explicitly.
+- **Verification kept lying.** `xdotool` is not installed, so states cannot
+  be photographed by sending a keystroke — hence `SAMANTHA_WIDGET_STATE`.
+  Then the screen locked mid-run and every screenshot silently captured the
+  lock screen instead of the strip: a plausible image of the wrong thing.
+  `tools/render_wave.py` renders each state offscreen, immune to that.
+- **Shape changed twice during the run, at the user's request:** from a
+  floating 1100 px terracotta card to a full-width bar, then to a
+  transparent background with the terracotta moved into the line itself.
+  `theme.STRIP_MAX_WIDTH` and `theme.BACKGROUND` are the two knobs back.
+- **GNOME places it at x=66, width 1854, not 0/1920.** The Ubuntu dock
+  reserves those pixels from normal windows. Taking them needs
+  `_NET_WM_WINDOW_TYPE_DOCK`, which also gives up keyboard focus; the user
+  chose to leave it.
+- **Two things not verified.** That it survives a workspace switch (would
+  have moved the user's desktop while they were working), and the service
+  running from the canonical path — the installed unit currently points at
+  the worktree, because `widget/` does not exist on `development` yet.
+- **The kiosk was never installed on this machine.**
+  `systemctl --user is-enabled samantha-ui.service` returns `not-found`, so
+  the "leave the fallback intact" constraint had nothing to preserve here.
+  Nothing was removed regardless.
+
+---
+
 ## 2026-06-20 — Bugfix Sweep (2026-06-11 plan) ✅
 
 23-task sweep fixing the daily-conversation path, backend robustness, frontend robustness, and deploy issues found in a full-project review.
