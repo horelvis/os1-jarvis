@@ -19,6 +19,11 @@ class WaveState(str, Enum):
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
+    # She is doing something, not composing a sentence. THINKING is the
+    # pause before an answer; WORKING can last minutes and can hold
+    # several tasks at once — which is why it is a separate state and
+    # not a slower THINKING.
+    WORKING = "working"
 
 
 # How fast the drawn amplitude chases the requested one, per second.

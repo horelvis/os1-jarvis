@@ -79,6 +79,7 @@ class SamanthaApp(Gtk.Application):
         if _DEMO_STATE:
             state = WaveState(_DEMO_STATE)
             wave.set_state(state)
+            wave.set_task_count(int(os.environ.get("SAMANTHA_WIDGET_TASKS", "0")))
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 

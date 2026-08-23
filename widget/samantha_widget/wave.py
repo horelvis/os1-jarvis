@@ -67,6 +67,10 @@ class WaveArea(Gtk.Widget):
         self.model.set_level(level)
         self.bars.set_level(level)
 
+    def set_task_count(self, count: int) -> None:
+        """How many things she is doing, shown as one pulse each."""
+        self.bars.set_task_count(count)
+
     def set_bands(self, bands: list[float]) -> None:
         self.bars.set_bands(bands)
 
