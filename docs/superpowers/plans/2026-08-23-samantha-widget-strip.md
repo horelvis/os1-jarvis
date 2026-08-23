@@ -164,6 +164,22 @@ Install and re-run:
 Expected then: PASS. If it fails with `No module named 'gi'`, the venv
 was created without `--system-site-packages`; delete it and redo Step 2.
 
+**The flag has a second effect, measured while executing this step:**
+pip treats a system-wide package as already satisfying a requirement, so
+`pip install pytest` can be a silent no-op that leaves the venv depending
+on the system's copy — and a system upgrade then changes the test runner
+underneath the project. Check with `.venv/bin/pip list --local` (which
+lists only what the venv itself holds) and force anything that must be
+pinned here:
+
+```bash
+.venv/bin/pip install --ignore-installed pytest
+```
+
+That prints a dependency-conflict warning about whatever system package
+wanted an older `packaging`. It is unrelated to this project and is only
+visible because of `--system-site-packages`.
+
 - [ ] **Step 5: Write `pyproject.toml`**
 
 ```toml
@@ -190,6 +206,15 @@ include = ["samantha_widget*"]
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
+# E402 is off in ruff's default set, and every GTK module here needs it:
+# gi.require_version() has to run BEFORE the import it guards, so the
+# imports cannot be at the top of the file. Enabling the rule is what
+# makes the `# noqa: E402` on those lines honest — with the rule off,
+# ruff flags the noqa itself as unused (RUF100) and the file fails lint
+# for suppressing a warning it was right to suppress.
+select = ["E4", "E7", "E9", "E402", "F", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

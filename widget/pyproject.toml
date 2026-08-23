@@ -1,0 +1,35 @@
+[project]
+name = "samantha-widget"
+version = "0.1.0"
+description = "Samantha as a floating desktop strip (GTK4/X11)"
+requires-python = ">=3.12"
+# PyGObject is deliberately NOT listed: it comes from the system
+# packages python3-gi + gir1.2-gtk-4.0, reached through a venv created
+# with --system-site-packages. Listing it here would make pip try to
+# build it from source against GObject headers.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["samantha_widget*"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+# E402 is off in ruff's default set, and every GTK module here needs it:
+# gi.require_version() has to run BEFORE the import it guards, so the
+# imports cannot be at the top of the file. Enabling the rule is what
+# makes the `# noqa: E402` on those lines honest — with the rule off,
+# ruff flags the noqa itself as unused (RUF100) and the file fails lint
+# for suppressing a warning it was right to suppress.
+select = ["E4", "E7", "E9", "E402", "F", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
