@@ -1146,6 +1146,25 @@ cd .. && git add widget/ && git commit -m "feat(widget): the wave as arithmetic,
 
 ## Task 6: Drawing the wave
 
+> **Executed 2026-08-23, and it did not go as written.** The Cairo code
+> below fails on this machine with
+> `TypeError: Couldn't find foreign struct converter for 'cairo.Context'`
+> — raised inside the draw callback, where GTK swallows it, so the strip
+> appears and never draws a line. The cause is the missing system package
+> `python3-gi-cairo` (`python3-cairo` alone is not enough). The
+> implementation that landed uses `Gsk.PathBuilder` +
+> `Gtk.Snapshot.append_stroke` instead, which needs no extra package and
+> composites on the GPU; see `widget/samantha_widget/wave.py` and the
+> revision note in spec §4. Steps 1 and 2 below are kept as written so
+> the reasoning is legible; the shipped code is the GSK one.
+>
+> Task 6 also gained two things the plan did not anticipate:
+> `SAMANTHA_WIDGET_STATE`, because `xdotool` is not installed and a
+> keystroke cannot be sent to photograph a state; and
+> `widget/tools/render_wave.py`, which renders each state to a PNG with
+> no window at all — the screen locked itself mid-verification and every
+> screenshot silently captured the lock screen instead of the strip.
+
 **Files:**
 - Create: `widget/samantha_widget/wave.py`
 - Modify: `widget/samantha_widget/__main__.py`

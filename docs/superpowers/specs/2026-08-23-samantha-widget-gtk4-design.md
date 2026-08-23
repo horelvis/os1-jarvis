@@ -153,22 +153,40 @@ The film's Samantha is a line, not a spectrum (CLAUDE.md §12,
 2026-05). So the widget does not need an audio-visualisation library;
 it needs to draw one polyline per frame.
 
-**Decision: `Gtk.DrawingArea` + Cairo**, driven by
+**Decision: `Gtk.Snapshot` + `Gsk.PathBuilder`**, driven by
 `add_tick_callback()` so the animation runs at the compositor's frame
 clock rather than a timer that drifts.
+
+> **Revised 2026-08-23, during plan 1 Task 6.** This section originally
+> chose `Gtk.DrawingArea` + Cairo and dismissed GSK for having no
+> comfortable arbitrary-path primitive. Both halves of that turned out
+> to be wrong on this machine, and the correction is kept visible rather
+> than quietly rewritten:
+>
+> - **Cairo does not work here at all.** PyGObject cannot hand a
+>   `cairo.Context` to a draw function without `gi._gi_cairo`, which
+>   ships in the system package `python3-gi-cairo` — not installed, and
+>   `sudo` away. The failure is a `TypeError` raised *inside* the draw
+>   callback, where GTK swallows it: the strip appears and simply never
+>   draws its line. `python3-cairo` being installed is not enough and is
+>   what makes this misleading to diagnose.
+> - **GSK grew the primitive.** `Gsk.PathBuilder`, `Gsk.Stroke` and
+>   `Gtk.Snapshot.append_stroke` arrived in GTK 4.14, which is the
+>   version installed. Verified drawing all four states.
+>
+> For an appliance, one fewer system package to get right on the target
+> machine is worth more than Cairo's familiarity.
 
 Alternatives weighed and rejected:
 
 | Option | Why not |
 |---|---|
+| `Gtk.DrawingArea` + Cairo | Needs `python3-gi-cairo` on the target machine, and fails silently inside the draw callback when it is missing. Rasterises on the CPU. Was the original choice; see the note above. |
 | `Gtk.GLArea` + shaders | The right answer only if the OS1 3D ribbon comes back. PyOpenGL from Python is awkward and it is a lot of code for a line. Kept as the documented escape hatch. |
-| `Gtk.Snapshot` / GSK render nodes | GPU-composited and native to GTK4, but there is no comfortable arbitrary-path primitive from Python, and the wave is an arbitrary path that changes every frame. |
 | GStreamer + `gtk4paintablesink` | Real, ready-made audio visualisers (`wavescope`, `spectrascope`). Pulls in all of GStreamer and looks like a media player from 2004. Not OS1. |
 | Lottie / Rive | Pre-rendered vector animation. Cannot react to live amplitude without a fight. |
 
-Cairo rasterises on the CPU in GTK4, which is the standard objection.
-For a ~1100×96 strip at 60 fps it is not a real cost — and the strip
-is the only thing being drawn.
+GSK composites on the GPU and needs nothing GTK4 does not already need.
 
 **Four visual states**, one per phase of a turn, so the user always
 knows what she is doing without a single word of UI text:
