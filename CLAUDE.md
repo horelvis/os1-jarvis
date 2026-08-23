@@ -777,6 +777,44 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-23 — Electron reconsidered for the widget, and rejected again
+
+**Decision:** the widget stays GTK4. Raised because Hermes Desktop —
+Electron — was built and run on this machine the same day, and it works.
+
+**Measured, side by side, on this box:**
+
+| | widget (GTK4) | Hermes Desktop (Electron) |
+|---|---|---|
+| RSS | 389 MB, one process | 1257 MB across six |
+| Installed | 268 KB of code | 338 MB packaged |
+| Build | none | `npm install`, and it had to download its own Node |
+
+The widget's 389 MB is almost entirely faster-whisper resident on the
+GPU, not the interface.
+
+**The reason that decides it is not the memory.** Silero, Whisper,
+CosyVoice and playback share ONE Python process today. Electron splits
+that into a Node process plus a Python helper over IPC, or forces VAD
+and STT into JS. The Silero bug found this morning — 576-sample windows,
+not 512, failing silently — would have been considerably harder to find
+across a language boundary.
+
+**Where Electron would genuinely win:** a transparent undecorated
+always-on-top window is three lines there versus ~50 of EWMH here — but
+that cost is already paid and tested. And rich graphics: if the OS1 3D
+ribbon ever comes back, a browser gives it away free. **That** is the
+conversation worth reopening, and `frontend/` is still there for it.
+
+**Cheaper alternatives if the visualiser ever outgrows Cairo/GSK:**
+`Gtk.GLArea` in-process, or an embedded WebKitGTK for the visual half
+with Python still owning the audio. Neither breaks the single process.
+
+**Cost of this decision:** none today. It is the fifth architecture this
+project has considered (Tauri → Ubuntu Frame → Chromium kiosk → GTK4 →
+Electron) and the fourth it has rejected; the point of writing the
+numbers down is so the sixth conversation starts from evidence.
+
 ### 2026-08-23 — Samantha may act: agentic, but never visibly
 
 **Decision:** Samantha uses Hermes' tools. §1 loses "❌ A productivity
