@@ -87,6 +87,11 @@ as the primary interaction mode.
    things in the house: control it, remember, remind, look something up
    when the conversation needs it.
 
+   Since 2026-08-23 she also **sees**: the house's cameras, through
+   YOLO, close enough to notice somebody outside. Seeing obeys the same
+   rule as acting — she mentions what she noticed, in her words, and
+   never reports a detection.
+
    The order in that sentence is the principle. Acting serves the
    conversation, never replaces it. She does not announce her tools, does
    not narrate steps, does not offer menus of what she can do. If a
@@ -776,6 +781,82 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-23 — Samantha can see: BarnDoor's cameras, reused not integrated
+
+**Decision:** the widget watches the house's cameras. What comes from
+`~/git/barndoor` is the RTSP layout and a YOLOv9 model already converted
+to ONNX — and nothing else. No Frigate, no MQTT, no Telegram, no second
+agent. The two projects stay separate.
+
+**Why it belongs in the widget rather than in a service of its own:**
+zero new dependencies. `onnxruntime` was already there for Silero and
+PyAV arrived with faster-whisper, so a widget that could already hear
+was one import away from being able to look.
+
+**The design decision that matters:** a detection does not become
+speech. It becomes a `chat` frame with a prompt asking her to mention
+what she noticed, in one short line, forbidding any reference to cameras
+or detections. "Persona detectada en exterior" would be a machine
+talking, and §1 says she never performs using her tools. Measured:
+
+    cámara: alguien
+    ← Oye. Hay alguien fuera de casa.
+
+**What the user's suggestion to read BarnDoor's app was worth:** its
+`agent/rules.py` had the numbers, arrived at against these very
+cameras, that would otherwise have been guessed — confidence floor 0.7
+(the guess was 0.45), anti-spam of 180 s per label, and a person during
+quiet hours overriding that silence. Without the anti-spam a camera
+says "alguien" every three seconds for as long as somebody stands in
+the driveway.
+
+**Cost:** a model call per event, affordable only because those rules
+make events rare. And the privacy line moves again: what the cameras see
+is described to a cloud LLM, in the same "eyes open, not absolute"
+sense §1 already carries for conversation.
+
+**Not done:** she cannot be asked what she sees. The camera speaks; it
+cannot be questioned. That wants the vision path exposed as a Hermes
+tool rather than a thread pushing prompts.
+
+### 2026-08-23 — Electron reconsidered for the widget, and rejected again
+
+**Decision:** the widget stays GTK4. Raised because Hermes Desktop —
+Electron — was built and run on this machine the same day, and it works.
+
+**Measured, side by side, on this box:**
+
+| | widget (GTK4) | Hermes Desktop (Electron) |
+|---|---|---|
+| RSS | 389 MB, one process | 1257 MB across six |
+| Installed | 268 KB of code | 338 MB packaged |
+| Build | none | `npm install`, and it had to download its own Node |
+
+The widget's 389 MB is almost entirely faster-whisper resident on the
+GPU, not the interface.
+
+**The reason that decides it is not the memory.** Silero, Whisper,
+CosyVoice and playback share ONE Python process today. Electron splits
+that into a Node process plus a Python helper over IPC, or forces VAD
+and STT into JS. The Silero bug found this morning — 576-sample windows,
+not 512, failing silently — would have been considerably harder to find
+across a language boundary.
+
+**Where Electron would genuinely win:** a transparent undecorated
+always-on-top window is three lines there versus ~50 of EWMH here — but
+that cost is already paid and tested. And rich graphics: if the OS1 3D
+ribbon ever comes back, a browser gives it away free. **That** is the
+conversation worth reopening, and `frontend/` is still there for it.
+
+**Cheaper alternatives if the visualiser ever outgrows Cairo/GSK:**
+`Gtk.GLArea` in-process, or an embedded WebKitGTK for the visual half
+with Python still owning the audio. Neither breaks the single process.
+
+**Cost of this decision:** none today. It is the fifth architecture this
+project has considered (Tauri → Ubuntu Frame → Chromium kiosk → GTK4 →
+Electron) and the fourth it has rejected; the point of writing the
+numbers down is so the sixth conversation starts from evidence.
 
 ### 2026-08-23 — Samantha may act: agentic, but never visibly
 

@@ -1,6 +1,7 @@
 """samantha-kiosk — the OS1 interface as a Hermes platform."""
 
 import os
+from pathlib import Path
 
 from .adapter import (
     DEFAULT_USER_ID,
@@ -23,6 +24,45 @@ def check_requirements() -> bool:
     "stdlib-only, always loadable" case rather than a version/flag check.
     """
     return True
+
+
+# Where the persona lives, and why it lives HERE.
+#
+# The obvious home is SOUL.md, and it does not work: `load_soul_md()`
+# reads HERMES_HOME/SOUL.md, but the only caller that asks for it is
+# cron/scheduler.py (`load_soul_identity=True`). Every other path,
+# including the gateway serving this platform, takes the default of
+# False. So SOUL.md governs scheduled jobs and nothing else — a
+# conversation through the strip never sees it. Measured 2026-08-23:
+# with a full JARVIS SOUL.md in place, asked who she was, the reply was
+# still "Me llamo Hermes, aunque aquí me puedes llamar Samantha".
+#
+# `platform_hint` DOES reach every turn on this platform, so the persona
+# rides in on it. One source of truth on disk, `Hermes/jarvis-soul.md`,
+# versioned with the rest of the repo.
+_PERSONA_FILE = Path(__file__).resolve().parents[2] / "jarvis-soul.md"
+
+_FALLBACK_HINT = (
+    "Estás hablando en voz alta con la persona que vive aquí, a través "
+    "de una pantalla sin teclado a mano. Frases cortas, nada de listas "
+    "ni markdown."
+)
+
+
+def _platform_hint() -> str:
+    """The persona, plus the constraints of talking through a strip."""
+    surface = (
+        "Hablas en voz alta, por un altavoz, a la persona que vive aquí. "
+        "No hay teclado ni pantalla que leer: nada de listas, markdown, "
+        "URLs ni nombres de fichero. Frases que se puedan escuchar."
+    )
+    try:
+        persona = _PERSONA_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        # A missing persona file must not take the platform down with it;
+        # she is generic for a turn instead of absent for good.
+        return _FALLBACK_HINT
+    return f"{persona}\n\n{surface}"
 
 
 def register(ctx):
@@ -71,9 +111,5 @@ def register(ctx):
         max_message_length=600,
         emoji="🟠",
         pii_safe=True,
-        platform_hint=(
-            "Estás hablando en voz alta con la persona que vive aquí, a "
-            "través de una pantalla sin teclado a mano. Frases cortas, "
-            "nada de listas ni markdown."
-        ),
+        platform_hint=_platform_hint(),
     )

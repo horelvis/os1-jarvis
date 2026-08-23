@@ -13,6 +13,7 @@ needed is never written.
 from __future__ import annotations
 
 import asyncio
+import re
 import unicodedata
 
 try:
@@ -66,6 +67,38 @@ def is_system_message(text: str) -> bool:
     # So = symbol/other (most emoji), Cs = surrogate, Sk/Sm = other
     # symbol classes that pictographs fall into.
     return unicodedata.category(first) in {"So", "Sk", "Sm", "Cs"}
+
+
+# A cron delivery does not arrive as her words. It arrives wrapped:
+#
+#   Cronjob Response: Prueba ha salido bien
+#   (job_id: 03c8676840af)
+#   -------------
+#   La prueba ha salido bien.
+#
+#   To stop or manage this job, send me a new message (e.g. "stop
+#   reminder Prueba ha salido bien").
+#
+# Measured on 2026-08-23, and she read ALL of it out loud — the hex job
+# id, the row of dashes, and the closing instruction in English. Exactly
+# the "visible agent" CLAUDE.md §1 forbids. Only the body is hers.
+#
+# This is not `is_system_message`'s job: the frame IS a real delivery
+# with something to say, not chatter to drop.
+_CRON_HEADER = re.compile(
+    r"^\s*Cronjob Response:[^\n]*\n(?:\(job_id:[^)]*\)\s*\n)?-{3,}\s*\n",
+    re.IGNORECASE,
+)
+_CRON_FOOTER = re.compile(
+    r"\n\s*To stop or manage this job.*\Z", re.IGNORECASE | re.DOTALL
+)
+
+
+def unwrap_delivery(text: str) -> str:
+    """Strip the scaffolding off a scheduled delivery. Idempotent."""
+    body = _CRON_HEADER.sub("", text)
+    body = _CRON_FOOTER.sub("", body)
+    return body.strip()
 
 
 class ClauseChunker:

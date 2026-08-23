@@ -1,0 +1,60 @@
+# Hermes backend for the desktop app — the monitoring surface.
+#
+# `hermes serve` is the JSON-RPC/WebSocket backend that Hermes Desktop and
+# remote clients connect to. It is NOT the gateway: samantha-hermes.service
+# is what actually answers the strip on :7777. This one exists so the
+# desktop app can look INTO that gateway's world — its sessions, its
+# memories, its cron jobs — rather than starting a private Hermes of its
+# own, which is what the desktop's "Local gateway" mode would do and which
+# would collide with the running gateway over the same profile.
+#
+# Both processes share HERMES_HOME (run-gateway.sh sets it to the repo's
+# .hermes/home), which is the whole point: what you monitor is Samantha,
+# not a second installation that happens to look like her.
+#
+# Install:
+#   cp systemd/samantha-hermes-serve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now samantha-hermes-serve.service
+#
+# Then in Hermes Desktop choose "Remote gateway" and point it at
+# http://127.0.0.1:9119.
+
+[Unit]
+Description=Samantha monitoring backend (hermes serve, for Hermes Desktop)
+After=network.target samantha-hermes.service
+# Only a viewer: if the gateway goes down this can keep running and simply
+# has less to show, so this is deliberately not PartOf/BindsTo.
+Wants=samantha-hermes.service
+
+[Service]
+Type=simple
+
+# Relative defaults inside Hermes resolve against the working directory,
+# and systemd would otherwise start this in %h — the same trap that kept
+# samantha-hermes.service from starting at all.
+WorkingDirectory=%h/git/os1-samantha
+
+# HERMES_DASHBOARD_SESSION_TOKEN intentionally NOT set here — this file is
+# committed. Without it, `serve` generates a random token in memory at
+# startup and writes it nowhere, so nothing can ever authenticate: every
+# protected route answers 401 and the desktop cannot connect.
+#
+# Set a real one in a local drop-in on this machine:
+#   systemctl --user edit samantha-hermes-serve
+#   [Service]
+#   Environment=HERMES_DASHBOARD_SESSION_TOKEN=<token>
+#
+# Generate one with:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+#
+# The token is a password to a backend that can dispatch agents. The socket
+# below is loopback-only; keep it that way.
+ExecStart=%h/git/os1-samantha/Hermes/run-gateway.sh serve --port 9119 --host 127.0.0.1
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

@@ -1,5 +1,63 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-23 — Vista: las cámaras hablan ✅
+
+El widget mira las cámaras de la casa y, cuando ve algo que merece la
+pena, lo dice con sus palabras. Código reutilizado de
+[BarnDoor](~/git/barndoor); nada de aquel proyecto viene con él.
+
+**Verificado de extremo a extremo** con un clip real de la cámara
+exterior, porque las cámaras están apagadas y hay 1896 grabaciones en
+disco:
+
+```
+cámara: alguien
+← Oye. Hay alguien fuera de casa.
+```
+
+**Changed files:** `widget/samantha_widget/{vision,__main__}.py`,
+`widget/tests/test_vision.py`, `widget/README.md`,
+`docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md` (§5.7).
+
+**Tests:** 126 passed, ruff limpio. Ninguno necesita cámara ni el
+modelo de 8 MB.
+
+**Lo que se trajo de BarnDoor, y lo que no:**
+- **Sí:** el reparto RTSP de las cámaras y `yolov9-t-320.onnx`.
+- **No:** Frigate, MQTT, Telegram, su agente LangGraph. No hay
+  acoplamiento entre los dos proyectos.
+- **Coste en dependencias: cero.** `onnxruntime` ya estaba por Silero y
+  PyAV llegó con faster-whisper.
+
+**Notas:**
+
+- **Ella es avisada, no obligada a recitar.** Una detección no se
+  convierte en voz directamente: se convierte en un `chat` por el mismo
+  camino que cualquier cosa que diga el usuario, con un prompt que pide
+  una frase corta y prohíbe mencionar cámaras o detecciones. "Persona
+  detectada en exterior" sería una máquina hablando, y CLAUDE.md §1 dice
+  que nunca actúa *usando* sus herramientas. Cuesta una llamada al
+  modelo, que sale barata justamente porque el Watcher la hace rara.
+- **Detectar es la mitad fácil.** Revisar `agent/rules.py` de BarnDoor
+  —sugerencia del usuario— aportó los números que yo habría puesto mal:
+  umbral 0.7 (el mío era 0.45, a ojo), anti-spam de 180 s por etiqueta,
+  y una persona entre las 23:00 y las 07:00 se salta ese silencio. Solo
+  personas: un coche aparcado hablaría toda la noche.
+- **Sin el anti-spam la cámara diría "alguien" cada tres segundos**
+  mientras alguien esté en la entrada. Eso es exactamente el agente
+  visible que §1 prohíbe, además de insoportable.
+- El sub-stream, muestreando un fotograma de cada diez. La GPU es de
+  Whisper y CosyVoice, que están en el camino crítico de una
+  conversación; una cámara no.
+- **Falta:** nadie puede preguntarle qué ve. La cámara habla pero no se
+  la puede interrogar — eso pide exponer la visión como herramienta de
+  Hermes, no como un hilo empujando prompts.
+- Las cámaras (192.168.100.142 y .143) estaban apagadas durante todo
+  este trabajo. Todo lo verificado lo está contra grabaciones reales.
+
+---
+
+
 ## 2026-08-23 — Widget plan 2: the voice turn ⏸ blocked on hardware
 
 Everything between the microphone and her voice is built, wired and

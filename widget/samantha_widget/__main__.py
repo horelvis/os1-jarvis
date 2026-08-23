@@ -40,6 +40,11 @@ _NO_MIC = os.environ.get("SAMANTHA_WIDGET_NO_MIC") == "1"
 # no microphone, where no turn can ever begin.
 _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
 
+# An RTSP URL, or any file PyAV can open — a recording works for testing
+# exactly as a live camera does, which is just as well while the cameras
+# are switched off.
+_CAMERA_URL = os.environ.get("SAMANTHA_WIDGET_CAMERA")
+
 # Speak this INTO the widget, as if into a microphone: it is synthesised,
 # resampled to 16 kHz and pushed through the same on_frame the real
 # microphone calls. Everything after that is real — Silero, Whisper, the
@@ -116,7 +121,12 @@ class SamanthaApp(Gtk.Application):
 
         from .audio import Microphone, Player, describe_devices
         from .gateway import GatewayClient
-        from .speech import ClauseChunker, Speaker, is_system_message
+        from .speech import (
+            ClauseChunker,
+            Speaker,
+            is_system_message,
+            unwrap_delivery,
+        )
         from .stt import Transcriber
         from .turn import TurnMachine
         from .vad import SileroDetector, UtteranceDetector
@@ -178,6 +188,12 @@ class SamanthaApp(Gtk.Application):
                 print(f"(sistema) {token[:60]}", file=sys.stderr, flush=True)
                 return
             print(f"← {token}", file=sys.stderr, flush=True)
+            # A scheduled delivery arrives wrapped in scaffolding — job
+            # id, dashes, an English footer — and she would read all of
+            # it aloud.
+            token = unwrap_delivery(token)
+            if not token:
+                return
             machine.token(token)
             for clause in chunker.push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
@@ -217,6 +233,14 @@ class SamanthaApp(Gtk.Application):
                 set_level(min(1.0, rms * 6))
             if utterance is not None:
                 machine.heard(utterance)
+
+        if _CAMERA_URL:
+            threading.Thread(
+                target=_watch_camera,
+                args=(_CAMERA_URL, machine, client, loop, self),
+                name="camera",
+                daemon=True,
+            ).start()
 
         def _boot() -> None:
             # Both run for the lifetime of the process, on the loop that
@@ -385,6 +409,78 @@ def _feed_fake_mic(text: str, on_frame, transcriber) -> None:
         delay = next_at - time.monotonic()
         if delay > 0:
             time.sleep(delay)
+
+
+def _watch_camera(url: str, machine, client, loop, app) -> None:
+    """Look at a camera, and tell her when something is worth saying.
+
+    She is TOLD, not made to recite. The prompt asks for one short line
+    in her own voice and forbids mentioning cameras or detections,
+    because "persona detectada en exterior" is a machine talking, and
+    CLAUDE.md §1 says she never performs using her tools.
+
+    Sending it as a `chat` frame is deliberate: it goes through the same
+    path as anything the user says, so what comes back is her, in her
+    tone, with her memory of the conversation — not a canned string.
+    That costs a model call, which is affordable precisely because the
+    Watcher makes it rare (180 s per label, quiet hours aside).
+    """
+    import time
+
+    from .vision import CameraStream, Detector, Watcher, describe
+    from .wave_model import WaveState
+
+    try:
+        detector = Detector()
+    except FileNotFoundError as exc:
+        print(f"cámara: sin modelo YOLO — {exc}", file=sys.stderr, flush=True)
+        return
+
+    watcher = Watcher()
+    print(f"cámara: mirando {url}", file=sys.stderr, flush=True)
+
+    while True:
+        stream = CameraStream(url)
+        try:
+            for frame in stream.frames():
+                seen = detector.detect(frame)
+                if not seen:
+                    continue
+                now = time.time()
+                worth = watcher.worth_saying(
+                    seen, now=now, hour=time.localtime().tm_hour
+                )
+                if not worth:
+                    continue
+
+                phrase = describe(worth)
+                print(f"cámara: {phrase}", file=sys.stderr, flush=True)
+                prompt = (
+                    f"Acabas de ver {phrase} fuera de casa. Coméntalo en una "
+                    f"frase corta, con tus palabras, como si te hubieras dado "
+                    f"cuenta tú. No menciones cámaras, detecciones ni sistemas."
+                )
+                # THINKING, not SPEAKING: she has not said anything yet,
+                # and the reply takes a few seconds to arrive.
+                machine._go(WaveState.THINKING)
+                loop.call_soon_threadsafe(
+                    lambda text=prompt: app._spawn(client.send_chat(text))
+                )
+        except Exception as exc:
+            # A camera that is off, unplugged or rebooting is normal.
+            # She goes back to not being able to see, and tries again.
+            print(f"cámara: {exc}", file=sys.stderr, flush=True)
+        finally:
+            stream.close()
+
+        if not _CAMERA_RETRY_SECONDS:
+            return
+        time.sleep(_CAMERA_RETRY_SECONDS)
+
+
+# 0 means "give up after the stream ends" — which is what a recording
+# does, and what makes it usable as a test camera.
+_CAMERA_RETRY_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_CAMERA_RETRY", "30"))
 
 
 def _preload() -> None:

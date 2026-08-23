@@ -133,3 +133,55 @@ def test_leading_whitespace_does_not_smuggle_one_through() -> None:
 def test_an_empty_frame_is_filtered() -> None:
     assert is_system_message("") is True
     assert is_system_message("   ") is True
+
+
+# ── scheduled deliveries ──────────────────────────────────────────────
+
+CRON_DELIVERY = """Cronjob Response: Prueba ha salido bien
+(job_id: 03c8676840af)
+-------------
+La prueba ha salido bien.
+
+To stop or manage this job, send me a new message (e.g. "stop reminder Prueba ha salido bien")."""
+
+
+def test_only_her_words_survive_a_scheduled_delivery() -> None:
+    """Measured verbatim: she read the job id, the dashes and an English
+    instruction out loud. Only the body is hers."""
+    from samantha_widget.speech import unwrap_delivery
+
+    assert unwrap_delivery(CRON_DELIVERY) == "La prueba ha salido bien."
+
+
+def test_unwrapping_is_idempotent() -> None:
+    from samantha_widget.speech import unwrap_delivery
+
+    once = unwrap_delivery(CRON_DELIVERY)
+    assert unwrap_delivery(once) == once
+
+
+def test_an_ordinary_reply_passes_through_untouched() -> None:
+    from samantha_widget.speech import unwrap_delivery
+
+    plain = "Hola. Hay un momento, al final de la playa, en que todo calla."
+    assert unwrap_delivery(plain) == plain
+
+
+def test_a_delivery_with_no_job_id_line_still_unwraps() -> None:
+    from samantha_widget.speech import unwrap_delivery
+
+    text = "Cronjob Response: Regar\n-------------\nRiega las plantas."
+    assert unwrap_delivery(text) == "Riega las plantas."
+
+
+def test_a_multi_sentence_body_is_kept_whole() -> None:
+    from samantha_widget.speech import unwrap_delivery
+
+    text = (
+        "Cronjob Response: X\n(job_id: abc)\n-------------\n"
+        "Riega las plantas. Y abre la ventana, que hace bueno.\n\n"
+        'To stop or manage this job, send me a new message (e.g. "stop X").'
+    )
+    assert (
+        unwrap_delivery(text) == "Riega las plantas. Y abre la ventana, que hace bueno."
+    )
