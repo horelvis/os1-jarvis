@@ -4,7 +4,7 @@ What matters here is that the bars answer the sound and settle when it
 stops — the two things that made the first version look wrong.
 """
 
-from samantha_widget.bars_model import BAND_COUNT, BarsModel
+from samantha_widget.bars_model import BAND_COUNT, MAX_VISIBLE_TASKS, BarsModel
 from samantha_widget.wave_model import WaveState
 
 
@@ -221,3 +221,124 @@ def test_the_newest_sound_is_in_the_middle() -> None:
     heights = model.heights()
     half = len(heights) // 2
     assert heights[half] > 5 * heights[0]
+
+
+# ── working: one pulse per task ───────────────────────────────────────
+
+
+def _peak_count(heights: list[float], floor: float = 0.15) -> int:
+    """How many separate blips are on the row, counted circularly.
+
+    A pulse mid-crossing shows as two stubs, one at each end — that is
+    the point of the wrap, not two tasks. So the row is walked as a ring
+    and the two stubs count once.
+    """
+    count, inside = 0, False
+    for value in heights:
+        if value >= floor and not inside:
+            count += 1
+            inside = True
+        elif value < floor:
+            inside = False
+    if count > 1 and heights[0] >= floor and heights[-1] >= floor:
+        count -= 1  # the same pulse, seen at both ends
+    return count
+
+
+def test_working_with_no_tasks_falls_back_to_one_pulse() -> None:
+    """ "Working on nothing" is just waiting."""
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(0)
+    model.advance(0.3)
+
+    assert _peak_count(model.heights()) >= 1
+
+
+def test_two_tasks_show_two_pulses() -> None:
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(2)
+    model.advance(0.25)
+
+    assert _peak_count(model.heights()) == 2
+
+
+def test_three_tasks_show_three_pulses() -> None:
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(3)
+    model.advance(0.25)
+
+    assert _peak_count(model.heights()) == 3
+
+
+def test_the_pulses_travel_at_different_speeds() -> None:
+    """Locked in step they would read as one task, not three."""
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(3)
+
+    def peaks() -> list[int]:
+        heights = model.heights()
+        return [i for i, v in enumerate(heights) if v >= 0.15]
+
+    model.advance(0.2)
+    first = peaks()
+    model.advance(0.6)
+    second = peaks()
+
+    assert first != second
+
+
+def test_a_crossing_never_overflows_the_strip() -> None:
+    """Pulses add where they meet; the sum must stay on screen."""
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(MAX_VISIBLE_TASKS)
+    for _ in range(200):
+        model.advance(1 / 60)
+        assert max(model.heights()) <= 1.0
+
+
+def test_more_tasks_than_can_be_counted_are_capped() -> None:
+    """Past a point it just looks busy, which is the honest reading."""
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(40)
+    model.advance(0.25)
+
+    assert _peak_count(model.heights()) <= MAX_VISIBLE_TASKS
+
+
+def test_a_pulse_never_gets_cut_off_at_the_edge() -> None:
+    """The bug the user caught: the pulse vanished mid-stride.
+
+    Centred on `head` with a plain difference, the bump loses its right
+    half as `head` approaches 1.0 — on screen it does not leave the strip,
+    it is amputated by it. Measured the short way round the circle, the
+    total amount of light on the row stays roughly constant no matter
+    where the pulse happens to be.
+    """
+    model = BarsModel()
+    model.state = WaveState.WORKING
+    model.set_task_count(1)
+
+    totals = []
+    for _ in range(240):  # several full crossings
+        model.advance(1 / 60)
+        totals.append(sum(model.heights()))
+
+    assert min(totals) > 0.6 * max(totals)
+
+
+def test_the_thinking_pulse_does_not_get_cut_off_either() -> None:
+    model = BarsModel()
+    model.state = WaveState.THINKING
+
+    totals = []
+    for _ in range(240):
+        model.advance(1 / 60)
+        totals.append(sum(model.heights()))
+
+    assert min(totals) > 0.6 * max(totals)

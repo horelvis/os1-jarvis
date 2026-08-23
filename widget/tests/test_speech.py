@@ -97,6 +97,13 @@ def test_hermes_narrating_itself_is_not_said_out_loud() -> None:
         "💡 First-time tip — I redirected the current run using your message.",
         "⚠️ Couldn't deliver the audio attachment.",
         "⚡ Interrupting current task. I'll respond to your message shortly.",
+        # The one that got through a fixed list of markers and was read
+        # out loud during the agentic probe.
+        "💾 Self-improvement review: User profile updated",
+        # Not observed, but the same shape — the rule has to cover the
+        # ones Hermes has not shipped yet.
+        "🔧 Tool call failed, retrying",
+        "✅ Done",
     ):
         assert is_system_message(text) is True, text
 
@@ -108,6 +115,13 @@ def test_her_own_words_are_not_filtered() -> None:
         "[breath] Estaba pensando en lo que dijiste.",
         "¿Y tú qué tal?",
         "…y entonces me quedé pensando.",
+        # Spanish opens with these constantly, and they are punctuation,
+        # not pictographs — the rule must not eat them.
+        "¿Y tú qué tal has dormido?",
+        "¡Claro que me acuerdo!",
+        "«Esto lo dijiste tú», me acuerdo bien.",
+        "— Y entonces me callé.",
+        '"Café solo", apuntado.',
     ):
         assert is_system_message(text) is False, text
 

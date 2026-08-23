@@ -81,9 +81,21 @@ as the primary interaction mode.
    `SAMANTHA_LLM_API_KEY` and point `SAMANTHA_LLM_SERVER_URL` at a
    local OpenAI-compatible server.
 
-2. **Conversational, not task-oriented.** Samantha is designed for the
-   relationship, not for productivity. She remembers, she asks, she has
-   opinions. She is NOT a Siri/Alexa replacement.
+2. **Conversational first, and able to act.** Samantha is designed for
+   the relationship. She remembers, she asks, she has opinions. She is
+   NOT a Siri/Alexa replacement — but since 2026-08-23 she *can* do
+   things in the house: control it, remember, remind, look something up
+   when the conversation needs it.
+
+   The order in that sentence is the principle. Acting serves the
+   conversation, never replaces it. She does not announce her tools, does
+   not narrate steps, does not offer menus of what she can do. If a
+   request would make her sound like a task runner, she talks instead.
+   The test: someone watching should not be able to tell where the
+   conversation ended and the task began.
+
+   Revised on 2026-08-23 — this principle used to end at "not for
+   productivity", and §12 has the reasoning.
 
 3. **Aesthetic restraint.** Minimalism in every screen. One color
    (`#d1684e`), one wave, one typography pair (Cormorant Garamond +
@@ -100,11 +112,18 @@ as the primary interaction mode.
 ### What Samantha is NOT
 
 - ❌ A multi-user system (single user, always)
-- ❌ A productivity assistant (no calendar/email integration in v1)
 - ❌ A cloud-LLM wrapper (conversational inference stays local — Qwen via llama-server)
 - ❌ A mobile app (desktop kiosk only)
 - ❌ A coding assistant
-- ❌ An agentic tool-using system (no function calling, no web search)
+- ❌ **A visible agent.** She uses tools; she never performs using them.
+  No "ejecutando 3 de 5", no tool names out loud, no progress reports, no
+  listing her own capabilities. A task that cannot be done without
+  narrating it is a task she declines, in her own words.
+
+**Removed 2026-08-23** (see §12): "❌ A productivity assistant" and
+"❌ An agentic tool-using system (no function calling, no web search)".
+Both were contradicted by Phase 9, which integrated Hermes *for* agentic
+tool use, and the contradiction was resolved in favour of acting.
 
 ---
 
@@ -757,6 +776,53 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-23 — Samantha may act: agentic, but never visibly
+
+**Decision:** Samantha uses Hermes' tools. §1 loses "❌ A productivity
+assistant" and "❌ An agentic tool-using system (no function calling, no
+web search)", and gains "❌ A visible agent" in their place.
+
+**Rationale:** the spec contradicted itself. §1 forbade agentic tool
+use; Phase 9 (§4) integrated Hermes explicitly *"to enable agéntico tool
+use"*. Until today the prohibition won by default, which left Hermes
+working as a text pipe — a sentence in, a sentence out — with an entire
+tool ecosystem sitting unused underneath a device that lives in
+somebody's living room.
+
+The user's framing on 2026-08-23: *"Hermes funciona como un chatbot y no
+es esa su utilidad, sino hacer tareas de agentes y aprovechar todo su
+ecosistema de integración."*
+
+**What is in, in priority order:** Home Assistant (the one that makes a
+thing in the living room worth having), `memory` + `session_search`,
+`cronjob` (reminders she raises out loud), web search, Spotify, and
+Discord — the only social platform this pinned Hermes actually ships,
+alongside Yuanbao and Feishu.
+
+**Cost, and it is not small:**
+
+- **The personality spec now has to police behaviour, not just prose.**
+  "No visible agent" is a rule about what she does, and `docs/
+  personality.md` was written for what she says.
+- **The voice turn does not fit an agentic turn.** It assumes you speak,
+  she thinks for a few seconds, she answers. A real task takes minutes,
+  emits intermediate chatter (`↪ Redirected current run`, already seen
+  in the wild) and trips the kiosk adapter's 90 s watchdog. The wave has
+  no state for "still working".
+- **`cronjob` inverts the conversation.** A reminder is Samantha talking
+  first, which nothing in the widget or the adapter currently supports.
+- **The privacy line moves again.** Web search and Home Assistant send
+  the house's business outward. §1's "eyes open, not absolute" already
+  covers it, but it is a wider aperture than the 2026-05-15 entry
+  imagined.
+- **Memory now has two homes.** Hermes has its own `memory` toolset and
+  we have ChromaDB (§2.7) that the gateway path never touches. One of
+  them has to win.
+
+**Alternatives rejected:** keeping her purely conversational (leaves
+Hermes pointless — a smaller local model would do), and going fully
+task-oriented (that is Siri, and §1 has always said no).
 
 ### 2026-05-15 — LLM switched from local Qwen3-8B to Grok API
 

@@ -202,11 +202,17 @@ class Player:
             samplerate=OUTPUT_RATE,
             channels=1,
             dtype="int16",
-            blocksize=_LEVEL_BLOCK_SAMPLES,
-            # The wave is driven by what has just been written, so the
-            # buffer's depth IS the lag between the line and the sound.
-            # Ask for the smallest the device will give.
-            latency="low",
+            # Let PortAudio size its own buffer, and do NOT ask for low
+            # latency. Both were set to keep the visualiser in step with
+            # the sound, and both were wrong: this thread shares a CPU
+            # with Silero, Whisper and GTK, and a 12 ms buffer empties
+            # faster than it can be refilled. The audible result is
+            # syllables dropping out of her speech, and the visible one
+            # is the wave freezing while _pump blocks on a starved
+            # write. A deeper buffer costs a few tens of milliseconds of
+            # lag between the bars and the voice — nobody can see that,
+            # and everybody can hear a missing vowel.
+            blocksize=0,
         )
         self._stream.start()
         self._running = True

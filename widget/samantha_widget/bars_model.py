@@ -38,9 +38,34 @@ _THINKING_GAIN = 0.55
 # off rather than amplifying the noise floor to full height.
 _SILENCE_FLOOR = 0.04
 
+# One travelling pulse per task in flight. Different speeds so two tasks
+# never lock into step and read as one — they drift apart, cross, and
+# separate again, which is what makes the count legible without counting.
+_WORK_BASE_SECONDS = 2.2
+_WORK_SPEED_SPREAD = 0.35
+_WORK_PULSE_WIDTH = 0.10
+_WORK_GAIN = 0.62
+# Above this many, the pulses stop being countable and the row just looks
+# busy — which is the honest reading of "she has a lot on".
+MAX_VISIBLE_TASKS = 5
+
 _IDLE_BREATH_HZ = 0.16
 _PACKET_SECONDS = 1.6
 _PACKET_WIDTH = 0.16
+
+
+def _wrapped_distance(position: float, head: float) -> float:
+    """Distance from `position` to `head` around a circle of length 1.
+
+    A travelling pulse is a bump centred on `head`, and with a plain
+    `position - head` the bump is CUT IN HALF at both ends of the row:
+    as the centre approaches 1.0 the right half falls off the edge and
+    the pulse vanishes mid-stride instead of leaving on one side and
+    arriving on the other. Measuring the short way round the circle
+    makes it continuous.
+    """
+    gap = abs(position - head)
+    return min(gap, 1.0 - gap)
 
 
 def mirror(values: list[float]) -> list[float]:
@@ -56,6 +81,7 @@ def mirror(values: list[float]) -> list[float]:
 class BarsModel:
     def __init__(self, band_count: int = BAND_COUNT) -> None:
         self.state = WaveState.IDLE
+        self.task_count = 0
         self.band_count = band_count
         self._target = [0.0] * band_count
         self._drawn = [0.0] * band_count
@@ -85,8 +111,14 @@ class BarsModel:
             rate = _ATTACK if target > self._drawn[i] else _DECAY
             self._drawn[i] += (target - self._drawn[i]) * min(1.0, rate * dt)
 
+    def set_task_count(self, count: int) -> None:
+        """How many things she has in flight right now."""
+        self.task_count = max(0, int(count))
+
     def heights(self) -> list[float]:
         """Half-height of each bar, 0..1 of half the strip height."""
+        if self.state is WaveState.WORKING:
+            return self._working()
         if self.state is WaveState.THINKING:
             return self._packet()
         if self.state is WaveState.IDLE:
@@ -101,6 +133,32 @@ class BarsModel:
         breath = 0.5 + 0.5 * math.sin(2 * math.pi * _IDLE_BREATH_HZ * self._t)
         return mirror([_IDLE_GAIN * breath] * self.band_count)
 
+    def _working(self) -> list[float]:
+        """One pulse per task, travelling at its own speed.
+
+        Read left to right the row is a set of blips crossing at
+        different rates; the number of them is the number of things she
+        is doing. At zero tasks it falls back to the single thinking
+        pulse, because "working on nothing" is just waiting.
+        """
+        tasks = min(self.task_count, MAX_VISIBLE_TASKS)
+        if tasks <= 0:
+            return self._packet()
+
+        width = 2 * self.band_count
+        out = [0.0] * width
+        for task in range(tasks):
+            # Each task is slower than the last, and starts further along.
+            period = _WORK_BASE_SECONDS * (1.0 + _WORK_SPEED_SPREAD * task)
+            head = ((self._t / period) + task / tasks) % 1.0
+            for i in range(width):
+                u = i / max(1, width - 1)
+                d = _wrapped_distance(u, head) / _WORK_PULSE_WIDTH
+                # Pulses add where they cross, so two tasks meeting make
+                # a taller blip — but never taller than the strip.
+                out[i] = min(1.0, out[i] + _WORK_GAIN * math.exp(-d * d))
+        return out
+
     def _packet(self) -> list[float]:
         """Thinking: one travelling bump, drawn across the mirrored row."""
         width = 2 * self.band_count
@@ -108,7 +166,7 @@ class BarsModel:
         out = []
         for i in range(width):
             u = i / max(1, width - 1)
-            d = (u - head) / _PACKET_WIDTH
+            d = _wrapped_distance(u, head) / _PACKET_WIDTH
             out.append(_THINKING_GAIN * math.exp(-d * d))
         return out
 
@@ -171,13 +229,19 @@ class WaveformModel:
     def advance(self, dt: float) -> None:
         self._t += dt
 
+    def set_task_count(self, count: int) -> None:
+        """How many things she has in flight right now."""
+        self.task_count = max(0, int(count))
+
     def heights(self) -> list[float]:
+        if self.state is WaveState.WORKING:
+            return self._working()
         if self.state is WaveState.THINKING:
             head = (self._t / _PACKET_SECONDS) % 1.0
             out = []
             for i in range(self.length):
                 u = i / max(1, self.length - 1)
-                d = (u - head) / _PACKET_WIDTH
+                d = _wrapped_distance(u, head) / _PACKET_WIDTH
                 out.append(_THINKING_GAIN * math.exp(-d * d))
             return out
         if self.state is WaveState.IDLE:
