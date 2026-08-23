@@ -276,6 +276,16 @@ async def _stream_cosyvoice(
     """
     transcript, wav_bytes, wav_name = _load_cosyvoice_refs()
 
+    # A voice prompt, when set, goes in front of the transcript with the
+    # end-of-prompt marker. The server only prepends its own
+    # "You are a helpful assistant." when the marker is ABSENT
+    # (server.py::_ensure_eop_prefix), so supplying one replaces it
+    # rather than fighting it.
+    if config.tts_cosyvoice_voice_prompt:
+        transcript = (
+            f"{config.tts_cosyvoice_voice_prompt}<|endofprompt|>{transcript}"
+        )
+
     url = f"{config.tts_cosyvoice_url.rstrip('/')}/inference_zero_shot"
     # httpx multipart: (filename, content, content-type). filename=None
     # for text fields makes httpx emit them as plain form parts.

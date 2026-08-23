@@ -141,6 +141,13 @@ class Config:
     # needs it to condition the LLM on prosody (cross_lingual sounds
     # robotic because it discards prompt_text). Loaded once at startup.
     tts_cosyvoice_ref_transcript_path: str = "~/.samantha/voices/ref/samantha.txt"
+    # Character given to the VOICE, not to the words. CosyVoice accepts a
+    # system prompt before `<|endofprompt|>` that conditions delivery —
+    # pace, poise, how much it leans on a phrase — and the server has
+    # been injecting a fixed "You are a helpful assistant." all along,
+    # which is a personality too, just nobody's. Anything set here
+    # replaces it. Empty keeps the server's default.
+    tts_cosyvoice_voice_prompt: str = ""
 
     # === Logging ===
     log_level: str = "INFO"
@@ -194,6 +201,9 @@ class Config:
             tts_cosyvoice_url=_get("TTS_COSYVOICE_URL", cls.tts_cosyvoice_url),
             tts_cosyvoice_timeout_s=_get("TTS_COSYVOICE_TIMEOUT_S", cls.tts_cosyvoice_timeout_s),
             tts_cosyvoice_ref_wav=_get("TTS_COSYVOICE_REF_WAV", cls.tts_cosyvoice_ref_wav),
+            tts_cosyvoice_voice_prompt=_get(
+                "TTS_COSYVOICE_VOICE_PROMPT", cls.tts_cosyvoice_voice_prompt
+            ),
             tts_cosyvoice_ref_transcript_path=_get(
                 "TTS_COSYVOICE_REF_TRANSCRIPT_PATH",
                 cls.tts_cosyvoice_ref_transcript_path,
