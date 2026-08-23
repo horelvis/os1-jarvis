@@ -25,7 +25,9 @@ Type=simple
 
 # Model source: HuggingFace repo + quant tag. llama-server auto-downloads
 # on first run and caches under ~/.cache/llama.cpp/.
-Environment=SAMANTHA_LLAMA_HF=Qwen/Qwen3-8B-GGUF:Q8_0
+# The model file, not a -hf spec: it is already on disk and pulling it
+# again on every install is 13 GB nobody needs.
+Environment=SAMANTHA_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q3_K_XL.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.
@@ -38,16 +40,26 @@ Environment=SAMANTHA_LLAMA_NGL=99
 
 # Context window. Qwen3 supports up to 40K natively; generous headroom
 # for Phase 6 memory injection.
-Environment=SAMANTHA_LLAMA_CTX=40960
+# 64K is a HARD FLOOR, not a preference: Hermes refuses any model whose
+# context window is under 64,000 and the turn dies with
+# "below the minimum 64,000 required by Hermes Agent".
+Environment=SAMANTHA_LLAMA_CTX=65536
 
-ExecStart=/usr/bin/env llama-server \
-    -hf ${SAMANTHA_LLAMA_HF} \
+# The build in ~/git/llama.cpp, not whatever llama-server is on PATH.
+# Qwen3.8's hybrid Gated DeltaNet needs a recent build: b9115 failed to
+# load the Q3_K_XL outright ("missing tensor blk.64.ssm_conv1d.weight")
+# where b10603 loads it and runs it FOUR TIMES faster — 57 tok/s against
+# 13.7 for the Q4_K_M on the old build.
+ExecStart=%h/git/llama.cpp/build/bin/llama-server \
+    -m ${SAMANTHA_LLAMA_MODEL} \
     --host ${SAMANTHA_LLAMA_HOST} \
     --port ${SAMANTHA_LLAMA_PORT} \
     --n-gpu-layers ${SAMANTHA_LLAMA_NGL} \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
     --ctx-size ${SAMANTHA_LLAMA_CTX} \
     --jinja \
-    --flash-attn auto \
+    --flash-attn on \
     --split-mode row \
     --temp 0.6 \
     --top-k 20 \

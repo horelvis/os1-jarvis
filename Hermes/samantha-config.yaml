@@ -82,4 +82,29 @@ platform_toolsets:
 # why. Pin cron jobs themselves too (`--provider`/`--model`), or a later
 # change to this value makes Hermes skip them to avoid unintended spend.
 model:
-  default: grok-4.6
+  default: qwen3.8-27b
+  provider: custom:local
+  # Hermes refuses any model whose window is under 64,000 and kills the
+  # turn outright, so llama-server must be started with --ctx-size 65536
+  # to match.
+  context_length: 65536
+
+providers:
+  local:
+    base_url: http://127.0.0.1:8000/v1
+    api_key: no-key-required
+    default_model: qwen3.8-27b
+    extra_body:
+      chat_template_kwargs:
+        # Qwen3.8 reasons by default and puts EVERYTHING into
+        # reasoning_content: `content` comes back EMPTY and the strip
+        # sits in "thinking" without ever speaking.
+        enable_thinking: false
+
+# Note on the two fields above: provider and model are SEPARATE. Putting
+# `custom:local` into model.default sends the literal string
+# "custom:local" to xAI as a model name and the turn dies with a 404 —
+# resolution only reads `model.provider`.
+#
+# To go back to the cloud: `default: grok-4.6`, drop `provider`, and
+# unset `context_length`.
