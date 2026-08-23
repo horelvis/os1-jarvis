@@ -15,7 +15,10 @@ def strip_rect(
     first one.
     """
     available = monitor_w - 2 * theme.SIDE_MARGIN
-    width = min(theme.STRIP_MAX_WIDTH, available)
+    # STRIP_MAX_WIDTH == 0 means "no cap": edge to edge.
+    width = (
+        min(theme.STRIP_MAX_WIDTH, available) if theme.STRIP_MAX_WIDTH else available
+    )
     # A tiny screen must not produce a zero or negative width; below this
     # the strip stops obeying the margins rather than disappearing.
     width = max(width, 240)

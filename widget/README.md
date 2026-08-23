@@ -28,6 +28,15 @@ only visible at all because of `--system-site-packages`.)
 
     DISPLAY=:1 .venv/bin/python -m samantha_widget
 
+Running it from another directory — which is what systemd does — needs
+the package actually installed, not merely present:
+
+    .venv/bin/pip install -e .
+
+Without it the service dies on every start with `No module named
+samantha_widget`, while running it by hand from this directory works
+fine, because then the current directory is on sys.path.
+
 ## Test
 
     .venv/bin/python -m pytest -v

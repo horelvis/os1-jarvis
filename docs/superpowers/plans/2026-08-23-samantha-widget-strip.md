@@ -1366,6 +1366,16 @@ WantedBy=graphical-session.target
 
 - [ ] **Step 2: Install and start it**
 
+**Install the package first.** systemd starts the process from `%h`, not
+from `widget/`, so the package has to be importable rather than merely
+present. Skipping this gives `No module named samantha_widget` on every
+restart, while running it by hand from `widget/` keeps working — the
+current directory covers for it:
+
+```bash
+cd widget && .venv/bin/pip install -e . && cd ..
+```
+
 ```bash
 cp systemd/samantha-widget.service ~/.config/systemd/user/
 systemctl --user daemon-reload
