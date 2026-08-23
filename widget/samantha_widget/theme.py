@@ -24,13 +24,21 @@ LINE = TERRACOTTA
 # to get the solid bar back.
 BACKGROUND = "transparent"
 
+# Which visualiser is drawn. All three are implemented and all three are
+# driven by the same audio:
+#   "bars"     — an equaliser: one bar per frequency band, via FFT.
+#                Bars stay put and change height; nothing travels.
+#   "waveform" — one bar per instant, newest in the MIDDLE and older
+#                travelling out to both edges (user's choice 2026-08-23)
+#   "line"     — the horizontal wave of CLAUDE.md §12
+VISUALIZER = "waveform"
+
 STRIP_HEIGHT = 96
-# 0 means "as wide as the monitor". The strip started as a floating
-# 1100 px card centred with 48 px of air around it (spec §3); the user
-# asked for the full width and no frame on 2026-08-23, which turns it
-# from a card into a bar along the bottom edge. Set a number here to get
-# the floating card back.
-STRIP_MAX_WIDTH = 0
+# A fixed width, centred (user, 2026-08-23). It went full-width earlier
+# the same day and that was the wrong call: an equaliser stretched across
+# 1854 px reads as a status bar, and the visualiser it was modelled on
+# occupies a block in the middle of the frame. 0 restores full width.
+STRIP_MAX_WIDTH = 900
 SIDE_MARGIN = 0
 BOTTOM_MARGIN = 0
 # Square corners: a rounded rectangle reads as a window, and edge to

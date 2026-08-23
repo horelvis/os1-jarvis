@@ -33,6 +33,12 @@ _DEMO_STATE = os.environ.get("SAMANTHA_WIDGET_STATE")
 # cannot hear" and "the process is broken" visible in one variable.
 _NO_MIC = os.environ.get("SAMANTHA_WIDGET_NO_MIC") == "1"
 
+# Say this once, a few seconds after starting, and show the speaking
+# wave while it plays. The only way to hear the widget's real voice path
+# — its own threads, its own queue, its own player — on a machine with
+# no microphone, where no turn can ever begin.
+_SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
+
 
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
@@ -119,7 +125,7 @@ class SamanthaApp(Gtk.Application):
             GLib.idle_add(wave.set_state, state)
 
         def set_level(level: float) -> None:
-            GLib.idle_add(wave.model.set_level, level)
+            GLib.idle_add(wave.set_level, level)
 
         def on_utterance(pcm: bytes) -> None:
             loop.call_soon_threadsafe(lambda: self._spawn(dispatch(pcm)))
@@ -190,6 +196,29 @@ class SamanthaApp(Gtk.Application):
             self._spawn(client.run())
             speaker.start()
 
+        def _drive_speaking_level() -> bool:
+            """Make the line follow her own voice while she talks.
+
+            Nothing else does. `set_level` is only ever called from the
+            microphone path, and that path is deliberately gated shut
+            while the player is busy (so she does not hear herself) — so
+            without this the wave sits perfectly flat through every reply,
+            which is not what spec §4 promises and looks broken.
+
+            Runs on the GTK thread, so it may touch the widget directly;
+            50 ms is well under the frame interval and cheap.
+            """
+            if machine.state is WaveState.SPEAKING:
+                # The spectrum of the block going out right now, which is
+                # what makes the equaliser match the voice instead of
+                # merely reacting to it.
+                wave.set_bands(player.bands)
+                wave.set_history(player.history)
+                wave.model.set_level(min(1.0, player.level * 5))
+            return True  # GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add(50, _drive_speaking_level)
+
         threading.Thread(target=loop.run_forever, daemon=True).start()
         loop.call_soon_threadsafe(_boot)
         threading.Thread(target=transcriber.load, daemon=True).start()
@@ -198,6 +227,19 @@ class SamanthaApp(Gtk.Application):
             print("micrófono: desactivado", file=sys.stderr, flush=True)
         else:
             Microphone(on_frame).start()
+
+        if _SAY_ON_START:
+
+            def _say_it() -> None:
+                print(f"diciendo: {_SAY_ON_START}", file=sys.stderr, flush=True)
+                machine.token(_SAY_ON_START)  # drives the wave to `speaking`
+                for clause in chunker.push(_SAY_ON_START):
+                    speaker.enqueue(clause)
+                for clause in chunker.flush():
+                    speaker.enqueue(clause)
+
+            # After _boot, so the Speaker's worker is already running.
+            loop.call_soon_threadsafe(loop.call_later, 3.0, _say_it)
 
 
 _LIVE = {WaveState.LISTENING, WaveState.SPEAKING}

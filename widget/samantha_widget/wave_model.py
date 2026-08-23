@@ -24,8 +24,14 @@ class WaveState(str, Enum):
 # How fast the drawn amplitude chases the requested one, per second.
 # Attack is fast enough to feel immediate, decay slow enough that the
 # line falls rather than drops.
+#
+# Decay was 3.5 while the wave had nothing real to follow. Against her
+# actual voice that reads as lagging behind the sound: syllables are
+# 100-200 ms and a 3.5/s decay needs about 300 ms to come down, so the
+# line was still falling from one syllable when the next arrived and it
+# never matched what was being heard.
 _ATTACK = 9.0
-_DECAY = 3.5
+_DECAY = 7.0
 
 # Peak amplitude as a fraction of half the strip height.
 _IDLE_GAIN = 0.05

@@ -147,7 +147,29 @@ checked. A visual claim with no screenshot behind it is not verified.
 
 ---
 
-## 4. The wave
+## 4. The visualiser
+
+> **Revised again 2026-08-23, by the user, after seeing it run:** an
+> **equaliser of 32 bars**, not the line. The line is kept and still
+> works — `theme.VISUALIZER` switches between them — so this is a change
+> of default, not a deletion.
+>
+> This reverses the "horizontal wave replaces orb" decision of
+> CLAUDE.md §12 as far as the widget is concerned, and it is the user's
+> call about their own product. Worth recording honestly: the line was
+> not rejected for being a line. It was rejected while it was **wrong** —
+> flat during speech, because nothing connected the player's level to
+> it, and then lurching, because the level was sampled once per
+> half-second CosyVoice chunk and read before the audio reached the
+> buffer. Both were fixed (20 ms blocks, faster decay) and the line does
+> follow the voice now. The equaliser was chosen after that, on looks.
+>
+> The bars are driven by a real FFT of the block being played —
+> 32 logarithmic bands between 80 Hz and 8 kHz, mirrored about the
+> centre line — not by a decorative animation keyed to volume.
+> Logarithmic because linear bands put three quarters of the bars above
+> 3 kHz, where speech has nothing, and the equaliser looks dead while
+> somebody is talking.
 
 The film's Samantha is a line, not a spectrum (CLAUDE.md §12,
 2026-05). So the widget does not need an audio-visualisation library;
