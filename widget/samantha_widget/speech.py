@@ -13,6 +13,7 @@ needed is never written.
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 
 try:
     from Hermes.plugins.samantha_voice.markers import has_unclosed_tag
@@ -30,22 +31,27 @@ _MIN_CLAUSE_CHARS = 12
 _MIN_SOFT_CLAUSE_CHARS = 25
 
 # Hermes narrates itself through ordinary `token` frames — in English,
-# with emoji, to a person who has no keyboard. Measured verbatim on
-# 2026-08-23 (docs/…-widget-gateway-probe.md §3):
+# with emoji, to a person who has no keyboard. Measured verbatim:
 #
 #   📬 No home channel is set for Samantha_Kiosk … Type /sethome
 #   ↪ Redirected current run (iteration 1/9223372036854775807)
 #   💡 First-time tip — I redirected the current run…
 #   ⚠️ Couldn't deliver the audio attachment.
 #   ⚡ Interrupting current task. I'll respond to your message shortly.
+#   💾 Self-improvement review: User profile updated
 #
-# Matching on the leading marker rather than on the text keeps this
-# small and language-independent, and it fails safe: the worst case is
-# staying quiet about something that was not hers to say. Her own
-# replies never open with one — the personality spec's markers are
-# `[laughter]`, `[breath]`, `[sigh]` and `<laughter>`, none of which is
-# an emoji.
-_SYSTEM_MARKERS = ("📬", "↪", "💡", "⚠️", "⚡", "🔔", "🛑")
+# The first five were a fixed list until the sixth turned up, spoken
+# aloud, during the agentic probe. Enumerating them is a losing game:
+# any Hermes release can add another, and the cost of missing one is
+# that she reads it out.
+#
+# So the rule is the shape, not the list: a frame that OPENS with a
+# symbol or pictograph is Hermes talking about itself. Nothing of hers
+# starts that way — the personality spec bans emoji outright, and her
+# own expression markers are `[laughter]`, `[breath]`, `[sigh]` and
+# `<laughter>`, all ASCII. It fails safe: the worst case is staying
+# quiet about something that was not hers to say.
+_SPEAKABLE_LEADING_PUNCTUATION = "¿¡\"'«—-…("
 
 
 def is_system_message(text: str) -> bool:
@@ -53,7 +59,13 @@ def is_system_message(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
         return True
-    return stripped.startswith(_SYSTEM_MARKERS)
+
+    first = stripped[0]
+    if first in _SPEAKABLE_LEADING_PUNCTUATION:
+        return False
+    # So = symbol/other (most emoji), Cs = surrogate, Sk/Sm = other
+    # symbol classes that pictographs fall into.
+    return unicodedata.category(first) in {"So", "Sk", "Sm", "Cs"}
 
 
 class ClauseChunker:
