@@ -95,7 +95,41 @@ you.
 
 ---
 
-## Task 1: Find out whether the gateway also speaks
+## Task 1: Find out whether the gateway also speaks ✅ done 2026-08-23
+
+> **Answered. Full findings:**
+> `docs/superpowers/specs/2026-08-23-widget-gateway-probe.md`
+>
+> The short version, and what it changes downstream:
+>
+> - **Yes, it speaks** — through the agent's own `text_to_speech` tool,
+>   not `voice.auto_tts` (which is off by default and was never on).
+>   It was synthesising through **Edge TTS, Microsoft's cloud**: the
+>   cache file was MP3 48 kbps, and CosyVoice yields WAV/PCM. Fixed by
+>   setting `tts.provider: cosyvoice` in the repo's
+>   `.hermes/home/config.yaml`, and verified — the next file was
+>   `WAVE audio, Microsoft PCM, 16 bit, mono 24000 Hz`. **That config is
+>   git-ignored, so it has to be redone on the appliance.**
+> - **Hermes answers as "Hermes, tu asistente"**, offering `/help` to a
+>   person with no keyboard. Known (spec §9), still true, plan 3's to fix
+>   — and the likeliest reason the widget fails to convince.
+> - **NEW, and it changes Task 6:** the gateway emits its own system
+>   messages as ordinary `token` frames, in English, with emoji —
+>   `📬 No home channel…`, `↪ Redirected current run…`,
+>   `💡 First-time tip…`, `⚠️ Couldn't deliver the audio attachment.`,
+>   `⚡ Interrupting current task…`. Spoken aloud they are gibberish.
+>   Task 6 must filter a frame whose text starts with one of
+>   `📬 ↪ 💡 ⚠️ ⚡` before it reaches the chunker.
+> - **NEW, and it changes Task 7:** every system message carries its own
+>   `done`, so one turn produced **six** of them, all with
+>   `thinking_ms: 0`. `done` is not a turn boundary. Rule that matches
+>   what was measured: a `done` settles the turn only if at least one
+>   *unfiltered* token has arrived since the last settle.
+> - **NEW:** tokens arrive as whole messages, not word by word. The
+>   chunker still earns its place, but the latency win is smaller than
+>   §5.2 assumed.
+
+## Task 1 (as originally written): Find out whether the gateway also speaks
 
 **Files:**
 - Create: `widget/tools/probe_gateway.py`
