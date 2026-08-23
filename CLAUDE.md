@@ -13,44 +13,66 @@
 
 ## 0. TL;DR
 
-Samantha is a **kiosk-style AI companion** inspired by the film *Her*.
-She runs on a single mini-PC and interacts with one user via voice and
-text through a fullscreen webview interface. Inference (LLM, TTS,
-optionally STT) is local; ancillary rendering pieces (fonts, browser
-STT) MAY use the network. Offline-only was a v1 principle that was
-relaxed on 2026-05-13.
+> **Rewritten 2026-08-23.** Everything below had drifted from the code:
+> it described an 8 GB laptop GPU, a Chromium kiosk, FastAPI serving the
+> UI and Piper as the voice. None of that had been true for a while. The
+> decisions that caused the drift are in §12; this section is now what
+> actually runs.
+
+JARVIS — until 2026-08-23, Samantha — is an **AI presence that lives on
+the desktop**: a strip along the bottom edge of the screen that listens
+all the time, speaks in a cloned voice, watches the house's cameras, and
+can act on it. Not a window you open. Something that is there.
 
 **Stack at a glance:**
-- **Hardware:** Minisforum AtomMan G7 Ti SE (RTX 4070 Mobile 8GB VRAM, 32GB RAM)
-- **OS:** Ubuntu Server 24.04 LTS with minimal X11 stack
-- **Kiosk:** Chromium browser in `--kiosk` mode, launched via systemd
-- **Backend:** Python 3.12 + FastAPI on localhost:7777 (serves frontend AND API)
-- **Frontend:** Static HTML/CSS/JS served by FastAPI, rendered by Chromium
-- **LLM:** Qwen 3.5-9B Instruct (8GB VRAM target; final model TBD on first run)
-- **STT:** faster-whisper Large v3 Turbo
-- **TTS:** Piper (Spanish voice preset `es_ES-davefx-medium`)
-- **Memory:** ChromaDB with nomic-embed-text embeddings
-- **Audio I/O:** sounddevice (Python, native, no browser permissions)
-- **Language:** Spanish (Spain) — all UX strings, prompts, voices
+- **Hardware:** one box with an RTX 4090 (24 GB VRAM). VRAM is the
+  budget everything competes for — see the note below.
+- **OS:** Ubuntu with GNOME on X11 (`DISPLAY=:1`). Wayland out of scope.
+- **Surface:** `widget/` — a GTK4 strip, no browser, no webview.
+  Transparent, borderless, always above, drawn with GSK.
+- **Brain:** Hermes Agent gateway on `:7777` (plugin `samantha_kiosk`),
+  which gives JARVIS tools: memory, reminders, session recall.
+- **LLM:** local `llama-server` with Qwen3.8-27B (GGUF), or X.AI's Grok
+  API — a config switch. §2.5 and §12 carry the trade.
+- **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process.
+- **VAD:** Silero v5 over onnxruntime, CPU, always listening.
+- **TTS:** CosyVoice 3 zero-shot on `:8093`, JARVIS' cloned voice.
+- **Vision:** YOLOv9 over onnxruntime against the house's RTSP cameras,
+  borrowed from BarnDoor.
+- **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
+  (§2.7) still exists in `backend/` but the gateway path never uses it.
+- **Language:** Spanish (Spain) — every user-facing string, prompt and
+  voice.
 
-**Two processes, one machine:**
+**The processes, one machine:**
 
 ```
-┌────────────────────────────────────────────────────┐
-│  Chromium in --kiosk mode (fullscreen, no chrome)  │
-│  - Launched by systemd at boot                     │
-│  - Loads http://localhost:7777/                    │
-│  - No address bar, no tabs, no escape              │
-├────────────────────────────────────────────────────┤
-│  Python Backend (FastAPI on :7777)                 │
-│  - Serves /static/* (HTML/CSS/JS)                  │
-│  - GET / → index.html (the UI)                     │
-│  - POST /chat, /transcribe, /speak (API)           │
-│  - WebSocket /ws (streaming conversation)          │
-│  - sounddevice for mic capture (native, no browser)│
-│  - Orchestrates vLLM, Whisper, Piper, ChromaDB     │
-└────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  widget  (one Python process, GTK4 main loop)            │
+│    the strip · Silero · Whisper · YOLO · playback        │
+│    speaks CosyVoice directly; never waits for audio      │
+└───────────────┬─────────────────────────┬────────────────┘
+      ws://127.0.0.1:7777/ws     http://127.0.0.1:8093
+                │                         │
+┌───────────────▼──────────────┐  ┌───────▼────────────────┐
+│  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
+│   + samantha_kiosk (surface) │  └────────────────────────┘
+│   + samantha_voice (TTS)     │
+│   memory · cron · sessions   │       llama-server :8000
+└───────────────┬──────────────┘       (Qwen3.8-27B, local)
+                └──────────────────────────────┘
 ```
+
+**The VRAM budget is the real constraint.** CosyVoice holds ~5.5 GB and
+Whisper ~2.5 GB, so a 27B model at Q4_K_M does not fit alongside them
+and spills onto the CPU. Measured 2026-08-23: 13.7 tok/s that way,
+against 35 tok/s when the model fits. §1's "latency over correctness"
+is what decides the quantisation.
+
+**What is still here but unused:** `backend/` (FastAPI, `/chat`,
+`/speak`, ChromaDB) and `frontend/` (React, Vite, the OS1 ribbon). The
+widget replaced both. They stay until the widget has convinced; that was
+an explicit condition, and the removal is plan 3.
 
 ---
 
