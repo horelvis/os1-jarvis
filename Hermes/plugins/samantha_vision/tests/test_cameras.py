@@ -665,8 +665,13 @@ def test_a_second_caller_does_not_lose_the_first_ones_frame_to_a_race():
     # A fixed head start (as this test originally gave `t2`) proved
     # nothing on a loaded box — 0/1 s of scheduling slack either side of
     # a race is not a race any more, and the test stayed green while
-    # guarding nothing.
-    assert _wait(lambda: fleet._wanted.get("entrada") is not e1)
+    # guarding nothing. The barrier itself must not have the same flaw:
+    # its own timeout (0.5 s) is well under `first`'s (1.0 s), and the
+    # `is_alive()` check below proves the barrier was satisfied WHILE
+    # `first` was still waiting, not after it had already timed out on
+    # its own and this assertion passed on an empty coincidence.
+    assert _wait(lambda: fleet._wanted.get("entrada") is not e1, timeout=0.5)
+    assert t1.is_alive(), "the barrier fired after `first` had already timed out"
 
     # `first` now times out (its own Event, `e1`, will never be set) and
     # runs its cleanup — the exact moment the bug lived in.
@@ -681,3 +686,138 @@ def test_a_second_caller_does_not_lose_the_first_ones_frame_to_a_race():
     # And the hand-off leaves no trace for either caller.
     assert "entrada" not in fleet._wanted
     assert "entrada" not in fleet._pending
+
+
+# ── deterministic reproductions of the two lock-gap races ──────────────
+#
+# Both races live in a window a few bytecode instructions wide: between
+# an unlocked read of `_wanted` and a locked store/read a few lines
+# later. Round 2 of review argued that window couldn't be pinned without
+# a test-only hook in production code — that was checked and disproven:
+# `_grab_lock` is already a plain instance attribute used only as a
+# context manager, so a drop-in replacement that runs a callback right
+# before it actually acquires the real lock reproduces the interleaving
+# exactly, with zero changes to `cameras.py` and no timing luck involved.
+
+
+class GatedLock:
+    """A stand-in for `threading.Lock` that runs `hook(n)` immediately
+    BEFORE the Nth acquisition actually locks.
+
+    `_offer` and `grab` each acquire `_grab_lock` a fixed, known number
+    of times per call (`_offer`: once, at the store; `grab`: registration,
+    the post-wait read, `finally` — in that order). Swapping this in for
+    a fleet's `_grab_lock` and matching `n` to the acquisition of
+    interest lets a test simulate exactly what another thread would have
+    done in that gap, deterministically — the interleaving a real race
+    would only sometimes hit.
+    """
+
+    def __init__(self, hook):
+        self._lock = threading.Lock()
+        self._hook = hook
+        self.acquisitions = 0
+
+    def __enter__(self):
+        self.acquisitions += 1
+        self._hook(self.acquisitions)
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc_info):
+        self._lock.release()
+        return False
+
+
+def test_offer_does_not_pin_a_frame_for_a_caller_that_has_already_gone():
+    """Pins the first lock-gap race: `_offer` reads `_wanted` OUTSIDE the
+    lock, so a waiter that times out and finishes its own `grab()`
+    cleanup in the gap before `_offer` takes the lock would, without the
+    identity re-check, still get its frame stored — pinning a decoded
+    frame (~6 MB at 1080p) in `_pending` for a caller that is no longer
+    there, forever: nothing else ever clears a stray entry.
+
+    `_offer` acquires `_grab_lock` exactly once, at the store, so gating
+    that single acquisition and simulating the departed caller's cleanup
+    inside the hook reproduces the exact window the bug lived in.
+    """
+    fleet = _fleet()
+    event = threading.Event()
+    fleet._wanted["entrada"] = event
+    fleet._pending["entrada"] = None
+
+    def hook(n):
+        # The caller times out and completes its own `grab()` cleanup
+        # right here, in the gap between `_offer`'s unlocked read of
+        # `_wanted` (which found `event`) and this, its one lock.
+        fleet._wanted.pop("entrada", None)
+        fleet._pending.pop("entrada", None)
+
+    fleet._grab_lock = GatedLock(hook)
+
+    fleet._offer("entrada", np.zeros((1080, 1920, 3), dtype="uint8"))
+
+    assert "entrada" not in fleet._pending, (
+        "a frame was pinned in _pending for a caller that had already gone"
+    )
+    assert not event.is_set(), "a departed caller's Event was set anyway"
+
+
+def test_a_preempted_waiter_gets_none_not_the_next_callers_frame():
+    """Pins the second lock-gap race: a caller can wake — its own Event
+    was set by `_offer` — and then be pre-empted by a LATER `grab()` for
+    the same camera before it reaches its own post-wait read of
+    `_pending`. Without the identity re-check there, it would read
+    whatever the later caller's frame turned out to be — the same
+    `ndarray` object, aliased between two callers — instead of the
+    honest `None` a pre-empted caller is owed everywhere else in this
+    design. The later caller's own registration and frame must also
+    survive the pre-empted caller's `finally`.
+
+    `grab()`'s three lock acquisitions are, in order: registration, the
+    post-wait read, `finally`. Gating the SECOND and registering +
+    serving a later caller inside that hook reproduces the exact window
+    the bug lived in.
+    """
+    fleet = _fleet()
+    mine = np.full((2, 2, 3), 1, dtype="uint8")
+    theirs = np.full((2, 2, 3), 9, dtype="uint8")
+    later_event = threading.Event()
+
+    def hook(n):
+        if n == 2:
+            # A later grab() for this camera has registered and been
+            # served, in the window after our own wait() already
+            # returned but before we re-take the lock to read our frame.
+            fleet._wanted["entrada"] = later_event
+            fleet._pending["entrada"] = theirs
+
+    fleet._grab_lock = GatedLock(hook)
+    results: dict[str, np.ndarray | None] = {}
+
+    def waiter():
+        results["got"] = fleet.grab("entrada", timeout=2.0)
+
+    thread = threading.Thread(target=waiter)
+    thread.start()
+    try:
+        assert _wait(lambda: "entrada" in fleet._wanted)
+        # Deliver OUR frame directly — standing in for the `_offer` that
+        # would normally set this Event, so `event.wait()` returns True
+        # and the waiter proceeds to its post-wait read, where `hook`
+        # above is waiting to spring the pre-emption.
+        our_event = fleet._wanted["entrada"]
+        fleet._pending["entrada"] = mine
+        our_event.set()
+        thread.join(timeout=2.0)
+    finally:
+        if thread.is_alive():
+            thread.join(timeout=0.1)
+
+    assert not thread.is_alive(), "grab() deadlocked on the pre-empted path"
+    got = results.get("got")
+    assert got is not theirs, "a pre-empted caller got the LATER caller's array"
+    assert got is None
+    # And the later caller's own state must have survived our finally.
+    assert fleet._wanted.get("entrada") is later_event
+    assert fleet._pending.get("entrada") is theirs
