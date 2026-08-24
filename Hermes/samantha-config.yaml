@@ -108,6 +108,15 @@ agent:
 # Deliberately absent: terminal, file, code_execution, browser. She lives
 # in a living room, and none of them can be used without narrating what
 # she is doing.
+#
+# `vision` carries `mirar` — he looks at a camera now and says what is
+# there — and it is the toolset the plugin registers into (plugin spec
+# §6.2). It also carries Hermes' own `vision_analyze`, which this box
+# cannot honestly serve: the model behind the strip is Qwen3.8-27B and it
+# does not look at images. `check_vision_requirements()` returns True
+# here anyway (measured 2026-08-25 — it resolves the local provider), so
+# he IS offered it. Nothing else in this list has that problem, and it is
+# the one open question this section carries.
 platform_toolsets:
   samantha_kiosk:
     - memory
@@ -115,6 +124,7 @@ platform_toolsets:
     - cronjob
     - todo
     - clarify
+    - vision
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron

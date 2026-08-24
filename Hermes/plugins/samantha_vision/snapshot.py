@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 from loguru import logger
-from PIL import Image
 
 # Hermes already designates `cache/images` for generated media; a
 # subdirectory of our own keeps pruning unambiguous and keeps this out of
@@ -45,7 +44,17 @@ def write_jpeg(frame: np.ndarray, camera: str, *, now: float) -> Path:
     Pillow, not PyAV: PyAV's image2 muxer ignores an in-memory target and
     writes a file named `<none>` into the working directory. Measured
     2026-08-24.
+
+    The import is deferred to here, and that is not style. Since Task 5
+    this module is on the plugin's LOAD path — `tool.py` imports it, and
+    `__init__.py` imports that — so a module-level `from PIL import
+    Image` would make a box without Pillow fail to load the plugin at
+    all, costing the house the alerts and the watching as well as the
+    snapshots. Deferred, a missing Pillow costs exactly the picture, and
+    the caller (`tool.py`) already answers in words without one.
     """
+    from PIL import Image
+
     directory = snapshot_dir()
     safe = _UNSAFE.sub("-", camera).strip("-") or "camara"
     path = directory / f"{safe}-{int(now)}.jpg"

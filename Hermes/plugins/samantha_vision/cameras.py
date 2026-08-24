@@ -214,6 +214,13 @@ class CameraFleet:
         self._stopping = threading.Event()
         self._threads: list[threading.Thread] = []
 
+        # The one detector, kept so the `mirar` tool can run it over a
+        # frame it just grabbed instead of loading a SECOND ONNX session
+        # for a model already resident. None until start() builds it —
+        # and a fleet with no detector started no watcher thread either,
+        # so it can never hand anybody a frame to run it on.
+        self.detector: Any = None
+
         # One slot per camera, filled by the watcher thread ONLY while a
         # caller is waiting. A request arriving mid-frame therefore gets
         # the NEXT frame, never the one already analysed — "ahora" has to
@@ -245,6 +252,7 @@ class CameraFleet:
                 f"samantha-vision: no detector, no cameras watched — {redact(exc)}"
             )
             return
+        self.detector = detector
 
         for camera in cameras:
             thread = threading.Thread(

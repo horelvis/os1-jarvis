@@ -4,6 +4,10 @@
 registration that blocks or raises is reported by Hermes as a
 retry-forever loop at DEBUG level — i.e. invisibly. Both properties that
 protect against that are tested here.
+
+It also DECLARES the `mirar` tool, which is not the same as doing
+anything: no camera is opened, no model loaded, no socket touched. The
+tests below hold that line too.
 """
 
 import threading
@@ -11,6 +15,7 @@ import time
 
 from loguru import logger
 
+from Hermes.plugins import samantha_vision as plugin
 from Hermes.plugins.samantha_vision import _supervise, register
 
 
@@ -21,9 +26,13 @@ class FakeCtx:
         self._config = config if config is not None else []
         self._blocker = blocker
         self.unload_hooks: list = []
+        self.tools: list[dict] = []
 
     def on_unload(self, fn):
         self.unload_hooks.append(fn)
+
+    def register_tool(self, **kwargs):
+        self.tools.append(kwargs)
 
     def get_config(self, key, default=None):
         if self._blocker is not None:
@@ -112,3 +121,53 @@ def test_supervise_does_not_leak_the_password_of_a_raising_config():
 
     joined = " ".join(r["message"] for r in records)
     assert "hunter2" not in joined, joined
+
+
+def _tool(ctx):
+    return next(t for t in ctx.tools if t["name"] == "mirar")
+
+
+def _settle(check, want, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and check() is not want:
+        time.sleep(0.01)
+    return check()
+
+
+def test_register_declares_mirar_as_an_async_tool():
+    """`grab` blocks for two seconds and the photo is pushed with an
+    await; a handler registered as sync would be called and never
+    awaited, so Hermes has to be told (Ruling 1)."""
+    ctx = FakeCtx(config=[])
+    register(ctx)
+    tool = _tool(ctx)
+    assert tool["is_async"] is True
+    assert tool["toolset"] == "vision"
+    assert "camara" in tool["schema"]["properties"]
+    assert tool["schema"]["required"] == []
+
+
+def test_the_tool_is_hidden_until_a_camera_is_actually_watched():
+    """He is never offered something that cannot work — and until the
+    supervisor thread has read the config, nothing can."""
+    ctx = FakeCtx(config=[])
+    register(ctx)
+    check = _tool(ctx)["check_fn"]
+    assert check() is False
+    assert _settle(check, True) is False, "no cameras configured, so no tool"
+
+
+def test_the_tool_appears_once_the_cameras_are_known(monkeypatch):
+    # A fake fleet, so the config path is exercised without loading YOLO
+    # or opening an RTSP session in a unit test.
+    monkeypatch.setattr(plugin, "CameraFleet", FakeFleet)
+    ctx = FakeCtx(config=[{"name": "entrada", "url": "rtsp://camera/sub"}])
+    register(ctx)
+    assert _settle(_tool(ctx)["check_fn"], True) is True
+
+
+def test_supervise_fills_in_the_camera_names_the_tool_reads():
+    names: list = []
+    ctx = FakeCtx(config=[{"name": "entrada", "url": "rtsp://camera/sub"}])
+    _supervise(ctx, FakeFleet(), names)
+    assert names == ["entrada"]

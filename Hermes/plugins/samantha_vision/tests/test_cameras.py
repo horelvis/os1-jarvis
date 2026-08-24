@@ -190,6 +190,35 @@ def test_detections_arrive_carrying_the_camera_name():
     assert seen[0] == ("entrada", [PERSON])
 
 
+def test_the_fleet_keeps_the_detector_it_built():
+    """`mirar` runs YOLO over the frame it just grabbed, and must use
+    THIS session rather than loading a second one for a model already
+    resident. A fleet that never started has none — and it has no
+    watcher thread either, so it can never hand anybody a frame."""
+    fleet = _fleet(open_stream=lambda url: FakeStream([[PERSON]]))
+    assert fleet.detector is None
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert isinstance(fleet.detector, FakeDetector)
+    finally:
+        fleet.stop()
+
+
+def test_a_fleet_whose_detector_will_not_build_keeps_none():
+    """The tool reads this attribute; "the model failed to load" must
+    not look like "a detector that finds nothing"."""
+
+    def explode():
+        raise RuntimeError("no onnxruntime")
+
+    fleet = _fleet(make_detector=explode)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert fleet.detector is None
+    finally:
+        fleet.stop()
+
+
 def test_each_camera_runs_in_its_own_named_thread():
     """`journalctl` and a traceback both have to say which camera."""
     threads: set[str] = set()
