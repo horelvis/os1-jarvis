@@ -48,8 +48,11 @@ def decode_server(raw: str) -> dict[str, Any]:
         raise ProtocolError(f"not JSON: {exc}") from exc
     if not isinstance(msg, dict):
         raise ProtocolError(f"expected an object, got {type(msg).__name__}")
-    if msg.get("type") not in _SERVER_TYPES:
-        raise ProtocolError(f"unknown type: {msg.get('type')!r}")
+    # A type we do not know is not an error. The gateway is versioned
+    # separately from the strip and will ship frames this build has never
+    # heard of (see _SERVER_TYPES); refusing them turned one unknown frame
+    # into a dead turn. `_dispatch` handles what it recognises and drops
+    # the rest.
     return msg
 
 

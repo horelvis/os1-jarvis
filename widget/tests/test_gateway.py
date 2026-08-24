@@ -46,9 +46,11 @@ def test_garbage_is_a_protocol_error() -> None:
         decode_server("not json at all")
 
 
-def test_unknown_type_is_a_protocol_error() -> None:
-    with pytest.raises(ProtocolError):
-        decode_server('{"type":"sing"}')
+def test_unknown_type_is_not_a_protocol_error() -> None:
+    """The gateway is versioned separately from the strip; a frame type
+    this build has never heard of is dropped, not fatal."""
+    msg = decode_server('{"type":"sing"}')
+    assert msg["type"] == "sing"
 
 
 async def test_a_full_turn_against_a_real_socket() -> None:
@@ -112,3 +114,29 @@ async def test_sending_with_no_connection_says_so_instead_of_raising() -> None:
 
     assert len(said) == 1
     assert said[0]  # in Spanish, in her voice — content is a judgement call
+
+
+def test_an_unknown_server_type_is_not_fatal() -> None:
+    # The gateway ships new frame types before the strip learns them.
+    # A strip that raises here goes silent for the whole turn.
+    msg = decode_server(json.dumps({"type": "photo", "path": "/tmp/a.jpg"}))
+    assert msg["type"] == "photo"
+
+
+def test_malformed_json_is_still_an_error() -> None:
+    with pytest.raises(ProtocolError):
+        decode_server("{not json")
+
+
+def test_a_non_object_is_still_an_error() -> None:
+    with pytest.raises(ProtocolError):
+        decode_server(json.dumps([1, 2, 3]))
+
+
+def test_dispatch_ignores_an_unknown_type_without_calling_handlers() -> None:
+    gw = GatewayClient()
+    seen: list[str] = []
+    gw.on_token = lambda t: seen.append("token")
+    gw.on_error = lambda m: seen.append("error")
+    gw._dispatch(json.dumps({"type": "nonesuch"}))
+    assert seen == []
