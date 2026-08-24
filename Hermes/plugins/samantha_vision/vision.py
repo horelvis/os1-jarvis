@@ -254,6 +254,23 @@ ANTI_SPAM_SECONDS = 180
 QUIET_START_HOUR = 23
 QUIET_END_HOUR = 7
 
+# The anti-spam window widens for a thing that will not go away.
+#
+# 180 s stops three-second spam and nothing stopped three-MINUTE spam.
+# Measured on the live gateway, 2026-08-24: `entrada: alguien` at 15:35,
+# 15:41, 15:53, 16:02, 16:10 — five in 35 minutes, and PROGRESS.md's own
+# showcase line for it is "sigue plantado donde está, señor." At that
+# rate a thing parked in view is ~480 spoken turns and ~480 model calls a
+# day, all night included. In the widget the exposure was bounded by the
+# widget's uptime; in the gateway it runs while the house sleeps.
+#
+# So: multiples of the calibrated window, not replacements for it.
+# ANTI_SPAM_SECONDS stays the FLOOR and stays BarnDoor's number — the
+# first sighting is never suppressed and the first repeat still costs
+# 180 s. Only a thing that keeps re-firing pays 15 minutes, then an hour.
+# 5 and 20 are ours; 180 is not, and is not to be re-derived.
+ESCALATION_FACTORS: tuple[int, ...] = (1, 5, 20)  # 180 s, 15 min, hourly
+
 
 def is_quiet_hours(hour: int) -> bool:
     """True between QUIET_START_HOUR and QUIET_END_HOUR, wrapping midnight."""
@@ -273,10 +290,22 @@ class Watcher:
 
     def __init__(self, anti_spam_seconds: float = ANTI_SPAM_SECONDS) -> None:
         self.anti_spam_seconds = anti_spam_seconds
-        # Keyed (camera, label), not label: two cameras seeing a person
-        # are two events, and collapsing them would mean somebody could
-        # cross the whole property in silence after the first sighting.
+        # All three are keyed (camera, label), not label: two cameras
+        # seeing a person are two events, and collapsing them would mean
+        # somebody could cross the whole property in silence after the
+        # first sighting.
         self._last_said: dict[tuple[str, str], float] = {}
+        # When it was last SEEN, said or not. This is what tells "still
+        # standing there" apart from "came back": the first must escalate
+        # and the second must not.
+        self._last_seen: dict[tuple[str, str], float] = {}
+        # How many consecutive re-fires this thing has cost. Indexes
+        # ESCALATION_FACTORS; 0 is the calibrated 180 s floor.
+        self._level: dict[tuple[str, str], int] = {}
+
+    def _window(self, level: int) -> float:
+        factor = ESCALATION_FACTORS[min(level, len(ESCALATION_FACTORS) - 1)]
+        return self.anti_spam_seconds * factor
 
     def worth_saying(
         self, detections: list[Detection], now: float, hour: int, *, camera: str
@@ -285,16 +314,46 @@ class Watcher:
         out: list[Detection] = []
         for item in detections:
             key = (camera, item.label)
-            previous = self._last_said.get(key)
-            recent = previous is not None and (now - previous) < self.anti_spam_seconds
+            level = self._level.get(key, 0)
+            window = self._window(level)
+
+            # Absent for a full window — the CURRENT one — and it is a new
+            # event, not a repeat: back to the floor. The current window
+            # rather than the floor is what makes the escalation mean
+            # anything: a thing seen sporadically every four minutes would
+            # otherwise reset every time and never widen past 180 s, which
+            # is precisely the pattern measured on `entrada`.
+            #
+            # The cost, and it is real: while a (camera, label) sits at the
+            # hourly level, ANY person at that camera is silenced for up to
+            # an hour. That is inherent to keying on the label — the plugin
+            # cannot tell one person from another — and is the trade the
+            # 180 s floor is there to bound at the start of each visit.
+            last_seen = self._last_seen.get(key)
+            fresh = last_seen is None or (now - last_seen) >= window
+            if fresh:
+                level = 0
+                window = self._window(level)
+            self._last_seen[key] = now
 
             # A person at night beats the anti-spam: the second time
             # somebody is in the garden at 3am is more worth saying than
-            # the first, not less.
+            # the first, not less. Unchanged, and deliberately outside the
+            # escalation in BOTH directions — the widened window never
+            # gates it, and it never advances the level either. Counting
+            # the night override's own firings would turn it into its
+            # opposite the moment quiet hours ended, silencing the morning
+            # after because of what happened at 3am.
             urgent = item.label == "persona" and is_quiet_hours(hour)
 
-            if recent and not urgent:
+            previous = self._last_said.get(key)
+            if previous is not None and (now - previous) < window and not urgent:
                 continue
+
+            if not urgent:
+                self._level[key] = (
+                    0 if fresh else min(level + 1, len(ESCALATION_FACTORS) - 1)
+                )
             self._last_said[key] = now
             out.append(item)
         return out
@@ -302,3 +361,5 @@ class Watcher:
     def forget(self) -> None:
         """Drop the history — for tests, and for a camera coming back."""
         self._last_said.clear()
+        self._last_seen.clear()
+        self._level.clear()

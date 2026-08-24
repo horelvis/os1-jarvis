@@ -6,6 +6,8 @@ tested here is the part that decides whether she opens her mouth, and
 what comes out when she does.
 """
 
+import itertools
+
 import pytest
 
 from Hermes.plugins.samantha_vision.vision import (
@@ -230,3 +232,128 @@ def test_a_car_at_night_does_not_beat_the_anti_spam_per_camera() -> None:
     car = Detection(label="coche", confidence=0.9, x=0.5, y=0.5)
     assert watcher.worth_saying([car], now=0.0, hour=3, camera="fuera")
     assert not watcher.worth_saying([car], now=1.0, hour=3, camera="fuera")
+
+
+# ── he stops repeating himself ────────────────────────────────────────
+#
+# Measured on the live gateway 2026-08-24: `entrada: alguien` five times
+# in 35 minutes, which is ~480 spoken turns and ~480 model calls a day.
+# The 180 s window stops three-SECOND spam; nothing stopped three-MINUTE
+# spam. The floor stays 180 s and stays BarnDoor's; the widening is ours.
+
+
+def _watcher():
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    return Watcher()
+
+
+def test_a_first_sighting_is_never_suppressed() -> None:
+    """Whatever the escalation does, it may not cost the first word."""
+    watcher = _watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=12, camera="entrada")
+
+
+def test_a_repeat_inside_the_window_says_nothing() -> None:
+    watcher = _watcher()
+    watcher.worth_saying([person()], now=0.0, hour=12, camera="entrada")
+    assert watcher.worth_saying([person()], now=90.0, hour=12, camera="entrada") == []
+
+
+def test_the_first_repeat_still_costs_only_the_calibrated_window() -> None:
+    """180 s is the FLOOR, not something the escalation may raise."""
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
+
+    watcher = Watcher()
+    watcher.worth_saying([person()], now=0.0, hour=12, camera="entrada")
+    assert watcher.worth_saying(
+        [person()], now=ANTI_SPAM_SECONDS + 1, hour=12, camera="entrada"
+    )
+
+
+def test_the_window_widens_on_consecutive_re_fires() -> None:
+    """Somebody who will not move: 180 s, then 15 min, then hourly."""
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
+
+    watcher = Watcher()
+    spoke: list[float] = []
+    # Sampled the way a camera samples: often enough that it is never
+    # "absent", for six hours.
+    for tick in range(0, 6 * 3600, 30):
+        now = float(tick)
+        if watcher.worth_saying([person()], now=now, hour=12, camera="entrada"):
+            spoke.append(now)
+
+    gaps = [b - a for a, b in itertools.pairwise(spoke)]
+    assert spoke[0] == 0.0
+    assert gaps[0] == ANTI_SPAM_SECONDS  # 180 s
+    assert gaps[1] == ANTI_SPAM_SECONDS * 5  # 15 min
+    assert all(g == ANTI_SPAM_SECONDS * 20 for g in gaps[2:]), gaps  # hourly
+    # Six hours of somebody standing there: single figures, not ~120.
+    assert len(spoke) <= 8, spoke
+
+
+def test_the_window_resets_after_a_full_window_of_absence() -> None:
+    """It escalates for a thing that will not go away, not for a place
+    where things happen."""
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
+
+    watcher = Watcher()
+    watcher.worth_saying([person()], now=0.0, hour=12, camera="entrada")
+    watcher.worth_saying([person()], now=181.0, hour=12, camera="entrada")
+    # Now at the 15-minute level. Nothing seen at all for longer than that.
+    gone_for_a_full_window = 181.0 + ANTI_SPAM_SECONDS * 5 + 1
+    assert watcher.worth_saying(
+        [person()], now=gone_for_a_full_window, hour=12, camera="entrada"
+    )
+    # And it is back at the floor: the next repeat costs 180 s, not 15 min.
+    assert watcher.worth_saying(
+        [person()],
+        now=gone_for_a_full_window + ANTI_SPAM_SECONDS + 1,
+        hour=12,
+        camera="entrada",
+    )
+
+
+def test_escalation_is_per_camera_and_per_label() -> None:
+    """One camera going quiet must not quieten the other, or the car."""
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    watcher = Watcher()
+    for tick in range(0, 2000, 30):
+        watcher.worth_saying([person()], now=float(tick), hour=12, camera="entrada")
+
+    # `entrada`/persona is deep into the escalation by now. Neither of
+    # these shares its key, so both are a first sighting.
+    assert watcher.worth_saying([person()], now=2000.0, hour=12, camera="fuera")
+    car = Detection("coche", 0.9, 0.5, 0.5)
+    assert watcher.worth_saying([car], now=2000.0, hour=12, camera="entrada")
+
+
+def test_a_person_at_night_still_beats_a_widened_window() -> None:
+    """The night rule is outside the escalation in both directions: the
+    widened window never gates it, and it never advances the level."""
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    watcher = Watcher()
+    # Escalate in daylight first.
+    for tick in range(0, 2000, 30):
+        watcher.worth_saying([person()], now=float(tick), hour=12, camera="fuera")
+
+    # 03:00, and somebody is in the garden. Still worth saying.
+    assert watcher.worth_saying([person()], now=2010.0, hour=3, camera="fuera")
+
+
+def test_two_cameras_seeing_the_same_thing_inside_the_window_both_speak() -> None:
+    """Task 4's keying, in the shape that actually broke it: not the same
+    instant, but one camera silenced while the other is heard."""
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    watcher = Watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=12, camera="fuera")
+    # 100 s later — well inside the 180 s window — the SAME label at the
+    # OTHER camera. Under label-only keying this was silence, and somebody
+    # could walk from the gate to the door unannounced.
+    assert watcher.worth_saying([person()], now=100.0, hour=12, camera="entrada")
+    # And the first camera is still, correctly, quiet.
+    assert watcher.worth_saying([person()], now=100.0, hour=12, camera="fuera") == []
