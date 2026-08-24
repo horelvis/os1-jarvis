@@ -144,6 +144,21 @@ that, and a retry that backs off from 30 s to a 5-minute ceiling. The
 other cameras carry on and the gateway never notices. When it comes
 back, one line says so.
 
+**A camera that answers but sends no video** gets the same treatment,
+and did not until 2026-08-24. Nothing raises in that case — a wrong
+sub-stream path, a camera in a boot loop, a recording that has already
+ended — so without counting frames it was indistinguishable from a
+camera with an empty driveway in front of it, backing off to five
+minutes in complete silence.
+
+**A camera that dies mid-stream** is the reason `open()` passes both
+`timeout` and `stimeout`. ffmpeg renamed that option; libavformat 62
+(FFmpeg 8, which is what PyAV 18.1.0 links here) knows only `timeout`,
+and an unknown option is dropped without a warning — leaving
+`timeout=0`, which is infinite. Probed 2026-08-24 against `127.0.0.1:1`.
+Both names are passed on purpose; the tidy version is the one that hangs.
+
+
 ## Reading the journal
 
 ```bash
@@ -156,6 +171,8 @@ journalctl --user -u samantha-hermes.service -f | grep samantha-vision
   typo in the key, which is why the line names the key it read.
 - `watching N camera(s): …` — the threads are up.
 - `<name> unreachable — …` — that camera only, once.
+- `<name> connected but produced no frames` — it answered and sent no
+  video. Once per camera, `DEBUG` after that.
 - `<name>: alguien` — a sighting got through the quiet rules; his reply
   follows on the strip.
 - `nobody to tell, sighting dropped` — nothing to inject into. Either the

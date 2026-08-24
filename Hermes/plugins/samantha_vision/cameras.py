@@ -195,11 +195,13 @@ class CameraFleet:
         on a camera, which is the wrong way round.
         """
         self._stopping.set()
-        for thread in self._threads:
+        # Snapshot: start() appends to this list, and a fleet stopped while
+        # it is still starting would otherwise mutate what we iterate.
+        threads, self._threads = list(self._threads), []
+        for thread in threads:
             thread.join(timeout=timeout)
             if thread.is_alive():
                 logger.debug(f"samantha-vision: {thread.name} still in a read, left")
-        self._threads = []
 
     # -- one camera --------------------------------------------------------
 
@@ -214,16 +216,36 @@ class CameraFleet:
 
         while not self._stopping.is_set():
             stream = None
+            frames_seen = 0
             try:
                 stream = self._open_stream(camera.url)
                 for frame in stream.frames(self._sample_every):
                     if self._stopping.is_set():
                         break
+                    frames_seen += 1
                     if reported:
                         logger.info(f"samantha-vision: {camera.name} is back")
                     reported = False
                     delay = self._retry_seconds
                     self._report(camera, detector, frame, on_detections)
+                # Manifest failure mode #4, and the one this plugin used
+                # not to name. A camera that ANSWERS but yields no video —
+                # wrong sub-stream path, a boot loop, a recording that has
+                # already ended — raises nothing, so the `except` below
+                # never runs and the backoff climbs to five minutes in
+                # complete silence. From the journal it is indistinguishable
+                # from a camera with nothing in front of it.
+                if frames_seen == 0 and not self._stopping.is_set():
+                    if not reported:
+                        logger.warning(
+                            f"samantha-vision: {camera.name} connected but "
+                            f"produced no frames"
+                        )
+                        reported = True
+                    else:
+                        logger.debug(
+                            f"samantha-vision: {camera.name} still producing no frames"
+                        )
             except Exception as exc:
                 # Once per camera, not once per attempt: a camera off for
                 # a week would otherwise be the only thing in the journal.
@@ -271,14 +293,14 @@ class CameraFleet:
 
 
 def _default_detector():
-    """The real YOLO session. Imported here: it loads onnxruntime."""
+    """The real YOLO session."""
     from .vision import Detector
 
     return Detector()
 
 
 def _default_stream(url: str):
-    """The real camera. Imported here: it drags in PyAV, and ffmpeg with it."""
+    """The real camera."""
     from .vision import CameraStream
 
     return CameraStream(url)

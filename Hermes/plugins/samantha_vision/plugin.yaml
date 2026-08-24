@@ -17,10 +17,17 @@ author: Horelvis Castillo
 #    box with no cameras and indistinguishable from a typo in the config
 #    key. The line says which key it read and that it was empty.
 #
-# 2. A CAMERA THAT NEVER CONNECTS. Logged once per camera, then retried
-#    on a backoff. It does not repeat every attempt: a camera that is
-#    off for a week would otherwise fill the journal.
+# 2. A CAMERA THAT NEVER CONNECTS. One WARNING, then DEBUG per retry,
+#    on a backoff: a camera off for a week would otherwise fill the
+#    journal at a level anybody reads.
 #
 # 3. THE MODEL FILE IS MISSING. yolov9-t-320.onnx (~8 MB) is not in the
 #    repo. Without it no thread starts and the plugin is inert. Named
 #    here because "he stopped noticing people" has no other symptom.
+#
+# 4. A CAMERA THAT CONNECTS AND YIELDS NOTHING. RTSP answers, the stream
+#    opens, and no frame ever arrives — a wrong sub-stream path, a camera
+#    in a boot loop, a recording that has already ended. Nothing raises,
+#    so nothing else here notices: it looks exactly like a camera with an
+#    empty driveway in front of it. One WARNING, then DEBUG per retry,
+#    same discipline as #2.

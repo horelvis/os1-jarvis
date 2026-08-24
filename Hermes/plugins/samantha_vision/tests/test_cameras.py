@@ -117,17 +117,34 @@ def captured_logs():
 
 
 class FakeStream:
-    """Stands in for CameraStream: a list of frames, no decoder."""
+    """Stands in for CameraStream: a list of frames, no decoder.
 
-    def __init__(self, frames: list) -> None:
+    `raises` is the shape that matters, and the shape these tests got
+    wrong until 2026-08-24. `CameraStream(url)` only stores the url — it
+    is `frames()` that calls `open()` and therefore `frames()` that
+    raises when a camera is unreachable. Fakes that raised from
+    `open_stream` were exercising a path the real code does not have,
+    which is why neither the missing socket timeout nor the
+    connects-but-yields-nothing case was ever caught here.
+    """
+
+    def __init__(self, frames: list, raises: Exception | None = None) -> None:
         self._frames = frames
+        self._raises = raises
         self.closed = False
 
     def frames(self, every: int = 10):
+        if self._raises is not None:
+            raise self._raises
         yield from self._frames
 
     def close(self) -> None:
         self.closed = True
+
+
+def dead(message: str = "connection refused"):
+    """A camera that is off: constructed fine, fails on the first read."""
+    return lambda url: FakeStream([], raises=OSError(message))
 
 
 class FakeDetector:
@@ -195,7 +212,7 @@ def test_one_dead_camera_does_not_take_the_others_with_it():
 
     def open_stream(url):
         if url == "rtsp://dead/1":
-            raise OSError("connection refused")
+            return FakeStream([], raises=OSError("connection refused"))
         return FakeStream([[PERSON]])
 
     fleet = _fleet(open_stream=open_stream)
@@ -215,7 +232,7 @@ def test_a_dead_camera_logs_once_not_once_per_attempt():
 
     def open_stream(url):
         attempts.append(1)
-        raise OSError("connection refused")
+        return FakeStream([], raises=OSError("connection refused"))
 
     with captured_logs() as records:
         fleet = _fleet(open_stream=open_stream)
@@ -295,7 +312,7 @@ def test_redact_leaves_a_url_without_credentials_alone():
 
 def test_a_dead_camera_does_not_log_its_password():
     def open_stream(url):
-        raise OSError(f"No route to host: '{url}'")
+        return FakeStream([], raises=OSError(f"No route to host: '{url}'"))
 
     with captured_logs() as records:
         fleet = _fleet(open_stream=open_stream)
@@ -361,3 +378,51 @@ def test_a_bare_url_as_a_list_entry_does_not_log_its_password():
     joined = " ".join(r["message"] for r in records)
     assert "hunter2" not in joined, joined
     assert "admin:***@" in joined, joined
+
+
+# ── a camera that connects and yields nothing ─────────────────────────
+#
+# Manifest failure mode #4, added 2026-08-24. Nothing raises, so the
+# `except` never runs: without this the backoff climbs to five minutes in
+# total silence and the camera is indistinguishable from one with an
+# empty driveway in front of it.
+
+
+def test_a_camera_that_yields_no_frames_says_so_once():
+    attempts: list[int] = []
+
+    def open_stream(url):
+        attempts.append(1)
+        return FakeStream([])  # opens cleanly, returns cleanly, no video
+
+    with captured_logs() as records:
+        fleet = _fleet(open_stream=open_stream)
+        fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, dets: None)
+        try:
+            assert _wait(lambda: len(attempts) >= 3)
+        finally:
+            fleet.stop()
+
+    warnings = [
+        r for r in records if r["level"].name == "WARNING" and "entrada" in r["message"]
+    ]
+    assert len(warnings) == 1, [r["message"] for r in warnings]
+    assert "no frames" in warnings[0]["message"]
+    # The retries are still visible, just not at a level anybody reads.
+    assert any(
+        r["level"].name == "DEBUG" and "still producing no frames" in r["message"]
+        for r in records
+    )
+
+
+def test_a_camera_that_starts_yielding_frames_is_not_reported_as_empty():
+    """A recording that ends is normal. Only zero frames is a symptom."""
+    with captured_logs() as records:
+        fleet = _fleet(open_stream=lambda url: FakeStream([[PERSON]]))
+        fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, dets: None)
+        try:
+            assert _wait(lambda: any("entrada" in r["message"] for r in records))
+        finally:
+            fleet.stop()
+
+    assert not [r for r in records if "no frames" in r["message"]]
