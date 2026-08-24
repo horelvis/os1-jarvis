@@ -1,5 +1,118 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-24 — Repaso de rama: deja de repetirse, y la contraseña sale de la URL ✅
+
+La revisión de la rama entera antes de subirla. Siete arreglos, y dos de
+ellos son de los que solo se ven mirando el sistema vivo.
+
+**Lo que se corrigió:**
+
+- **Cuatro sitios afirmaban, como medida, algo falso.** «`inject_message`
+  devuelve `False` cuando la tira no ha hablado nunca» no es cierto.
+  Leído en la fuente fijada: `False` solo sale de tres sitios —
+  `session_key` ausente, permiso denegado, y no haber gateway vivo. La
+  sesión inexistente se resuelve **dentro de la corrutina**:
+  `_schedule_plugin_message_injection` ya ha devuelto `True`
+  (`gateway/run.py:18715`) cuando `_dispatch_…` mira y no encuentra fila
+  (`:18729`), y **lo avisa el propio Hermes** desde un done-callback:
+  `Plugin message injection was not routed`. Es decir, nuestra línea «no
+  hay a quién decírselo» **no podía saltar nunca por el caso para el que
+  se escribió**, y el README mandaba a buscar al journal un mensaje que
+  no existe. Corregido en `alert.py`, el README, el diseño y CLAUDE.md.
+  El calendario de reintentos no se toca: para el caso «aún no está
+  arriba» sigue siendo el correcto.
+- **No había timeout de socket. Ninguno.** ffmpeg renombró la opción del
+  demuxer rtsp de `stimeout` a `timeout`, y una opción desconocida se
+  descarta **sin avisar**. Sondeado contra `127.0.0.1:1` con
+  `av.logging.DEBUG` (PyAV 18.1.0 / libavformat 62):
+
+      stimeout=5000000 -> Connection to tcp://127.0.0.1:1?timeout=0
+      timeout=5000000  -> Connection to tcp://127.0.0.1:1?timeout=5000000
+
+  `timeout=0` es infinito. Una cámara que se muere **a mitad de stream**
+  —un switch que se reinicia, un TCP medio abierto— dejaba su hilo
+  clavado dentro de `decode()` para siempre: sin excepción, sin log, sin
+  backoff y sin reintento. Ciega en silencio hasta reiniciar el gateway.
+  `fuera` solo fallaba rápido porque «no route to host» es enrutado, no
+  timeout. Ahora se pasan **las dos** opciones: una desconocida se
+  ignora, así que vale en las dos direcciones.
+- **Dejó de repetirse.** Medido en el gateway vivo: `entrada: alguien` a
+  las 15:35, 15:41, 15:53, 16:02 y 16:10 — cinco en 35 minutos, unos 480
+  turnos hablados y 480 llamadas al modelo al día, toda la noche
+  incluida. Los 180 s paraban el spam de tres segundos y nada paraba el
+  de tres minutos. Ahora la ventana **se ensancha** con las repeticiones
+  consecutivas: 180 s → 15 min → cada hora, y vuelve al suelo cuando ese
+  `(cámara, etiqueta)` lleva una ventana entera sin verse. La primera vez
+  nunca se calla, y los 180 s siguen siendo el suelo de BarnDoor. La
+  regla nocturna queda **fuera** de la escalada en las dos direcciones:
+  ni la ventana ensanchada la silencia, ni sus disparos suben el nivel
+  —contarlos la convertiría en su contraria en cuanto amaneciera.
+- **Una cámara que conecta y no da vídeo era invisible.** No lanza nada,
+  así que el `except` no corría, no se registraba nada a ningún nivel y
+  el backoff subía a cinco minutos en silencio. Indistinguible de una
+  cámara con la calle vacía delante. Ahora se cuentan los fotogramas por
+  intento: cero fotogramas es un WARNING, una vez, con la misma
+  disciplina que `unreachable`. Es el modo de fallo #4 del manifiesto.
+- **El camino de caja nueva no funcionaba.** `setup-runtime.sh` no
+  instalaba `av`, `onnxruntime` ni `numpy` —`uv sync` no los trae; el
+  extra `voice` salió de `[all]` a favor del lazy-install, así que en
+  esta caja existen solo porque Hermes los instaló para el STT— y el
+  bucle de «habilitar» no incluía `samantha-vision`. Y
+  `check_requirements()` era **código muerto**: nada en
+  `hermes_cli/plugins.py` lo llama, es un convenio de `kind: platform`
+  que se pasa como `check_fn` a `register_platform`, y este plugin es
+  `standalone`. Borrado, y el README corregido: lo que pasa de verdad en
+  una caja sin ellos es una línea, `no detector, no cameras watched`.
+- **La contraseña sale de la URL** (petición directa). Vive en `.env` en
+  la raíz —ignorado por git, con `.env.example` versionado para que una
+  caja nueva sepa qué falta—, `Hermes/run-gateway.sh` lo carga (es el
+  único cuello de botella: las tres units y toda invocación manual pasan
+  por ahí) y las URLs dicen `${RTSP_PASSWORD}`. La trampa, que está
+  tratada explícitamente: `expandvars` deja una variable **sin definir**
+  como el texto literal `${RTSP_PASSWORD}`, que se usaría de contraseña
+  y acabaría en el journal. Se comprueban los nombres **antes** de
+  expandir, sobre la URL cruda, y una variable que falta tira esa cámara
+  con un aviso que la nombra —sin conectar y sin registrar la URL.
+- **El README versionado deja de ser un mapa a la credencial.** Este
+  repo se sube a GitHub y ahí estaban la subred, las dos direcciones, el
+  fabricante, la cuenta, la ruta del stream, el fichero con la
+  contraseña, la variable dentro de él y el dato de que abre también el
+  Frigate de BarnDoor. Todo el campo menos el secreto, más las
+  indicaciones para llegar al secreto. Direcciones sustituidas por
+  marcadores, aquí y en `samantha-config.yaml` y en esta bitácora; los
+  valores reales viven junto a las URLs que describen.
+
+**Menores:** `redact()` en los dos logs de excepción de `alert.py`;
+`stop()` itera una copia de la lista de hilos; el diseño decía
+`shutdown()` donde la API es `ctx.on_unload(fleet.stop)`; el modo de
+fallo #2 del manifiesto decía «no se repite» cuando sí se repite a
+DEBUG; `height, width` calculados y borrados en `detect()`; comentarios
+de import perezoso que no diferían nada.
+
+**Tests:** 83 del plugin (eran 64) y 110 del widget, todos en verde. Los
+nuevos: la cámara que no da fotogramas, la expansión de `${VAR}` y la
+variable sin definir, la escalada y su reinicio, `register()` que vuelve
+enseguida aunque leer la config bloquee, `_supervise` que se traga una
+config que revienta, y dos cámaras con la misma etiqueta dentro de la
+ventana. Los dobles de cámara muerta ahora fallan desde `frames()`, que
+es donde falla el código real —`CameraStream.__init__` solo guarda la
+url—; con la forma antigua ni el timeout ni los cero fotogramas podían
+haberse detectado aquí.
+
+**Verificado en vivo** tras reiniciar el gateway: las dos cámaras
+vigiladas, la contraseña expandida desde `.env` y redactada en el log.
+
+    samantha-vision: watching 2 camera(s): fuera, entrada
+    samantha-vision: fuera unreachable — [Errno 113] No route to host:
+      'rtsp://admin:***@…'
+
+**Sigue sin hacerse:** una persona a las 3 de la mañana dispara en cada
+fotograma muestreado, no cada 180 s. Es la regla nocturna de BarnDoor tal
+y como está escrita y tal y como la fija su test; silenciar la noche no
+se diseñó nunca y no entra aquí.
+
+---
+
 ## 2026-08-24 — La visión se muda al cerebro: el plugin `samantha_vision` ✅
 
 Las cámaras dejan el widget y pasan a vivir dentro del gateway, como
@@ -11,8 +124,8 @@ ser la tira: dibuja, escucha y habla.
 Sustituye a la entrada del 2026-08-23 («Vista: las cámaras hablan»), que
 sigue siendo correcta en todo menos en dónde vive esto.
 
-**Verificado contra la casa real** — una cámara encendida (`entrada`,
-.143), la otra apagada (`fuera`, .142), nada simulado:
+**Verificado contra la casa real** — una cámara encendida (`entrada`),
+la otra apagada (`fuera`), nada simulado:
 
 ```
 entrada: alguien
@@ -82,9 +195,10 @@ sustituyen.
   adaptadores de plataforma. Se reintenta 1 s, 3 s, 5 s y luego se
   **descarta** la detección. Encolarlas sería peor: le haría recitar
   noticias viejas en cuanto la tira conectase, que es exactamente la
-  máquina hablando que prohíbe §1. Hay un segundo caso en el que ese
-  `False` no se cura nunca: una caja donde la tira no ha hablado jamás
-  no tiene sesión, y no la tendrá hasta que el usuario diga algo.
+  máquina hablando que prohíbe §1. **Corregido el 2026-08-24:** este
+  párrafo decía además que una caja donde la tira no ha hablado nunca
+  devuelve `False` para siempre. Es falso — eso vuelve `True` y lo avisa
+  Hermes por su cuenta. Ver la entrada de ese día.
 - **Las cámaras dentro del cerebro son un riesgo real.** Si un hilo
   tumba el gateway se cae todo, no solo la vista. Cada hilo captura
   cualquier excepción, avisa una vez y reintenta con backoff de 30 s
@@ -148,8 +262,10 @@ modelo de 8 MB.
 - **Falta:** nadie puede preguntarle qué ve. La cámara habla pero no se
   la puede interrogar — eso pide exponer la visión como herramienta de
   Hermes, no como un hilo empujando prompts.
-- Las cámaras (192.168.100.142 y .143) estaban apagadas durante todo
-  este trabajo. Todo lo verificado lo está contra grabaciones reales.
+- Las dos cámaras estaban apagadas durante todo este trabajo. Todo lo
+  verificado lo está contra grabaciones reales. Sus direcciones viven
+  junto a las URLs que describen, en `.hermes/home/config.yaml`, y no
+  en un fichero que se sube a GitHub.
 
 ---
 

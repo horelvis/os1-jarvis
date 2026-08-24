@@ -127,3 +127,24 @@ def test_a_handler_that_explodes_never_reaches_the_gateway():
 
     handler = make_handler(None, deliver_prompt=boom, now=lambda: 0.0, hour=lambda: 12)
     handler("entrada", [person()])  # must not raise
+
+
+def test_the_dropped_warning_blames_the_gateway_not_a_missing_session():
+    """Corrected 2026-08-24. `inject_message` returns False only when the
+    gateway is not up; a missing session row comes back True and Hermes
+    logs it itself as "Plugin message injection was not routed". The line
+    here used to send the reader hunting for a session that was never the
+    cause."""
+    from loguru import logger
+
+    records: list = []
+    sink = logger.add(lambda m: records.append(m.record), level="DEBUG")
+    try:
+        assert deliver(FakeCtx([]), "hola", sleep=lambda _s: None) is False
+    finally:
+        logger.remove(sink)
+
+    warnings = [r["message"] for r in records if r["level"].name == "WARNING"]
+    assert len(warnings) == 1, warnings
+    assert "no live gateway" in warnings[0]
+    assert "session" not in warnings[0].lower(), warnings[0]

@@ -24,6 +24,7 @@ from typing import Any
 
 from loguru import logger
 
+from .cameras import redact
 from .vision import Watcher, describe
 
 # Where the strip's conversation lives. Measured in Task 1 against
@@ -33,22 +34,36 @@ from .vision import Watcher, describe
 # mints a fresh session_id under the SAME key, so it stays correct.
 KIOSK_SESSION_KEY = "agent:main:samantha_kiosk:dm:kiosk"
 
-# `inject_message` returns False, silently, whenever there is nothing to
-# deliver into. Two cases, and they want opposite things:
+# What `False` from `inject_message` actually means — corrected
+# 2026-08-24, having been stated the other way round in four places.
 #
-#   - the gateway is still starting. The injector is installed only
-#     after EVERY platform adapter has connected, which on this box is
-#     under a second after registration but is not a guarantee. A short
-#     retry clears it.
-#   - the strip has never spoken on this box. There is no session row,
-#     and there never will be until the user talks, so retrying is
-#     pointless.
+# Read against the pinned source: `inject_message`
+# (`hermes_cli/plugins.py:1973`) returns False for exactly three things —
+# a missing `session_key`, a denied `allow_gateway_injection`, and
+# `has_gateway_message_injector` being false. The last is the one that
+# matters here: the injector is installed only after EVERY platform
+# adapter has connected, which on this box is under a second after
+# registration but is not a guarantee. **False means the gateway is not
+# up yet, and retrying helps.**
 #
-# One bounded schedule covers both: try, wait, try, give up. What is NOT
-# done is queueing — a detection with nowhere to go is DROPPED. Queueing
-# means he recites a backlog of stale sightings the moment the strip
-# connects, which is exactly the machine-talking §1 forbids. The cameras
-# re-detect anyway, and the anti-spam window is three minutes.
+# A MISSING SESSION ROW DOES NOT COME BACK AS FALSE. It is resolved
+# inside the coroutine: `_schedule_plugin_message_injection`
+# (`gateway/run.py:18649`) returns True at `:18715` as soon as the task
+# is scheduled, and `_dispatch_plugin_message_injection` only then finds
+# `lookup_by_session_key` is None and returns False at `:18729`. Hermes
+# logs that itself, from a done-callback at `:18708`:
+#
+#   Plugin message injection was not routed: plugin=… session=…
+#
+# So on a box whose strip has never spoken, `deliver()` returns True on
+# the FIRST attempt and the warning below never fires. That line is about
+# a gateway that is not listening, and only that.
+#
+# One bounded schedule: try, wait, try, give up. What is NOT done is
+# queueing — a detection with nowhere to go is DROPPED. Queueing means he
+# recites a backlog of stale sightings the moment the strip connects,
+# which is exactly the machine-talking §1 forbids. The cameras re-detect
+# anyway, and the anti-spam window is three minutes.
 #
 # The wait happens on the camera's own thread, which is the point: a
 # camera that cannot be talked about should stop sampling for those
@@ -101,9 +116,12 @@ def deliver(
     """Hand the prompt to the gateway as a user turn. Never raises.
 
     True means the gateway accepted it for dispatch — not that the turn
-    finished, and not that he said anything. There is no way to push a
-    finished assistant message through this API at all, which is exactly
-    the property that keeps him from reciting.
+    finished, and not that he said anything, and NOT that a session
+    existed to deliver it into (see the note on RETRY_DELAYS: that comes
+    back True and surfaces as Hermes' own "Plugin message injection was
+    not routed" warning). There is no way to push a finished assistant
+    message through this API at all, which is exactly the property that
+    keeps him from reciting.
     """
     for index, delay in enumerate((0.0, *delays)):
         if delay:
@@ -115,19 +133,19 @@ def deliver(
         except Exception as exc:
             # A gateway that is going down mid-injection must not take a
             # camera thread with it.
-            logger.warning(f"samantha-vision: injection raised — {exc}")
+            logger.warning(f"samantha-vision: injection raised — {redact(exc)}")
             return False
         if accepted:
             if index:
                 logger.debug(f"samantha-vision: delivered on attempt {index + 1}")
             return True
 
-    # One line, and then silence. Either the gateway is not listening
-    # yet, or nobody has ever spoken to the strip on this box — and in
-    # the second case no amount of waiting helps.
+    # One line, and then silence. The gateway is not listening: either it
+    # is still starting or it is going down. A missing session row cannot
+    # reach here — it comes back True and Hermes logs it itself.
     logger.warning(
-        "samantha-vision: nobody to tell, sighting dropped "
-        "(no live session on the strip?)"
+        "samantha-vision: no live gateway, sighting dropped after "
+        f"{len(delays) + 1} attempts"
     )
     return False
 
@@ -168,6 +186,8 @@ def make_handler(
             # `cameras.py` catches this too. Belt and braces on purpose:
             # this is the one handler that touches the gateway, and the
             # gateway is the brain.
-            logger.warning(f"samantha-vision: {camera_name}: alert failed — {exc}")
+            logger.warning(
+                f"samantha-vision: {camera_name}: alert failed — {redact(exc)}"
+            )
 
     return on_detections

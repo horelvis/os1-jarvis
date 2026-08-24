@@ -961,6 +961,44 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-24 — He stops repeating himself, and the password leaves the URL
+
+**Two decisions from the whole-branch review, both behaviour the user
+hears or a credential he owns.**
+
+**The camera anti-spam window widens.** 180 s stopped three-second spam
+and nothing stopped three-minute spam: measured on the live gateway,
+`entrada: alguien` five times in 35 minutes — ~480 spoken turns and ~480
+model calls a day, running while the house sleeps. Consecutive re-fires
+of the same `(camera, label)` now back the window off 180 s → 15 min →
+hourly, resetting to the floor after a full window unseen. **The four
+calibrated constants are untouched** — 180, 0.7, 23:00, 07:00 are
+BarnDoor's, arrived at against these cameras; the ×5 and ×20 are ours. A
+first sighting is never suppressed, and the quiet-hours person rule sits
+outside the escalation in both directions: a widened window never gates
+it, and its firings never advance the level, because counting them would
+turn the override into its opposite the moment quiet hours ended.
+
+**Credentials move to `.env`.** The RTSP password lived inline inside the
+camera URLs in the untracked `.hermes/home/config.yaml`, which is what
+let PyAV write it into the journal in the first place. It now lives in
+`.env` at the repo root — git-ignored, with a tracked `.env.example` —
+which `Hermes/run-gateway.sh` sources; that is the single chokepoint, so
+all three units and every manual invocation get it. URLs say
+`${RTSP_PASSWORD}` and the plugin expands it. The trap, handled
+explicitly: an unset variable is left by `expandvars` as the literal
+`${RTSP_PASSWORD}`, which would then be used as the password and logged,
+so the names are checked against the environment **before** expanding and
+a missing one drops that camera with a warning naming the variable.
+
+**Cost:** the escalation is keyed on the label, so while a `(camera,
+label)` sits at the hourly level any person at that camera is silenced
+for up to an hour. That is inherent to a plugin that cannot tell one
+person from another; the 180 s floor bounds it at the start of each
+visit. And the tracked README no longer carries the house's camera
+addresses — placeholders there, real values beside the URLs they
+describe.
+
 ### 2026-08-24 — Vision moves out of the widget and into a Hermes plugin
 
 **Decision:** the cameras live in the gateway, as the standalone plugin
@@ -996,11 +1034,16 @@ decided the design and are worth carrying:
 - **It can only push a *user* message.** There is no API for putting
   finished words in his mouth, which makes §1's "he is told, never made
   to recite" a property of the mechanism rather than of our discipline.
-- **It fails silently.** `False` before the adapters connect (the
-  injector installs after the last one), and `False` forever on a box
-  whose strip has never spoken, because no session row exists until the
-  user talks. A sighting with nowhere to go is retried three times and
-  then dropped; queueing would make him recite stale news.
+- **It fails silently, and not in the way it looks.** `False` means only
+  that the gateway is not up yet — the injector installs after the last
+  platform adapter connects — so retrying clears it. A **missing session
+  row comes back `True`**: the lookup happens inside the coroutine, after
+  the task is scheduled, and Hermes logs it itself as "Plugin message
+  injection was not routed". (Corrected 2026-08-24; the opposite was
+  stated here and in three other places, and sent a reader hunting for a
+  log line that cannot exist.) A sighting with nowhere to go is retried
+  three times and then dropped; queueing would make him recite stale
+  news.
 
 Injection is also a per-plugin permission, default-off:
 `plugins.entries.samantha-vision.allow_gateway_injection: true`. Without

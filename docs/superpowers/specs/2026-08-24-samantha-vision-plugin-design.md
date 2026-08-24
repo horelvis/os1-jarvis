@@ -132,10 +132,11 @@ and Hermes reports that as a retry-forever loop at DEBUG level. **A
 camera that cannot be reached is a warning in the log and a thread that
 keeps trying, never a plugin that fails to register.**
 
-`shutdown()` sets a stop flag and joins each thread with a short
-timeout. A thread wedged inside a decoder read is abandoned rather than
-waited on, because a gateway that will not stop is worse than a leaked
-thread on the way to process exit.
+Stopping is `ctx.on_unload(fleet.stop)` — there is no `shutdown()` hook,
+and the plugin registers none. `CameraFleet.stop()` sets a stop flag and
+joins each thread with a short timeout. A thread wedged inside a decoder
+read is abandoned rather than waited on, because a gateway that will not
+stop is worse than a leaked thread on the way to process exit.
 
 ### Speaking first: `ctx.inject_message`
 
@@ -179,8 +180,8 @@ finished.
 trusted from the session, and a live adapter must exist for the
 session's platform.
 
-**It returns `False` silently, in two cases that want opposite
-handling:**
+**It returns `False` silently — and for exactly one reason that matters
+here. Corrected 2026-08-24; this section used to claim two.**
 
 - **The gateway is still starting.** `_install_plugin_message_injector()`
   (`gateway/run.py:18634`) publishes the live runner into
@@ -190,11 +191,23 @@ handling:**
   injection returns `False` and logs "no live gateway is available". On
   this box that window was under a second, but a slow or retrying
   adapter pushes it arbitrarily later, so **a fixed delay is the wrong
-  answer**: treat `False` as "not yet" and retry, bounded.
-- **The strip has never spoken on this box.** There is no session row,
-  `lookup_by_session_key` returns `None`, and no amount of waiting makes
-  one. Vision cannot introduce itself to a gateway nobody has talked to
-  yet, so the retry must end in dropping the sighting.
+  answer**: treat `False` as "not yet" and retry, bounded. The only other
+  `False` paths in `inject_message` are configuration, not timing: a
+  missing `session_key`, and a denied `allow_gateway_injection`.
+- **The strip having never spoken is NOT one of them**, which is what
+  this section had wrong. `_schedule_plugin_message_injection` returns
+  `True` at `gateway/run.py:18715` as soon as the task is scheduled;
+  only then does `_dispatch_plugin_message_injection` call
+  `lookup_by_session_key`, find `None`, and return `False` at `:18729`.
+  A done-callback logs that itself at `:18708`:
+
+      Plugin message injection was not routed: plugin=… session=…
+
+  So on a box whose strip has never spoken, `deliver()` succeeds on the
+  first attempt, and the plugin's own "sighting dropped" line can never
+  fire for the case it was written for. The retry schedule stays exactly
+  as it is — it is still right for the not-up-yet case — but the
+  diagnostic to go looking for is Hermes' line, not ours.
 
 ### The other path, and why we do not want it
 
