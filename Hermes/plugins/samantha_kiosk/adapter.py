@@ -1,10 +1,10 @@
 """The OS1 kiosk as a Hermes platform adapter.
 
 Unlike every other in-tree adapter except `api_server`, this one LISTENS: it
-starts an aiohttp server inside the gateway process, serves the built OS1
-frontend, and holds one WebSocket to it. There is exactly one kiosk, so a
-second connection replaces the first rather than being refused — a browser
-refresh must not lock the user out of their own house.
+starts an aiohttp server inside the gateway process and holds one WebSocket
+to it. There is exactly one kiosk, so a second connection replaces the first
+rather than being refused — a browser refresh must not lock the user out of
+their own house.
 
 The wire format is the frontend's existing one; see protocol.py.
 
@@ -31,7 +31,6 @@ import errno
 import os
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
@@ -155,7 +154,6 @@ _TURN_LOST = "Algo se ha quedado a medias. ¿Me lo repites?"
 # the fallback so unit tests can construct an adapter without touching the
 # process environment.
 _ENV_PORT = "SAMANTHA_KIOSK_PORT"
-_ENV_STATIC_ROOT = "SAMANTHA_KIOSK_STATIC_ROOT"
 _ENV_TURN_TIMEOUT = "SAMANTHA_KIOSK_TURN_TIMEOUT"
 
 # Authorization, read by gateway/authz_mixin.py via the registry entry that
@@ -233,17 +231,7 @@ class KioskAdapter(BasePlatformAdapter):
         # Environment first, then the config dict, then a default — the
         # house pattern (see plugins/platforms/irc/adapter.py's
         # `os.getenv("IRC_SERVER") or extra.get("server", "")`). Without
-        # this, SAMANTHA_KIOSK_PORT / SAMANTHA_KIOSK_STATIC_ROOT would be
-        # documented but silently ignored.
-        static_root = os.getenv(_ENV_STATIC_ROOT) or cfg.get(
-            "static_root", "frontend/dist"
-        )
-        # .resolve() as well as .expanduser(): the default is relative, so
-        # without it the served directory depends on which directory
-        # `hermes gateway` happened to be launched from, and the failure is
-        # a blank screen with a correct-looking config.
-        self.static_root = Path(static_root).expanduser().resolve()
-
+        # this, SAMANTHA_KIOSK_PORT would be documented but silently ignored.
         raw_port = os.getenv(_ENV_PORT) or cfg.get("port", 7777)
         try:
             self._configured_port = int(raw_port)
@@ -291,43 +279,12 @@ class KioskAdapter(BasePlatformAdapter):
         self._fatal_error_code = None
         self._fatal_error_message = None
         self._fatal_error_retryable = None
-        # Both of these are checked BEFORE anything is bound or started.
-        # `add_static` raises ValueError on a missing directory (measured on
-        # aiohttp 3.14.1), which would escape connect() entirely; the
-        # gateway's reconnect watcher logs that at DEBUG and retries on
-        # backoff forever — the same retry-forever shape the EADDRINUSE
-        # branch below exists to prevent, reached by the likelier road (an
-        # unbuilt frontend, or a wrong SAMANTHA_KIOSK_STATIC_ROOT). A present
-        # assets/ with a missing index.html is just as fatal in practice: the
-        # kiosk paints a blank page off a bare 404, with nothing to diagnose.
-        missing = [
-            path
-            for path in (self.static_root / "index.html", self.static_root / "assets")
-            if not path.exists()
-        ]
-        if missing:
-            self._set_fatal_error(
-                "samantha_kiosk_static_root_missing",
-                f"Built frontend not found: missing "
-                f"{', '.join(str(p) for p in missing)}. Run `pnpm build` in "
-                f"frontend/ or point SAMANTHA_KIOSK_STATIC_ROOT at the "
-                f"directory that holds index.html and assets/, then "
-                f"`/platform resume samantha_kiosk`.",
-                retryable=False,
-            )
-            logger.error(
-                f"samantha-kiosk: no frontend at {self.static_root} "
-                f"(missing {', '.join(p.name for p in missing)})"
-            )
-            return False
 
         app = web.Application()
+        # This port serves exactly one route, /ws — no static frontend, by
+        # design. The OS1 web UI is retired; JARVIS (widget/) is the client
+        # now, and it only ever speaks the WebSocket protocol in protocol.py.
         app.router.add_get("/ws", self._ws_handler)
-        # Vite's build emits index.html plus assets/, and index.html
-        # references /assets/... — so three explicit routes, and no
-        # catch-all static mount on "/" that would shadow /ws.
-        app.router.add_static("/assets", str(self.static_root / "assets"))
-        app.router.add_get("/", self._index)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -361,7 +318,7 @@ class KioskAdapter(BasePlatformAdapter):
             )
             return False
         self.port = self._actual_port()
-        logger.info(f"samantha-kiosk: serving {self.static_root} on :{self.port}")
+        logger.info(f"samantha-kiosk: serving /ws on :{self.port}")
         return True
 
     def _actual_port(self) -> int:
@@ -375,9 +332,6 @@ class KioskAdapter(BasePlatformAdapter):
         if addresses:
             return int(addresses[0][1])
         return self._configured_port
-
-    async def _index(self, _request: web.Request) -> web.FileResponse:
-        return web.FileResponse(self.static_root / "index.html")
 
     async def disconnect(self) -> None:
         self._abandon_turn()

@@ -10,41 +10,11 @@ from Hermes.plugins.samantha_kiosk.adapter import KioskAdapter  # noqa: E402
 
 
 def _cfg(tmp_path: Path) -> dict:
-    # Mirrors a real Vite build: index.html plus an assets/ directory.
-    (tmp_path / "index.html").write_text("<html>os1</html>", encoding="utf-8")
-    (tmp_path / "assets").mkdir(exist_ok=True)
-    (tmp_path / "assets" / "app.js").write_text("// os1", encoding="utf-8")
-    return {"port": 0, "static_root": str(tmp_path)}
-
-
-def test_serves_index_html(tmp_path):
-    async def go():
-        a = KioskAdapter(_cfg(tmp_path))
-        assert await a.connect() is True
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(f"http://127.0.0.1:{a.port}/") as r:
-                    assert r.status == 200
-                    assert "os1" in await r.text()
-        finally:
-            await a.disconnect()
-
-    asyncio.run(go())
-
-
-def test_serves_the_assets_directory(tmp_path):
-    # index.html references /assets/... — if this 404s the screen is blank.
-    async def go():
-        a = KioskAdapter(_cfg(tmp_path))
-        await a.connect()
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(f"http://127.0.0.1:{a.port}/assets/app.js") as r:
-                    assert r.status == 200
-        finally:
-            await a.disconnect()
-
-    asyncio.run(go())
+    # tmp_path is unused now that the adapter serves no files, but every
+    # caller passes it — kept so this stays a one-line swap if a future
+    # test needs a scratch directory again.
+    del tmp_path
+    return {"port": 0}
 
 
 def test_websocket_round_trip(tmp_path, monkeypatch):
@@ -222,7 +192,7 @@ def test_disconnect_releases_the_port(tmp_path):
         port = a.port
         await a.disconnect()
         # Binding the same port again must succeed.
-        b = KioskAdapter({"port": port, "static_root": str(tmp_path)})
+        b = KioskAdapter({"port": port})
         assert await b.connect() is True
         await b.disconnect()
 
@@ -238,7 +208,7 @@ def test_port_conflict_is_a_fatal_non_retryable_error(tmp_path):
     async def go():
         a = KioskAdapter(_cfg(tmp_path))
         await a.connect()
-        b = KioskAdapter({"port": a.port, "static_root": str(tmp_path)})
+        b = KioskAdapter({"port": a.port})
         try:
             ok = await b.connect()
             assert ok is False
@@ -262,8 +232,8 @@ def test_fatal_error_survives_disconnect(tmp_path):
     # has_fatal_error (gateway/run.py:12985-12986): a fatal connect()
     # failure is disconnected, then the adapter is asked whether it was
     # fatal. If disconnect() clears the flags, has_fatal_error is always
-    # False there and a non-retryable failure (bad port, missing static
-    # root) gets requeued and retried forever instead of being dropped —
+    # False there and a non-retryable failure (a taken port) gets requeued
+    # and retried forever instead of being dropped —
     # exactly the retry-forever shape connect()'s fatal path exists to
     # prevent. Clearing on disconnect() undoes the fix silently, because
     # no other test calls disconnect() after a fatal connect().
@@ -271,7 +241,7 @@ def test_fatal_error_survives_disconnect(tmp_path):
         a = KioskAdapter(_cfg(tmp_path))
         await a.connect()
         try:
-            b = KioskAdapter({"port": a.port, "static_root": str(tmp_path)})
+            b = KioskAdapter({"port": a.port})
             assert await b.connect() is False
             assert b._fatal_error_code == "samantha_kiosk_port_in_use"
 
@@ -287,19 +257,15 @@ def test_fatal_error_survives_disconnect(tmp_path):
 
 
 def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
-    # SAMANTHA_KIOSK_PORT / SAMANTHA_KIOSK_STATIC_ROOT (declared in Task 4's
-    # manifest, exported by Task 5's manual test) must win over whatever the
-    # config dict says — otherwise the documented env vars are ignored and
-    # the kiosk silently serves the wrong directory on the wrong port.
-    env_root = tmp_path / "env-root"
-    env_root.mkdir()
+    # SAMANTHA_KIOSK_PORT (declared in the manifest) must win over whatever
+    # the config dict says — otherwise the documented env var is ignored and
+    # the kiosk silently serves on the wrong port.
+    del tmp_path
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "0")
-    monkeypatch.setenv("SAMANTHA_KIOSK_STATIC_ROOT", str(env_root))
 
-    a = KioskAdapter({"port": 9999, "static_root": str(tmp_path / "config-root")})
+    a = KioskAdapter({"port": 9999})
 
     assert a.port == 0
-    assert a.static_root == env_root.resolve()
 
 
 def test_send_returns_a_send_result_not_none(tmp_path):
@@ -534,38 +500,6 @@ def test_a_dispatch_failure_reaches_the_screen(tmp_path, monkeypatch):
     asyncio.run(go())
 
 
-def test_missing_static_root_is_a_fatal_non_retryable_error(tmp_path):
-    # aiohttp's add_static raises ValueError on a missing directory, which
-    # would escape connect() into the gateway watcher's `except Exception`,
-    # be logged at DEBUG, and retry forever on backoff — the exact shape the
-    # port-conflict branch exists to prevent, reached by the likelier road.
-    async def go():
-        a = KioskAdapter({"port": 0, "static_root": str(tmp_path / "nope")})
-        assert await a.connect() is False
-        assert a._fatal_error_code == "samantha_kiosk_static_root_missing"
-        assert a._fatal_error_retryable is False
-        # The message must name the path, or it is unactionable.
-        assert "nope" in a._fatal_error_message
-        assert a._runner is None
-
-    asyncio.run(go())
-
-
-def test_missing_index_html_is_fatal_too(tmp_path):
-    # assets/ present, index.html absent: aiohttp binds happily and serves a
-    # bare 404 on "/", so the kiosk paints a blank page with nothing to
-    # diagnose from. Same failure, same treatment.
-    (tmp_path / "assets").mkdir()
-
-    async def go():
-        a = KioskAdapter({"port": 0, "static_root": str(tmp_path)})
-        assert await a.connect() is False
-        assert a._fatal_error_code == "samantha_kiosk_static_root_missing"
-        assert "index.html" in a._fatal_error_message
-
-    asyncio.run(go())
-
-
 def test_a_foreign_origin_cannot_open_the_socket(tmp_path):
     # WebSockets are exempt from the same-origin policy, so without this any
     # local page could open ws://127.0.0.1/ws, assert a user_id, talk to an
@@ -621,24 +555,21 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
     # the platform never comes up and the screen is blank with nothing on the
     # wire to explain it. Only the exported env vars were hiding this.
     monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_STATIC_ROOT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
 
     class FakePlatformConfig:
         """Shaped like gateway.config.PlatformConfig: settings live in .extra."""
 
         enabled = True
-        extra = {"port": 0, "static_root": "/tmp/os1", "turn_timeout": 12}
+        extra = {"port": 0, "turn_timeout": 12}
 
     a = KioskAdapter(FakePlatformConfig())
     assert a.port == 0
     assert a.turn_timeout == 12
-    assert a.static_root == Path("/tmp/os1").resolve()
 
 
 def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
     monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_STATIC_ROOT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
 
     class Bare:

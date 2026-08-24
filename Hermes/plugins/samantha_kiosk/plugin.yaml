@@ -5,8 +5,8 @@ label: Samantha (kiosk)
 kind: platform
 version: 1.0.0
 description: >
-  Serves the OS1 interface and holds the single WebSocket the kiosk talks
-  over. Text only in this version; audio arrives in plan 3b.
+  Holds the single WebSocket the kiosk talks over. Text only in this
+  version; audio arrives in plan 3b.
 author: Horelvis Castillo
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -25,26 +25,20 @@ author: Horelvis Castillo
 #    all the default is worse than silence: Hermes greets the owner in
 #    English with a pairing code, on their own screen.
 #
-# 2. NO BUILT FRONTEND. A missing index.html or assets/ under
-#    SAMANTHA_KIOSK_STATIC_ROOT is a blank screen. connect() now refuses
-#    non-retryably (samantha_kiosk_static_root_missing) instead of letting
-#    aiohttp's ValueError escape into the gateway's retry-forever loop,
-#    where it was logged at DEBUG only.
-#
-# 3. A TURN THAT NEVER COMES BACK. The gateway answers asynchronously, so
+# 2. A TURN THAT NEVER COMES BACK. The gateway answers asynchronously, so
 #    nothing downstream guarantees a reply. The adapter arms a watchdog per
 #    accepted `chat` frame (SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
 #    pushes an `error` frame if nothing closed the turn. Without it the
 #    frontend hangs forever — `busy` never clears, and because the STT
 #    commit is gated on `busy`, VOICE input dies with it.
 #
-# 4. NOBODY LISTENING. If the browser is mid-refresh, send() reports
+# 3. NOBODY LISTENING. If the browser is mid-refresh, send() reports
 #    success=False/retryable=True so Hermes retries rather than losing the
 #    reply. If the browser died without a FIN the socket looks alive in
 #    Python; heartbeat=30 turns that into a normal close instead of a sink
 #    that swallows every reply with no log line.
 #
-# 5. THE VOICE IS NOT HERS YET. Replies come from Hermes' own SOUL.md
+# 4. THE VOICE IS NOT HERS YET. Replies come from Hermes' own SOUL.md
 #    persona, not backend/samantha/personality.py. Known, out of scope for
 #    plan 3a; see docs/running-real-mode.md.
 # ─────────────────────────────────────────────────────────────────────────
@@ -55,12 +49,8 @@ python_dependencies:
 
 optional_env:
   - name: SAMANTHA_KIOSK_PORT
-    description: "Puerto donde se sirve la interfaz (por defecto 7777)"
+    description: "Puerto donde se sirve el WebSocket del kiosko (por defecto 7777)"
     prompt: "Puerto del kiosko"
-    password: false
-  - name: SAMANTHA_KIOSK_STATIC_ROOT
-    description: "Ruta al frontend construido (por defecto frontend/dist)"
-    prompt: "Ruta de frontend/dist"
     password: false
   - name: SAMANTHA_KIOSK_ALLOWED_USERS
     description: >
