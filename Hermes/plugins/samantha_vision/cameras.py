@@ -30,11 +30,22 @@ def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
     house to it would be absurd.
     """
     raw = cfg.get("cameras") or []
+    if not isinstance(raw, list):
+        # `cameras:` written as a name -> url mapping, or as one bare
+        # string. Nothing is watched, but the journal says what was read
+        # rather than showing a traceback from three frames deeper.
+        logger.warning(f"samantha-vision: 'cameras' is not a list: {raw!r}")
+        raw = []
     out: list[Camera] = []
     seen: set[str] = set()
     for entry in raw:
-        name = (entry or {}).get("name")
-        url = (entry or {}).get("url")
+        if not isinstance(entry, dict):
+            # `- rtsp://…` instead of `- name: … / url: …`. One bad line
+            # is one dropped camera, never the whole house.
+            logger.warning(f"samantha-vision: camera entry is not a mapping: {entry!r}")
+            continue
+        name = entry.get("name")
+        url = entry.get("url")
         if not name or not url:
             logger.warning(
                 f"samantha-vision: camera entry without name or url: {entry!r}"

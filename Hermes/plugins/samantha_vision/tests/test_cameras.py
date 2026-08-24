@@ -46,6 +46,34 @@ def test_entry_without_a_name_is_dropped_not_fatal():
     assert cams == [Camera("entrada", "rtsp://x/2")]
 
 
+def test_an_entry_that_is_not_a_mapping_is_dropped_not_fatal():
+    # `- rtsp://x/1` instead of `- name: … / url: …` is the likeliest way
+    # to write this key wrong, and it used to raise — which cost the
+    # house every camera, not the bad line.
+    cams = parse_cameras(
+        {
+            "cameras": [
+                "rtsp://x/1",
+                None,
+                42,
+                {"name": "entrada", "url": "rtsp://x/2"},
+            ]
+        }
+    )
+    assert cams == [Camera("entrada", "rtsp://x/2")]
+
+
+def test_a_mapping_instead_of_a_list_is_not_fatal():
+    # The other likely typo: names as keys. Nothing is watched, but the
+    # gateway is told what it read rather than handed an AttributeError.
+    assert parse_cameras({"cameras": {"fuera": "rtsp://x/1"}}) == []
+
+
+def test_a_scalar_under_the_key_is_not_fatal():
+    assert parse_cameras({"cameras": "rtsp://x/1"}) == []
+    assert parse_cameras({"cameras": 7}) == []
+
+
 def test_duplicate_names_keep_the_first():
     # Two cameras answering to one name makes the tool ambiguous; the
     # first wins and the second is dropped with a log line.
