@@ -118,9 +118,43 @@ async def test_sending_with_no_connection_says_so_instead_of_raising() -> None:
 
 def test_an_unknown_server_type_is_not_fatal() -> None:
     # The gateway ships new frame types before the strip learns them.
-    # A strip that raises here goes silent for the whole turn.
-    msg = decode_server(json.dumps({"type": "photo", "path": "/tmp/a.jpg"}))
-    assert msg["type"] == "photo"
+    # A strip that raises here goes silent for the whole turn. `photo`
+    # was the example here until the strip learned it (2026-08-24),
+    # which is exactly the sequence this test exists to survive.
+    msg = decode_server(json.dumps({"type": "hologram", "path": "/tmp/a.jpg"}))
+    assert msg["type"] == "hologram"
+
+
+def test_a_photo_frame_reaches_the_photo_handler() -> None:
+    gw = GatewayClient()
+    seen: list[tuple[str, str]] = []
+    gw.on_photo = lambda path, camera: seen.append((path, camera))
+    gw._dispatch(
+        json.dumps({"type": "photo", "path": "/tmp/vision/a.jpg", "camera": "entrada"})
+    )
+    assert seen == [("/tmp/vision/a.jpg", "entrada")]
+
+
+def test_a_photo_frame_never_reaches_the_voice() -> None:
+    # It is a picture, not something she says. A photo that arrived as a
+    # token would be read out as a file path by CosyVoice.
+    gw = GatewayClient()
+    spoken: list[str] = []
+    gw.on_token = lambda t: spoken.append(t)
+    gw.on_error = lambda m: spoken.append(m)
+    gw._dispatch(json.dumps({"type": "photo", "path": "/tmp/a.jpg", "camera": "fuera"}))
+    assert spoken == []
+
+
+def test_a_photo_with_no_path_is_dropped() -> None:
+    # An empty path can only end as a failed texture load; there is
+    # nothing to show and nothing to grow the strip for.
+    gw = GatewayClient()
+    seen: list[tuple[str, str]] = []
+    gw.on_photo = lambda path, camera: seen.append((path, camera))
+    gw._dispatch(json.dumps({"type": "photo", "camera": "entrada"}))
+    gw._dispatch(json.dumps({"type": "photo", "path": "", "camera": "entrada"}))
+    assert seen == []
 
 
 def test_malformed_json_is_still_an_error() -> None:

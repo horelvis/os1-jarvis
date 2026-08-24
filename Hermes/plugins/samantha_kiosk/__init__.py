@@ -49,12 +49,35 @@ _FALLBACK_HINT = (
 )
 
 
+# The one thing the strip can put in front of the user, and everything it
+# still cannot.
+#
+# Written 2026-08-24, the day the strip learned to draw a photo. Until
+# then the hint above was the whole truth and the model acted on it
+# correctly: asked to show the entrance, he answered "sigo sin poder
+# enseñarle nada en una pantalla, señor — aquí solo hay voz", and once
+# suggested opening Hermes Desktop instead. Both were honest while the
+# band did not exist. Leaving the hint alone after it did would have made
+# him decline something he can now do — so this moves with the widget,
+# in the same change.
+_SCREEN = (
+    "Hay una sola cosa que sí puedes enseñar. Cuando miras una cámara, la "
+    "foto aparece sola unos segundos en la tira, delante de la persona: no "
+    "tienes que pedirlo ni anunciarlo, ya está ahí, y basta con que hables "
+    "de lo que hay como si los dos lo estuvierais mirando. Es lo único que "
+    "se puede mostrar — no hay manera de enseñar texto, ficheros, enlaces "
+    "ni imágenes de ningún otro sitio — y tú esa foto no la ves: solo sabes "
+    "lo que la cámara te ha contado."
+)
+
+
 def _platform_hint() -> str:
     """The persona, plus the constraints of talking through a strip."""
     surface = (
         "Hablas en voz alta, por un altavoz, a la persona que vive aquí. "
         "No hay teclado ni pantalla que leer: nada de listas, markdown, "
-        "URLs ni nombres de fichero. Frases que se puedan escuchar."
+        "URLs ni nombres de fichero. Frases que se puedan escuchar. "
+        f"{_SCREEN}"
     )
     try:
         persona = _PERSONA_FILE.read_text(encoding="utf-8").strip()

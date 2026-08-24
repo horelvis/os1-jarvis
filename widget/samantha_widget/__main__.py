@@ -46,6 +46,13 @@ _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
 # WebSocket to Hermes, and her reply spoken back. Only the air is faked.
 _FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
 
+# Show these photos (comma-separated paths) a couple of seconds after
+# starting, exactly as if the gateway had pushed them. The only way to
+# photograph the band on a box where making him actually look at a
+# camera takes a whole live turn — the counterpart of SAMANTHA_WIDGET_SAY
+# for the half of him you can see.
+_SHOW_ON_START = os.environ.get("SAMANTHA_WIDGET_PHOTO")
+
 # Write every utterance the VAD closes to this directory as a WAV.
 # Diagnostic only: when a transcription comes back as nonsense there is
 # no way to tell from the text whether the audio was bad or Whisper was.
@@ -67,14 +74,31 @@ class SamanthaApp(Gtk.Application):
         task.add_done_callback(self._tasks.discard)
 
     def do_activate(self) -> None:
+        from .photo_area import PhotoArea
         from .wave import WaveArea
         from .window import StripWindow
 
         window = StripWindow(self)
         wave = WaveArea()
         window.set_content(wave)
+        # The band drives the window's size directly: it is the only
+        # thing that knows how tall it wants to be, and `resize_to` is
+        # the only thing that can move the top edge up to make room.
+        band = PhotoArea(on_resize=window.resize_to)
+        window.set_band(band)
         self._add_demo_keys(window, wave)
         window.present()
+
+        if _SHOW_ON_START:
+            paths = [p.strip() for p in _SHOW_ON_START.split(",") if p.strip()]
+
+            def _show_them() -> bool:
+                for path in paths:
+                    print(f"foto de prueba: {path}", file=sys.stderr, flush=True)
+                    band.show_photo(path, "prueba")
+                return False  # GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(2000, _show_them)
 
         if _DEMO_STATE:
             state = WaveState(_DEMO_STATE)
@@ -83,7 +107,7 @@ class SamanthaApp(Gtk.Application):
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 
-        self._start_voice_loop(wave)
+        self._start_voice_loop(wave, band)
 
     # ── the demo half ─────────────────────────────────────────────────
 
@@ -111,7 +135,7 @@ class SamanthaApp(Gtk.Application):
 
     # ── the real half ─────────────────────────────────────────────────
 
-    def _start_voice_loop(self, wave) -> None:
+    def _start_voice_loop(self, wave, band) -> None:
         import numpy as np
 
         from .audio import Microphone, Player, describe_devices
@@ -205,9 +229,18 @@ class SamanthaApp(Gtk.Application):
                 speaker.enqueue(message)
             machine.error(message)
 
+        def on_photo(path: str, camera: str) -> None:
+            # Straight to the GTK thread. Everything else the gateway
+            # sends goes through the turn machine; a photo does not — it
+            # is not part of what he says, and it must appear whether or
+            # not a turn is in flight (a reminder can push one).
+            print(f"foto: {camera} -> {path}", file=sys.stderr, flush=True)
+            GLib.idle_add(band.show_photo, path, camera)
+
         client.on_token = on_token
         client.on_done = on_done
         client.on_error = on_error
+        client.on_photo = on_photo
 
         # ── the microphone, always open ───────────────────────────────
         detector = UtteranceDetector(SileroDetector())

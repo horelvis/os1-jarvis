@@ -26,7 +26,7 @@ import websockets
 DEFAULT_URI = "ws://127.0.0.1:7777/ws"
 DEFAULT_USER_ID = "primary"
 
-_SERVER_TYPES = {"token", "done", "error", "transcription"}
+_SERVER_TYPES = {"token", "done", "error", "transcription", "photo"}
 
 # Said out loud when the gateway is unreachable. Silence would leave the
 # user talking to a wall — one of the few Spanish strings in this package.
@@ -64,6 +64,10 @@ class GatewayClient:
         self.on_token: Callable[[str], None] = lambda _t: None
         self.on_done: Callable[[int], None] = lambda _ms: None
         self.on_error: Callable[[str], None] = lambda _m: None
+        # A picture for the band above the wave. It is a frame of its
+        # own and never a token: an answer travels wherever the turn is
+        # routed, and a path in one would be read aloud.
+        self.on_photo: Callable[[str, str], None] = lambda _p, _c: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -110,3 +114,7 @@ class GatewayClient:
             self.on_done(int(msg.get("thinking_ms", 0)))
         elif kind == "error":
             self.on_error(msg.get("error", ""))
+        elif kind == "photo":
+            path = msg.get("path", "")
+            if isinstance(path, str) and path:
+                self.on_photo(path, str(msg.get("camera", "")))
