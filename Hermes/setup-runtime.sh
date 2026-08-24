@@ -33,10 +33,12 @@ HERMES_TAG="v2026.8.19"          # pyproject version 0.20.5
 # `git ls-remote --tags <repo> "v2026.8.19^{}"`.
 HERMES_COMMIT="fcbd1076a93841fa88855acce810e342a5b78101"
 
-# Declared in the plugin.yaml manifests. Hermes parses `python_dependencies`
-# and warns when one is missing, but never installs them — a plugin whose
-# import fails still shows as "enabled" in `hermes plugins list`. This is the
-# "No module named loguru" failure the manifests warn about.
+# Declared in the plugin.yaml manifests — all six of them, including the three
+# added to samantha_vision's manifest on 2026-08-24, which until then declared
+# none. Hermes parses `python_dependencies` and warns when one is missing, but
+# never installs them — a plugin whose import fails still shows as "enabled"
+# in `hermes plugins list`. This is the "No module named loguru" failure the
+# manifests warn about.
 #
 # `av`, `onnxruntime` and `numpy` are samantha-vision's, and `uv sync` does
 # NOT bring them: the `voice` extra was removed from `[all]` in Hermes'

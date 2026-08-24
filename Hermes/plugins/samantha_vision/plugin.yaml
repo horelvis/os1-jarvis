@@ -31,3 +31,19 @@ author: Horelvis Castillo
 #    so nothing else here notices: it looks exactly like a camera with an
 #    empty driveway in front of it. One WARNING, then DEBUG per retry,
 #    same discipline as #2.
+
+# Declared so the failure has a name at load time. Hermes never installs
+# these — `_warn_python_dependencies` (hermes_cli/plugins.py:4679) is "a
+# declaration seam ONLY", says its own docstring — but it probes each
+# distribution and logs a WARNING naming the missing ones with an install
+# hint. That turns failure mode #3's worst variant, a plugin that loads
+# and quietly watches nothing, into a line at startup. Upper bounds are
+# Hermes' dependency policy; `plugins doctor` warns without them.
+#
+# `Hermes/setup-runtime.sh` is what actually installs them: `uv sync` does
+# not, because Hermes moved that extra to lazy install.
+python_dependencies:
+  - "loguru>=0.7,<1"
+  - "av>=12,<19"
+  - "onnxruntime>=1.17,<2"
+  - "numpy>=1.26,<3"
