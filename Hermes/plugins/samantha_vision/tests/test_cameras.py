@@ -426,3 +426,55 @@ def test_a_camera_that_starts_yielding_frames_is_not_reported_as_empty():
             fleet.stop()
 
     assert not [r for r in records if "no frames" in r["message"]]
+
+
+# ── the password arrives from the environment, not from the URL ───────
+#
+# Ruling 21. `.hermes/home/config.yaml` writes `${RTSP_PASSWORD}` and
+# `Hermes/run-gateway.sh` puts the value in the environment. The trap is
+# an UNSET variable: `expandvars` leaves the literal text `${…}` behind,
+# which would then be used as the password and logged.
+
+
+def test_a_camera_url_expands_the_password_from_the_environment(monkeypatch):
+    monkeypatch.setenv("RTSP_PASSWORD", "dummy-not-the-real-one")
+    cameras = parse_cameras(
+        {"cameras": [{"name": "entrada", "url": "rtsp://admin:${RTSP_PASSWORD}@h/sub"}]}
+    )
+    assert [c.url for c in cameras] == ["rtsp://admin:dummy-not-the-real-one@h/sub"]
+
+
+def test_an_unset_variable_drops_the_camera_rather_than_connecting(monkeypatch):
+    monkeypatch.delenv("RTSP_PASSWORD", raising=False)
+    with captured_logs() as records:
+        cameras = parse_cameras(
+            {
+                "cameras": [
+                    {"name": "entrada", "url": "rtsp://admin:${RTSP_PASSWORD}@h/sub"}
+                ]
+            }
+        )
+    assert cameras == []
+    joined = " ".join(r["message"] for r in records)
+    assert "RTSP_PASSWORD" in joined
+    # Never the URL: the literal `${RTSP_PASSWORD}` would otherwise be
+    # used as a password and written into the journal by the first failure.
+    assert "rtsp://" not in joined, joined
+
+
+def test_a_url_with_no_variables_is_left_exactly_alone(monkeypatch):
+    monkeypatch.delenv("RTSP_PASSWORD", raising=False)
+    cameras = parse_cameras(
+        {"cameras": [{"name": "entrada", "url": "/home/nexus/clip.mp4"}]}
+    )
+    assert [c.url for c in cameras] == ["/home/nexus/clip.mp4"]
+
+
+def test_a_dollar_inside_the_password_survives_expansion(monkeypatch):
+    """The check runs on the RAW url, so a `$` in the VALUE is not a
+    placeholder and must not drop the camera."""
+    monkeypatch.setenv("RTSP_PASSWORD", "a$b-dummy")
+    cameras = parse_cameras(
+        {"cameras": [{"name": "entrada", "url": "rtsp://admin:${RTSP_PASSWORD}@h/sub"}]}
+    )
+    assert [c.url for c in cameras] == ["rtsp://admin:a$b-dummy@h/sub"]

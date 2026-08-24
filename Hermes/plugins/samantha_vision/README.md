@@ -29,9 +29,26 @@ you are looking for `SAMANTHA_WIDGET_CAMERA`, this is where it went.
 
 ## Configuring the cameras — and where the password goes
 
-The camera URLs carry the RTSP password, so they live **only** in the
-git-ignored `.hermes/home/config.yaml`. `Hermes/samantha-config.yaml` is
-tracked in git and carries the shape as a comment, nothing more.
+**The password is never written into a URL.** It lives in `.env` at the
+repo root — git-ignored, one `KEY=value` line — and the URL names it:
+
+```
+RTSP_PASSWORD=…
+```
+
+`Hermes/run-gateway.sh` sources that file if it is there, which is the
+single chokepoint: all three systemd units and every manual invocation go
+through it, so nothing else has to be taught. `.env.example` is tracked
+and carries the key names with no values, so a fresh box knows what is
+missing. The plugin expands `${RTSP_PASSWORD}` when it builds a `Camera`,
+and a URL naming a variable that is **not** set drops that camera with a
+warning that says which variable — it never connects with the literal
+text as a password and never logs the URL.
+
+The camera addresses themselves are still local to this box, so they live
+**only** in the git-ignored `.hermes/home/config.yaml`.
+`Hermes/samantha-config.yaml` is tracked in git and carries the shape as
+a comment, nothing more.
 
 Write this under `plugins.entries.samantha-vision` in
 `.hermes/home/config.yaml`:
@@ -40,9 +57,9 @@ Write this under `plugins.entries.samantha-vision` in
       settings:
         cameras:
           - name: fuera
-            url: rtsp://admin:<RTSP_PASSWORD>@192.168.100.142:554/h264Preview_01_sub
+            url: rtsp://admin:${RTSP_PASSWORD}@192.168.x.142:554/h264Preview_01_sub
           - name: entrada
-            url: rtsp://admin:<RTSP_PASSWORD>@192.168.100.143:554/h264Preview_01_sub
+            url: rtsp://admin:${RTSP_PASSWORD}@192.168.x.143:554/h264Preview_01_sub
 ```
 
 **The `settings:` level is load-bearing.** `ctx.get_config("cameras")`
@@ -56,27 +73,30 @@ it is the one mistake this config invites.
 
 then `systemctl --user restart samantha-hermes.service`.
 
-The house's two Reolink cameras, as of 2026-08-24:
+The house's two cameras, as of 2026-08-24. Addresses are placeholders:
+this file is pushed to GitHub, and the real ones live next to the URLs
+they describe, in `.hermes/home/config.yaml`.
 
 | name here | address | BarnDoor calls it | state |
 |---|---|---|---|
-| `fuera` | `192.168.100.142` | `exterior` | offline — port 554 unreachable |
-| `entrada` | `192.168.100.143` | `garage` | live |
+| `fuera` | `192.168.x.142` | `exterior` | offline — port 554 unreachable |
+| `entrada` | `192.168.x.143` | `garage` | live |
 
-The user is `admin`; the password is `RTSP_PASSWORD` in
-`~/git/barndoor/.env`, which is git-ignored there. It is the same
-credential BarnDoor's Frigate uses (`frigate-config/config.yml`).
+The credential lives in the git-ignored `.env` on this box; it is shared
+with BarnDoor.
 
 **Always the sub-stream** (`h264Preview_01_sub`). The main stream is 4K,
 costs real time to decode, and YOLO scales everything to 320 px anyway.
 
-**On a new box the cameras are the one thing you must write by hand.**
-Everything else is scripted: `Hermes/setup-runtime.sh` symlinks this
-directory into `$HERMES_HOME/plugins/`, and `Hermes/apply-config.sh`
-merges the tracked `Hermes/samantha-config.yaml`, which enables
-`samantha-vision` and grants it `allow_gateway_injection`. What no
-script can restore is the block above: `.hermes/home/config.yaml` is not
-in git and never will be, because those URLs carry the password.
+**On a new box, two things are yours to write by hand: the cameras and
+the `.env`.** Everything else is scripted — `Hermes/setup-runtime.sh`
+symlinks this directory into `$HERMES_HOME/plugins/`, installs `av`,
+`onnxruntime` and `numpy` (which `uv sync` does not), and enables the
+plugin; `Hermes/apply-config.sh` merges the tracked
+`Hermes/samantha-config.yaml`, which lists `samantha-vision` and grants
+it `allow_gateway_injection`. What no script can restore is the camera
+block above — `.hermes/home/config.yaml` is not in git and never will be
+— and the credential it names.
 
 The symptom of forgetting is not an error. The plugin registers, logs
 `no cameras configured (config key 'cameras' empty)`, and he simply
@@ -173,6 +193,8 @@ journalctl --user -u samantha-hermes.service -f | grep samantha-vision
 - `<name> unreachable — …` — that camera only, once.
 - `<name> connected but produced no frames` — it answered and sent no
   video. Once per camera, `DEBUG` after that.
+- `<name> dropped, ${VAR} is not set` — the URL names a variable the
+  environment does not have. Check `.env` against `.env.example`.
 - `<name>: alguien` — a sighting got through the quiet rules; his reply
   follows on the strip.
 - `nobody to tell, sighting dropped` — nothing to inject into. Either the

@@ -32,17 +32,24 @@ plugins:
       # mentions a thing. Measured in Task 1 against
       # `plugins.py::_gateway_injection_allowed`.
       allow_gateway_injection: true
-      # The cameras themselves are NOT here, and must not be: their URLs
-      # carry the RTSP password, and this file is tracked in git. They go
-      # into `.hermes/home/config.yaml` only, which is not. The shape,
-      # with an obvious placeholder:
+      # The cameras themselves are NOT here, and must not be: this file is
+      # tracked in git and pushed, and a camera's address is a fact about
+      # somebody's house. They go into `.hermes/home/config.yaml` only,
+      # which is not tracked. The shape, with placeholder addresses:
       #
       #   settings:
       #     cameras:
       #       - name: fuera
-      #         url: rtsp://user:pass@192.168.100.142:554/h264Preview_01_sub
+      #         url: rtsp://admin:${RTSP_PASSWORD}@192.168.x.142:554/h264Preview_01_sub
       #       - name: entrada
-      #         url: rtsp://user:pass@192.168.100.143:554/h264Preview_01_sub
+      #         url: rtsp://admin:${RTSP_PASSWORD}@192.168.x.143:554/h264Preview_01_sub
+      #
+      # The PASSWORD is never written into a URL, tracked file or not. It
+      # lives in `.env` at the repo root — git-ignored, see `.env.example`
+      # — which `Hermes/run-gateway.sh` sources, and the plugin expands
+      # `${RTSP_PASSWORD}` when it builds a Camera. A variable that is not
+      # set drops that camera with a warning naming it; it is never used
+      # as a literal password and the URL is never logged.
       #
       # The `settings:` level is NOT decoration. `ctx.get_config("cameras")`
       # reads `plugins.entries.<id>.settings.cameras` and nothing else

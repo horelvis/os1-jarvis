@@ -12,6 +12,12 @@ __pycache__/
 venv/
 env/
 
+# Secrets. `.env` holds this box's credentials (RTSP_PASSWORD); it is
+# sourced by Hermes/run-gateway.sh and referenced from the camera URLs in
+# .hermes/home/config.yaml. `.env.example` IS tracked and carries the key
+# names with no values.
+.env
+
 # Editable install metadata
 *.egg-info/
 *.egg

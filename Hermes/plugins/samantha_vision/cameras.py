@@ -8,6 +8,7 @@ something anybody would say out loud.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 from collections.abc import Callable
@@ -54,6 +55,35 @@ def redact(text: str) -> str:
     return _CREDENTIAL.sub(r"\1:***@", str(text))
 
 
+# The password does not live in the URL any more (Ruling 21). The URL in
+# `.hermes/home/config.yaml` says `rtsp://admin:${RTSP_PASSWORD}@…` and the
+# value arrives in the environment, put there by `Hermes/run-gateway.sh`
+# sourcing the git-ignored `.env`.
+#
+# The trap, and it is the whole reason this is not one call to
+# `expandvars`: an UNSET variable is left as the literal text
+# `${RTSP_PASSWORD}`, which would then be used as the password and written
+# into the journal by the first failure. So the names are read out of the
+# RAW url and checked against the environment BEFORE expanding — checking
+# afterwards would also flag a `$` that legitimately arrived inside the
+# value.
+_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _expand(url: str) -> tuple[str | None, str | None]:
+    """Substitute `${VAR}` from the environment.
+
+    Returns `(url, None)` on success, or `(None, name)` naming the first
+    variable that is not set. The URL is never returned half-expanded and
+    the caller must never log it.
+    """
+    for match in _PLACEHOLDER.finditer(url):
+        name = match.group(1) or match.group(2)
+        if name not in os.environ:
+            return None, name
+    return os.path.expandvars(url), None
+
+
 def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
     """Read the `cameras` config key. Never raises.
 
@@ -91,8 +121,17 @@ def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
                 f"samantha-vision: duplicate camera name {name!r}, keeping the first"
             )
             continue
+        expanded, missing = _expand(str(url))
+        if expanded is None:
+            # Never the URL: it is half a credential either way, and the
+            # unexpanded half is the name we are about to print anyway.
+            logger.warning(
+                f"samantha-vision: camera {str(name)!r} dropped, "
+                f"${{{missing}}} is not set (see .env.example)"
+            )
+            continue
         seen.add(name)
-        out.append(Camera(str(name), str(url)))
+        out.append(Camera(str(name), expanded))
     if not out:
         logger.info(
             "samantha-vision: no cameras configured (config key 'cameras' empty)"
