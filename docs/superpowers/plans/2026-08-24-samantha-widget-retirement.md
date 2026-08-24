@@ -36,10 +36,19 @@ that commit could not, because the code was still present then.
 
 ## Global Constraints
 
-- **Task 1 is a lock, not a formality.** No task in this plan may run
-  until Task 1 has passed with a real microphone and a real voice. If
-  Task 1 fails, stop: the kiosk is still installed and still works, and
-  that is the fallback this ordering exists to preserve.
+- **Task 1 is a lock on the deletion.** **Nothing is deleted** until
+  Task 1 has passed with a real microphone and a real voice. If Task 1
+  fails, stop: the kiosk is still installed and still works, and that is
+  the fallback this ordering exists to preserve.
+
+  *Relaxed 2026-08-24, on the user's instruction, while the microphone
+  was still in the post.* The lock originally read "no task may run",
+  which protected more than it needed to: Tasks 2 and 3 move a module and
+  unwire a route, both revertible with `git revert` and both verifiable
+  with `SAMANTHA_WIDGET_FAKE_MIC`. Tasks 4 onward — everything that
+  deletes — stay locked. The cost accepted is that if the microphone
+  later exposes a fault in the audio path, it is debugged against a tree
+  where `tts.py` has already moved.
 - **Task 3 MUST land before Task 5.** `adapter.py:301-320` checks that
   `frontend/dist/index.html` and `assets/` exist and refuses to start
   the platform if either is missing — non-retryably. Deleting
