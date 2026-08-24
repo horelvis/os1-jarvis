@@ -5,7 +5,7 @@ import threading
 from loguru import logger
 
 from .alert import make_handler
-from .cameras import CameraFleet, parse_cameras
+from .cameras import CameraFleet, parse_cameras, redact
 
 
 def check_requirements() -> bool:
@@ -54,4 +54,4 @@ def _supervise(ctx, fleet: CameraFleet) -> None:
         cameras = parse_cameras({"cameras": ctx.get_config("cameras", [])})
         fleet.start(cameras, make_handler(ctx))
     except Exception as exc:
-        logger.error(f"samantha-vision: cameras not started — {exc}")
+        logger.error(f"samantha-vision: cameras not started — {redact(exc)}")

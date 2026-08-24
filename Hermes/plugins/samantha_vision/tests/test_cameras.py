@@ -319,3 +319,45 @@ def test_a_malformed_entry_does_not_log_its_password():
         parse_cameras({"cameras": [{"url": "rtsp://admin:hunter2@10.0.0.1/sub"}]})
     joined = " ".join(r["message"] for r in records)
     assert "hunter2" not in joined, joined
+
+
+def test_redact_handles_a_password_containing_an_at_sign():
+    """ffmpeg splits the authority on the LAST `@`, so this is a real URL.
+
+    A pattern that stopped at the first one left the tail of the password
+    in the journal — and a partial redaction reads as a success.
+    """
+    assert (
+        redact("rtsp://admin:p@ssw0rd@192.168.1.5:554/sub")
+        == "rtsp://admin:***@192.168.1.5:554/sub"
+    )
+
+
+def test_redact_handles_an_empty_username():
+    assert redact("rtsp://:hunter2@192.168.1.5/sub") == "rtsp://:***@192.168.1.5/sub"
+
+
+def test_redact_does_not_run_across_two_urls_in_one_message():
+    """The greedy half must stay inside one URL, or it swallows the pair."""
+    assert (
+        redact("rtsp://admin:hunter2@h/sub and rtsp://admin:hunter3@h2/sub")
+        == "rtsp://admin:***@h/sub and rtsp://admin:***@h2/sub"
+    )
+
+
+def test_a_bare_url_under_the_key_does_not_log_its_password():
+    """`cameras: rtsp://…` — a shape an operator plausibly writes."""
+    with captured_logs() as records:
+        parse_cameras({"cameras": "rtsp://admin:hunter2@10.0.0.1/sub"})
+    joined = " ".join(r["message"] for r in records)
+    assert "hunter2" not in joined, joined
+    assert "admin:***@" in joined, joined
+
+
+def test_a_bare_url_as_a_list_entry_does_not_log_its_password():
+    """`- rtsp://…` instead of `- name: … / url: …`."""
+    with captured_logs() as records:
+        parse_cameras({"cameras": ["rtsp://admin:hunter2@10.0.0.1/sub"]})
+    joined = " ".join(r["message"] for r in records)
+    assert "hunter2" not in joined, joined
+    assert "admin:***@" in joined, joined

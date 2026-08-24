@@ -31,7 +31,18 @@ class Camera:
 # Measured 2026-08-24, the first time the plugin was pointed at the real
 # cameras: `fuera unreachable — [Errno 113] No route to host:
 # 'rtsp://admin:<the actual password>@192.168.100.142:554/…'`.
-_CREDENTIAL = re.compile(r"(?<=://)([^/\s:@]+):[^/\s@]*@")
+# The password runs to the LAST `@` of the authority, not the first, and
+# it is allowed to contain one: ffmpeg splits on the last, so
+# `rtsp://admin:p@ssw0rd@host/sub` is a URL an operator can plausibly
+# write. A class that excluded `@` stopped at the first one and left the
+# tail of the password in the journal — a partial redaction, which reads
+# as a success. The username may also be empty (`rtsp://:secret@host`),
+# so it is `*` and not `+`.
+#
+# `[^\s/]*` is what keeps the match inside ONE url: it cannot cross the
+# path separator or a space, so two URLs in one message are redacted
+# separately instead of being swallowed into a single match.
+_CREDENTIAL = re.compile(r"(?<=://)([^/\s:@]*):[^\s/]*@")
 
 
 def redact(text: str) -> str:
@@ -157,7 +168,9 @@ class CameraFleet:
             # Manifest failure mode #3: without the model no thread
             # starts and the plugin is inert. "He stopped noticing
             # people" has no other symptom, so it is said out loud.
-            logger.error(f"samantha-vision: no detector, no cameras watched — {exc}")
+            logger.error(
+                f"samantha-vision: no detector, no cameras watched — {redact(exc)}"
+            )
             return
 
         for camera in cameras:
@@ -243,14 +256,18 @@ class CameraFleet:
         try:
             seen = detector.detect(frame)
         except Exception as exc:
-            logger.debug(f"samantha-vision: {camera.name} detect failed — {exc}")
+            logger.debug(
+                f"samantha-vision: {camera.name} detect failed — {redact(exc)}"
+            )
             return
         if not seen:
             return
         try:
             on_detections(camera.name, seen)
         except Exception as exc:
-            logger.warning(f"samantha-vision: {camera.name} handler failed — {exc}")
+            logger.warning(
+                f"samantha-vision: {camera.name} handler failed — {redact(exc)}"
+            )
 
 
 def _default_detector():
