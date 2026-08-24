@@ -8,7 +8,7 @@ what comes out when she does.
 
 import pytest
 
-from samantha_widget.vision import (
+from Hermes.plugins.samantha_vision.vision import (
     WATCHED_CLASSES,
     Detection,
     _deduplicate,
@@ -126,7 +126,7 @@ def test_household_clutter_is_not_watched(missing: str) -> None:
 def test_the_same_thing_again_is_not_news() -> None:
     """Someone standing in the driveway is one event, not one every
     three seconds."""
-    from samantha_widget.vision import Watcher
+    from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
     assert watcher.worth_saying([person()], now=1000.0, hour=12)
@@ -134,7 +134,7 @@ def test_the_same_thing_again_is_not_news() -> None:
 
 
 def test_the_same_thing_much_later_is_news_again() -> None:
-    from samantha_widget.vision import ANTI_SPAM_SECONDS, Watcher
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
 
     watcher = Watcher()
     watcher.worth_saying([person()], now=1000.0, hour=12)
@@ -146,7 +146,7 @@ def test_the_same_thing_much_later_is_news_again() -> None:
 def test_a_different_thing_is_always_news() -> None:
     """Anti-spam is per label: a car arriving while somebody stands
     there is a separate fact."""
-    from samantha_widget.vision import Watcher
+    from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
     watcher.worth_saying([person()], now=1000.0, hour=12)
@@ -158,7 +158,7 @@ def test_a_different_thing_is_always_news() -> None:
 def test_a_person_at_night_beats_the_anti_spam() -> None:
     """The second time somebody is in the garden at 3am is MORE worth
     saying than the first."""
-    from samantha_widget.vision import Watcher
+    from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
     watcher.worth_saying([person()], now=1000.0, hour=3)
@@ -168,7 +168,7 @@ def test_a_person_at_night_beats_the_anti_spam() -> None:
 
 def test_a_car_at_night_does_not_beat_the_anti_spam() -> None:
     """Only people. A car parked in view would otherwise talk all night."""
-    from samantha_widget.vision import Watcher
+    from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
     car = Detection("coche", 0.9, 0.5, 0.5)
@@ -178,7 +178,7 @@ def test_a_car_at_night_does_not_beat_the_anti_spam() -> None:
 
 
 def test_quiet_hours_wrap_around_midnight() -> None:
-    from samantha_widget.vision import is_quiet_hours
+    from Hermes.plugins.samantha_vision.vision import is_quiet_hours
 
     assert is_quiet_hours(23) is True
     assert is_quiet_hours(3) is True
@@ -190,6 +190,6 @@ def test_quiet_hours_wrap_around_midnight() -> None:
 def test_the_threshold_matches_what_the_cameras_taught_barndoor() -> None:
     """0.45 was a guess; 0.7 is what a system running against these
     cameras settled on."""
-    from samantha_widget.vision import DEFAULT_THRESHOLD
+    from Hermes.plugins.samantha_vision.vision import DEFAULT_THRESHOLD
 
     assert DEFAULT_THRESHOLD == 0.7
