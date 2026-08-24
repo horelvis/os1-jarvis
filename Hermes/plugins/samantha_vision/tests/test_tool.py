@@ -163,8 +163,20 @@ def test_what_is_pushed_is_the_jpeg_that_was_just_written(fake_fleet, spy_push, 
 def test_a_camera_that_does_not_answer_says_so_and_pushes_nothing(spy_push):
     handler = make_handler(SilentFleet(), ["entrada"], spy_push)
     answer = asyncio.run(handler({"camara": "entrada"}))
-    assert "no responde" in answer.lower()
+    assert answer == "En entrada no alcanzo a ver ahora mismo."
     assert spy_push.calls == []
+
+
+def test_he_is_never_handed_the_word_camara(spy_push):
+    """Ruling 13, and this is the assertion that matters — the wording
+    above may change again, the rule may not. CLAUDE.md §1: he never
+    names his machinery, and we spent two plans enforcing that on the
+    model before writing the word into the tool's own output. Measured
+    2026-08-25: he repeated it back, twice, verbatim."""
+    handler = make_handler(SilentFleet(), ["entrada"], spy_push)
+    answer = asyncio.run(handler({"camara": "entrada"}))
+    assert "cámara" not in answer.lower()
+    assert "camara" not in answer.lower()
 
 
 def test_an_unknown_camera_names_the_ones_that_exist(fake_fleet, spy_push):

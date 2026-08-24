@@ -163,7 +163,31 @@ def make_handler(
             logger.warning(f"samantha-vision: {camera} grab failed — {redact(exc)}")
             frame = None
         if frame is None:
-            return f"La cámara de {camera} no responde."
+            # NOT "La cámara de {camera} no responde." (the brief's
+            # table), and Ruling 13 overrides that line alone. CLAUDE.md
+            # §1 says he never names his machinery — and then this
+            # sentence handed him the word. Measured 2026-08-25, twice:
+            # "…y la cámara de fuera no responde", "la cámara de fuera
+            # sin dar señales de vida". He was repeating us.
+            #
+            # The frame is deliberately the same "En {camara} …" as the
+            # other two, and both shapes the ruling offered were tried
+            # against the real names first:
+            #   "{camara} no responde"  — a bare name as the SUBJECT,
+            #     with no article. That is the exact shape the previous
+            #     plan's Ruling 14 measured him repairing by inventing a
+            #     place ("en fuera de casa" -> "en la entrada").
+            #   "De {camara} no me llega nada" — "de entrada" is a common
+            #     Spanish adverbial ("to begin with"), and one of this
+            #     box's two cameras is called `entrada`. The camera
+            #     disappears from the sentence entirely.
+            # Reusing the frame that is already in production is the one
+            # option with evidence behind it.
+            #
+            # No vocative either, for the same reason the other three
+            # have none: these are facts he paraphrases, not speech. He
+            # adds "señor" himself, every time.
+            return f"En {camera} no alcanzo a ver ahora mismo."
         await _show(frame, camera)
         phrase = describe(_detections(frame, camera))
         if phrase:
