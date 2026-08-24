@@ -27,3 +27,20 @@ def strip_rect(
     x = monitor_x + (monitor_w - width) // 2
     y = monitor_y + monitor_h - height - theme.BOTTOM_MARGIN
     return x, y, width, height
+
+
+def placement_is_wrong(
+    actual: tuple[int, int, int, int] | None,
+    wanted: tuple[int, int, int, int],
+) -> bool:
+    """Did the window manager put the strip somewhere other than asked?
+
+    `actual` is what was read back off the X connection, `wanted` is what
+    was asked for; both are (x, y, width, height) in root coordinates.
+
+    `None` — the geometry could not be read at all — is deliberately NOT
+    wrong. Unknown is not the same as misplaced, and a caller that
+    treated it as misplaced would re-place a window that may no longer
+    exist, forever.
+    """
+    return actual is not None and actual != wanted

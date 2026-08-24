@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -12,7 +14,14 @@ from gi.repository import Gdk, GdkX11, GLib, Gtk  # noqa: E402
 
 from . import theme  # noqa: E402
 from .ewmh import Ewmh  # noqa: E402
-from .geometry import strip_rect  # noqa: E402
+from .geometry import placement_is_wrong, strip_rect  # noqa: E402
+
+# How long to leave the window manager before checking it obeyed, and
+# how many times to insist. Three tries at 120 ms is a third of a
+# second: under a blink, and bounded so a WM that simply refuses the
+# geometry is reported rather than argued with forever.
+_VERIFY_MS = 120
+_VERIFY_TRIES = 3
 
 
 class StripWindow(Gtk.ApplicationWindow):
@@ -30,6 +39,8 @@ class StripWindow(Gtk.ApplicationWindow):
         self._xid: int | None = None
         # The strip at rest: what `resize_to` grows from and returns to.
         self._rect: tuple[int, int, int, int] | None = None
+        # The rectangle it is currently trying to occupy.
+        self._wanted: tuple[int, int, int, int] | None = None
 
         # Vertical, because the band of photos sits ON TOP of the wave
         # and pushes the window's top edge up. Horizontal until
@@ -83,29 +94,82 @@ class StripWindow(Gtk.ApplicationWindow):
         so GTK pins the WM size hints to the current natural size and a
         window manager that honours them would refuse the new geometry.
 
-        And then AGAIN on the next idle, which is not belt and braces.
-        Mutter constrains a move against the size it currently believes
-        the window to be, and that belief is one layout pass behind:
-        shrinking back from 900x480 to 900x96, the move to y=984 was
-        read as "put a 480-tall window at 984", which runs 384 px off
-        the bottom of a 1080 screen, so it was clamped to y=600 — and
-        the strip ended up floating in the middle of the desktop.
-        Measured 2026-08-24 with `xwininfo -name Samantha`. By the idle
-        the new size is in place and the identical call lands.
+        Then the SAME request a second time, and the reason is not the
+        one it is easy to assume. Mutter constrains a move against the
+        size it currently believes the window to be, and shrinking back
+        from 900x480 to 900x96 the move to y=984 was read as "put a
+        480-tall window at 984" — 384 px off the bottom of a 1080
+        screen — so it was clamped to y=600 and the strip ended up
+        floating in the middle of the desktop. Measured 2026-08-24 with
+        `xwininfo -name Samantha`.
+
+        What the repeat buys is ORDERING ON THE X CONNECTION, not GTK
+        layout. Both requests go down the one connection `ewmh.py`
+        holds, and mutter serves ConfigureRequests in arrival order, so
+        by the time it constrains the second it has necessarily applied
+        the size from the first. Writing this down because the first
+        version of this comment said "by the idle the new size is in
+        place", meaning GTK's layout — which is NOT what mutter
+        constrains against, and which the idle does not wait for anyway:
+        the frame clock is time-gated at priority 120 and an idle at
+        priority 200 routinely runs first. The fix was right and the
+        stated reason was wrong, which is exactly how the next person
+        deletes the right line.
+
+        And because "necessarily" is a claim about somebody else's
+        window manager, `_verify` reads the geometry back and says so if
+        it was not obeyed, instead of leaving the strip mispositioned
+        and silent until the next photo.
         """
         if self._ewmh is None or self._xid is None or self._rect is None:
             return
         x, y, w, h = self._rect
         extra = max(0, extra_height)
+        wanted = (x, y - extra, w, h + extra)
+        # What the strip is currently trying to be. A verify still in
+        # flight for an older size must not fight a newer one.
+        self._wanted = wanted
         self.set_default_size(w, h + extra)
-        self._place(x, y - extra, w, h + extra)
-        GLib.idle_add(self._place, x, y - extra, w, h + extra)
+        self._place(*wanted)
+        GLib.idle_add(self._settle, wanted)
 
     def _place(self, x: int, y: int, w: int, h: int) -> bool:
         if self._ewmh is None or self._xid is None:
             return False  # GLib.SOURCE_REMOVE
         self._ewmh.move_resize(self._xid, x, y, w, h)
         self._ewmh.flush()
+        return False  # GLib.SOURCE_REMOVE
+
+    def _settle(self, wanted: tuple[int, int, int, int]) -> bool:
+        if self._wanted != wanted:
+            return False  # GLib.SOURCE_REMOVE — a newer size won
+        self._place(*wanted)
+        GLib.timeout_add(_VERIFY_MS, self._verify, wanted, _VERIFY_TRIES)
+        return False  # GLib.SOURCE_REMOVE
+
+    def _verify(self, wanted: tuple[int, int, int, int], tries: int) -> bool:
+        """Read the geometry back, and re-place if it is not what was asked.
+
+        Nothing did this before, and that is how a clamped shrink became
+        invisible: the strip sat in the middle of the desktop until the
+        next photo happened to resize it. A window manager is not
+        obliged to obey; the least this can do is notice.
+        """
+        if self._ewmh is None or self._xid is None or self._wanted != wanted:
+            return False  # GLib.SOURCE_REMOVE
+        if not placement_is_wrong(self._ewmh.geometry(self._xid), wanted):
+            return False  # GLib.SOURCE_REMOVE
+        if tries <= 0:
+            # Loud, because the alternative is a strip in the middle of
+            # the screen and nothing anywhere saying why.
+            print(
+                f"la tira no quedó donde se pidió: {wanted}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return False  # GLib.SOURCE_REMOVE
+        self._place(*wanted)
+        GLib.timeout_add(_VERIFY_MS, self._verify, wanted, tries - 1)
         return False  # GLib.SOURCE_REMOVE
 
     def _install_css(self) -> None:
@@ -131,6 +195,7 @@ class StripWindow(Gtk.ApplicationWindow):
         self.set_default_size(w, h)
         self._xid = xid
         self._rect = (x, y, w, h)
+        self._wanted = (x, y, w, h)
 
         self._ewmh = Ewmh()
         # Two at a time. A third atom in one message is dropped silently

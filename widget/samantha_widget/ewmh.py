@@ -152,5 +152,60 @@ class Ewmh:
             ctypes.c_uint(h),
         )
 
+    def geometry(self, xid: int) -> tuple[int, int, int, int] | None:
+        """Where the window ACTUALLY is, in root coordinates. None if unknown.
+
+        `XGetGeometry` alone is not enough and the difference is silent:
+        mutter reparents the client into a frame, so the x and y it
+        returns are relative to that frame and read as 0,0 on a window
+        that is plainly at (510, 984). `XTranslateCoordinates` against
+        the root is what turns them into the numbers `xwininfo` prints,
+        which are the numbers anything here is compared against.
+
+        On a window that no longer exists this would reach Xlib's default
+        error handler, which prints and calls `exit()`. The caller is a
+        GLib timeout, and a GLib timeout cannot outlive the main loop,
+        which cannot outlive the window — so the window is alive whenever
+        this runs. Anything that calls it from somewhere else has to
+        think about that again.
+        """
+        root = ctypes.c_ulong()
+        x = ctypes.c_int()
+        y = ctypes.c_int()
+        w = ctypes.c_uint()
+        h = ctypes.c_uint()
+        border = ctypes.c_uint()
+        depth = ctypes.c_uint()
+        ok = self._x11.XGetGeometry(
+            ctypes.c_void_p(self._display),
+            ctypes.c_ulong(xid),
+            ctypes.byref(root),
+            ctypes.byref(x),
+            ctypes.byref(y),
+            ctypes.byref(w),
+            ctypes.byref(h),
+            ctypes.byref(border),
+            ctypes.byref(depth),
+        )
+        if not ok:
+            return None
+
+        abs_x = ctypes.c_int()
+        abs_y = ctypes.c_int()
+        child = ctypes.c_ulong()
+        ok = self._x11.XTranslateCoordinates(
+            ctypes.c_void_p(self._display),
+            ctypes.c_ulong(xid),
+            ctypes.c_ulong(self._root),
+            ctypes.c_int(0),
+            ctypes.c_int(0),
+            ctypes.byref(abs_x),
+            ctypes.byref(abs_y),
+            ctypes.byref(child),
+        )
+        if not ok:
+            return None
+        return (abs_x.value, abs_y.value, w.value, h.value)
+
     def flush(self) -> None:
         self._x11.XFlush(ctypes.c_void_p(self._display))

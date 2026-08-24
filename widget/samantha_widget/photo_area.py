@@ -45,6 +45,10 @@ class PhotoArea(Gtk.Widget):
         # Cached both ways: retrying a missing file every frame would
         # hammer the disk at 60 Hz for as long as the band is up.
         self._textures: dict[str, Gdk.Texture | None] = {}
+        # The height the window has actually been told about. Compared
+        # against, so a batch's second photo does not spend a second
+        # EWMH round-trip on a size that has not changed.
+        self._applied = 0
         self.set_size_request(-1, 0)
         self.set_vexpand(False)
 
@@ -60,10 +64,12 @@ class PhotoArea(Gtk.Widget):
     # ── what the gateway does to it ───────────────────────────────────
 
     def show_photo(self, path: str, camera: str) -> None:
-        if self.model.show(path, camera, time.monotonic()):
-            self._apply()
-        else:
-            self.queue_draw()
+        self.model.show(path, camera, time.monotonic())
+        # `_apply` decides whether the size actually changed. It cannot
+        # be left to the model's return value any more: the model does
+        # not know that a file failed to open, and the height depends on
+        # that (see `_wanted_height`).
+        self._apply()
 
     # ── what the user does to it ──────────────────────────────────────
 
@@ -86,15 +92,40 @@ class PhotoArea(Gtk.Widget):
             self._apply()
 
     def _on_tick(self) -> bool:
-        if self.model.tick(time.monotonic()):
-            self._apply()
+        # PyGObject reads a raised callback as SOURCE_REMOVE, so an
+        # exception in here does not cost one tick — it costs the fade
+        # forever, and the band stays up with the strip grown around it.
+        # `_apply` reaches all the way out to X through `resize_to`,
+        # which is a long way for nothing to go wrong.
+        try:
+            if self.model.tick(time.monotonic()):
+                self._apply()
+        except Exception as exc:
+            print(
+                f"la banda falló al desvanecerse: {exc!r}", file=sys.stderr, flush=True
+            )
         return True  # GLib.SOURCE_CONTINUE
 
+    def _wanted_height(self) -> int:
+        """How tall the band should be, given what can actually be drawn.
+
+        `PhotoModel.height` is the answer for photos that exist. A push
+        whose file has already gone would otherwise grow the strip by
+        114 px of nothing and hold it there for the full fifteen
+        seconds — the failure that is worse than not showing the photo,
+        because it is visible and says nothing.
+        """
+        if not self._loadable():
+            return 0
+        return self.model.height
+
     def _apply(self) -> None:
-        height = self.model.height
-        self.set_size_request(-1, height)
         self._forget_unused()
-        self._on_resize(height)
+        height = self._wanted_height()
+        self.set_size_request(-1, height)
+        if height != self._applied:
+            self._applied = height
+            self._on_resize(height)
         self.queue_draw()
 
     def _forget_unused(self) -> None:

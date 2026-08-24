@@ -12,7 +12,7 @@ working.
 """
 
 from samantha_widget import theme
-from samantha_widget.geometry import strip_rect
+from samantha_widget.geometry import placement_is_wrong, strip_rect
 
 
 def test_it_is_a_fixed_width_block_centred_horizontally() -> None:
@@ -66,3 +66,32 @@ def test_absurdly_small_screen_still_produces_a_positive_size() -> None:
 
     assert w > 0
     assert h > 0
+
+
+# ── the placement read-back ───────────────────────────────────────────
+#
+# The strip asks the window manager for a rectangle; the window manager
+# is free to give it another one, and did (2026-08-24: a shrink clamped
+# to y=600, leaving the strip floating in the middle of the desktop).
+# Nothing read the answer back. This is the decision that follows the
+# read, kept pure so it can be exercised without an X server.
+
+
+def test_the_geometry_it_asked_for_is_not_wrong():
+    assert placement_is_wrong((510, 984, 900, 96), (510, 984, 900, 96)) is False
+
+
+def test_a_clamped_position_is_wrong():
+    # The exact failure: the right size at the wrong y.
+    assert placement_is_wrong((510, 600, 900, 96), (510, 984, 900, 96)) is True
+
+
+def test_a_wrong_size_is_wrong_too():
+    assert placement_is_wrong((510, 984, 900, 210), (510, 984, 900, 96)) is True
+
+
+def test_a_geometry_that_could_not_be_read_is_not_wrong():
+    # None means the question could not be answered — the connection is
+    # gone, or the window is. Re-placing a window that may not exist
+    # buys nothing and would loop forever against a dead server.
+    assert placement_is_wrong(None, (510, 984, 900, 96)) is False
