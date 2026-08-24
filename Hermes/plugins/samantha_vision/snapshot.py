@@ -68,22 +68,32 @@ def prune(*, keep: int = 20, max_age_s: float = 3600.0, now: float) -> int:
     the same second (or the same instant, on a fast filesystem) tie on
     mtime, and the filename — which carries the same timestamp — is the
     stable tiebreak that makes "keeps the newest" actually true.
+
+    Listing (`glob`) failing is fatal to the whole pass — there is nothing
+    to prune against. One file's `stat()` failing during that listing is
+    NOT: a race with another writer, a permissions glitch, a dangling
+    symlink must cost that one file, not silently disable pruning for
+    every other file on every subsequent write.
     """
     try:
-        files = sorted(
-            snapshot_dir().glob("*.jpg"),
-            key=lambda p: (p.stat().st_mtime, p.name),
-            reverse=True,
-        )
+        candidates = list(snapshot_dir().glob("*.jpg"))
     except OSError as exc:
         logger.warning(f"samantha-vision: cannot list snapshots: {exc}")
         return 0
 
+    entries: list[tuple[float, str, Path]] = []
+    for path in candidates:
+        try:
+            entries.append((path.stat().st_mtime, path.name, path))
+        except OSError as exc:
+            logger.warning(f"samantha-vision: cannot stat {path.name}: {exc}")
+    entries.sort(reverse=True)
+
     deleted = 0
-    for index, path in enumerate(files):
+    for index, (mtime, _name, path) in enumerate(entries):
         try:
             too_many = index >= keep
-            too_old = (now - path.stat().st_mtime) > max_age_s
+            too_old = (now - mtime) > max_age_s
             if too_many or too_old:
                 path.unlink()
                 deleted += 1

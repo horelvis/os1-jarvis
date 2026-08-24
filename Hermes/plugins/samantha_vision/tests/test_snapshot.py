@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
 
@@ -54,3 +57,29 @@ def test_prune_drops_anything_older_than_the_window(tmp_path, monkeypatch):
     deleted = snapshot.prune(keep=50, max_age_s=10.0, now=5000.0)
     assert deleted == 1
     assert list(tmp_path.glob("*.jpg")) == []
+
+
+def test_prune_skips_a_file_whose_stat_fails_but_prunes_the_rest(tmp_path, monkeypatch):
+    # Reproduces a reviewer-found regression: one file's stat() raising
+    # during the initial listing must not abort the whole pass and leave
+    # every other file un-pruned.
+    monkeypatch.setattr(snapshot, "_ROOT", tmp_path)
+    good = snapshot.write_jpeg(_frame(), "entrada", now=1000.0)
+    bad = snapshot.write_jpeg(_frame(), "salida", now=1001.0)
+
+    real_stat = Path.stat
+
+    def flaky_stat(self, *args, **kwargs):
+        if self == bad:
+            raise FileNotFoundError("vanished")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+
+    deleted = snapshot.prune(keep=0, max_age_s=1e9, now=2000.0)
+
+    assert deleted == 1
+    # os.path.exists, not Path.exists: the monkeypatch above is still in
+    # effect and Path.exists() calls Path.stat() internally.
+    assert not os.path.exists(good)
+    assert os.path.exists(bad)
