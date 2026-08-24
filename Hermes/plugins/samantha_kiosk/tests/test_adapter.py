@@ -593,17 +593,67 @@ def spool(tmp_path, monkeypatch):
 
 @pytest.fixture
 def adapter(tmp_path):
-    """The adapter with no socket attached: _push returns False."""
+    """The adapter with no socket attached: _push returns False.
+
+    Good for proving push_photo is False when nobody is listening, but
+    USELESS for proving a bad path was rejected: _push(...) returns False
+    the instant it sees `_ws is None`, before push_photo's own validation
+    ever runs — so a rejection test built on this fixture alone passes
+    whether or not the validation code exists. Use `connected_adapter`
+    for anything that must prove the validation itself did the rejecting.
+    """
     a = KioskAdapter(_cfg(tmp_path))
     a._ws = None
     return a
 
 
+class _RecordingWs:
+    """A stand-in for aiohttp's WebSocketResponse that records frames sent.
+
+    `_push` only checks `ws is None or ws.closed`, so this needs nothing
+    else to look "connected" to it. What it buys: `sent` makes it possible
+    to tell "push_photo's validation rejected this" apart from "nothing
+    was listening" — both return False from push_photo, but only the first
+    leaves `sent` empty when the path SHOULD have been rejected, and only
+    the second leaves it empty when the path was fine. A test asserting
+    `push_photo(...) is False` alone cannot make that distinction; a test
+    asserting `sent == []` on a definitely-open socket can.
+    """
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.sent: list[str] = []
+
+    async def send_str(self, payload: str) -> None:
+        self.sent.append(payload)
+
+
+@pytest.fixture
+def connected_adapter(tmp_path):
+    """The adapter with a fake, definitely-open socket attached.
+
+    Recovered from a review finding: the `adapter` fixture's `_ws = None`
+    made `test_push_photo_refuses_a_path_outside_the_snapshot_directory`
+    and its symlink sibling pass regardless of whether the path validation
+    in push_photo ran at all — `_push` returns False on a None socket
+    before the frame content is ever inspected. This fixture's socket is
+    "open" (`closed = False`), so if validation ever let a bad path
+    through, `_RecordingWs.sent` would show it.
+    """
+    a = KioskAdapter(_cfg(tmp_path))
+    a._ws = _RecordingWs()
+    return a
+
+
 @pytest.mark.asyncio
 async def test_push_photo_refuses_a_path_outside_the_snapshot_directory(
-    adapter,
+    connected_adapter,
 ):
-    assert await adapter.push_photo("/etc/shadow", "entrada") is False
+    ok = await connected_adapter.push_photo("/etc/shadow", "entrada")
+    assert ok is False
+    # The socket is open; an empty `sent` is what proves validation refused
+    # the path BEFORE _push was ever called — not that nobody was listening.
+    assert connected_adapter._ws.sent == []
 
 
 @pytest.mark.asyncio
@@ -615,7 +665,7 @@ async def test_push_photo_with_no_strip_connected_is_false_not_an_error(adapter,
 
 @pytest.mark.asyncio
 async def test_push_photo_refuses_a_symlink_that_escapes_the_snapshot_directory(
-    adapter, spool, tmp_path
+    connected_adapter, spool, tmp_path
 ):
     # A symlink INSIDE the spool that resolves to a file OUTSIDE it must be
     # refused too — this is what proves the check follows realpath rather
@@ -625,4 +675,28 @@ async def test_push_photo_refuses_a_symlink_that_escapes_the_snapshot_directory(
     escape = spool.parent / "escape.jpg"
     escape.symlink_to(outside)
 
-    assert await adapter.push_photo(str(escape), "entrada") is False
+    ok = await connected_adapter.push_photo(str(escape), "entrada")
+    assert ok is False
+    assert connected_adapter._ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_push_photo_refuses_a_symlink_loop_rather_than_raising(
+    connected_adapter, tmp_path, monkeypatch
+):
+    # Path.resolve(strict=True) raises RuntimeError (not OSError) on a
+    # symlink cycle on CPython. A cycle reachable inside the spool is our
+    # own bug, not an attacker's input, but push_photo must never raise —
+    # the gateway owns the cameras, and an exception here reaches it.
+    from Hermes.plugins.samantha_vision import snapshot
+
+    monkeypatch.setattr(snapshot, "_ROOT", tmp_path)
+    loop_a = tmp_path / "loop_a"
+    loop_b = tmp_path / "loop_b"
+    loop_a.symlink_to(loop_b)
+    loop_b.symlink_to(loop_a)
+
+    ok = await connected_adapter.push_photo(str(loop_a), "entrada")
+
+    assert ok is False
+    assert connected_adapter._ws.sent == []

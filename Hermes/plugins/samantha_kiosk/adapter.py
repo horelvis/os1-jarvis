@@ -466,7 +466,14 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             resolved = Path(path).resolve(strict=True)
             resolved.relative_to(snapshot_dir().resolve())
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
+            # OSError: missing file, permission, or any other filesystem
+            # failure surfaced by resolve(strict=True). ValueError: resolved
+            # lands outside snapshot_dir(), from relative_to(). RuntimeError:
+            # a symlink cycle (`resolve(strict=True)` raises this, not
+            # OSError, on CPython) — reachable through our own bug in the
+            # spool, not an attacker, but this method must never raise
+            # regardless of cause.
             logger.warning(
                 f"samantha-kiosk: refusing photo outside the spool: {path!r}"
             )
