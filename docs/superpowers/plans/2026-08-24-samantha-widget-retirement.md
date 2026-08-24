@@ -162,6 +162,20 @@ PortAudio and no amount of widget debugging will change that.
 
 - [ ] **Step 3: Start him with the gateway up, and talk to him**
 
+> **Do this first, or Step 3 fails with status 203.** Measured
+> 2026-08-24: the INSTALLED `~/.config/systemd/user/samantha-widget.service`
+> still points its ExecStart at `.claude/worktrees/widget-gtk4-spec/widget/.venv/`,
+> a worktree that no longer exists. The repo's copy is correct.
+>
+> ```bash
+> cp systemd/samantha-widget.service ~/.config/systemd/user/
+> systemctl --user daemon-reload
+> ```
+>
+> Also note: `VAR=x systemctl --user restart <unit>` does NOT pass VAR to
+> the service. To run him with an environment switch, run him by hand —
+> see the form in Task 2's notes.
+
 ```bash
 systemctl --user status samantha-hermes.service   # must be running
 systemctl --user restart samantha-widget.service
@@ -821,7 +835,28 @@ corrections, dated and left visible rather than silently rewritten:
 §8's line "**Deleting anything.** All of it is plan 3." can now say
 plan 3 landed, with this plan's filename.
 
-- [ ] **Step 7: Check every internal link still resolves**
+- [ ] **Step 7: Sweep the stale references that Tasks 2 and 3 left behind**
+
+Found during execution (2026-08-24) by the task reviews and the
+whole-branch review. Each names a path that no longer exists:
+
+| File | What is stale |
+|---|---|
+| `widget/README.md:48,52` | documents `PYTHONPATH=<repo>/backend:<repo>` and names `samantha.tts`. The canonical run command names a module path that is gone. |
+| `Hermes/plugins/samantha_voice/bridge.py:21` | `` `samantha.tts.stream` `` in a comment |
+| `Hermes/plugins/samantha_voice/provider.py:88,333` | same |
+| `Hermes/plugins/samantha_voice/tests/test_provider.py:493` | same |
+| `widget/samantha_widget/audio.py:4` | same |
+| `docs/running-real-mode.md:333,403` | tells the reader to export `SAMANTHA_KIOSK_STATIC_ROOT`, which the adapter no longer reads |
+| `systemd/samantha-hermes.service` | the `WorkingDirectory` comment justifies the directive by the static-root check that Task 3 deleted. **Keep the directive** — it is still needed — and fix only the comment. |
+
+```bash
+grep -rn 'samantha\.tts\|SAMANTHA_KIOSK_STATIC_ROOT\|backend:' \
+  --include='*.py' --include='*.md' --include='*.service' \
+  widget/ Hermes/ docs/ systemd/ | grep -v '.superpowers'
+```
+
+- [ ] **Step 8: Check every internal link still resolves**
 
 ```bash
 cd /home/nexus/git/os1-samantha
