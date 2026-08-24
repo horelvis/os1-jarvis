@@ -1,6 +1,16 @@
 # samantha-vision: the photo on demand
 
-> **Status:** design, not description. Nothing in this document is built.
+> **Status:** shipped 2026-08-25, and running. It was written as a design
+> with nothing built, and that header is kept below the line; what is
+> here now describes live code, with two overrides taken during
+> execution. **The tool lives in a toolset called `camaras`, not
+> `vision`** — §4.3 defers to the plugin spec's §6.2, which said
+> `vision`, and that name is Hermes' own, carrying `vision_analyze`, an
+> image tool this text-only box cannot serve. **The no-answer sentence
+> lost the word "cámara"** — our own string had handed him a word
+> CLAUDE.md §1 forbids him to say. CLAUDE.md §12 (2026-08-25, two
+> entries) and PROGRESS.md carry what it cost.
+>
 > Its predecessor, `2026-08-24-samantha-vision-plugin-design.md`, shipped
 > on 2026-08-24 and IS running; where this file refers to the watcher,
 > the cameras or the alert, it is describing live code.

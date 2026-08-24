@@ -50,7 +50,9 @@ can act on it. Not a window you open. Something that is there.
 - **Vision:** YOLOv9 over onnxruntime against the house's RTSP cameras,
   borrowed from BarnDoor. Since 2026-08-24 it runs **inside the
   gateway**, as the plugin `samantha_vision` — one thread per named
-  camera. The widget no longer opens a camera.
+  camera. The widget no longer opens a camera. Since 2026-08-25 he can
+  also be **asked** (`mirar`), and the still he takes appears above the
+  strip and nowhere else (§12).
 - **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
   (§2.7) still exists in `backend/` but the gateway path never uses it.
 - **Language:** Spanish (Spain) — every user-facing string, prompt and
@@ -259,6 +261,10 @@ presence but an application.
 - **A strip is not a window.** It has no title bar, no focus, nothing to
   click. That is the product principle of §1.5 made literal, and no
   browser can be made to look like it without fighting the browser.
+  (One exception since 2026-08-25: a photo he was asked for answers a
+  press, to enlarge or dismiss it. Only the picture itself does, and
+  only while it is up — a few seconds, and then there is nothing to
+  click again.)
 - **Native drawing.** GSK composites on the GPU. The wave animates on
   the frame clock, at no measurable cost.
 - **One process.** The strip, the VAD, transcription and playback are
@@ -587,6 +593,8 @@ os1-samantha/
 │   │   ├── audio.py        ← PortAudio in and out, blocking, our thread
 │   │   ├── gateway.py      ← the WebSocket to Hermes
 │   │   ├── turn.py         ← the state machine of one turn
+│   │   ├── photo.py        ← the band as pure state: size, batch, fade
+│   │   ├── photo_area.py   ← the band drawn, and the click on it
 │   │   └── fake_mic.py     ← speak INTO him, on a box with no microphone
 │   ├── tools/              ← probes: render_wave, probe_gateway, probe_agentic
 │   └── tests/
@@ -598,8 +606,8 @@ os1-samantha/
 │   └── plugins/
 │       ├── samantha_kiosk/  ← the surface he speaks through
 │       ├── samantha_voice/  ← CosyVoice, from inside the gateway
-│       └── samantha_vision/ ← the cameras: YOLO, the quiet rules,
-│                              the alert. Its own README.
+│       └── samantha_vision/ ← the cameras: YOLO, the quiet rules, the
+│                              alert, and `mirar`. Its own README.
 │
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from
@@ -641,10 +649,20 @@ the LLM local on this box at 57 tok/s.
   this box. Everything downstream of it is proved via
   `SAMANTHA_WIDGET_FAKE_MIC`. This is the last task of widget plan 2 and
   it needs hardware, not code.
-- **Nobody can ask him what he sees.** Still true. The cameras moved
-  into the gateway on 2026-08-24, which is where a tool can live, but
-  they still only knock: `samantha_vision` registers no tool. `mirar`
-  and `revisar` — and the detections table they read — are plan 2.
+- **He can be asked to look — and that is the whole of what "asking"
+  means.** Since 2026-08-25 the `mirar` tool answers "enséñame la
+  entrada" with a sentence, and the photo appears above the strip for
+  fifteen seconds. He does not see that photo: the model is text-only
+  and is told only what YOLO labelled, so any visual detail beyond
+  those eight labels is invented — and measured live, he invents it
+  ("puerta cerrada, el porche vacío" against a tool that said only
+  "no hay nadie"). He also calls `mirar` with **no** camera 5 times out
+  of 5, even when one was named, so a question about one camera comes
+  back as a survey of all of them.
+- **"Who came this morning" still has no answer.** There is no
+  detections table and no `revisar`; they are plan 2 of the vision
+  spec. Nor is there live video: it was considered and dropped (a
+  second decoder, continuous bandwidth, and a window that stays).
 - **Plan 3 is unwritten:** removing the kiosk, `backend/` and
   `frontend/`. Deliberately parked until the widget convinces.
 - **The Hermes config is git-ignored**, so `tts:` must be re-applied by
@@ -669,7 +687,9 @@ by the widget — the LLM, TTS and Hermes work carried straight over.
 - **2026-08-23** — vision: the cameras speak ✅
 - **2026-08-23** — the LLM comes home: Qwen3.8-27B local, 57 tok/s ✅
 - **2026-08-24** — vision moves into the gateway: the `samantha_vision`
-  plugin, cameras plural and named ✅ (asking him what he sees: plan 2)
+  plugin, cameras plural and named ✅
+- **2026-08-25** — the photo on demand: `mirar`, and a band above the
+  strip that grows for it ✅ (the detections table: plan 2)
 
 ---
 
@@ -898,13 +918,16 @@ If you encounter:
 |---|---|
 | The process: threads and wiring | `widget/samantha_widget/__main__.py` |
 | One turn, as a state machine | `widget/samantha_widget/turn.py` |
-| The window, borderless and above | `widget/samantha_widget/{window,ewmh,geometry}.py` |
+| The window: borderless, above, and how it grows | `widget/samantha_widget/{window,ewmh,geometry}.py` |
+| The photo band (drawing / pure model) | `widget/samantha_widget/{photo_area,photo}.py` |
 | The wave (drawing / pure model) | `widget/samantha_widget/{wave,wave_model,bars_model}.py` |
 | Colour, and the shadow to kill | `widget/samantha_widget/theme.py` |
 | Listening: VAD and transcription | `widget/samantha_widget/{vad,stt}.py` |
 | Speaking: clauses and playback | `widget/samantha_widget/{speech,audio}.py` |
 | The link to the brain | `widget/samantha_widget/gateway.py` |
 | Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
+| Being asked to look, and the JPEG it leaves | `Hermes/plugins/samantha_vision/{tool,snapshot}.py` |
+| The `photo` frame, and the path it refuses | `Hermes/plugins/samantha_kiosk/{protocol,adapter}.py` |
 | A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
 | The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
 | Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
@@ -930,6 +953,7 @@ If you encounter:
 | **openbox** | The minimal X11 window manager the kiosk used. Gone with it; the desktop is GNOME. |
 | **OS1 / cinta** | The Three.js 3D ribbon loader from the film, attributed to Siyoung Park (MIT). In `frontend/`, unused. |
 | **The wave / línea** | The line that represents him on the strip, drawn in GSK. Four states: idle, listening, thinking, speaking. |
+| **The band / la banda** | The strip's second half, above the wave and zero pixels tall until a photo arrives. It grows the window rather than opening one. |
 | **Onboarding / primer encuentro** | The first-run flow: boot → calibration → voiceprint → greeting → 6 questions → generating → welcome |
 | **The 6 questions** | Personality calibration questions asked once |
 | **Voiceprint / huella de voz** | User's voice embedding stored on first run |
@@ -960,6 +984,105 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-25 — The photo reaches the strip and nothing else
+
+**Decision:** when he is asked to look, the model's answer is **words**
+and travels wherever the turn travels; the **picture** travels on a
+separate channel, from the vision plugin to the strip, over the loopback
+WebSocket those two processes already share. No adapter other than the
+kiosk ever sees it.
+
+**`MEDIA:` was the first design, and it fitted.** A tool result
+containing `MEDIA:/path.jpg` is turned into a native attachment by the
+**base** platform adapter — `extract_media()` in
+`gateway/platforms/base.py`, described there as the single source of
+truth for every extractor that turns response text into attachments, with
+`stream_consumer.py` stripping the tag before the text is shown. It is
+machinery every adapter inherits. One mechanism, both surfaces, nothing
+to write.
+
+**It was rejected because it is a *platform* convention, and that is the
+whole of its purpose:** any adapter can render it. A tool that emits one
+has no say in where its turn is delivered, so a picture of the inside of
+the house would leave this box the first time a conversation was routed
+to Telegram. The property "images never leave here" would then hold
+because the platforms happen to be configured a certain way — and **a
+privacy property held by convention is not held**. Config drifts, a
+platform gets enabled, and nothing fails loudly.
+
+Two paths, therefore, and the guarantee becomes structural rather than
+conventional: not "we configured the platforms correctly" but "there is
+no path by which an image reaches a third party". This is the same shape
+as §1's "he is told, never made to recite" — Hermes' injection API only
+accepts a *user* message, so reciting is not something we avoid, it is
+something the API cannot express.
+
+**The destination is a constant, not a config key.** `KIOSK_PLATFORM`
+in `samantha_vision/__init__.py` is hard-coded for exactly this reason: a
+setting naming the platform would put the rejected decision back, one
+edit away.
+
+**Cost, accepted explicitly:** the strip and Telegram no longer share a
+mechanism. Two paths to maintain instead of one, and any future surface
+that wants a picture has to be given one deliberately. That separation
+*is* the feature, not an accident of it.
+
+**A consequence worth stating, because it surprises people:** the
+unprompted alert still carries **no** photo, anywhere. The picture is a
+side effect of the `mirar` handler and an alert does not call `mirar`.
+An image that appears unbidden over whatever you were doing is a larger
+thing than one you asked for. If that is ever wanted, the mechanism is
+already there.
+
+### 2026-08-25 — The kiosk contract gains its first new frame
+
+**Decision:** the `samantha_kiosk` protocol gains
+`{"type": "photo", "path": …, "camera": …}`, **server to client only**.
+`decode_client` is untouched. It is the first change to that contract
+since it was written on 2026-08-22.
+
+**Why the strip needed a frame when no other platform did.** Every other
+adapter Hermes ships renders whatever the turn carries, because a chat
+platform *is* a renderer: text goes in a bubble, an attachment goes
+beside it. The strip is not a chat window. It has no message list to put
+an attachment in, and what has to happen is that a window on somebody's
+desktop **changes shape** — grows from 900×96 to 900×210, to 900×480 on
+a click, and back. Nothing expressible inside a turn can say that. The
+one surface that is not a platform is the one that needs a frame of its
+own.
+
+**It cost a fix in the strip first.** `decode_server` raised
+`ProtocolError` on any type outside its set, so the first unknown frame
+killed the turn carrying it. The gateway and the widget are versioned
+separately and always will be; the strip now drops what it does not
+recognise and handles what it does.
+
+**The path is validated before it goes on the wire**, against the
+snapshot directory, in the adapter. The socket is an unauthenticated
+local listener and the strip opens whatever it is handed, so that check
+is the trust boundary. A strip that is not connected is not an error: the
+frame is dropped and the spoken answer is unaffected.
+
+**What it cost beyond the code:** the kiosk's `platform_hint` said there
+was no screen, and until that day it had been true. Measured on the live
+gateway in the window where the photo was already being pushed and
+nothing yet drew it, he declined correctly and for the wrong reason —
+"sigo sin poder enseñarle nada en una pantalla, señor", once offering to
+open Hermes Desktop instead. The hint therefore had to move in the same
+change as the drawing, and it now says what he can show (one camera
+still, briefly, and nothing else), that he need not announce it, and that
+he does not see it himself. Remember §7: a hint reaches an existing
+session only after `/new` and `/approve`.
+
+**Deferred, deliberately:** the band is as wide as the strip and mostly
+transparent, so while a photo is up it swallows pointer events over that
+much desktop — 900×210, or 900×480 enlarged, for fifteen seconds. The
+honest fix is `XShapeCombineRectangles` through the ctypes handle
+(`Gdk.Surface.set_input_region` wants a `cairo.Region`, and Cairo is the
+trap this machine is built around), which is a new X mechanism in the
+file whose EWMH work cost this project days. The risk of the fix exceeds
+the harm this week.
 
 ### 2026-08-24 — He stops repeating himself, and the password leaves the URL
 

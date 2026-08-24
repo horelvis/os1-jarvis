@@ -100,6 +100,48 @@ Without it the service dies on every start with `No module named
 samantha_widget`, while running it by hand from this directory works
 fine, because then the current directory is on sys.path.
 
+## The strip grows for a photo
+
+Since 2026-08-25 the strip is not always the same size. When he is asked
+to look at a camera, the gateway pushes a `photo` frame down the
+WebSocket that was already there, and a band appears **above** the wave
+with the picture in it:
+
+| | |
+|---|---|
+| At rest | `900x96` |
+| A photo arrives | `900x210` — a 16:9 thumbnail, centred |
+| Click the picture | `900x480`, and the fade timer starts again |
+| Click it again | gone |
+| Left alone | gone after 15 s |
+
+Several photos at once — asking about the house looks at every camera —
+are laid out left to right in one row, four at most, and the strip grows
+once rather than wider.
+
+**Only the picture answers a press.** The band is as wide as the strip
+and almost all of it is transparent, so a press is hit-tested against the
+tiles; a click on the empty air beside the photo does nothing, the same
+as a click on the wave. **Known, and deliberately not fixed:** while a
+photo is up, that transparent band still swallows pointer events over the
+desktop underneath it — for those fifteen seconds, clicks beside the
+picture do not reach whatever is behind. The honest fix is an X input
+region set by hand, and it was judged riskier than the defect.
+
+**The growth is upward and it is not GTK's.** The strip's bottom edge is
+already flush against the screen, so letting GTK resize the toplevel puts
+the extra height off the bottom of the display. `window.resize_to` moves
+the top edge up by exactly as much as the window grew, through the same
+EWMH placement call `_on_map` uses, and then reads the geometry back to
+check the window manager obeyed — mutter constrains a move against the
+size it still believes the window to be, which once left the strip
+floating in the middle of the desktop after a shrink.
+
+The JPEG itself is written by the gateway, in
+`Hermes/plugins/samantha_vision/`; the strip is only ever handed a path
+and opens it. To see all of this without a live turn — and without a
+camera — point `SAMANTHA_WIDGET_PHOTO` at one or more image files.
+
 ## Test
 
     .venv/bin/python -m pytest -v

@@ -1,5 +1,131 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-25 — La foto a demanda: se le puede preguntar, y la tira crece ✅
+
+Le dices «enséñame la entrada» y la foto aparece sobre la tira quince
+segundos; un clic la pone a tamaño nativo y reinicia el reloj; se va
+sola. Es la primera vez que la cámara responde en lugar de solo llamar a
+la puerta.
+
+**La decisión que sostiene todo lo demás:** lo que dice el modelo son
+**palabras**, y viajan a donde viaje el turno —hoy la tira, y cualquier
+plataforma que se configure el día que se configure—. La **imagen** viaja
+por un canal aparte, del plugin a la tira,
+por el WebSocket de loopback que esos dos procesos ya compartían. Ningún
+otro adaptador la ve nunca. El convenio `MEDIA:` de Hermes encajaba y se
+descartó justo por lo que es: un convenio **de plataforma**, pensado para
+que cualquier adaptador lo pinte. Una propiedad de privacidad sostenida
+por convenio no está sostenida.
+
+**Verificado en vivo**, con la casa real y el gateway de siempre: el
+fotograma de la cámara —gris, con la marca de hora quemada— encima de la
+onda, la tira transparente alrededor. Medido: `900x210` en `510,870` con
+la miniatura, `900x480` al hacer clic, y vuelta exacta a `900x96` en
+`510,984` tanto por el segundo clic como por el desvanecido, con
+`_NET_WM_STATE_ABOVE/STICKY/SKIP_*` intactos todo el rato.
+
+**Changed files:** `Hermes/plugins/samantha_vision/` — `snapshot.py` y
+`tool.py` (nuevos), `cameras.py` (`CameraFleet.grab`), `__init__.py` (el
+registro del tool y `push_photo`), `plugin.yaml` (pillow), `README.md`,
+`tests/`. `Hermes/plugins/samantha_kiosk/` — `protocol.py` (el frame
+`photo`), `adapter.py` (`push_photo` y la validación de la ruta),
+`__init__.py` (el `platform_hint`), `tests/`.
+`Hermes/samantha-config.yaml` (el toolset `camaras`),
+`Hermes/setup-runtime.sh` (pillow).
+`widget/samantha_widget/` — `photo.py` y `photo_area.py` (nuevos),
+`window.py` (la tira crece hacia arriba), `ewmh.py` (`geometry()`),
+`geometry.py` (`placement_is_wrong`), `gateway.py` (el frame `photo`, y
+un tipo desconocido deja de ser un error), `__main__.py`
+(`SAMANTHA_WIDGET_PHOTO`), `README.md`, `tests/`. `CLAUDE.md` (§0, §4,
+§9 y dos entradas del §12), la cabecera de estado del diseño de la
+instantánea, y esta bitácora.
+
+**Tests:** 140 del widget (eran 110), 130 del plugin de visión (eran 83)
+y 45 del kiosko, todos en verde. Ninguno necesita cámara, GPU ni red: la
+foto se prueba con un array sintético, el frame con cadenas, y el reloj
+del desvanecido se inyecta. Cada tarea aplicó mutaciones y las vio en
+rojo contra el test que las guarda; la revisión reprodujo las suyas.
+
+**Notas:**
+
+- **Llama a `mirar` sin argumento, 5 de 5**, aunque el usuario haya
+  nombrado la cámara. Es decir: una pregunta sobre una cámara se
+  responde con un repaso de todas. Se probó a deletrearlo en la
+  descripción del esquema («omitir SOLO si no se ha nombrado ninguna»):
+  3 medidas más, sin cambio, y se revirtió. Una edición de prompt que no
+  funciona es ruido en el fichero; y a dónde llega el resultado del tool
+  es una cuestión de diseño, no de redacción.
+- **Nuestra propia frase le regaló la palabra «cámara»**, que el §1 de
+  CLAUDE.md le prohíbe decir. Nosotros escribimos `La cámara de {camara}
+  no responde.` y él lo repitió: «…y la cámara de fuera no responde». No
+  se puede culpar al modelo de repetir una frase que le hemos escrito
+  nosotros. Ahora dice `En {camara} no alcanzo a ver ahora mismo.` —el
+  mismo molde que las otras dos, que es el único con evidencia detrás.
+- **`vision` ya estaba cogido.** Es un toolset **propio de Hermes** y
+  lleva `vision_analyze`, análisis de imágenes que esta caja no puede
+  servir: el modelo de la tira es Qwen3.8-27B y no mira imágenes.
+  Listarlo para llegar a `mirar` le ofrecía además esa otra herramienta,
+  que es exactamente lo que `check_fn` existe para evitar, un nivel más
+  arriba. El tool vive en un toolset nuestro, `camaras`.
+- **Se inventa detalle visual que no puede ver.** «Puerta cerrada, el
+  porche vacío», contra un tool que solo había dicho «En la entrada no
+  hay nadie». Es de texto y nunca ve el JPEG: todo lo que añada más allá
+  de las ocho etiquetas de YOLO es inventado. No se arregla en la capa
+  del tool —la frase ya es mínima—; queda en manos de quien decida la
+  personalidad.
+- **Destroza un nombre pelado:** `fuera` salió como **«Fuora»**, porque
+  «En fuera no alcanzo a ver» no es castellano natural y él lo repara.
+  Arreglarlo de verdad es dar a cada cámara una forma hablada en la
+  config, que es un cambio de esquema y una decisión sobre cómo se
+  llaman los sitios de esta casa. Sin hacer, a propósito.
+- **Le dijo al usuario que no tenía pantalla mientras se le empujaba la
+  foto:** «Sigo sin poder enseñarle nada en una pantalla, señor — aquí
+  solo hay voz», y una vez sugirió abrir Hermes Desktop en su lugar. Era
+  cierto hasta que la banda existió. El `platform_hint` del kiosko se
+  corrigió **en el mismo cambio** que le dio la pantalla; enviar una
+  pantalla diciéndole que no la hay es justo el fallo de «la
+  documentación describe código que no existe» que este proyecto lleva
+  cinco veces cometiendo. Recuérdese el §7: un hint solo alcanza a una
+  sesión viva tras `/new` y `/approve`.
+- **Los handlers async de un plugin no corren en el bucle del gateway.**
+  Hermes los puentea con `_run_async`, que dentro de un bucle en marcha
+  ejecuta la corrutina en un **hilo desechable con bucle propio**. La
+  decisión (async + `to_thread`) sigue siendo la buena y es barata, pero
+  su razón declarada —«bloquear dos segundos el bucle pararía todos los
+  turnos de la casa»— era falsa. Se anota porque una regla con la razón
+  equivocada la cita después alguien que se cree la razón.
+- **La tira crece hacia arriba, y el reintento de colocación funciona
+  por el ORDEN EN LA CONEXIÓN X**, no porque GTK haya maquetado en el
+  idle. Las dos peticiones bajan por la misma conexión y mutter atiende
+  los ConfigureRequest en orden de llegada, así que cuando restringe la
+  segunda ya ha aplicado el tamaño de la primera. La primera versión del
+  comentario decía «en el idle el tamaño nuevo ya está puesto», que es
+  maquetación de GTK —que no es contra lo que mutter restringe, y que el
+  idle ni siquiera espera: el frame clock va a prioridad 120 y sujeto al
+  reloj, y el idle, a 200, se cuela antes con frecuencia—. El arreglo era correcto y la razón escrita no; así es
+  exactamente como el siguiente borra la línea buena.
+- **Dos defectos que solo aparecieron ejecutándolo**, los dos ya
+  arreglados: al encoger, la tira se quedaba flotando en `y=600` —mutter
+  restringe el movimiento contra el tamaño que aún cree que tiene—, y
+  una pulsación sobre el aire transparente de la banda ampliaba la foto.
+  Ahora hay test de impacto real y se relee la geometría para comprobar
+  que el gestor de ventanas obedeció.
+- **Lo que sigue sin hacerse, a propósito:** la banda transparente se
+  traga los clics del escritorio los segundos que la foto está puesta
+  —900x210, o 900x480 ampliada—. El arreglo honesto es
+  `XShapeCombineRectangles` a mano (`set_input_region` quiere una
+  `cairo.Region`, y Cairo es la trampa sobre la que está construida esta
+  máquina), un mecanismo X nuevo en el fichero cuyo EWMH costó días. El
+  riesgo del arreglo supera el daño del defecto esta semana.
+- **`fuera` está físicamente apagada**, así que «dos cámaras, dos fotos»
+  está probado **solo por camino de código**.
+- **Sigue sin haber tabla de detecciones ni `revisar`.** «Quién vino
+  esta mañana» no tiene respuesta: es el plan 2 del diseño de visión.
+  Tampoco hay vídeo en directo: se consideró y se descartó —un
+  decodificador más, ancho de banda continuo y una ventana que se queda—.
+
+---
+
 ## 2026-08-24 — Repaso de rama: deja de repetirse, y la contraseña sale de la URL ✅
 
 La revisión de la rama entera antes de subirla. Siete arreglos, y dos de
