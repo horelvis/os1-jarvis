@@ -142,7 +142,10 @@ def test_register_declares_mirar_as_an_async_tool():
     register(ctx)
     tool = _tool(ctx)
     assert tool["is_async"] is True
-    assert tool["toolset"] == "vision"
+    # A toolset of our own (Ruling 11): Hermes' `vision` already carries
+    # `vision_analyze`, and sharing the name would have offered him an
+    # image-analysis tool this box cannot serve.
+    assert tool["toolset"] == "camaras"
     assert "camara" in tool["schema"]["properties"]
     assert tool["schema"]["required"] == []
 

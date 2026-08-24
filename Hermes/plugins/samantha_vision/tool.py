@@ -43,7 +43,14 @@ GRAB_TIMEOUT = 2.0
 # The tool as the model sees it. Spanish, because the model is answering
 # somebody who speaks Spanish and the camera names are Spanish nouns.
 NAME = "mirar"
-TOOLSET = "vision"
+# NOT "vision", which the plugin spec §6.2 asked for and Ruling 11
+# overrides. That name was already spoken for: Hermes' own `vision`
+# toolset (`toolsets.py:134`) carries `vision_analyze`, an image-analysis
+# tool this box cannot serve — the model behind the strip is Qwen3.8-27B
+# and it does not look at images. Enabling `vision` for the strip to
+# reach `mirar` would have offered him that one too, which is precisely
+# what `check_fn` exists to prevent, one level up.
+TOOLSET = "camaras"
 DESCRIPTION = "Mira una cámara de la casa ahora mismo y di qué hay."
 EMOJI = "👁"
 SCHEMA: dict[str, Any] = {
@@ -51,6 +58,13 @@ SCHEMA: dict[str, Any] = {
     "properties": {
         "camara": {
             "type": "string",
+            # He calls this tool with NO argument even when a camera was
+            # named — measured 5 times on 2026-08-25, and a wording that
+            # spelled out "omitir SOLO si no se ha nombrado ninguna"
+            # changed nothing in 3 further asks. Left as the plugin spec
+            # §6.2 wrote it: a prompt edit that does not work is noise in
+            # the file, and where the tool's result reaches his voice is
+            # a design question, not a wording one.
             "description": "Nombre de la cámara. Omitir para mirar todas.",
         }
     },
@@ -182,6 +196,13 @@ def make_handler(
             # configured, so this is a race with a gateway still reading
             # its config, not a normal answer.
             return "No tengo ninguna cámara."
+
+        # WHICH camera he asked for, in the journal. Not decoration: what
+        # he says afterwards is his paraphrase of what comes back, and
+        # the only way to tell "he asked about one camera and was
+        # answered about two" from "he was answered about one and
+        # embellished" is to see the argument he actually passed.
+        logger.info(f"samantha-vision: mirar {wanted or '(todas)'}")
 
         said = [await _look(camera) for camera in targets]
         return " ".join(said)
