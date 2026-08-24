@@ -963,8 +963,8 @@ Significant decisions made during development. Append-only.
 
 ### 2026-08-24 — He stops repeating himself, and the password leaves the URL
 
-**Two decisions from the whole-branch review, both behaviour the user
-hears or a credential he owns.**
+**Three decisions from the whole-branch review and its re-review, all of
+them behaviour the user hears or a credential he owns.**
 
 **The camera anti-spam window widens.** 180 s stopped three-second spam
 and nothing stopped three-minute spam: measured on the live gateway,
@@ -975,9 +975,12 @@ hourly, resetting to the floor after a full window unseen. **The four
 calibrated constants are untouched** — 180, 0.7, 23:00, 07:00 are
 BarnDoor's, arrived at against these cameras; the ×5 and ×20 are ours. A
 first sighting is never suppressed, and the quiet-hours person rule sits
-outside the escalation in both directions: a widened window never gates
-it, and its firings never advance the level, because counting them would
-turn the override into its opposite the moment quiet hours ended.
+outside the escalation in **three** ways: a widened window never gates it
+(only the night floor below does), its firings never advance the level —
+counting them would turn the override into its opposite at dawn — and it
+resets the level, so the morning does not inherit the day's fatigue. The
+third was added after measuring what its absence cost; see the night
+floor below.
 
 **Credentials move to `.env`.** The RTSP password lived inline inside the
 camera URLs in the untracked `.hermes/home/config.yaml`, which is what
@@ -988,10 +991,37 @@ both units that start a Hermes process — `samantha-hermes.service` and
 `samantha-hermes-serve.service` — and every manual invocation get it.
 `samantha-widget.service` does not, and needs no credential. URLs say
 `${RTSP_PASSWORD}` and the plugin expands it. The trap, handled
-explicitly: an unset variable is left by `expandvars` as the literal
-`${RTSP_PASSWORD}`, which would then be used as the password and logged,
-so the names are checked against the environment **before** expanding and
-a missing one drops that camera with a warning naming the variable.
+explicitly: an unset variable would be left as the literal text
+`${RTSP_PASSWORD}`, which would then be used as the password and logged.
+`_expand` therefore does the substitution itself and resolves each name
+inside the callback, dropping the camera with a warning that names the
+variable and never the URL. It deliberately does **not** call
+`os.path.expandvars`, which also expands a bare `$NAME` — and a password
+may contain a `$`, which cost a password fragment in the journal on
+2026-08-24 before the pattern was narrowed to braces only.
+
+**A 30 s floor under the night rule — the user's decision**, taken from
+three options put to them after the re-review measured the alternative.
+"A person at night beats the anti-spam" is BarnDoor's, and it was written
+for a mailbox rather than a mouth: there it produced a notification, here
+a spoken turn and a model call, and `worth_saying` runs once per sampled
+frame. Measured against the real `Watcher`: **19,200 utterances over an
+eight-hour night** with somebody standing in view. `NIGHT_FLOOR_SECONDS
+= 30` caps it at one mention per 30 s per `(camera, label)`; the same
+measurement afterwards gives 960.
+
+**Its cost, stated plainly:** he now insists *less* at night than
+BarnDoor's rule intended. The rule exists because the second sighting at
+3am matters more than the first, and 29 of every 30 seconds of that
+insistence are gone. The trade is that the alternative was not insistence
+but continuous speech. 30 s is ours and is **not** a fifth calibrated
+constant.
+
+The same pass found the escalation level surviving the dawn boundary: a
+key escalated to hourly in daylight and present all night got its first
+morning mention 60.0 minutes after quiet hours ended, when the morning is
+exactly when the user wakes and would want to know. The night path now
+resets the level; measured again, 150 s.
 
 **Cost:** the escalation is keyed on the label, so while a `(camera,
 label)` sits at the hourly level any person at that camera is silenced

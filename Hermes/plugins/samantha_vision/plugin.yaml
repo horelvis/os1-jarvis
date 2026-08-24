@@ -31,6 +31,11 @@ author: Horelvis Castillo
 #    so nothing else here notices: it looks exactly like a camera with an
 #    empty driveway in front of it. One WARNING, then DEBUG per retry,
 #    same discipline as #2.
+#
+# #2 and #4 keep SEPARATE once-per-camera flags. A camera that stays in
+# one state costs exactly one WARNING; a camera flipping between the two
+# announces each, rather than leaving a stale WARNING describing the
+# state it is no longer in.
 
 # Declared so the failure has a name at load time. Hermes never installs
 # these — `_warn_python_dependencies` (hermes_cli/plugins.py:4679) is "a

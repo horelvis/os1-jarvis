@@ -277,6 +277,7 @@ these same cameras and not guessed:
 | Confidence floor | `0.7` | Below it, YOLOv9-t at 320 px announces shadows. |
 | Anti-spam | `180 s` per label **per camera** | Without it, one person in the doorway is announced every three seconds. |
 | Quiet hours | `23:00`–`07:00` | A person overrides the silence; a parked car does not. |
+| Night floor | `30 s` | Added 2026-08-24, after the fact. The override above was written against a notifier; here it produces a spoken turn per sampled frame — 19,200 in an eight-hour night, measured. The override stands; it is gated at one mention per 30 s. |
 | Watched classes | 8 | persona, bicicleta, coche, moto, autobús, camión, gato, perro. |
 
 **The anti-spam key gains the camera.** Today it is the label; with two

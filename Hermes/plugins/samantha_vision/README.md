@@ -44,9 +44,9 @@ RTSP_PASSWORD=…
 `Hermes/run-gateway.sh` sources that file if it is there, which is the
 single chokepoint: both units that start a Hermes process
 (`samantha-hermes.service`, `samantha-hermes-serve.service`) and every
-manual invocation go through it, so nothing else has to be taught. `.env.example` is tracked
-and carries the key names with no values, so a fresh box knows what is
-missing. The plugin expands `${RTSP_PASSWORD}` when it builds a `Camera`,
+manual invocation go through it, so nothing else has to be taught.
+`.env.example` is tracked and carries the key names with no values, so a
+fresh box knows what is missing. The plugin expands `${RTSP_PASSWORD}` when it builds a `Camera`,
 and a URL naming a variable that is **not** set drops that camera with a
 warning that says which variable — it never connects with the literal
 text as a password and never logs the URL.
@@ -146,7 +146,8 @@ one model call per event is affordable.
 |---|---|---|
 | Confidence floor | `0.7` | Below it, YOLOv9-t at 320 px announces shadows. |
 | Anti-spam | `180 s` per label **per camera** | Without it, one person in the doorway is announced every three seconds. |
-| Night window | `23:00`–`07:00` | A **person** seen in it beats the 180 s anti-spam: the second time somebody is in the garden at 3am is more worth saying than the first. |
+| Night window | `23:00`–`07:00` | A **person** seen in it beats the 180 s window and the escalation both: the second time somebody is in the garden at 3am is more worth saying than the first. |
+| Night floor | `30 s` per label per camera | What the night window is gated by *instead*. Without it, "beats the anti-spam" meant every sampled frame: 19,200 utterances over an eight-hour night, measured. |
 | Watched classes | 8 | persona, bicicleta, coche, moto, autobús, camión, gato, perro. |
 | Sampling | one frame in ten | The GPU belongs to Whisper and CosyVoice, which are in the critical path of a conversation. A camera is not. |
 
@@ -154,12 +155,20 @@ The anti-spam key carries the **camera as well as the label**, which is
 the point of naming them: somebody walking from `fuera` to `entrada` is
 two events and should be.
 
-**Nothing is silenced at night.** The night window is the *only* place
-`is_quiet_hours` is used (`vision.py:272`), and all it does is set
-`urgent` for a person so the anti-spam is skipped. There is no
-suppression path anywhere in the plugin: a car seen at 03:00 is
-announced, exactly as it would be at noon. If you came here after
-"why did he mention a car at 3 a.m.", that is the rule working, not
+**Nothing is silenced at night, but a person is paced.** The night
+window is the *only* place `is_quiet_hours` is used (`vision.py:384`),
+and all it does is set `urgent` for a person. Until 2026-08-24 `urgent`
+skipped the anti-spam outright; it now **replaces** it with the 30 s
+night floor (`vision.py:387`; `NIGHT_FLOOR_SECONDS` at `vision.py:272`)
+and **resets the escalation level** (`vision.py:392`). If you came here
+after "why did he not mention the person again for thirty seconds at
+3 a.m.", that is the floor, and it is the whole of what gates him at
+night.
+
+There is still no *suppression* path anywhere in the plugin: a car seen
+at 03:00 is announced exactly as it would be at noon — a car is never
+`urgent`, so it obeys the ordinary window. If you came here after "why
+did he mention a car at 3 a.m.", that is the rule working, not
 breaking.
 
 ## What it does when a camera is off
@@ -169,6 +178,12 @@ owns its own failure: one warning line the first time, `DEBUG` after
 that, and a retry that backs off from 30 s to a 5-minute ceiling. The
 other cameras carry on and the gateway never notices. When it comes
 back, one line says so.
+
+"The first time" is **per failure mode**, not per camera: unreachable and
+"no frames" keep separate flags, so a camera flipping between them
+announces each rather than leaving a stale WARNING describing the state
+it is no longer in. A camera that stays in one state still costs exactly
+one line.
 
 **A camera that answers but sends no video** gets the same treatment,
 and did not until 2026-08-24. Nothing raises in that case — a wrong
@@ -203,11 +218,17 @@ journalctl --user -u samantha-hermes.service -f | grep samantha-vision
   environment does not have. Check `.env` against `.env.example`.
 - `<name>: alguien` — a sighting got through the quiet rules; his reply
   follows on the strip.
-- `no live gateway, sighting dropped after 4 attempts` — the gateway is
-  not listening, and that is the **only** thing this line means: it is
-  still starting, or it is going down. Corrected 2026-08-24, when it read
-  that the strip might never have spoken on this box — which cannot
-  produce this line at all, and sent readers hunting for it.
+- `no live gateway, sighting dropped after 4 attempts` — every attempt
+  came back `False`. Two causes, and neither of them is a missing
+  session: **the gateway is not listening** (still starting, or going
+  down), which is the common one and which retrying fixes; or
+  **`allow_gateway_injection` was never granted** (`plugins.py:2012`),
+  which fails identically on every attempt and forever. Hermes' own
+  `inject_message: gateway injection denied for plugin samantha-vision`
+  turns up on the same grep and tells the two apart. Corrected
+  2026-08-24, when this line read that the strip might never have spoken
+  on this box — which cannot produce it at all, and sent readers hunting
+  for it.
 - `Plugin message injection was not routed: plugin=samantha-vision …` —
   **Hermes' own line, not ours**, and this is the one that means there is
   no session to inject into: no row exists until the user has talked to

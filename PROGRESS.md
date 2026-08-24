@@ -66,13 +66,18 @@ ellos son de los que solo se ven mirando el sistema vivo.
 - **La contraseña sale de la URL** (petición directa). Vive en `.env` en
   la raíz —ignorado por git, con `.env.example` versionado para que una
   caja nueva sepa qué falta—, `Hermes/run-gateway.sh` lo carga (es el
-  único cuello de botella: las tres units y toda invocación manual pasan
-  por ahí) y las URLs dicen `${RTSP_PASSWORD}`. La trampa, que está
-  tratada explícitamente: `expandvars` deja una variable **sin definir**
-  como el texto literal `${RTSP_PASSWORD}`, que se usaría de contraseña
-  y acabaría en el journal. Se comprueban los nombres **antes** de
-  expandir, sobre la URL cruda, y una variable que falta tira esa cámara
-  con un aviso que la nombra —sin conectar y sin registrar la URL.
+  único cuello de botella: las dos units que arrancan un proceso de
+  Hermes —`samantha-hermes.service` y `samantha-hermes-serve.service`— y
+  toda invocación manual pasan por ahí; la del widget no, y no necesita
+  credencial) y las URLs dicen `${RTSP_PASSWORD}`. La trampa, que está
+  tratada explícitamente: una variable **sin definir** quedaría como el
+  texto literal `${RTSP_PASSWORD}`, que se usaría de contraseña y
+  acabaría en el journal. `_expand` hace la sustitución él mismo y
+  resuelve cada nombre dentro del callback; una variable que falta tira
+  esa cámara con un aviso que la nombra —sin conectar y sin registrar la
+  URL—. **No** usa `os.path.expandvars`, que expande también un `$NAME`
+  pelado: una contraseña puede llevar un `$`, y eso costó un fragmento de
+  contraseña en el journal hasta que el patrón se limitó a las llaves.
 - **El README versionado deja de ser un mapa a la credencial.** Este
   repo se sube a GitHub y ahí estaban la subred, las dos direcciones, el
   fabricante, la cuenta, la ruta del stream, el fichero con la
@@ -106,10 +111,13 @@ vigiladas, la contraseña expandida desde `.env` y redactada en el log.
     samantha-vision: fuera unreachable — [Errno 113] No route to host:
       'rtsp://admin:***@…'
 
-**Sigue sin hacerse:** una persona a las 3 de la mañana dispara en cada
-fotograma muestreado, no cada 180 s. Es la regla nocturna de BarnDoor tal
-y como está escrita y tal y como la fija su test; silenciar la noche no
-se diseñó nunca y no entra aquí.
+**Lo que quedó señalado aquí y se hizo en la re-revisión:** una persona a
+las 3 de la mañana disparaba en **cada fotograma muestreado**, no cada
+180 s —19.200 frases en una noche de ocho horas, medido—. El usuario
+eligió un suelo de 30 s (`NIGHT_FLOOR_SECONDS`), que lo deja en 960. La
+regla nocturna de BarnDoor sigue en pie: sigue ganándole a la ventana de
+180 s y sigue fuera de la escalada. Silenciar la noche no se diseñó nunca
+y sigue sin hacerse: un coche a las 3 se anuncia igual que a mediodía.
 
 ---
 
