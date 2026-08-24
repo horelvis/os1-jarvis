@@ -56,14 +56,29 @@ KIOSK_SESSION_KEY = "agent:main:samantha_kiosk:dm:kiosk"
 # is not listening.
 RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 5.0)
 
-# Dropping the article is deliberate. Camera names are bare nouns —
-# `fuera`, `entrada` — so "en la {camera}" yields "en la fuera de casa",
-# and a gender error in the prompt is an invitation to echo it. The
-# prompt is instruction to the model and is never spoken aloud, so a
-# clipped preposition costs nothing and a wrong article could cost a
-# sentence.
+# The camera name is a LABELLED VALUE, not part of a sentence, and that
+# shape is load-bearing (Ruling 14, measured 2026-08-24).
+#
+# Camera names are bare nouns — `fuera`, `entrada`, `jardín` — so they
+# carry no gender and no article. Put one inside a prepositional phrase
+# and something is always broken: "en la fuera de casa" is the wrong
+# article, "en fuera de casa" is no Spanish at all. And a model handed
+# broken Spanish does not shrug: it REPAIRS it, by inventing a place
+# that fits. Measured, twice, on the live gateway with a camera named
+# `fuera`:
+#
+#   …en fuera de casa: alguien.  ->  "Hay alguien en la entrada, señor."
+#
+# Somebody outside, reported as somebody at the door. In a feature whose
+# whole job is telling you who is around the house, that is a wrong
+# answer, not a clumsy one. Handed the same fact as a label, he keeps
+# the place he was given and picks his own preposition:
+#
+#   Dónde: fuera. Qué: alguien.  ->  "Sigue ahí afuera, señor."
+#
+# So: do not "clean this up" back into a sentence.
 _TEMPLATE = (
-    "Acabas de fijarte en algo en {camera} de casa: {phrase}. "
+    "Acabas de fijarte en algo en casa. Dónde: {camera}. Qué: {phrase}. "
     "Coméntalo en una frase corta, con tus palabras, como quien levanta "
     "la vista y lo menciona. "
     "No digas nunca la palabra cámara, ni detección, ni detectado, ni "
