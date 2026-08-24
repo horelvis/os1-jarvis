@@ -10,6 +10,8 @@ import threading
 import time
 from contextlib import contextmanager
 
+import numpy as np
+
 from loguru import logger
 
 from Hermes.plugins.samantha_vision.cameras import (
@@ -548,3 +550,121 @@ def test_one_persistent_failure_mode_still_costs_exactly_one_line():
         r for r in records if r["level"].name == "WARNING" and "entrada" in r["message"]
     ]
     assert len(warnings) == 1, [r["message"] for r in warnings]
+
+
+# ── grab: the watcher hands over its next frame ────────────────────────
+#
+# "ahora" has to mean now. The watcher samples one frame in ten, so its
+# last analysed frame can be 40 s old — grab() waits for the NEXT frame
+# on the stream the watcher already has open, rather than reusing a
+# stale one or opening a second RTSP session.
+
+
+def test_grab_returns_the_next_frame_the_watcher_decodes():
+    """The brief's own version of this test called `_offer` BEFORE
+    `grab`, in-line, and asserted a non-None result — which contradicts
+    `test_grab_never_returns_a_frame_the_watcher_already_analysed` below,
+    written against the exact same call order. Both cannot pass against
+    one implementation: `_offer` only fills the slot while a caller is
+    already registered as waiting (see its docstring), so an `_offer`
+    that precedes `grab` is dropped by design — that is the whole "no
+    stale frames" point of this task.
+
+    Fixed here to exercise what the name actually promises: a caller
+    already blocked in `grab()` sees the frame the watcher hands off
+    next, from a real second thread — not a call made in-line by the
+    test after the fact.
+    """
+    fleet = _fleet()
+    frame = np.zeros((4, 4, 3), dtype="uint8")
+    results: list = []
+
+    def waiter():
+        results.append(fleet.grab("entrada", timeout=2.0))
+
+    thread = threading.Thread(target=waiter)
+    thread.start()
+    try:
+        assert _wait(lambda: "entrada" in fleet._wanted)
+        fleet._offer("entrada", frame)
+        thread.join(timeout=2.0)
+    finally:
+        if thread.is_alive():
+            thread.join(timeout=0.1)
+
+    assert len(results) == 1
+    got = results[0]
+    assert got is not None
+    assert got.shape == (4, 4, 3)
+
+
+def test_grab_times_out_rather_than_hanging():
+    fleet = _fleet()
+    assert fleet.grab("entrada", timeout=0.05) is None
+
+
+def test_grab_on_an_unknown_camera_is_none_not_an_error():
+    fleet = _fleet()
+    assert fleet.grab("nonesuch", timeout=0.05) is None
+
+
+def test_the_watcher_pays_nothing_when_nobody_is_waiting():
+    # `_offer` must not copy or store a frame unless somebody asked.
+    fleet = _fleet()
+    fleet._offer("entrada", np.zeros((4, 4, 3), dtype="uint8"))
+    assert fleet._pending.get("entrada") is None
+
+
+def test_grab_never_returns_a_frame_the_watcher_already_analysed():
+    # The slot is filled only AFTER a request arrives, so a frame offered
+    # before the request can never satisfy it. This is the "no stale
+    # frames" constraint, as a test.
+    fleet = _fleet()
+    stale = np.zeros((4, 4, 3), dtype="uint8")
+    fleet._offer("entrada", stale)  # nobody waiting: dropped
+    assert fleet.grab("entrada", timeout=0.05) is None
+
+
+def test_a_second_caller_does_not_lose_the_first_ones_frame_to_a_race():
+    """Two grab() calls overlap on the SAME camera. The second one
+    overwrites the shared `_wanted`/`_pending` slot with its own Event,
+    so the first is left registered under an Event nobody will ever set
+    and simply times out — that is an accepted "only the latest caller
+    is served" limitation, not a bug.
+
+    The bug this pins: the first caller's `grab()` returning (via its
+    own short timeout) must not run cleanup that deletes the SECOND
+    caller's still-live registration, or a frame already delivered to
+    it. Without the identity check in `grab()`'s `finally`, the first
+    caller's unconditional `pop()` does exactly that, and the second
+    caller loses a frame it was correctly handed.
+    """
+    fleet = _fleet()
+    frame = np.full((3, 3, 3), 7, dtype="uint8")
+    results: dict[str, np.ndarray | None] = {}
+
+    def first():
+        results["first"] = fleet.grab("entrada", timeout=0.1)
+
+    def second():
+        results["second"] = fleet.grab("entrada", timeout=2.0)
+
+    t1 = threading.Thread(target=first)
+    t1.start()
+    assert _wait(lambda: "entrada" in fleet._wanted)
+    t2 = threading.Thread(target=second)
+    t2.start()
+    # Give `second` time to overwrite the slot, then let `first` time out
+    # and run its cleanup, BEFORE the frame ever arrives — that ordering
+    # is what makes the race real rather than accidental.
+    t1.join(timeout=2.0)
+    assert results.get("first") is None
+
+    fleet._offer("entrada", frame)
+    t2.join(timeout=2.0)
+
+    assert results.get("second") is not None
+    assert (results["second"] == frame).all()
+    # And the hand-off leaves no trace for either caller.
+    assert "entrada" not in fleet._wanted
+    assert "entrada" not in fleet._pending

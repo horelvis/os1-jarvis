@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 from loguru import logger
 
 
@@ -213,6 +214,15 @@ class CameraFleet:
         self._stopping = threading.Event()
         self._threads: list[threading.Thread] = []
 
+        # One slot per camera, filled by the watcher thread ONLY while a
+        # caller is waiting. A request arriving mid-frame therefore gets
+        # the NEXT frame, never the one already analysed — "ahora" has to
+        # mean now, and the watcher samples one frame in ten, so its last
+        # frame can be 40 s old.
+        self._pending: dict[str, np.ndarray | None] = {}
+        self._wanted: dict[str, threading.Event] = {}
+        self._grab_lock = threading.Lock()
+
     def start(
         self,
         cameras: list[Camera],
@@ -266,6 +276,51 @@ class CameraFleet:
             if thread.is_alive():
                 logger.debug(f"samantha-vision: {thread.name} still in a read, left")
 
+    # -- handing a frame to someone asking right now ------------------------
+
+    def _offer(self, camera: str, frame: np.ndarray) -> None:
+        """Called by the watcher thread for every sampled frame.
+
+        Costs one dict lookup when nobody is waiting, which is the normal
+        case: this must not slow the detection loop down.
+        """
+        event = self._wanted.get(camera)
+        if event is None or event.is_set():
+            return
+        with self._grab_lock:
+            self._pending[camera] = frame
+        event.set()
+
+    def grab(self, camera: str, timeout: float = 2.0) -> np.ndarray | None:
+        """The next frame this camera decodes, or None.
+
+        None covers both "no such camera" and "it did not answer in time".
+        A question that hangs is worse than one answered honestly, because
+        he simply goes quiet (spec §4.1).
+        """
+        event = threading.Event()
+        with self._grab_lock:
+            self._wanted[camera] = event
+            self._pending[camera] = None
+        try:
+            if not event.wait(timeout):
+                return None
+            with self._grab_lock:
+                return self._pending.get(camera)
+        finally:
+            with self._grab_lock:
+                # Only remove OUR OWN registration. A second grab() for
+                # the same camera, arriving while this one still waits,
+                # overwrites this slot with its own Event before this one
+                # is done with it — an unconditional pop here would then
+                # delete THAT caller's live registration, or the frame
+                # already delivered to it, out from under it. Comparing
+                # identity is what tells the two apart; the camera name
+                # alone cannot.
+                if self._wanted.get(camera) is event:
+                    self._wanted.pop(camera, None)
+                    self._pending.pop(camera, None)
+
     # -- one camera --------------------------------------------------------
 
     def _watch(self, camera: Camera, detector: Any, on_detections) -> None:
@@ -299,6 +354,15 @@ class CameraFleet:
                         logger.info(f"samantha-vision: {camera.name} is back")
                     reported_unreachable = reported_empty = False
                     delay = self._retry_seconds
+                    # Before detection, deliberately: a caller waiting on
+                    # grab() must not wait behind a slow detector too.
+                    try:
+                        self._offer(camera.name, frame)
+                    except Exception as exc:
+                        logger.debug(
+                            f"samantha-vision: {camera.name} offer failed — "
+                            f"{redact(exc)}"
+                        )
                     self._report(camera, detector, frame, on_detections)
                 # Manifest failure mode #4, and the one this plugin used
                 # not to name. A camera that ANSWERS but yields no video —
