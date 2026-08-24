@@ -1,13 +1,23 @@
-# CLAUDE.md — Samantha Project Specification (v3)
+# CLAUDE.md — JARVIS Project Specification (v4)
 
-> **For Claude Code:** This is the single source of truth for the Samantha
+> **For Claude Code:** This is the single source of truth for this
 > project. Read this entire document before making any changes. When in
 > doubt about scope, architecture, or style, this document overrides your
 > defaults. Update `PROGRESS.md` after completing each phase.
 >
-> **This is v3.** Previous versions used Tauri + Rust (v1) and Ubuntu
-> Frame + WPE WebKit + snap (v2). v3 simplifies to Chromium in kiosk
-> mode launched via systemd. See §12 for the full decision log.
+> **He is called JARVIS.** Until 2026-08-23 he was Samantha, and the
+> package names, environment variables and systemd units still carry that
+> name — `samantha_widget`, `samantha_kiosk`, `SAMANTHA_*`. Renaming them
+> is not worth the churn. In prose he is JARVIS; in code, samantha.
+>
+> **This is v4.** v1 was Tauri + Rust, v2 Ubuntu Frame + WPE WebKit +
+> snap, v3 Chromium in kiosk mode. v4 has no browser at all: a GTK4
+> strip on the desktop, talking to a Hermes Agent gateway. Every one of
+> those transitions is in §12.
+>
+> **Sections still carrying v3 assumptions are marked.** §0 is the
+> shortest true description of what runs; where a later section
+> contradicts it, §0 wins and the contradiction is a bug to report.
 
 ---
 
@@ -78,7 +88,7 @@ an explicit condition, and the removal is plan 3.
 
 ## 1. Vision & Product Principles
 
-### What Samantha is
+### What he is
 
 Samantha is **not** an assistant, a chatbot, an agent, or a tool. She is
 a presence: a curious, warm, conversational AI that lives on a single
@@ -91,17 +101,24 @@ as the primary interaction mode.
 
 ### Product principles (in priority order)
 
-1. **Privacy with eyes open, not absolute.** TTS and STT inference stay
-   local (Piper / vllm-omni + Qwen3-TTS / browser Web Speech). The LLM
-   path is configurable: local llama-server (Qwen3-8B Q8) is supported,
-   but the default since 2026-05-15 is **X.AI's Grok API** because A/B
-   testing showed Qwen3-8B-Q8 produced visibly more verbose/theatrical
-   replies than `grok-4-1-fast-non-reasoning` for the same prompt.
-   Conversational content thus *does* leave the device when the API
-   path is active. Ancillary network use (Google Fonts CDN, browser
-   Web Speech) is still allowed. To restore "fully local LLM", unset
-   `SAMANTHA_LLM_API_KEY` and point `SAMANTHA_LLM_SERVER_URL` at a
-   local OpenAI-compatible server.
+1. **Privacy with eyes open, not absolute.** Every piece of inference
+   runs on this box: the LLM (Qwen3.8-27B on llama-server), the voice
+   (CosyVoice), the ears (Silero + Whisper) and the eyes (YOLO). Since
+   2026-08-23 **nothing said in the room leaves it by default.**
+
+   It is a default, not a property. Pointing the config at X.AI's Grok
+   API is one line, and then the conversation — and a description of
+   whatever the cameras see — goes to a third party. That switch was the
+   default between 2026-05-15 and 2026-08-23, for reasons §12 records
+   and a 27B model on a 4090 made obsolete.
+
+   **Two leaks worth knowing about**, because both are silent:
+   - **Hermes' `tts.provider` defaults to `edge`** — Microsoft's. If the
+     `tts:` section of the Hermes config is missing, his words are
+     synthesised in the cloud and it looks like it works. The config is
+     git-ignored, so this must be re-applied on every box.
+   - Cron/reminders resolve their own model, separately from the
+     gateway. Pinning one and not the other splits the path.
 
 2. **Conversational first, and able to act.** Samantha is designed for
    the relationship. She remembers, she asks, she has opinions. She is
@@ -132,15 +149,22 @@ as the primary interaction mode.
    good feels infinitely better than a 5 tok/s response that is 100%
    good. Choose the faster model.
 
-5. **Appliance experience.** When the device boots, it boots into Samantha.
-   No login screen, no desktop, no settings UI. The device IS Samantha.
-   This is enforced by systemd + auto-login + Chromium kiosk mode.
+5. **Present, not launched.** He is not an application somebody opens.
+   The strip is along the bottom edge of the screen from login, listening,
+   with no window to focus, no icon to click and no settings UI. A systemd
+   user service starts him; the desktop underneath stays the user's.
 
-### What Samantha is NOT
+   Revised on 2026-08-23. This principle used to read "Appliance
+   experience — when the device boots, it boots into Samantha… enforced
+   by systemd + auto-login + Chromium kiosk mode". The appliance model
+   went with the kiosk (§2.3, §12): the box is a desktop the user also
+   works on, and taking the whole screen was the wrong trade.
+
+### What he is NOT
 
 - ❌ A multi-user system (single user, always)
 - ❌ A cloud-LLM wrapper (conversational inference stays local — Qwen via llama-server)
-- ❌ A mobile app (desktop kiosk only)
+- ❌ A mobile app (this desktop only)
 - ❌ A coding assistant
 - ❌ **A visible agent.** She uses tools; she never performs using them.
   No "ejecutando 3 de 5", no tool names out loud, no progress reports, no
@@ -160,27 +184,41 @@ These decisions are settled. Do NOT revisit them without explicit user
 permission. If the user requests a change, ask for confirmation that
 they understand the implications listed.
 
-### 2.1 Hardware: Minisforum AtomMan G7 Ti SE
+### 2.1 Hardware: one box, one RTX 4090
 
-**Decision:** Mini-PC with Intel i7-14650HX + RTX 4070 Mobile (8GB VRAM)
-+ 32GB DDR5 + 1TB NVMe.
+**Decision:** he runs on the machine that was already here — a desktop
+with an RTX 4090 (24 GB VRAM).
 
-**Rationale:**
-- Mini form factor fits the "appliance" feel (small, hidden, present)
-- RTX 4070 Mobile has enough VRAM for a 9B model in 4-bit quantization
-- 32GB RAM is generous given DDR5 price spike in 2026 (~450€ to upgrade to 64GB)
-- ~1500€ total budget cap
+**Revised 2026-08-23.** This section used to specify a Minisforum AtomMan
+G7 Ti SE (RTX 4070 Mobile, 8 GB VRAM) bought for the purpose. That plan
+belonged to the appliance model; when he became a widget on a desktop
+the user already owned, the mini-PC stopped being the target.
 
-**Implications:**
-- Models > 14B parameters at 4-bit DON'T fit in VRAM without offloading
-- VRAM is the bottleneck, not RAM
-- The LLM lives in VRAM; everything else lives in RAM
+**Implications, and they are the ones that shape everything else:**
+- **VRAM is the budget three things compete for.** CosyVoice holds
+  ~5.5 GB and Whisper ~2.5 GB, so the model gets what is left — about
+  16 GB. That number, not model quality, picks the quantisation.
+- A 27B at Q4_K_M does not fit alongside them and spills onto the CPU:
+  13.7 tok/s measured, against 57 tok/s when it fits (§12, 2026-08-23).
+- Everything is on one machine. There is no second box, no network hop,
+  and every service in §0's diagram is on loopback.
 
-### 2.2 Operating System: Ubuntu Server 24.04 LTS
+### 2.2 Operating System: Ubuntu with GNOME on X11
 
-**Decision:** Ubuntu Server 24.04 LTS (Noble Numbat).
+**Decision:** Ubuntu with a full GNOME desktop, running **X11**
+(`DISPLAY=:1`). Wayland is out of scope.
 
-**Rationale:**
+**Revised 2026-08-23.** This used to read "Ubuntu Server 24.04 LTS",
+with no desktop, because the kiosk needed none. A widget needs a desktop
+to sit on top of. X11 survived the change for a harder reason than
+inertia: placing a window at an exact pixel and keeping it above others
+is done through EWMH — `XSendEvent` of a `_NET_WM_STATE` ClientMessage
+plus `XMoveResizeWindow`, via ctypes against libX11, no extra
+dependency. GTK4 exposes no `set_keep_above` and no `move`, and
+`gtk4-layer-shell`, the modern answer, is Wayland-only. Wayland would
+mean either a compositor-specific protocol or losing the placement.
+
+**Why Ubuntu, unchanged from the original decision:**
 - LTS support until April 2029, extended until 2034 with Ubuntu Pro
 - Official NVIDIA driver support (`ubuntu-drivers autoinstall`)
 - Massive community: any problem has been solved before on StackOverflow
@@ -188,105 +226,161 @@ they understand the implications listed.
 - Familiar Linux model (apt, systemd) for manual interventions
 
 **Alternatives considered and rejected:**
-- Arch Linux: too much manual maintenance for an appliance
+- Arch Linux: too much manual maintenance
 - Ubuntu Core 24: too rigid, harder to debug, all-snap model
 - Pop!_OS: less standard, smaller community
-- Fedora: smaller community than Ubuntu for kiosk use cases
+- Fedora: smaller community than Ubuntu
 
 **Implications:**
-- Use X11 (not Wayland) for the kiosk session, since Chromium + X11 +
-  openbox is the most widely-deployed kiosk stack
+- **X11, not Wayland** — see the Decision above; this is now a hard
+  constraint of the placement code, not a preference.
 - NVIDIA drivers from official Ubuntu repositories
-- All services managed via systemd
+- All services managed via systemd **user** units (`systemctl --user`),
+  since they need the user's session and its display
 
-### 2.3 Display Layer: Chromium in Kiosk Mode
+### 2.3 Display Layer: a GTK4 strip on the desktop
 
-**Decision:** Use Chromium browser launched with `--kiosk` flag, started
-automatically at boot by systemd via auto-login user session.
+**Decision (2026-08-22, implemented 2026-08-23):** the surface is
+`widget/` — a GTK4 window along the bottom edge of the screen.
+Borderless, transparent, always above, drawn with GSK on the frame
+clock, started by a systemd **user** service. **No browser and no
+webview anywhere in the running system.**
+
+**This replaced the Chromium kiosk**, which was v3's answer and is now
+gone from the running system. §12 carries the decision and its cost; the
+short version is that the kiosk owned the whole screen on a machine the
+user also works on, and a presence that has to be exclusive is not a
+presence but an application.
 
 **Rationale:**
-- **Familiar:** Chromium is what every developer knows. Debugging works
-  with standard DevTools.
-- **Compatible:** Full support for modern web APIs (Three.js, Canvas 2D,
-  Web Audio, WebSocket, fetch). No "WebKit might not support X" worries.
-- **Minimal complexity:** ~5 lines of systemd config + a single command.
-  No new packaging system to learn (snap), no new compositor (Mir).
-- **Reliable:** Chromium kiosk mode is battle-tested in millions of
-  digital signage deployments worldwide.
+- **A strip is not a window.** It has no title bar, no focus, nothing to
+  click. That is the product principle of §1.5 made literal, and no
+  browser can be made to look like it without fighting the browser.
+- **Native drawing.** GSK composites on the GPU. The wave animates on
+  the frame clock, at no measurable cost.
+- **One process.** The strip, the VAD, transcription, playback and vision
+  are threads in a single Python program, so the wave reacts to the state
+  of the turn without a protocol between them.
+- **Weight.** Measured against the alternative: ~389 MB resident, almost
+  all of it Whisper, against Electron's baseline for the same job.
 
 **Alternatives considered and rejected:**
-- **Electron:** ~150MB binary, designed for cross-platform apps, not
-  Linux kiosks.
-- **Firefox kiosk:** Less polished kiosk mode than Chromium.
+- **Electron** — reconsidered on 2026-08-23 precisely because Hermes
+  Desktop is Electron and already exists. Rejected again on the numbers;
+  §12 has the table.
+- **Keeping the Chromium kiosk** — see §12.
+- **`gtk4-layer-shell`** — the modern way to place a panel, and
+  Wayland-only. On X11 the placement is EWMH by hand (§2.2).
 
-**Implementation pattern:**
+**Implementation, and the two things that bite:**
 
 ```
-Boot
+systemd --user: samantha-widget.service
   ↓
-systemd: getty@tty1 auto-login as user `samantha`
+python -m samantha_widget      (venv with --system-site-packages)
   ↓
-~/.bash_profile: if tty1, run `startx`
-  ↓
-~/.xinitrc: launch openbox + samantha-ui.service
-  ↓
-samantha-ui.service: chromium --kiosk http://localhost:7777/
+GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 ```
 
-**Implications:**
-- Frontend is **just HTML/CSS/JS** served by Python. No bundling, no
-  build step, no frameworks.
-- Use **X11** (not Wayland) for simplicity. Chromium + X11 + openbox is
-  the most widely-deployed kiosk stack on Linux.
-- Boot to Samantha takes ~20s (BIOS + kernel + login + Chromium startup).
-- For debugging, `Ctrl+Alt+F2` exits to a TTY (only on dev machines;
-  disabled in production).
+- **Cairo does not work on this machine.** PyGObject needs `gi._gi_cairo`
+  from the system package `python3-gi-cairo`, which is not installed —
+  and `python3-cairo`, which IS installed, makes that misleading. The
+  failure is a `TypeError` raised inside the draw callback, where GTK
+  swallows it: the strip appears, never draws, and logs nothing. Use
+  `Gsk.PathBuilder` + `Gtk.Snapshot.append_stroke` (GTK 4.14+).
+- **`_NET_WM_STATE` carries only two properties per message.** A third is
+  dropped in silence. Send them in pairs and check with `xprop`.
+- GNOME places the strip at x=66, width 1854, not 0/1920: the dock
+  reserves those pixels. Taking them needs
+  `_NET_WM_WINDOW_TYPE_DOCK`, which also gives up keyboard focus. Left
+  as is, deliberately.
+- Nothing about the appearance is provable by a test. Capture the screen
+  (`ffmpeg -f x11grab`) — and confirm with `xwininfo -name` that you
+  photographed the strip and not a lock screen.
 
-### 2.4 Backend Stack: Python + FastAPI (Fullstack)
+### 2.4 Backend Stack: Python + FastAPI (Fullstack) — SUPERSEDED
 
-**Decision:** Python 3.12 + FastAPI + uvicorn, serving on
-`127.0.0.1:7777`. Backend serves BOTH the static frontend AND the API.
+> **Superseded 2026-08-23, kept for the history.** No FastAPI server
+> runs. `127.0.0.1:7777` is now the **Hermes gateway**, not uvicorn, and
+> nothing serves a frontend because there is no browser to serve it to.
+>
+> **`backend/` is not entirely dead, and the distinction matters:**
+> `samantha.tts` is imported by the widget **as a library** to reach
+> CosyVoice. That is the whole reason `PYTHONPATH` includes `backend/`
+> when the widget runs. The FastAPI app, `/chat`, `/speak`, the
+> WebSocket and ChromaDB are what is unused. Removing them is plan 3.
+>
+> Everything below describes v3 and is retained so the transition is
+> legible.
 
-**Rationale:**
-- vLLM is Python-native
-- faster-whisper and Piper have Python APIs
-- ChromaDB is Python-native
-- FastAPI's `StaticFiles` lets us serve the frontend from the same process
-- Single deployment unit, single process to monitor
-- Same-origin (no CORS issues for fetch/WebSocket)
-
-**Architecture pattern:**
-
-```python
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/")
-async def index():
-    return FileResponse("static/index.html")
-
-@app.post("/chat") ...
-@app.websocket("/ws") ...
-```
-
-When WPE WebKit visits `http://127.0.0.1:7777/`, it gets `index.html`.
-That HTML loads `/static/app.js`, which connects to `/ws` via WebSocket
-for streaming conversation.
-
-**Implications (v2 redesign, 2026-05-12):**
-- The frontend lives in `frontend/` separate from `backend/`. Vite builds to
-  `frontend/dist/`, which FastAPI's `StaticFiles` mounts at `/`.
-- Phase 7 deployment now requires `cd frontend && npm install && npm run build`
-  before starting the systemd services.
+> **Decision:** Python 3.12 + FastAPI + uvicorn, serving on
+> `127.0.0.1:7777`. Backend serves BOTH the static frontend AND the API.
+>
+> **Rationale:**
+> - vLLM is Python-native
+> - faster-whisper and Piper have Python APIs
+> - ChromaDB is Python-native
+> - FastAPI's `StaticFiles` lets us serve the frontend from the same process
+> - Single deployment unit, single process to monitor
+> - Same-origin (no CORS issues for fetch/WebSocket)
+>
+> **Architecture pattern:**
+>
+> ```python
+> app = FastAPI()
+> app.mount("/static", StaticFiles(directory="static"), name="static")
+>
+> @app.get("/")
+> async def index():
+>     return FileResponse("static/index.html")
+>
+> @app.post("/chat") ...
+> @app.websocket("/ws") ...
+> ```
+>
+> When WPE WebKit visits `http://127.0.0.1:7777/`, it gets `index.html`.
+> That HTML loads `/static/app.js`, which connects to `/ws` via WebSocket
+> for streaming conversation.
+>
+> **Implications (v2 redesign, 2026-05-12):**
+> - The frontend lives in `frontend/` separate from `backend/`. Vite builds to
+>   `frontend/dist/`, which FastAPI's `StaticFiles` mounts at `/`.
+> - Phase 7 deployment now requires `cd frontend && npm install && npm run build`
+>   before starting the systemd services.
 
 ### 2.5 LLM Runtime + Model
 
-**Decision (revised 2026-05-15):**
-- **Default runtime:** X.AI Grok API (`https://api.x.ai`,
-  OpenAI-compatible). Default model: `grok-4-1-fast-non-reasoning`.
-- **Local fallback runtime:** llama.cpp via `llama-server`
-  (OpenAI-compatible HTTP API) on the 4090 box at port 8000.
-- **Local model (when used):** Qwen3-8B-Q8 GGUF (~8.5 GB).
+**Decision (revised 2026-08-23 — the LLM came home):**
+- **Default runtime:** llama.cpp `llama-server` on this box, `:8000`.
+- **Default model:** **Qwen3.8-27B, UD-Q3_K_XL** GGUF. 20.8 GB, 57 tok/s.
+- **Remote fallback:** X.AI Grok API (`https://api.x.ai`,
+  OpenAI-compatible), `grok-4-1-fast-non-reasoning`. One config switch;
+  §1.1 for what it costs.
+
+**Why Q3 and not the usual Q4_K_M** — the only number that mattered:
+
+| | VRAM | speed |
+|---|---|---|
+| Q4_K_M, llama.cpp b9115 | 22.3 GB | 13.7 tok/s |
+| UD-Q3_K_XL, b10603 | 20.8 GB | **57.4 tok/s** |
+
+Four times faster on less memory. Two causes, both needed: the smaller
+quant fits **entirely** on the GPU next to CosyVoice and Whisper instead
+of spilling layers onto the CPU, and b10603 is ~1500 builds of
+optimisation ahead. §1.4 asks for 30 tok/s; this is the decision that
+delivers it. Everything resident at once: 23.3 GB of 24.5.
+
+**Three things that each cost a round, now in `samantha-config.yaml`:**
+- **`enable_thinking: false`.** Qwen3.8 reasons by default and puts
+  everything into `reasoning_content`; `content` comes back empty and the
+  strip sits in "thinking" without ever speaking.
+- **Provider and model are separate fields.** `model.default:
+  custom:local` sends the literal string "custom:local" as a model name
+  and the turn dies with a 404.
+- **64K context is a hard floor.** Hermes refuses less and kills the
+  turn, so `llama-server` must be started to match.
+
+**The old default, for the record:**
 
 **Rationale for the switch to Grok API:**
 - A/B testing on 2026-05-15 with the v4 evocative system prompt:
@@ -323,11 +417,25 @@ for streaming conversation.
 
 ### 2.6 STT/TTS
 
-**Decision:**
-- **STT:** faster-whisper Large v3 Turbo (~1.5GB model, runs on GPU
-  when LLM is not actively generating)
-- **TTS:** Piper with voice `es_ES-davefx-medium` (~40MB, CPU-only,
-  ~200ms latency)
+**Decision (TTS revised 2026-08; STT unchanged in kind, moved in place):**
+- **STT:** faster-whisper `large-v3-turbo`, in-process inside the widget,
+  on the GPU. ~2.5 GB of VRAM resident, 81 s to load the first time and
+  ~1 s afterwards; 0.23 s to transcribe 3.5 s of speech.
+- **TTS:** **CosyVoice 3** zero-shot, in Docker on `:8093`, cloning his
+  voice from one reference clip plus its transcript in `voices/`.
+  24 kHz int16, synthesised clause by clause so he starts speaking
+  before the sentence is finished. ~5.5 GB of VRAM.
+
+**Piper was the v3 choice** (`es_ES-davefx-medium`, CPU, ~200 ms) and
+lost on identity, not on latency: a preset voice is somebody else's.
+XTTS-v2 was tried in between. `backend/samantha/tts.py` still dispatches
+across all three; CosyVoice is the default and the only one used.
+
+**A second lever, easy to miss:** CosyVoice takes a system prompt before
+`<|endofprompt|>` that conditions *delivery* — pace, poise — not words.
+The server injected a fixed "You are a helpful assistant." for months,
+which is a personality too, just nobody's. Set it with
+`SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT`.
 
 ### 2.7 Memory: ChromaDB + SQLite ring + facts (v2)
 
@@ -355,35 +463,62 @@ and Samantha is Spanish-first. fastembed runs the multilingual
 MiniLM-L12-v2 model in-process (no extra daemon, no torch). Cost:
 ~130 MB deps + a one-time ~30s model download on first launch.
 
-### 2.8 Audio I/O: browser Web Speech API for STT, Python for TTS
+### 2.8 Audio I/O: everything in the widget, nothing in a browser
 
-**Decision (revised 2026-05-13):** Microphone capture and speech
-recognition happen in the **browser** via the Web Speech API
-(`webkitSpeechRecognition`). TTS playback uses an HTMLAudioElement
-with WAV bytes produced by Python (Piper) and served by /speak.
+**Decision (revised 2026-08-23):** the widget owns the microphone and
+the speakers, through PortAudio (`sounddevice`). There is no browser, so
+there is no Web Speech API.
 
-**Rationale (post-offline-relaxation):**
-- Web Speech API is built into Chromium with native Spanish (`es-ES`)
-  support and streams a transcript in real time. No model download,
-  no Python audio stack, no per-OS audio quirks.
-- Local Whisper (faster-whisper) remains an option for environments
-  that genuinely need offline STT, but the offline kiosk requirement
-  was relaxed on 2026-05-13 so the simpler path wins.
-- TTS stays Python-side because Piper is local, deterministic, and
-  the voice file (`es_ES-sharvard-medium`, ~73 MB) lives at
-  `~/.samantha/voices/`.
+- **Always listening.** Silero v5 VAD over onnxruntime, on the CPU,
+  decides where an utterance starts and stops. No wake word, no shortcut.
+- **Transcription** is faster-whisper in the same process (§2.6).
+- **Playback** is raw PCM from CosyVoice, written to the output stream
+  clause by clause, strictly sequentially — synthesising clauses
+  concurrently interleaves their chunks and garbles the speech.
+- **The microphone is gated while he speaks**, or he hears himself.
 
-**Implications:**
-- Frontend calls `new webkitSpeechRecognition()` (CLAUDE.md §6 marks
-  this as the one approved browser-side audio API). The previous WS
-  `listen` message path that delegated to Python is deprecated but
-  still wired in `backend/samantha/api.py:_ws_handle_listen` for the
-  mock fallback.
-- Chromium kiosk needs `--use-fake-ui-for-media-stream` (or pre-granted
-  mic permission via origin allowlist) so the kiosk illusion isn't
-  broken by a permission prompt at first use.
-- Audio playback (TTS) is an `<audio>` element fed by `/speak` (Piper).
-  See §2.6 and `backend/samantha/tts.py`.
+**Two things that cost days, both silent:**
+- **PortAudio's `callback=` mode segfaults under GTK.** No traceback, and
+  it surfaces inside whatever unrelated `import` happens to be running.
+  Read blocking from a thread of our own. `SAMANTHA_WIDGET_NO_MIC=1`
+  exists because isolating the microphone is what found this.
+- **A venv with `--system-site-packages` also sees `~/.local/lib`**, and
+  a different numpy / anyio / websockets there gets loaded instead.
+  Always run with `PYTHONNOUSERSITE=1`; `pip list --local` is the only
+  honest view of what the venv holds.
+
+**Status:** never verified against a human voice — this box has no
+microphone plugged in. `SAMANTHA_WIDGET_FAKE_MIC` pushes synthesised
+speech through the real path, which is how everything downstream of the
+microphone was proved.
+
+> **The v3 decision, superseded, kept for the history.** Microphone
+> capture and speech recognition happened in the **browser** via the Web
+> Speech API (`webkitSpeechRecognition`); TTS playback used an
+> HTMLAudioElement fed by `/speak`.
+
+> **Rationale (post-offline-relaxation):**
+> - Web Speech API is built into Chromium with native Spanish (`es-ES`)
+>   support and streams a transcript in real time. No model download,
+>   no Python audio stack, no per-OS audio quirks.
+> - Local Whisper (faster-whisper) remains an option for environments
+>   that genuinely need offline STT, but the offline kiosk requirement
+>   was relaxed on 2026-05-13 so the simpler path wins.
+> - TTS stays Python-side because Piper is local, deterministic, and
+>   the voice file (`es_ES-sharvard-medium`, ~73 MB) lives at
+>   `~/.samantha/voices/`.
+>
+> **Implications:**
+> - Frontend calls `new webkitSpeechRecognition()` (CLAUDE.md §6 marks
+>   this as the one approved browser-side audio API). The previous WS
+>   `listen` message path that delegated to Python is deprecated but
+>   still wired in `backend/samantha/api.py:_ws_handle_listen` for the
+>   mock fallback.
+> - Chromium kiosk needs `--use-fake-ui-for-media-stream` (or pre-granted
+>   mic permission via origin allowlist) so the kiosk illusion isn't
+>   broken by a permission prompt at first use.
+> - Audio playback (TTS) is an `<audio>` element fed by `/speak` (Piper).
+>   See §2.6 and `backend/samantha/tts.py`.
 
 ### 2.9 Language: Spanish (Spain)
 
@@ -395,240 +530,213 @@ Spanish from Spain (peninsular).
 - User-facing strings: **Spanish**
 - Documentation: **English** (this file, READMEs)
 
-### 2.10 Frontend Stack: React + Vite + TypeScript
+### 2.10 Frontend Stack: React + Vite + TypeScript — SUPERSEDED
 
-**Decision:** React 18 + Vite + TypeScript in a separate `frontend/`
-directory.
+> **Superseded 2026-08-23, kept for the history.** `frontend/` still
+> exists and nothing runs it. The four screens, the Zustand store and the
+> Three.js OS1 ribbon were the kiosk's UI; the widget draws its own in
+> GSK (§2.3). It stays until the widget has convinced — an explicit
+> condition of the 2026-08-22 decision — and its removal is plan 3.
+>
+> **Node, pnpm and the whole build step are therefore not needed to run
+> him.** They are needed only to build something nothing loads.
 
-**Rationale:** The UI grew beyond what vanilla DOM manipulation
-handles cleanly (4 screens with state, a wave canvas, a toggleable
-history, a router). Component model + types + HMR pay back the
-build-step cost quickly. The original vanilla-JS decision (§12,
-2026-05) was correct for the original scope; that scope changed with
-the v2 redesign.
-
-**Cost:** Node.js as a dev dependency. Production deploy needs
-`npm install && npm run build` once during install. Runtime on the
-kiosk still needs only Python + Chromium.
+> **Decision:** React 18 + Vite + TypeScript in a separate `frontend/`
+> directory.
+>
+> **Rationale:** The UI grew beyond what vanilla DOM manipulation
+> handles cleanly (4 screens with state, a wave canvas, a toggleable
+> history, a router). Component model + types + HMR pay back the
+> build-step cost quickly. The original vanilla-JS decision (§12,
+> 2026-05) was correct for the original scope; that scope changed with
+> the v2 redesign.
+>
+> **Cost:** Node.js as a dev dependency. Production deploy needs
+> `npm install && npm run build` once during install. Runtime on the
+> kiosk still needs only Python + Chromium.
 
 ---
 
 ## 3. Project Structure (Authoritative)
 
 ```
-samantha/
-├── CLAUDE.md                   ← This file. Read first.
-├── PROGRESS.md                 ← Phase completion log (you update this)
-├── README.md                   ← Brief overview for humans
+os1-samantha/
+├── CLAUDE.md               ← This file. Read first.
+├── PROGRESS.md             ← The log, newest first (you append to this)
+├── README.md               ← The short version, for humans
 │
-├── backend/                    ← The whole application (Python)
+├── widget/                 ← HIM. The GTK4 strip and everything it does.
 │   ├── pyproject.toml
-│   ├── README.md
-│   ├── samantha/
-│   │   ├── __init__.py
-│   │   ├── api.py              ← FastAPI app + endpoints + StaticFiles + WS
-│   │   ├── config.py           ← Env-var-based config
-│   │   ├── schemas.py          ← Pydantic models (API contract)
-│   │   ├── mock_llm.py         ← Pattern-matched mock responses
-│   │   ├── real_llm.py         ← vLLM client (Phase 4)
-│   │   ├── audio_capture.py    ← sounddevice mic capture (Phase 5)
-│   │   ├── stt.py              ← faster-whisper (Phase 5)
-│   │   ├── tts.py              ← Piper (Phase 5)
-│   │   ├── memory.py           ← ChromaDB wrapper (Phase 6)
-│   │   └── personality.py      ← System prompt + persona (Phase 4)
-│   ├── static/                 ← Frontend, served by FastAPI
-│   │   ├── index.html          ← Single-page app
-│   │   ├── style.css           ← All styles
-│   │   ├── app.js              ← Main app + screen state machine
-│   │   ├── samantha-wave.js    ← Canvas 2D wave visualizer
-│   │   ├── os1-loader.js       ← Three.js cinta loader
-│   │   └── ws-client.js        ← WebSocket connection to /ws
+│   ├── README.md           ← the venv, the models, the switches. Read it.
+│   ├── samantha_widget/
+│   │   ├── __main__.py     ← the process: threads, wiring, camera loop
+│   │   ├── window.py       ← the GTK4 window
+│   │   ├── ewmh.py         ← above + placed, by ClientMessage (§2.2)
+│   │   ├── geometry.py     ← where the strip goes
+│   │   ├── theme.py        ← the colour, the shadow that must be killed
+│   │   ├── wave.py         ← drawing, in GSK, on the frame clock
+│   │   ├── wave_model.py   ← the wave as pure state, no GTK, testable
+│   │   ├── bars_model.py   ← the equaliser, likewise
+│   │   ├── vad.py          ← Silero: where an utterance starts and stops
+│   │   ├── stt.py          ← faster-whisper, and the politeness it invents
+│   │   ├── speech.py       ← splitting a reply into speakable clauses
+│   │   ├── audio.py        ← PortAudio in and out, blocking, our thread
+│   │   ├── gateway.py      ← the WebSocket to Hermes
+│   │   ├── turn.py         ← the state machine of one turn
+│   │   ├── vision.py       ← YOLO over RTSP; what is worth mentioning
+│   │   └── fake_mic.py     ← speak INTO him, on a box with no microphone
+│   ├── tools/              ← probes: render_wave, probe_gateway, probe_agentic
 │   └── tests/
-│       └── test_api.py
 │
-├── systemd/                    ← Service files for kiosk deployment
-│   ├── samantha-backend.service    ← Python backend
-│   ├── samantha-llamacpp.service   ← llama-server (Phase 4)
-│   ├── samantha-hermes.service     ← Hermes-Agent gateway (Phase 9 / v3)
-│   └── samantha-ui.service         ← Chromium kiosk launcher
+├── Hermes/                 ← the brain, pinned in-repo
+│   ├── jarvis-soul.md      ← the persona (and see the warning in §7)
+│   ├── samantha-config.yaml← model, provider, TTS. NOT the secrets.
+│   ├── apply-config.sh
+│   └── plugins/samantha_kiosk/  ← the surface he speaks through
 │
-└── docs/
-    ├── 01-setup-ubuntu.md      ← Full setup guide for the mini-PC
-    ├── 02-system-prompt-iterations.md
-    └── 03-design-decisions.md
+├── tts-server/             ← CosyVoice 3 in Docker, on :8093
+├── voices/                 ← the reference clip his voice is cloned from
+├── systemd/                ← user units: widget, hermes, hermes-serve,
+│                             llamacpp (+ backend/ui, dead with the kiosk)
+├── docs/                   ← personality.md, designs, plans, decisions
+│
+├── backend/                ← FastAPI + ChromaDB. Only `samantha.tts` is
+│                             still imported, as a library (§2.4).
+└── frontend/               ← React + Vite. Nothing runs it (§2.10).
 ```
 
 **Rules:**
-- **MUST NOT** introduce Rust, Tauri, or snap packaging (all rejected in
-  prior versions; see Decision Log §12)
+- **MUST NOT** introduce Rust, Tauri, snap packaging, or a browser /
+  webview of any kind (all rejected; see Decision Log §12)
 - **MUST NOT** add new top-level directories without asking
+- **MUST NOT** add code to `backend/` or `frontend/` — they are on their
+  way out (plan 3). New work goes in `widget/`.
 - **MAY** add files within existing directories following conventions
 
 ---
 
 ## 4. Current Project Status
 
-> Last updated by Claude Code: (initial v2)
+> Rewritten 2026-08-23. The phase numbering below belongs to the kiosk
+> era and stops being useful at Phase 9; what came after is dated
+> instead. `PROGRESS.md` is the authority and carries what each day cost.
 
-### Completed phases
+### Where he is now
 
-#### Phase 0: Architecture redesign ✅
-Settled on Ubuntu Server 24.04 LTS + Chromium kiosk + Python-only.
-Eliminated `src-tauri/` directory from v1. Discarded snap packaging
-plan from v2. Frontend lives in `backend/static/` and is served by
-FastAPI. Boot sequence: systemd auto-login → openbox → Chromium kiosk
-loads `http://localhost:7777/`.
+**Working:** the strip, always on top and placed; the full voice turn
+(VAD → Whisper → gateway → CosyVoice → playback); vision on the house's
+cameras; the persona; reminders that reach him unprompted; the LLM local
+on this box at 57 tok/s.
 
-#### Phase 2: Mock Python backend ✅ (from v1, mostly preserved)
-FastAPI server with 5 endpoints (ping, chat, chat/stream, transcribe,
-speak). Pattern-matched responses in `mock_llm.py` covering 14
-keyword-based categories plus 10 fallback replies. All responses follow
-the Samantha personality guidelines.
+**Not working / not done:**
+- **He has never heard a human voice.** No microphone is plugged into
+  this box. Everything downstream of it is proved via
+  `SAMANTHA_WIDGET_FAKE_MIC`. This is the last task of widget plan 2 and
+  it needs hardware, not code.
+- **Nobody can ask him what he sees.** The cameras speak; they cannot be
+  questioned. That wants vision exposed as a Hermes tool rather than a
+  thread pushing prompts.
+- **Plan 3 is unwritten:** removing the kiosk, `backend/` and
+  `frontend/`. Deliberately parked until the widget convinces.
+- **The Hermes config is git-ignored**, so `tts:` must be re-applied by
+  hand on any new box. Without it his words are synthesised by Edge TTS
+  — which means they leave for Microsoft. `Hermes/apply-config.sh`.
 
-**Note:** This phase predates the architecture change. It needs minor
-updates:
-- Add `StaticFiles` mount for `/static/*`
-- Add `GET /` route returning `index.html`
-- Add WebSocket endpoint `/ws` for streaming conversation
-- Remove `/chat/stream` SSE (replaced by WebSocket)
+### Completed phases (kiosk era, 1–9)
 
+Phases 0–9 built the Chromium kiosk: FastAPI backend, React frontend,
+llama.cpp, STT/TTS, ChromaDB memory, systemd deployment, the UI redesign
+and the Hermes-Agent integration. All ✅, all superseded as a *surface*
+by the widget — the LLM, TTS and Hermes work carried straight over.
+`PROGRESS.md` has each one.
 
-#### Phase 3: Frontend integration ✅
-Migrated the standalone mockup into a React + Vite application served by FastAPI. Wired all user input/output through real-time bidirectional WebSockets.
+### Since (dated, not numbered)
 
-#### Phase 4: Real LLM integration ✅
-Replaced `mock_llm.py` with `real_llm.py` that interacts with OpenAI-compatible completion endpoints (including local llama-server and remote Grok).
-
-#### Phase 5: STT + TTS + audio capture ✅
-Wired microphone and TTS audio streaming using Piper, XTTS-v2, and CosyVoice fallback paths.
-
-#### Phase 6: Memory with ChromaDB ✅
-Added ChromaDB semantic memory database. Facts are saved during onboarding and recalled semantically.
-
-#### Phase 7: Kiosk deployment ✅
-Auto-login and openbox launch on boot configured via systemd user services.
-
-#### Phase 8: UI Redesign ✅
-Immersive UI redesign using Zustand state management, 3D ribbon rendering with Three.js, and multi-mode wave visualizer.
-
-#### Phase 9: Hermes-Agent Integration ✅
-Hybrid integration of NousResearch `hermes-agent` API server daemon on port `8642` with session history mapping, header propagation (`X-Hermes-Session-Id`), and disabling `/no_think` Qwen switch to enable agéntico tool use.
-
-**Chromium kiosk command (reference):**
-```bash
-chromium-browser \
-  --kiosk \
-  --noerrdialogs \
-  --disable-infobars \
-  --disable-translate \
-  --no-first-run \
-  --start-fullscreen \
-  --app=http://localhost:7777/
-```
+- **2026-08-22** — decision: the widget replaces the kiosk (§12).
+- **2026-08-23** — widget plan 1: the strip ✅
+- **2026-08-23** — widget plan 2: the voice turn ⏸ blocked on a microphone
+- **2026-08-23** — he may act: reminders that arrive unprompted ✅
+- **2026-08-23** — JARVIS: the persona, the cloned voice ✅
+- **2026-08-23** — vision: the cameras speak ✅
+- **2026-08-23** — the LLM comes home: Qwen3.8-27B local, 57 tok/s ✅
 
 ---
 
 ## 5. Common Commands
 
-### Backend (Python)
+### The widget (this is the application)
 
 ```bash
-# Install in editable mode
-cd backend && pip install -e ".[dev]"
+cd widget
 
-# Run in mock mode (no GPU needed, no Ubuntu Frame needed)
-python -m samantha.api
+# One time. --system-site-packages is required: PyGObject and the GTK4
+# typelib are system packages, not pip ones.
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -e ".[dev]"
+# That flag also makes pip treat system packages as satisfying a
+# requirement, so an install can be a silent no-op. Force what matters:
+#   .venv/bin/pip install --ignore-installed -e ".[dev]"
+# and check with `pip list --local`, the only honest view of the venv.
 
-# Then open http://localhost:7777/ in any browser to see the UI
+# Run him. PYTHONPATH reaches samantha.tts (CosyVoice) and Hermes'
+# markers.py; PYTHONNOUSERSITE keeps ~/.local out of the way (§2.8).
+DISPLAY=:1 PYTHONNOUSERSITE=1 \
+  PYTHONPATH=$PWD/../backend:$PWD/.. \
+  .venv/bin/python -m samantha_widget
 
-# Run in real mode (requires llama-server on :8000)
-SAMANTHA_MODE=real python -m samantha.api
-
-# Run tests
-pytest tests/ -v
-
-# Format + lint
-ruff check . && ruff format .
+# Tests + lint
+.venv/bin/python -m pytest -v
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```
 
-### Frontend (Vite + React + TS)
+`widget/README.md` documents every environment switch — freezing the
+wave for a screenshot, running with no microphone, speaking INTO him,
+pointing him at a camera, dumping utterances to WAV. Read it before the
+first run.
 
-**Package manager: pnpm** (NOT npm). npm has had recurring supply-chain
-issues and we want stricter dep isolation. pnpm ships with Node via
-`corepack` — no extra install. Activate once on a new machine:
-
-```bash
-corepack enable
-corepack prepare pnpm@latest --activate
-```
-
-Then in `frontend/`:
+### The services around him
 
 ```bash
-cd frontend
-
-# One time
-pnpm install
-# pnpm blocks postinstall scripts by default. esbuild needs its
-# postinstall to fetch its binary; the project's package.json already
-# whitelists it under "pnpm.onlyBuiltDependencies". If pnpm prompts:
-pnpm approve-builds esbuild
-
-# Dev server with HMR on :5173, proxies API to :7777
-pnpm dev
-
-# Production build to frontend/dist/ (consumed by backend)
-pnpm build
-
-# Type checking only
-pnpm typecheck
-```
-
-**Do NOT run `npm install` in `frontend/`** — it would regenerate
-`package-lock.json` and pull deps without the pnpm isolation guarantees.
-
-### Development workflow
-
-```bash
-# Backend hot reload — edit Python and uvicorn picks it up
-cd backend && uvicorn samantha.api:app --host 127.0.0.1 --port 7777 --reload
-
-# Frontend HMR — edit anything under frontend/src/ and the browser updates
-cd frontend && npm run dev
-# then open http://localhost:5173/ (NOT :7777 during dev — Vite proxies the API)
-```
-
-### Deployment (Phase 7, on the mini-PC)
-
-```bash
-# On Ubuntu Server 24.04 LTS, after running setup script:
-# 1. Install dependencies
-sudo apt install xorg openbox chromium-browser
-sudo ubuntu-drivers autoinstall   # NVIDIA drivers
-
-# 2. Install Samantha backend
-cd backend && pip install -e .
-
-# 3. Build the frontend (Node required at install time, not at runtime)
-#    pnpm via corepack — never use npm here (see §5 / decision log).
-corepack enable
-corepack prepare pnpm@latest --activate
-cd ../frontend && pnpm install && pnpm approve-builds esbuild --all && pnpm build && cd ..
-
-# 4. Install systemd services
+# Install / refresh the user units
 cp systemd/*.service ~/.config/systemd/user/
-systemctl --user enable samantha-llamacpp.service
-systemctl --user enable samantha-backend.service
-systemctl --user enable samantha-ui.service
-loginctl enable-linger samantha    # Services start without login
+systemctl --user daemon-reload
 
-# 4. Enable auto-login on tty1
-sudo systemctl edit getty@tty1
-# (paste auto-login config from docs/01-setup-ubuntu.md)
+systemctl --user enable --now samantha-llamacpp.service   # the LLM, :8000
+systemctl --user enable --now samantha-hermes.service     # the gateway, :7777
+systemctl --user enable --now samantha-widget.service     # him
+loginctl enable-linger $USER    # so they survive without a login
 
-# 5. Reboot — Samantha takes over the screen
-sudo reboot
+journalctl --user -u samantha-widget.service -f
 ```
+
+CosyVoice runs in Docker from `tts-server/cosyvoice/` and listens on
+`:8093`. He answers without it, and is mute.
+
+**After changing the persona** (`Hermes/jarvis-soul.md`) send `/new` then
+`/approve` through the strip. Restarting the gateway is NOT enough — see
+§7 and the warning there; this has cost an afternoon once already.
+
+### Verifying anything visual
+
+```bash
+ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
+xwininfo -name "samantha-widget"   # did you photograph the strip, or the lock screen?
+```
+
+Nothing about his appearance is provable from a test, and a screenshot of
+a locked session is a convincing picture of the wrong thing.
+
+### Legacy: backend and frontend
+
+Neither runs (§2.4, §2.10). `backend/` still holds `samantha.tts`, which
+the widget imports, so its tests are worth keeping green:
+
+```bash
+cd backend && ./.venv/bin/python -m pytest tests/ -q
+```
+
+The frontend build (`pnpm install && pnpm build`, never `npm`) produces
+`frontend/dist/`, which nothing loads any more.
 
 ---
 
@@ -648,7 +756,16 @@ sudo reboot
   via exception handlers in `api.py`
 - **Async:** all I/O is async (FastAPI requirement)
 
-### JavaScript
+### JavaScript — no longer part of the running system
+
+> There is no browser (§2.3), so none of this governs anything that
+> runs. It applies only if you touch `frontend/`, which you should not
+> (§3). **The UI language is Python + GTK4**, under the Python rules
+> above, with one addition: `gi.require_version()` must run before the
+> import it guards, so those imports cannot be at the top of the file and
+> carry `# noqa: E402`. E402 is off in ruff's default set and is enabled
+> explicitly in `widget/pyproject.toml` — otherwise ruff flags the noqa
+> itself as unused.
 
 - **Style:** vanilla ES modules, no transpilation
 - **No npm dependencies** unless absolutely necessary. Three.js is loaded
@@ -678,16 +795,30 @@ sudo reboot
 
 ---
 
-## 7. Samantha's Personality (The Soul)
+## 7. The Personality (The Soul)
 
 The full personality spec — core identity, linguistic style, forbidden
 patterns, examples, system-prompt status — lives in
 **[`docs/personality.md`](docs/personality.md)**.
 
-It governs everything user-facing: chat replies, error messages,
-button labels, even loading text. Read it before writing any
-Samantha-facing string. Any reference to "§7" or "personality §7"
-elsewhere in this document points to that file.
+It governs everything user-facing: chat replies, error messages, even
+loading text. Read it before writing any string he might say. Any
+reference to "§7" or "personality §7" elsewhere points to that file.
+
+**Where the persona actually lives, and the trap in it.**
+`Hermes/jarvis-soul.md` is the identity, and it is delivered through the
+platform's `platform_hint` — **not** through `SOUL.md`. Hermes reads
+`SOUL.md` only when `load_soul_identity=True`, which is passed by
+`cron/scheduler.py` and nothing else, so a conversation through the strip
+never sees it.
+
+**The system prompt is fixed when the SESSION is born.** Editing the
+persona file, the hint or the memory does not touch a session that
+already exists, and restarting the gateway does not either — the session
+lives in `state.db` and resumes exactly as it was. Send **`/new`, then
+`/approve`** through the strip after any persona change. Hermes Desktop
+appears to obey instantly only because it opens a session of its own,
+and that discrepancy is the clue if you ever see it again.
 
 ---
 
@@ -726,7 +857,7 @@ elsewhere in this document points to that file.
 - Run tests before declaring a task done (`pytest`)
 - Format code before committing (`ruff format`)
 - Use the canonical commands in §5
-- Keep frontend in vanilla JS (no React, no build tools)
+- Keep new UI work in `widget/` (GTK4 + GSK) — not in `frontend/`, not in a browser
 - Write user-facing strings in Spanish, code/comments in English
 - Verify personality §7 rules for any new user-facing text
 
@@ -753,18 +884,23 @@ If you encounter:
 
 | Feature / topic | Files |
 |---|---|
-| API endpoints | `backend/samantha/api.py` |
-| Data contract | `backend/samantha/schemas.py` |
-| Mock responses | `backend/samantha/mock_llm.py` |
-| Real LLM (future) | `backend/samantha/real_llm.py`, `personality.py` |
-| Audio capture | `backend/samantha/audio_capture.py` |
-| The wave visualizer | `backend/static/samantha-wave.js` |
-| The OS1 loader (cinta) | `backend/static/os1-loader.js` |
-| Screen state machine | `backend/static/app.js` |
-| WebSocket client | `backend/static/ws-client.js` |
-| Server config | `backend/samantha/config.py` |
-| systemd services | `systemd/*.service` |
-| Setup guide (Phase 7) | `docs/01-setup-ubuntu.md` |
+| The process: threads and wiring | `widget/samantha_widget/__main__.py` |
+| One turn, as a state machine | `widget/samantha_widget/turn.py` |
+| The window, borderless and above | `widget/samantha_widget/{window,ewmh,geometry}.py` |
+| The wave (drawing / pure model) | `widget/samantha_widget/{wave,wave_model,bars_model}.py` |
+| Colour, and the shadow to kill | `widget/samantha_widget/theme.py` |
+| Listening: VAD and transcription | `widget/samantha_widget/{vad,stt}.py` |
+| Speaking: clauses and playback | `widget/samantha_widget/{speech,audio}.py` |
+| The link to the brain | `widget/samantha_widget/gateway.py` |
+| Vision, and what is worth saying | `widget/samantha_widget/vision.py` |
+| Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
+| The surface Hermes speaks through | `Hermes/plugins/samantha_kiosk/` |
+| His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
+| Model, provider, TTS provider | `Hermes/samantha-config.yaml` |
+| CosyVoice, and the voice prompt | `tts-server/cosyvoice/server.py`, `backend/samantha/tts.py` |
+| The reference clip | `voices/` |
+| Services | `systemd/*.service` |
+| Design, plans, decisions | `docs/superpowers/` |
 
 ---
 
@@ -772,16 +908,19 @@ If you encounter:
 
 | Term | Meaning |
 |---|---|
-| **Chromium kiosk** | Chromium browser launched with `--kiosk` flag, running fullscreen with no UI chrome (no address bar, no tabs). Our display layer. |
-| **openbox** | Minimal X11 window manager. Launches Chromium and gets out of the way. |
-| **OS1 / cinta** | The Three.js 3D ribbon loader from the film, attributed to Siyoung Park (MIT) |
-| **The wave / línea** | The horizontal Canvas 2D line that represents Samantha during conversation |
+| **The strip / la tira** | The GTK4 window along the bottom edge of the screen. Our display layer, and him. |
+| **The gateway** | The Hermes Agent daemon on `:7777`. His brain, memory and tools. Not to be confused with `hermes serve` (`:8642`), which is what Hermes Desktop connects to. |
+| **The turn** | One exchange, from the VAD deciding somebody is talking to the last clause of his reply being played. |
+| **EWMH** | The X11 convention for telling a window manager to keep a window above others and put it at an exact pixel. GTK4 has no API for either (§2.2). |
+| **Chromium kiosk** | v3's display layer, replaced 2026-08-23 (§2.3, §12). Mentioned only in history. |
+| **openbox** | The minimal X11 window manager the kiosk used. Gone with it; the desktop is GNOME. |
+| **OS1 / cinta** | The Three.js 3D ribbon loader from the film, attributed to Siyoung Park (MIT). In `frontend/`, unused. |
+| **The wave / línea** | The line that represents him on the strip, drawn in GSK. Four states: idle, listening, thinking, speaking. |
 | **Onboarding / primer encuentro** | The first-run flow: boot → calibration → voiceprint → greeting → 6 questions → generating → welcome |
 | **The 6 questions** | Personality calibration questions asked once |
 | **Voiceprint / huella de voz** | User's voice embedding stored on first run |
-| **Mock mode** | Backend mode where responses are pattern-matched, no LLM loaded |
-| **Real mode** | Backend mode with vLLM serving the actual model |
-| **Terracotta / `#d1684e`** | The exact background color from the film |
+| **Mock mode / Real mode** | Modes of the unused FastAPI backend (§2.4). Nothing in the running system has modes. |
+| **Terracotta / `#d1684e`** | The exact colour from the film. It moved from the strip's background into the line itself when the strip went transparent. |
 
 ---
 
@@ -790,13 +929,17 @@ If you encounter:
 - **Film:** Her (2013), Spike Jonze. Design references throughout.
 - **OS1 loader original:** https://codepen.io/psyonline/pen/yayYWg
   (MIT, by Siyoung Park / psyonline.kr)
-- **Ubuntu Server LTS:** https://ubuntu.com/download/server
-- **Chromium kiosk flags:** https://peter.sh/experiments/chromium-command-line-switches/
-- **FastAPI:** https://fastapi.tiangolo.com/
-- **Qwen models:** https://huggingface.co/Qwen
-- **Piper TTS:** https://github.com/rhasspy/piper
+- **GTK4 / GSK snapshot API:** https://docs.gtk.org/gtk4/class.Snapshot.html
+- **EWMH spec (`_NET_WM_STATE`, §7.5):** https://specifications.freedesktop.org/wm-spec/latest/
+- **Hermes Agent:** https://github.com/NousResearch/hermes-agent
+- **CosyVoice:** https://github.com/FunAudioLLM/CosyVoice
+- **Silero VAD:** https://github.com/snakers4/silero-vad
 - **faster-whisper:** https://github.com/SYSTRAN/faster-whisper
-- **ChromaDB:** https://docs.trychroma.com/
+- **llama.cpp:** https://github.com/ggml-org/llama.cpp
+- **Qwen models:** https://huggingface.co/Qwen
+- **Piper TTS:** https://github.com/rhasspy/piper (v3's voice, superseded)
+- **FastAPI:** https://fastapi.tiangolo.com/ (unused backend)
+- **ChromaDB:** https://docs.trychroma.com/ (unused backend)
 
 ---
 
@@ -926,6 +1069,80 @@ alongside Yuanbao and Feishu.
 **Alternatives rejected:** keeping her purely conversational (leaves
 Hermes pointless — a smaller local model would do), and going fully
 task-oriented (that is Siri, and §1 has always said no).
+
+### 2026-08-23 — The LLM came home: Qwen3.8-27B local, and Grok demoted
+
+**Decision:** inference runs on this box by default. `llama-server` with
+Qwen3.8-27B at UD-Q3_K_XL, 57 tok/s. Grok stays reachable behind a config
+switch. This reverses the 2026-05-15 decision below.
+
+**Rationale:** that decision rested on "8B-class models can't carry this
+personality, and bigger ones don't fit". The second half stopped being
+true — a 4090, a smaller quant and a current llama.cpp put a 27B beside
+CosyVoice and Whisper with room to spare, four times faster than the
+obvious quantisation. §2.5 has the table.
+
+**Cost:** the box must hold everything at once (23.3 GB of 24.5), so
+adding anything that wants VRAM now costs tokens per second. And
+llama.cpp must be recent: b9115 refused the file outright, missing a
+tensor of Qwen3.8's hybrid Gated DeltaNet.
+
+**What it buys:** §1.1 back, honestly. Nothing said in the room leaves it.
+
+---
+
+### 2026-08-23 — Samantha becomes JARVIS
+
+**Decision:** the persona is JARVIS — courteous, precise, dry, never
+alarmed, addresses the user as "señor" without servility, and never
+narrates his tools. Samantha's warmth was the right character for a
+companion; the thing that ended up on the desk is a house presence.
+
+**Cost:** the name is only changed in prose. `samantha_widget`,
+`samantha_kiosk`, `SAMANTHA_*` and the repo itself keep the old name —
+renaming them would touch every file, every unit and every env var to buy
+nothing. Anyone reading the code should expect the mismatch.
+
+**What the investigation cost, and it is the valuable part:** the persona
+was correct for an entire afternoon while the strip kept answering "me
+llamo Hermes". Two independent causes, both silent — `SOUL.md` never
+reaching a gateway conversation at all, and the system prompt being
+frozen when the *session* is born. §7 has both, and the fix (`/new`,
+`/approve`).
+
+---
+
+### 2026-08-22 — The Chromium kiosk is replaced by a GTK4 desktop widget
+
+**Decision:** the surface is a native GTK4 strip along the bottom of the
+screen. It **replaces** the kiosk rather than coexisting with it. Taken
+2026-08-22 in brainstorming, four answers closed: it replaces; GTK4 with
+no webview; a floating strip, wide and low, terracotta; always listening,
+with Silero deciding when the user speaks — no wake word, no shortcut.
+
+**Rationale:** the appliance model (§1.5, as it was) assumed a device
+that is only him. The real box is a desktop the user also works on, and a
+full-screen kiosk on it is not a presence but an application that will
+not go away. A strip is there without taking anything.
+
+**Cost, accepted explicitly:**
+- **`frontend/` dies.** React, Vite, Three.js, the OS1 ribbon, the four
+  screens — all of it was the kiosk's UI. The user's condition was that
+  it not be deleted until the widget convinces, which is why §2.10 and
+  §3 still list it and why plan 3 is unwritten.
+- **The UI is rewritten in GTK4/GSK**, a smaller and less familiar
+  toolkit than a browser, on a machine where Cairo turned out not to
+  work (§2.3).
+- **X11 becomes a hard constraint** rather than a preference (§2.2).
+- Boot-to-him and the auto-login chain are gone; a user service starts
+  him inside the ordinary desktop session.
+
+**What it bought, measured:** ~389 MB resident for the whole of him,
+Whisper included; a wave that animates on the frame clock at no
+measurable cost; and a surface with no window, no focus and nothing to
+click, which is §1.5 made literal.
+
+---
 
 ### 2026-05-15 — LLM switched from local Qwen3-8B to Grok API
 
