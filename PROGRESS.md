@@ -1,5 +1,101 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-24 — La visión se muda al cerebro: el plugin `samantha_vision` ✅
+
+Las cámaras dejan el widget y pasan a vivir dentro del gateway, como
+plugin `samantha_vision`. Dos cámaras **con nombre** (`fuera`,
+`entrada`), un hilo cada una, las mismas reglas de silencio de siempre
+pero con la cámara dentro de la clave del anti-spam. El widget vuelve a
+ser la tira: dibuja, escucha y habla.
+
+Sustituye a la entrada del 2026-08-23 («Vista: las cámaras hablan»), que
+sigue siendo correcta en todo menos en dónde vive esto.
+
+**Verificado contra la casa real** — una cámara encendida (`entrada`,
+.143), la otra apagada (`fuera`, .142), nada simulado:
+
+```
+entrada: alguien
+← El de la entrada sigue plantado donde está, señor.
+```
+
+**Changed files:** `Hermes/plugins/samantha_vision/` entero
+(`__init__.py`, `cameras.py`, `alert.py`, `vision.py`, `plugin.yaml`,
+`README.md`, `tests/`), `Hermes/samantha-config.yaml`,
+`widget/samantha_widget/__main__.py` (se va el hilo de cámara),
+`widget/README.md`, `CLAUDE.md` (§0, §2.3, §3, §4, §5, §9, §12),
+`docs/superpowers/specs/2026-08-24-samantha-vision-plugin-design.md`
+(§3, con lo que midió la sonda), `PROGRESS.md`. Se van
+`widget/samantha_widget/vision.py` y `widget/tests/test_vision.py`, que
+se mudan con lo demás.
+
+**Tests:** 64 del plugin y 110 del widget, todos en verde. Ninguno
+necesita cámara, GPU ni red: lo único que toca el mundo —construir el
+detector y abrir un stream— entra como callables que los tests
+sustituyen.
+
+**Notas:**
+
+- **La sonda decidió el diseño entero de la alerta, y salió barata.**
+  Antes de escribir nada se midió cómo habla un plugin sin que nadie le
+  pregunte. Tres hallazgos: **no hay ningún hook posterior al registro**,
+  así que `register(ctx)` es la única puerta y tiene que arrancar sus
+  propios hilos; la entrega es `ctx.inject_message(texto, role="user",
+  session_key=…)` y **solo sabe empujar un mensaje de usuario** —no
+  existe forma de ponerle palabras acabadas en la boca, que es justo la
+  propiedad que queríamos; y `allow_gateway_injection` es un permiso por
+  plugin, apagado por defecto. Eso convierte «se le avisa, no se le hace
+  recitar» (CLAUDE.md §1) en una propiedad del mecanismo y no de nuestra
+  disciplina. Todo con file:line, ahora en el §3 del diseño; `PROBE.md`
+  se borra porque su contenido está allí.
+- **El plan traía cuatro errores de detalle que solo aparecen
+  compilando.** `ctx.log` no existe (se usa `loguru`); `Detection` tiene
+  `confidence`, no `score`; `parse_cameras` tal como estaba escrita
+  reventaba con una lista pelada de URLs, es decir, una errata en una
+  cámara dejaba a la casa sin ninguna; y el `settings:` del que cuelgan
+  las cámaras no estaba.
+- **La forma del prompt importaba más que su contenido.** `"en la
+  {camera}"` y `"en {camera}"` producen los dos español roto con una
+  cámara llamada `fuera` —los nombres son sustantivos pelados, sin
+  artículo— y el modelo **no se encoge de hombros: lo repara**
+  inventando un sitio que encaje. Medido dos veces en el gateway vivo:
+  la cámara que mira a la calle veía a alguien y él informaba de la
+  entrada. Un sitio equivocado, no una frase torpe, en una función cuyo
+  trabajo entero es decirte quién anda por la casa. La solución fue
+  dejar de meter el nombre dentro de una preposición: se le entrega
+  etiquetado, `Dónde: fuera. Qué: alguien.`, y él elige la suya.
+- **`ctx.get_config("cameras")` lee
+  `entries.<id>.settings.cameras`, no la raíz de la entrada.** La forma
+  que traía el plan habría dejado el plugin cargado, sin hilos y sin una
+  sola queja audible: «no cameras configured» en el journal y él sin
+  mencionar a nadie nunca. Es el error que esta configuración invita.
+- **`apply-config.sh` fusiona diccionarios en profundidad pero
+  reemplaza listas enteras.** Una lista `cameras:` de ejemplo en el
+  `samantha-config.yaml` versionado habría pisado las cámaras de verdad
+  en la siguiente ejecución. Por eso ahí la forma va **comentada**: un
+  comentario no puede machacar nada.
+- **PyAV mete la URL RTSP completa, con contraseña, en cada mensaje de
+  error.** Llegó al journal en claro una vez antes de que existiera
+  `redact()`. Ahora todo lo que se registra pasa por ahí.
+- **`inject_message` falla casi siempre al primer intento**, y no es un
+  fallo: el inyector se instala solo después de que conecten *todos* los
+  adaptadores de plataforma. Se reintenta 1 s, 3 s, 5 s y luego se
+  **descarta** la detección. Encolarlas sería peor: le haría recitar
+  noticias viejas en cuanto la tira conectase, que es exactamente la
+  máquina hablando que prohíbe §1. Hay un segundo caso en el que ese
+  `False` no se cura nunca: una caja donde la tira no ha hablado jamás
+  no tiene sesión, y no la tendrá hasta que el usuario diga algo.
+- **Las cámaras dentro del cerebro son un riesgo real.** Si un hilo
+  tumba el gateway se cae todo, no solo la vista. Cada hilo captura
+  cualquier excepción, avisa una vez y reintenta con backoff de 30 s
+  hasta un techo de 5 minutos; una cámara apagada es un martes, no un
+  error, y nunca cuesta las demás.
+- **Falta lo mismo que faltaba ayer: nadie puede preguntarle qué ve.**
+  El plugin no registra ninguna herramienta y no recuerda nada. `mirar`,
+  `revisar` y la tabla de detecciones son el plan 2.
+
+---
+
 ## 2026-08-23 — Vista: las cámaras hablan ✅
 
 El widget mira las cámaras de la casa y, cuando ve algo que merece la

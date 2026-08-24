@@ -93,22 +93,118 @@ rests on it:
 
 ## 3. Lifecycle, and when the threads start
 
-`register()` registers the tools and **returns**. It does not open a
-camera. The threads start when the plugin is enabled and the gateway
-has finished starting — one per configured camera, each daemonised so a
-gateway shutdown does not wait on a blocked network read.
+> Everything with a file:line in this section was measured on 2026-08-24
+> against the pinned Hermes in `.hermes/src/`, by a throwaway plugin that
+> made the gateway speak unprompted. It was written up beside the code as
+> `PROBE.md` and folded in here on 2026-08-24, because this is where the
+> next person looks.
 
-This ordering matters for a reason measured on 2026-08-23 in the kiosk
-adapter: work done during registration that touches the outside world
-turns a missing dependency into a plugin that never loads, and Hermes
-reports that as a retry-forever loop at DEBUG level. Registration must
-be pure. **A camera that cannot be reached is a warning in the log and a
-thread that keeps trying, never a plugin that fails to register.**
+### `register(ctx)` is the only entry point
+
+**No lifecycle hook fires after registration.** The two candidates were
+both refuted:
+
+- `register_auxiliary_task` (`hermes_cli/plugins.py:2940`) is not a
+  lifecycle hook at all — it declares an LLM-backed *side job* routed
+  through `auxiliary_client.py`. Nothing about it runs code at startup.
+- `register_hook` (`plugins.py:3114`) is the real hook API, and its
+  allow-list `VALID_HOOKS` (`plugins.py:161`) has no "gateway is up" or
+  "plugin loaded" event. The closest are `on_session_start` (per
+  session, `run_agent.py:725`) and `pre_gateway_dispatch` (per inbound
+  message — it does hand over the `GatewayRunner`, but only once
+  somebody has already spoken).
+
+There *is* a `gateway:startup` event (`gateway/run.py:13160`), and it is
+not the plugin API: `self.hooks` there is `gateway/hooks.py::HookRegistry`,
+a separate system that scans `.hermes/home/hooks/` for `HOOK.yaml` +
+`handler.py` pairs. A plugin cannot subscribe to it. (`ctx.on_unload`
+exists with no `on_load` counterpart, which is the same fact from the
+other side: `register()` *is* the load.)
+
+So a plugin that must act later **starts its own threads from
+`register()`** — one per configured camera, each daemonised so a gateway
+shutdown does not wait on a blocked network read.
+
+Registration itself must stay pure, for a reason measured on 2026-08-23
+in the kiosk adapter: work done during registration that touches the
+outside world turns a missing dependency into a plugin that never loads,
+and Hermes reports that as a retry-forever loop at DEBUG level. **A
+camera that cannot be reached is a warning in the log and a thread that
+keeps trying, never a plugin that fails to register.**
 
 `shutdown()` sets a stop flag and joins each thread with a short
 timeout. A thread wedged inside a decoder read is abandoned rather than
 waited on, because a gateway that will not stop is worse than a leaked
 thread on the way to process exit.
+
+### Speaking first: `ctx.inject_message`
+
+```python
+ctx.inject_message(content: str, role: str = "user", *,
+                   session_key: str | None = None) -> bool
+```
+
+`plugins.py:1973`, and documented (`website/docs/user-guide/features/
+plugins.md`, "Injecting Messages"). The session key is deterministic:
+`build_session_key` (`gateway/session.py:1090`) joins namespace /
+platform / chat_type / chat_id, and the kiosk adapter always opens its
+source with `chat_id="kiosk"`, `chat_type="dm"` — so it is the constant
+`agent:main:samantha_kiosk:dm:kiosk`. A `/new` mints a fresh
+`session_id` under the same key, so the constant stays correct.
+
+**What arrives is a user message.** `_dispatch_plugin_message_injection`
+(`gateway/run.py:18716`) builds a plain inbound `MessageEvent` with
+`internal=True` and hands it to the platform adapter — the same path an
+inbound `chat` frame from the widget takes. The model reads the injected
+text as something the user said, and *his answer* is what reaches the
+strip. `role` is nearly cosmetic: a non-`"user"` role only prefixes the
+content with `[role]` and still arrives as user input.
+
+**There is no way to push a finished assistant message through this
+API, and that is the property we want.** It makes "he is told, never
+made to recite" (CLAUDE.md §1) a fact about the mechanism rather than
+about our discipline: the alert can only ever be an instruction, and
+the instruction is never spoken back. Slash commands and approvals are
+not reachable this way either — the docs are explicit that injected
+text is always conversational input. A busy session is safe: it uses
+the existing busy-session queue rather than starting a competing turn,
+and `True` means the gateway accepted it for dispatch, not that the turn
+finished.
+
+**The permission is per plugin and default-off.**
+`_gateway_injection_allowed()` (`plugins.py:2043`) reads
+`plugins.entries.<plugin_id>.allow_gateway_injection`, where
+`<plugin_id>` is the manifest `key` or `name` — for us
+`samantha-vision`. Authorisation is rechecked at dispatch rather than
+trusted from the session, and a live adapter must exist for the
+session's platform.
+
+**It returns `False` silently, in two cases that want opposite
+handling:**
+
+- **The gateway is still starting.** `_install_plugin_message_injector()`
+  (`gateway/run.py:18634`) publishes the live runner into
+  `PluginManager._gateway_message_injector`, and it is called at
+  `gateway/run.py:13155`, immediately after `self._running = True` —
+  i.e. **after every platform adapter has connected**. Before that,
+  injection returns `False` and logs "no live gateway is available". On
+  this box that window was under a second, but a slow or retrying
+  adapter pushes it arbitrarily later, so **a fixed delay is the wrong
+  answer**: treat `False` as "not yet" and retry, bounded.
+- **The strip has never spoken on this box.** There is no session row,
+  `lookup_by_session_key` returns `None`, and no amount of waiting makes
+  one. Vision cannot introduce itself to a gateway nobody has talked to
+  yet, so the retry must end in dropping the sighting.
+
+### The other path, and why we do not want it
+
+Cron does **not** use injection. `cron/scheduler.py::_deliver_result`
+(line 2652) runs the agent first and then pushes the finished text at
+the platform through `tools.send_message_tool::_send_to_platform`,
+optionally wrapped in a "Cronjob Response: …" header. That is the
+finished-assistant lane: it would put vision's own words on the strip
+verbatim and bypass his voice entirely. It exists; do not use it for
+detections.
 
 ---
 

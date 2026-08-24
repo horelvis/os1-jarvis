@@ -70,6 +70,26 @@ credential BarnDoor's Frigate uses (`frigate-config/config.yml`).
 **Always the sub-stream** (`h264Preview_01_sub`). The main stream is 4K,
 costs real time to decode, and YOLO scales everything to 320 px anyway.
 
+**On a new box there are no cameras.** `.hermes/home/config.yaml` is not
+in git and never will be, so nothing above is restored by cloning the
+repo. The symptom of forgetting is not an error: the plugin registers,
+logs `no cameras configured`, and he simply never mentions anybody.
+
+### A recording is a camera
+
+`url` is handed to PyAV, so **anything PyAV can open works** — including
+a path to a file (an absolute one — nothing expands `~`):
+
+```yaml
+        cameras:
+          - name: entrada
+            url: /home/nexus/git/barndoor/frigate-storage/recordings/2026-05-05/18/exterior/14.26.mp4
+```
+
+That is how this whole path is tested, and how it was built while both
+cameras were off: a recording proves the detector, the quiet rules, the
+prompt and his answer. The only thing it cannot prove is the network.
+
 ### The names are interface, not configuration
 
 `name` is what he says out loud and what the user asks for, so it must be
@@ -82,6 +102,24 @@ comment above `_TEMPLATE` in `alert.py` before touching the wording.
 
 A nameless or url-less entry is dropped with one warning line; a typo in
 one camera never costs the house the others.
+
+## The quiet rules, and their numbers
+
+They are not guesses. They come from BarnDoor's `agent/rules.py`,
+arrived at against these same two cameras, and they are the only reason
+one model call per event is affordable.
+
+| Rule | Value | Why |
+|---|---|---|
+| Confidence floor | `0.7` | Below it, YOLOv9-t at 320 px announces shadows. |
+| Anti-spam | `180 s` per label **per camera** | Without it, one person in the doorway is announced every three seconds. |
+| Quiet hours | `23:00`–`07:00` | Silence — but a person overrides it. A parked car does not. |
+| Watched classes | 8 | persona, bicicleta, coche, moto, autobús, camión, gato, perro. |
+| Sampling | one frame in ten | The GPU belongs to Whisper and CosyVoice, which are in the critical path of a conversation. A camera is not. |
+
+The anti-spam key carries the **camera as well as the label**, which is
+the point of naming them: somebody walking from `fuera` to `entrada` is
+two events and should be.
 
 ## What it does when a camera is off
 

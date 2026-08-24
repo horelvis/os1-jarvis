@@ -48,7 +48,9 @@ can act on it. Not a window you open. Something that is there.
 - **VAD:** Silero v5 over onnxruntime, CPU, always listening.
 - **TTS:** CosyVoice 3 zero-shot on `:8093`, JARVIS' cloned voice.
 - **Vision:** YOLOv9 over onnxruntime against the house's RTSP cameras,
-  borrowed from BarnDoor.
+  borrowed from BarnDoor. Since 2026-08-24 it runs **inside the
+  gateway**, as the plugin `samantha_vision` — one thread per named
+  camera. The widget no longer opens a camera.
 - **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
   (§2.7) still exists in `backend/` but the gateway path never uses it.
 - **Language:** Spanish (Spain) — every user-facing string, prompt and
@@ -59,7 +61,7 @@ can act on it. Not a window you open. Something that is there.
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  widget  (one Python process, GTK4 main loop)            │
-│    the strip · Silero · Whisper · YOLO · playback        │
+│    the strip · Silero · Whisper · playback               │
 │    speaks CosyVoice directly; never waits for audio      │
 └───────────────┬─────────────────────────┬────────────────┘
       ws://127.0.0.1:7777/ws     http://127.0.0.1:8093
@@ -68,6 +70,7 @@ can act on it. Not a window you open. Something that is there.
 │  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
 │   + samantha_kiosk (surface) │  └────────────────────────┘
 │   + samantha_voice (TTS)     │
+│   + samantha_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
 └───────────────┬──────────────┘       (Qwen3.8-27B, local)
                 └──────────────────────────────┘
@@ -258,9 +261,10 @@ presence but an application.
   browser can be made to look like it without fighting the browser.
 - **Native drawing.** GSK composites on the GPU. The wave animates on
   the frame clock, at no measurable cost.
-- **One process.** The strip, the VAD, transcription, playback and vision
-  are threads in a single Python program, so the wave reacts to the state
-  of the turn without a protocol between them.
+- **One process.** The strip, the VAD, transcription and playback are
+  threads in a single Python program, so the wave reacts to the state
+  of the turn without a protocol between them. (Vision was one of them
+  until 2026-08-24, when it moved into the gateway — see §12.)
 - **Weight.** Measured against the alternative: ~389 MB resident, almost
   all of it Whisper, against Electron's baseline for the same job.
 
@@ -569,7 +573,7 @@ os1-samantha/
 │   ├── pyproject.toml
 │   ├── README.md           ← the venv, the models, the switches. Read it.
 │   ├── samantha_widget/
-│   │   ├── __main__.py     ← the process: threads, wiring, camera loop
+│   │   ├── __main__.py     ← the process: threads and wiring
 │   │   ├── window.py       ← the GTK4 window
 │   │   ├── ewmh.py         ← above + placed, by ClientMessage (§2.2)
 │   │   ├── geometry.py     ← where the strip goes
@@ -583,7 +587,6 @@ os1-samantha/
 │   │   ├── audio.py        ← PortAudio in and out, blocking, our thread
 │   │   ├── gateway.py      ← the WebSocket to Hermes
 │   │   ├── turn.py         ← the state machine of one turn
-│   │   ├── vision.py       ← YOLO over RTSP; what is worth mentioning
 │   │   └── fake_mic.py     ← speak INTO him, on a box with no microphone
 │   ├── tools/              ← probes: render_wave, probe_gateway, probe_agentic
 │   └── tests/
@@ -592,7 +595,11 @@ os1-samantha/
 │   ├── jarvis-soul.md      ← the persona (and see the warning in §7)
 │   ├── samantha-config.yaml← model, provider, TTS. NOT the secrets.
 │   ├── apply-config.sh
-│   └── plugins/samantha_kiosk/  ← the surface he speaks through
+│   └── plugins/
+│       ├── samantha_kiosk/  ← the surface he speaks through
+│       ├── samantha_voice/  ← CosyVoice, from inside the gateway
+│       └── samantha_vision/ ← the cameras: YOLO, the quiet rules,
+│                              the alert. Its own README.
 │
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from
@@ -625,17 +632,19 @@ os1-samantha/
 
 **Working:** the strip, always on top and placed; the full voice turn
 (VAD → Whisper → gateway → CosyVoice → playback); vision on the house's
-cameras; the persona; reminders that reach him unprompted; the LLM local
-on this box at 57 tok/s.
+named cameras, from inside the gateway — two configured, one of them
+currently off; the persona; reminders that reach him unprompted;
+the LLM local on this box at 57 tok/s.
 
 **Not working / not done:**
 - **He has never heard a human voice.** No microphone is plugged into
   this box. Everything downstream of it is proved via
   `SAMANTHA_WIDGET_FAKE_MIC`. This is the last task of widget plan 2 and
   it needs hardware, not code.
-- **Nobody can ask him what he sees.** The cameras speak; they cannot be
-  questioned. That wants vision exposed as a Hermes tool rather than a
-  thread pushing prompts.
+- **Nobody can ask him what he sees.** Still true. The cameras moved
+  into the gateway on 2026-08-24, which is where a tool can live, but
+  they still only knock: `samantha_vision` registers no tool. `mirar`
+  and `revisar` — and the detections table they read — are plan 2.
 - **Plan 3 is unwritten:** removing the kiosk, `backend/` and
   `frontend/`. Deliberately parked until the widget convinces.
 - **The Hermes config is git-ignored**, so `tts:` must be re-applied by
@@ -659,6 +668,8 @@ by the widget — the LLM, TTS and Hermes work carried straight over.
 - **2026-08-23** — JARVIS: the persona, the cloned voice ✅
 - **2026-08-23** — vision: the cameras speak ✅
 - **2026-08-23** — the LLM comes home: Qwen3.8-27B local, 57 tok/s ✅
+- **2026-08-24** — vision moves into the gateway: the `samantha_vision`
+  plugin, cameras plural and named ✅ (asking him what he sees: plan 2)
 
 ---
 
@@ -691,8 +702,9 @@ DISPLAY=:1 PYTHONNOUSERSITE=1 \
 
 `widget/README.md` documents every environment switch — freezing the
 wave for a screenshot, running with no microphone, speaking INTO him,
-pointing him at a camera, dumping utterances to WAV. Read it before the
-first run.
+dumping utterances to WAV. Read it before the first run. The cameras are
+not among them any more — they are in
+`Hermes/plugins/samantha_vision/README.md`.
 
 ### The services around him
 
@@ -892,7 +904,9 @@ If you encounter:
 | Listening: VAD and transcription | `widget/samantha_widget/{vad,stt}.py` |
 | Speaking: clauses and playback | `widget/samantha_widget/{speech,audio}.py` |
 | The link to the brain | `widget/samantha_widget/gateway.py` |
-| Vision, and what is worth saying | `widget/samantha_widget/vision.py` |
+| Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
+| A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
+| The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
 | Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
 | The surface Hermes speaks through | `Hermes/plugins/samantha_kiosk/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
@@ -946,6 +960,106 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-24 — Vision moves out of the widget and into a Hermes plugin
+
+**Decision:** the cameras live in the gateway, as the standalone plugin
+`samantha_vision` (`Hermes/plugins/samantha_vision/`), one thread per
+camera. The widget goes back to drawing, listening and speaking, and
+opens no camera at all.
+
+**This supersedes the placement half of the 2026-08-23 entry below**
+("Why it belongs in the widget rather than in a service of its own").
+The rest of that entry stands unchanged and was carried over whole: what
+comes from BarnDoor and what does not, the quiet-rule numbers, and — the
+part that matters — that a detection becomes a *prompt* and never a
+sentence.
+
+**Rationale:**
+- **Watching should survive the widget restarting.** The strip is a
+  window on a desktop; the gateway is a systemd service with a lifecycle,
+  logs and supervision already paid for.
+- **A camera you can question has to live beside the thing that
+  answers.** The tool is plan 2, but it cannot exist in a UI process.
+- **The strip should draw.** §2.3 claims the widget is the surface; a
+  camera thread competing with the GTK main loop, Silero and Whisper was
+  the counter-example.
+
+**How a plugin speaks first, measured on the pinned Hermes:**
+`ctx.inject_message(text, role="user",
+session_key="agent:main:samantha_kiosk:dm:kiosk")`. Three properties
+decided the design and are worth carrying:
+- **No lifecycle hook fires after registration**, so `register(ctx)` is
+  the only entry point and must start its own threads — while staying
+  pure, because work that touches the outside world during registration
+  turns a missing dependency into a plugin that never loads.
+- **It can only push a *user* message.** There is no API for putting
+  finished words in his mouth, which makes §1's "he is told, never made
+  to recite" a property of the mechanism rather than of our discipline.
+- **It fails silently.** `False` before the adapters connect (the
+  injector installs after the last one), and `False` forever on a box
+  whose strip has never spoken, because no session row exists until the
+  user talks. A sighting with nowhere to go is retried three times and
+  then dropped; queueing would make him recite stale news.
+
+Injection is also a per-plugin permission, default-off:
+`plugins.entries.samantha-vision.allow_gateway_injection: true`. Without
+it the cameras watch and he never mentions a thing.
+
+**Cost:** the camera threads now run inside the brain. If one wedges the
+gateway, everything dies — so each thread catches everything, logs once
+and backs off from 30 s to a 5-minute ceiling, and each camera owns its
+own failure. And the widget keeps PyAV and onnxruntime in its
+dependencies, now for faster-whisper and Silero only; neither is there
+for vision any more.
+
+**Verified against the real house, 2026-08-24** — one camera live, one
+off, nothing faked:
+
+    ← El de la entrada sigue plantado donde está, señor.
+
+**Still not done:** he cannot be asked. `samantha_vision` registers no
+tool and remembers nothing; `mirar`, `revisar` and the detections table
+are plan 2.
+
+### 2026-08-24 — The cameras become plural, and named
+
+**Decision:** cameras are a list of `{name, url}` in the plugin's
+config, not one environment variable. The anti-spam window is keyed by
+camera **and** label. The names are interface, not configuration: they
+are what he says out loud.
+
+**Rationale:** somebody walking from `fuera` to `entrada` is two events
+and should be; with a single unnamed camera it was one, and the second
+half was swallowed by the 180 s window. Naming them is what makes the
+distinction expressible at all.
+
+**The measured trap, and it is not a small one.** Camera names are bare
+nouns, so they carry no article. Put one inside a prepositional phrase
+and the Spanish breaks — "en la fuera de casa", "en fuera de casa" — and
+a model handed broken Spanish does not shrug: it *repairs* it by
+inventing a place that fits. Twice on the live gateway, a camera named
+`fuera` seeing somebody produced "Hay alguien en la entrada, señor."
+Somebody outside, reported as somebody at the door — a wrong answer, not
+a clumsy one, in a feature whose whole job is telling you who is around
+the house. The fix was to stop putting the name inside a preposition at
+all: it is handed over as a labelled value, `Dónde: fuera. Qué:
+alguien.`, and he picks his own words around it.
+
+**Cost, all of it in the configuration:**
+- The URLs carry the RTSP password, so they live **only** in the
+  git-ignored `.hermes/home/config.yaml`. The tracked
+  `Hermes/samantha-config.yaml` carries the shape as a comment and
+  nothing else — a live placeholder list there would be worse than
+  useless, because `apply-config.sh` deep-merges dicts but **replaces
+  lists wholesale** and would blind him on the next run.
+- The list must sit under `settings:`. `ctx.get_config("cameras")` reads
+  `plugins.entries.<id>.settings.cameras` and nothing else; put it at the
+  entry root and the plugin loads, watches nothing, and says so in one
+  line nobody is reading.
+- PyAV puts the whole URL, password included, into every failure
+  message. It reached the journal in plaintext once before everything
+  logged went through `redact()`.
 
 ### 2026-08-23 — Samantha can see: BarnDoor's cameras, reused not integrated
 
