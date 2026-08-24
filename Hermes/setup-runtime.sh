@@ -77,7 +77,7 @@ say "4/6  HERMES_HOME at $HERMES_HOME"
 mkdir -p "$HERMES_HOME/plugins"
 # Symlinks, not copies: the plugins are versioned source in this repo and
 # must stay editable in place. Same pattern the plan documents use.
-for plugin in samantha_voice samantha_kiosk; do
+for plugin in samantha_voice samantha_kiosk samantha_vision; do
   ln -sfn "$REPO_ROOT/Hermes/plugins/$plugin" "$HERMES_HOME/plugins/$plugin"
   echo "    plugins/$plugin -> Hermes/plugins/$plugin"
 done

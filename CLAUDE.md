@@ -1009,9 +1009,9 @@ it the cameras watch and he never mentions a thing.
 **Cost:** the camera threads now run inside the brain. If one wedges the
 gateway, everything dies — so each thread catches everything, logs once
 and backs off from 30 s to a 5-minute ceiling, and each camera owns its
-own failure. And the widget keeps PyAV and onnxruntime in its
-dependencies, now for faster-whisper and Silero only; neither is there
-for vision any more.
+own failure. And onnxruntime and PyAV stay in the widget's dependency
+tree — onnxruntime declared, for Silero; PyAV transitively, because
+faster-whisper brings it — but neither is there for vision any more.
 
 **Verified against the real house, 2026-08-24** — one camera live, one
 off, nothing faked:

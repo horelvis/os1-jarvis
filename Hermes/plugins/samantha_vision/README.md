@@ -70,10 +70,17 @@ credential BarnDoor's Frigate uses (`frigate-config/config.yml`).
 **Always the sub-stream** (`h264Preview_01_sub`). The main stream is 4K,
 costs real time to decode, and YOLO scales everything to 320 px anyway.
 
-**On a new box there are no cameras.** `.hermes/home/config.yaml` is not
-in git and never will be, so nothing above is restored by cloning the
-repo. The symptom of forgetting is not an error: the plugin registers,
-logs `no cameras configured`, and he simply never mentions anybody.
+**On a new box the cameras are the one thing you must write by hand.**
+Everything else is scripted: `Hermes/setup-runtime.sh` symlinks this
+directory into `$HERMES_HOME/plugins/`, and `Hermes/apply-config.sh`
+merges the tracked `Hermes/samantha-config.yaml`, which enables
+`samantha-vision` and grants it `allow_gateway_injection`. What no
+script can restore is the block above: `.hermes/home/config.yaml` is not
+in git and never will be, because those URLs carry the password.
+
+The symptom of forgetting is not an error. The plugin registers, logs
+`no cameras configured (config key 'cameras' empty)`, and he simply
+never mentions anybody.
 
 ### A recording is a camera
 
@@ -113,13 +120,21 @@ one model call per event is affordable.
 |---|---|---|
 | Confidence floor | `0.7` | Below it, YOLOv9-t at 320 px announces shadows. |
 | Anti-spam | `180 s` per label **per camera** | Without it, one person in the doorway is announced every three seconds. |
-| Quiet hours | `23:00`–`07:00` | Silence — but a person overrides it. A parked car does not. |
+| Night window | `23:00`–`07:00` | A **person** seen in it beats the 180 s anti-spam: the second time somebody is in the garden at 3am is more worth saying than the first. |
 | Watched classes | 8 | persona, bicicleta, coche, moto, autobús, camión, gato, perro. |
 | Sampling | one frame in ten | The GPU belongs to Whisper and CosyVoice, which are in the critical path of a conversation. A camera is not. |
 
 The anti-spam key carries the **camera as well as the label**, which is
 the point of naming them: somebody walking from `fuera` to `entrada` is
 two events and should be.
+
+**Nothing is silenced at night.** The night window is the *only* place
+`is_quiet_hours` is used (`vision.py:272`), and all it does is set
+`urgent` for a person so the anti-spam is skipped. There is no
+suppression path anywhere in the plugin: a car seen at 03:00 is
+announced, exactly as it would be at noon. If you came here after
+"why did he mention a car at 3 a.m.", that is the rule working, not
+breaking.
 
 ## What it does when a camera is off
 

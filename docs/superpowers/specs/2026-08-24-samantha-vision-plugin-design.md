@@ -153,7 +153,7 @@ source with `chat_id="kiosk"`, `chat_type="dm"` — so it is the constant
 `session_id` under the same key, so the constant stays correct.
 
 **What arrives is a user message.** `_dispatch_plugin_message_injection`
-(`gateway/run.py:18716`) builds a plain inbound `MessageEvent` with
+(`gateway/run.py:18717`) builds a plain inbound `MessageEvent` with
 `internal=True` and hands it to the platform adapter — the same path an
 inbound `chat` frame from the widget takes. The model reads the injected
 text as something the user said, and *his answer* is what reaches the
@@ -277,6 +277,12 @@ the others: each thread owns its own failure.
 ---
 
 ## 6. Two doors on one engine
+
+> **Only the first door is built.** §6.1 shipped on 2026-08-24 and is
+> running. §6.2 (`mirar`, `revisar`) and §6.3 (the detections table) are
+> **plan 2**: nothing in `Hermes/plugins/samantha_vision/` registers a
+> tool or writes a row today. Read them as design, not as description —
+> unlike §3, which is measurement.
 
 ### 6.1 The knock — the alert
 
