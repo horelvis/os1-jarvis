@@ -47,7 +47,7 @@ HERMES_COMMIT="fcbd1076a93841fa88855acce810e342a5b78101"
 # Hermes lazy-installed them for STT. A fresh box that skipped that path gets
 # a plugin that loads and logs `no detector, no cameras watched — No module
 # named 'onnxruntime'`, and no camera is ever watched.
-PLUGIN_DEPS=(loguru httpx aiohttp av onnxruntime numpy)
+PLUGIN_DEPS=(loguru httpx aiohttp av onnxruntime numpy pillow)
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 

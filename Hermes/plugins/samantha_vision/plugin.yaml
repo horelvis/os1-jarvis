@@ -52,3 +52,4 @@ python_dependencies:
   - "av>=12,<19"
   - "onnxruntime>=1.17,<2"
   - "numpy>=1.26,<3"
+  - "pillow>=10,<13"
