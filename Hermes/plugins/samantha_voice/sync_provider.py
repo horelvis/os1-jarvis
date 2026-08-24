@@ -41,7 +41,7 @@ from typing import Any, List, Optional
 
 from loguru import logger
 
-from samantha import tts
+from . import tts
 
 try:  # Hermes is absent on dev machines that only run the unit tests.
     from agent.tts_provider import TTSProvider

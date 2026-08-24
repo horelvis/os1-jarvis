@@ -11,8 +11,7 @@ from typing import Dict, Iterator
 import httpx
 from loguru import logger
 
-from samantha import tts
-
+from . import tts
 from .announce import announcement_pcm
 from .bridge import iter_sync
 from .markers import has_unclosed_tag

@@ -1,10 +1,11 @@
-"""Unit tests for backend/samantha/tts.py (CosyVoice 3 backend)."""
+"""Unit tests for Hermes/plugins/samantha_voice/tts.py (CosyVoice 3 backend)."""
 
 from __future__ import annotations
 
 import pytest
 
-from samantha import tts
+from Hermes.plugins.samantha_voice import tts
+from Hermes.plugins.samantha_voice.tts_config import TTSConfig
 
 
 def test_is_available_reflects_disk_state():
@@ -24,18 +25,26 @@ def test_synth_empty_text_returns_empty_bytes():
 
 def test_is_available_false_when_refs_missing(monkeypatch, tmp_path):
     """is_available() returns False when ref WAV or transcript are absent."""
-    monkeypatch.setattr(tts.config, "tts_cosyvoice_ref_wav", str(tmp_path / "missing.wav"))
     monkeypatch.setattr(
-        tts.config, "tts_cosyvoice_ref_transcript_path", str(tmp_path / "missing.txt")
+        tts,
+        "config",
+        TTSConfig(
+            ref_wav=str(tmp_path / "missing.wav"),
+            ref_transcript_path=str(tmp_path / "missing.txt"),
+        ),
     )
     assert tts.is_available() is False
 
 
 def test_synth_raises_when_refs_missing(monkeypatch, tmp_path):
     """If the ref files don't exist, synth must raise VoiceMissingError."""
-    monkeypatch.setattr(tts.config, "tts_cosyvoice_ref_wav", str(tmp_path / "missing.wav"))
     monkeypatch.setattr(
-        tts.config, "tts_cosyvoice_ref_transcript_path", str(tmp_path / "missing.txt")
+        tts,
+        "config",
+        TTSConfig(
+            ref_wav=str(tmp_path / "missing.wav"),
+            ref_transcript_path=str(tmp_path / "missing.txt"),
+        ),
     )
     monkeypatch.setattr(tts, "_cosyvoice_ref_transcript", None)
     monkeypatch.setattr(tts, "_cosyvoice_ref_wav_bytes", None)

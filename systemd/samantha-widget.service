@@ -21,11 +21,10 @@ Environment=PYTHONUNBUFFERED=1
 # installed IN the venv (pip install --ignore-installed), so the user
 # site directory is simply switched off.
 Environment=PYTHONNOUSERSITE=1
-# samantha.tts (CosyVoice) and Hermes' markers.py, the same way
-# Hermes/run-gateway.sh reaches them. Without this she runs and is mute:
-# speech.py falls back to a local copy of has_unclosed_tag, so the only
-# symptom is silence.
-Environment=PYTHONPATH=%h/git/os1-samantha/backend:%h/git/os1-samantha
+# Hermes' markers.py and tts.py, the same way Hermes/run-gateway.sh
+# reaches them. Without this she runs and is mute: speech.py falls back
+# to a local copy of has_unclosed_tag, so the only symptom is silence.
+Environment=PYTHONPATH=%h/git/os1-samantha
 ExecStart=%h/git/os1-samantha/widget/.venv/bin/python -m samantha_widget
 Restart=on-failure
 RestartSec=3

@@ -19,8 +19,8 @@ and `agen.aclose()`.
 
 - The read loop is deliberately left unguarded here. For the real
   client (`samantha.tts.stream`), every `httpx` read is already bounded
-  by `config.tts_cosyvoice_timeout_s` (default 60s — see
-  `backend/samantha/tts.py`), so a wedged connection raises instead of
+  by `config.timeout_s` (default 60s — see
+  `Hermes/plugins/samantha_voice/tts.py`), so a wedged connection raises instead of
   hanging forever. That bound is per-read, not a whole-body cap — a
   server dribbling one byte every few seconds would never trip it —
   but that's a property of the producer's own timeout configuration,

@@ -186,7 +186,7 @@ class Speaker:
         self._player.stop()
 
     async def say(self, clause: str) -> None:
-        from samantha import tts
+        from Hermes.plugins.samantha_voice import tts
 
         if self._client is None:
             # An httpx.AsyncClient may only be used on the loop that

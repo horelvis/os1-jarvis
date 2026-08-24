@@ -7,11 +7,12 @@
 #   HERMES_HOME  keeps config, SOUL.md, state.db and sessions inside the
 #                repo, so Samantha's Hermes and the machine owner's personal
 #                ~/.hermes never share state or fight over a version.
-#   PYTHONPATH   makes `samantha.tts` importable from inside a plugin. Hermes
-#                cannot install the `samantha` package (it is not on PyPI),
-#                and without this both TTS providers fail at import — which
-#                Hermes logs as a warning and carries on from, leaving the
-#                whole-file path falling through to Edge TTS.
+#   PYTHONPATH   makes the `Hermes` package importable as a package root from
+#                inside a plugin, and reaches `samantha_voice.tts` and
+#                `samantha_voice.markers`. Without this both TTS providers
+#                fail at import — which Hermes logs as a warning and carries
+#                on from, leaving the whole-file path falling through to
+#                Edge TTS.
 #
 # With no arguments it starts the gateway. Any arguments are passed straight
 # through, so this is also how you run the CLI against the pinned runtime:
@@ -30,7 +31,7 @@ HERMES_BIN="$REPO_ROOT/.hermes/src/.venv/bin/hermes"
 }
 
 export HERMES_HOME="$REPO_ROOT/.hermes/home"
-export PYTHONPATH="$REPO_ROOT/backend:$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 [ $# -eq 0 ] && set -- gateway
 exec "$HERMES_BIN" "$@"

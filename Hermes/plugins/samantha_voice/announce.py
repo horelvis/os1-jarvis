@@ -28,7 +28,7 @@ here is finished: put the file at `ANNOUNCEMENT_CLIP_PATH`, saying
     python - <<'EOF'
     import asyncio, wave, io
     from pathlib import Path
-    from samantha import tts
+    from Hermes.plugins.samantha_voice import tts
     from Hermes.plugins.samantha_voice.announce import (
         ANNOUNCEMENT_TEXT, ANNOUNCEMENT_CLIP_PATH,
     )

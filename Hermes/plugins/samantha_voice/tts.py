@@ -34,7 +34,7 @@ from typing import AsyncIterator
 import httpx
 from loguru import logger
 
-from .config import config
+from .tts_config import config
 
 
 class VoiceMissingError(RuntimeError):
@@ -80,10 +80,10 @@ def new_client() -> httpx.AsyncClient:
     of freezing the caller forever.
     """
     timeout = httpx.Timeout(
-        connect=config.tts_cosyvoice_timeout_s,
-        read=config.tts_cosyvoice_timeout_s,
-        write=config.tts_cosyvoice_timeout_s,
-        pool=config.tts_cosyvoice_timeout_s,
+        connect=config.timeout_s,
+        read=config.timeout_s,
+        write=config.timeout_s,
+        pool=config.timeout_s,
     )
     return httpx.AsyncClient(timeout=timeout)
 
@@ -138,9 +138,9 @@ async def aclose() -> None:
 def is_available() -> bool:
     """Cheap, non-network probe: ref WAV + transcript exist on disk."""
     return (
-        bool(config.tts_cosyvoice_url)
-        and Path(config.tts_cosyvoice_ref_wav).expanduser().is_file()
-        and Path(config.tts_cosyvoice_ref_transcript_path).expanduser().is_file()
+        bool(config.url)
+        and Path(config.ref_wav).expanduser().is_file()
+        and Path(config.ref_transcript_path).expanduser().is_file()
     )
 
 
@@ -222,8 +222,8 @@ def _load_cosyvoice_refs() -> tuple[str, bytes, str]:
     """
     global _cosyvoice_ref_transcript, _cosyvoice_ref_wav_bytes
 
-    wav_path = Path(config.tts_cosyvoice_ref_wav).expanduser()
-    txt_path = Path(config.tts_cosyvoice_ref_transcript_path).expanduser()
+    wav_path = Path(config.ref_wav).expanduser()
+    txt_path = Path(config.ref_transcript_path).expanduser()
 
     if _cosyvoice_ref_transcript is None:
         if not txt_path.is_file():
@@ -281,12 +281,10 @@ async def _stream_cosyvoice(
     # "You are a helpful assistant." when the marker is ABSENT
     # (server.py::_ensure_eop_prefix), so supplying one replaces it
     # rather than fighting it.
-    if config.tts_cosyvoice_voice_prompt:
-        transcript = (
-            f"{config.tts_cosyvoice_voice_prompt}<|endofprompt|>{transcript}"
-        )
+    if config.voice_prompt:
+        transcript = f"{config.voice_prompt}<|endofprompt|>{transcript}"
 
-    url = f"{config.tts_cosyvoice_url.rstrip('/')}/inference_zero_shot"
+    url = f"{config.url.rstrip('/')}/inference_zero_shot"
     # httpx multipart: (filename, content, content-type). filename=None
     # for text fields makes httpx emit them as plain form parts.
     files = {
