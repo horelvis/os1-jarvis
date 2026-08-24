@@ -593,9 +593,15 @@ def spool(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def adapter():
-    """The adapter with no socket attached: _push returns False."""
-    a = KioskAdapter(...)          # follow the construction in the file's other tests
+def adapter(tmp_path):
+    """The adapter with no socket attached: _push returns False.
+
+    `_cfg` is the helper this file's existing tests already use to build a
+    config; reuse it rather than inventing a second one.
+    """
+    from Hermes.plugins.samantha_kiosk.adapter import KioskAdapter
+
+    a = KioskAdapter(_cfg(tmp_path))
     a._ws = None
     return a
 
