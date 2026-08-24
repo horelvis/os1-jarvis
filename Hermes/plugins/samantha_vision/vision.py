@@ -94,8 +94,6 @@ class Detector:
     def detect(self, frame) -> list[Detection]:
         """`frame` is an HxWx3 uint8 RGB array. Returns what it recognises."""
         np = self._np
-        height, width = frame.shape[:2]
-
         tensor = self._letterbox(frame)
         raw = self._session.run(None, {self._input_name: tensor})[0]
 
@@ -120,7 +118,6 @@ class Detector:
                     y=min(1.0, max(0.0, cy / _INPUT_SIZE)),
                 )
             )
-        del height, width
         return _deduplicate(out)
 
     def _letterbox(self, frame):
@@ -191,9 +188,34 @@ class CameraStream:
     def open(self) -> None:
         import av
 
-        # A camera that has gone away must not block the caller forever.
+        # A camera that has gone away must not block the caller forever —
+        # and for months this did not work at all.
+        #
+        # ffmpeg's rtsp demuxer called the option `stimeout` and RENAMED it
+        # to `timeout`. The venv here runs PyAV 18.1.0 / libavformat 62
+        # (FFmpeg 8), which only knows the new name, and an unknown option
+        # is dropped WITHOUT A WARNING. Probed 2026-08-24 against
+        # 127.0.0.1:1 with `av.logging.DEBUG`:
+        #
+        #   stimeout=5000000 -> Connection to tcp://127.0.0.1:1?timeout=0
+        #   timeout=5000000  -> Connection to tcp://127.0.0.1:1?timeout=5000000
+        #
+        # `timeout=0` is INFINITE. A camera that dies mid-stream — a switch
+        # reboot, a half-open TCP connection, a wedged encoder — left its
+        # thread blocked inside decode() forever: no exception, so no log,
+        # no backoff and no retry, and that camera stayed blind until the
+        # gateway restarted.
+        #
+        # Both names are passed on purpose. An unknown option is ignored, so
+        # this is portable across ffmpeg versions in both directions. Do not
+        # "clean up" the duplicate — the tidy version is the one that hangs.
         self._container = av.open(
-            self.url, options={"rtsp_transport": "tcp", "stimeout": "5000000"}
+            self.url,
+            options={
+                "rtsp_transport": "tcp",
+                "timeout": "5000000",
+                "stimeout": "5000000",
+            },
         )
 
     def close(self) -> None:
