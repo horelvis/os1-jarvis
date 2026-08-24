@@ -1,12 +1,26 @@
 manifest_version: 2
 api_version: 1
 name: samantha-vision
-label: Samantha (vision probe)
+label: Samantha (vision)
 kind: standalone
-version: 0.0.1
+version: 1.0.0
 description: >
-  THROWAWAY. Task 1 of the vision plan: prove that a plugin can start a
-  turn nobody asked for. Five seconds after registration it injects one
-  user message into the kiosk session and logs whether the gateway took
-  it. Deleted in task 2, when the real plugin takes this directory.
+  Owns the house cameras. Watches them, and says something when one of
+  them sees something worth saying.
 author: Horelvis Castillo
+
+# ─────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# 1. NO CAMERAS CONFIGURED. With an empty `cameras` list the plugin
+#    registers, starts nothing, and logs one line. That is correct on a
+#    box with no cameras and indistinguishable from a typo in the config
+#    key. The line says which key it read and that it was empty.
+#
+# 2. A CAMERA THAT NEVER CONNECTS. Logged once per camera, then retried
+#    on a backoff. It does not repeat every attempt: a camera that is
+#    off for a week would otherwise fill the journal.
+#
+# 3. THE MODEL FILE IS MISSING. yolov9-t-320.onnx (~8 MB) is not in the
+#    repo. Without it no thread starts and the plugin is inert. Named
+#    here because "he stopped noticing people" has no other symptom.

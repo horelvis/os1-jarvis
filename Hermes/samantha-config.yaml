@@ -18,10 +18,13 @@ plugins:
   enabled:
     - samantha-kiosk
     - samantha-voice
+    - samantha-vision
   entries:
     samantha-voice:
       allow_tool_override: false
     samantha-kiosk:
+      allow_tool_override: false
+    samantha-vision:
       allow_tool_override: false
 
 # ── TTS ───────────────────────────────────────────────────────────────

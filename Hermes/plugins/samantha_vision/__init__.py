@@ -1,15 +1,27 @@
-"""samantha-vision — throwaway probe for "how does a plugin speak first?"."""
+"""samantha-vision — the house cameras, and what is worth saying."""
 
-from .probe_deliver import schedule_probe
+from loguru import logger
 
-__all__ = ["register"]
+
+def check_requirements() -> bool:
+    """True when the plugin can run at all. No network, no cameras."""
+    try:
+        import av  # noqa: F401
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def register(ctx):
-    """Arm the probe.
+    """Declare the plugin. Start nothing.
 
-    ``register()`` is the ONLY entry point a plugin gets: there is no
-    lifecycle hook that fires once the gateway is up (see PROBE.md), so a
-    plugin that wants to act later has to start its own timer here.
+    Registration is pure on purpose (spec §3). Anything here that
+    touches the outside world turns a missing dependency into a plugin
+    that never loads, and Hermes reports that as a retry-forever loop at
+    DEBUG level — the failure the kiosk adapter's static-root check was
+    written to avoid, reached from the other direction.
+
+    The camera threads start in Task 3, from the hook Task 1 found.
     """
-    schedule_probe(ctx)
+    logger.info("samantha-vision: registered")
