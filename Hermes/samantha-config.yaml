@@ -32,6 +32,31 @@ plugins:
       # mentions a thing. Measured in Task 1 against
       # `plugins.py::_gateway_injection_allowed`.
       allow_gateway_injection: true
+      # The cameras themselves are NOT here, and must not be: their URLs
+      # carry the RTSP password, and this file is tracked in git. They go
+      # into `.hermes/home/config.yaml` only, which is not. The shape,
+      # with an obvious placeholder:
+      #
+      #   settings:
+      #     cameras:
+      #       - name: fuera
+      #         url: rtsp://user:pass@192.168.100.142:554/h264Preview_01_sub
+      #       - name: entrada
+      #         url: rtsp://user:pass@192.168.100.143:554/h264Preview_01_sub
+      #
+      # The `settings:` level is NOT decoration. `ctx.get_config("cameras")`
+      # reads `plugins.entries.<id>.settings.cameras` and nothing else
+      # (hermes_cli/plugins.py::get_config); put the list straight under
+      # the entry and the plugin starts, watches nothing, and says "no
+      # cameras configured". Measured 2026-08-24.
+      #
+      # It stays COMMENTED for a second reason, measured 2026-08-24:
+      # apply-config.sh deep-merges dicts but REPLACES lists wholesale, so
+      # a live placeholder list here would overwrite the real cameras on
+      # the next run and blind him silently. A comment cannot.
+      #
+      # Which cameras exist, which stream, and how to write the URL:
+      # Hermes/plugins/samantha_vision/README.md.
 
 # ── TTS ───────────────────────────────────────────────────────────────
 # Hermes' default provider is `edge` — Microsoft's cloud. Measured

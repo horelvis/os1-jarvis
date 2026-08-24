@@ -60,9 +60,6 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_STATE` | Freeze the wave in one state (`idle`, `listening`, `thinking`, `speaking`) and skip the voice loop. How each state gets photographed, since `xdotool` is not installed. |
 | `SAMANTHA_WIDGET_NO_MIC=1` | Do not open the microphone. On a box with none plugged in, this is the difference between "she cannot hear" and "the process is broken". |
 | `SAMANTHA_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.samantha/models/`). |
-| `SAMANTHA_WIDGET_CAMERA` | An RTSP URL, or any file PyAV can open. A recording works exactly as a live camera does, which is how the vision path is tested while the cameras are off. |
-| `SAMANTHA_WIDGET_CAMERA_RETRY` | Seconds before reopening a camera that ended or failed (default 30). `0` gives up when the stream ends — what you want for a recording. |
-| `SAMANTHA_YOLO_MODEL` | Path to `yolov9-t-320.onnx` (default `~/.samantha/models/`). |
 | `SAMANTHA_WIDGET_FAKE_MIC` | Speak this INTO the widget: it is synthesised, resampled to 16 kHz and pushed through the real microphone path. Everything downstream — VAD, Whisper, the gateway, her reply — is real. |
 | `SAMANTHA_WIDGET_SAY` | Say this once, three seconds after starting. The only way to hear her voice on a machine with no microphone. |
 | `SAMANTHA_WIDGET_DUMP` | Write every closed utterance to this directory as a WAV. When a transcription comes back as nonsense, nothing else tells you whether the audio was bad or the model was. |
@@ -76,35 +73,22 @@ it she runs and is simply mute.
 - **Whisper**: `large-v3-turbo`, downloaded automatically on first load
   (~1.5 GB, 81 s the first time, ~1 s after that). Needs the GPU: it
   sits at roughly 2.5 GB of VRAM alongside CosyVoice.
-- **YOLOv9**: `~/.samantha/models/yolov9-t-320.onnx`, 8 MB. Copied from
-  BarnDoor's `frigate-config/models/`; that repo's
-  `scripts/build-yolov9-onnx.sh` is what produced it.
 
-## The cameras
+## The cameras are not here any more
 
-Borrowed from [BarnDoor](../../barndoor) — the RTSP layout of the house's
-cameras and the YOLO model — and nothing else: no Frigate, no MQTT, no
-second agent. It needs no new dependency, since onnxruntime is already
-here for the VAD and PyAV came in with faster-whisper.
+This program watched the house's cameras until 2026-08-24. It does not
+now: `vision.py`, the camera thread and the `SAMANTHA_WIDGET_CAMERA`,
+`SAMANTHA_WIDGET_CAMERA_RETRY` and `SAMANTHA_YOLO_MODEL` switches all
+moved into the gateway, as the `samantha-vision` plugin.
 
-    SAMANTHA_WIDGET_CAMERA=rtsp://user:pass@192.168.100.142:554/h264Preview_01_sub
+They went because the strip was the wrong owner. Watching has to survive
+the widget being restarted, and a camera that sees somebody wants to
+start a turn on its own — which is a thing the gateway can do and a
+window on the desktop cannot.
 
-Point it at the **sub-stream**: 4K frames cost time to decode and YOLO
-scales everything to 320 px anyway.
-
-When something is worth mentioning she is *told*, not made to recite —
-the prompt asks for one short line in her own words and forbids
-mentioning cameras or detections. What reaches you is hers:
-
-    cámara: alguien
-    ← Oye. Hay alguien fuera de casa.
-
-"Worth mentioning" is the hard half, and the rules come from BarnDoor's
-`agent/rules.py`, which had already been run against these cameras:
-detections under **0.7** are ignored, the same label is not repeated
-within **180 s**, and a person between 23:00 and 07:00 overrides that
-silence — the second time somebody is in the garden at 3am is more worth
-saying than the first. Only people: a parked car would talk all night.
+Configuring them, the model file, and what the journal says when one is
+off: **`Hermes/plugins/samantha_vision/README.md`**. Nothing in this
+directory needs to change to point a camera anywhere.
 
 Running it from another directory — which is what systemd does — needs
 the package actually installed, not merely present:

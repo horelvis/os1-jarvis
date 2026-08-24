@@ -12,7 +12,12 @@ from contextlib import contextmanager
 
 from loguru import logger
 
-from Hermes.plugins.samantha_vision.cameras import Camera, CameraFleet, parse_cameras
+from Hermes.plugins.samantha_vision.cameras import (
+    Camera,
+    CameraFleet,
+    parse_cameras,
+    redact,
+)
 from Hermes.plugins.samantha_vision.vision import Detection
 
 
@@ -265,3 +270,52 @@ def test_a_missing_model_starts_nothing_and_does_not_raise():
 
     assert not [t for t in threading.enumerate() if t.name.startswith("camera-")]
     assert any("yolov9" in r["message"] for r in records)
+
+
+# ── the credential never reaches the journal ──────────────────────────
+#
+# PyAV puts the whole URL into the message of every failure it raises,
+# and the URL carries the camera password. Found 2026-08-24, the first
+# time the plugin was pointed at the real cameras: a camera that is off
+# fails on a loop, so the credential lands in `journalctl` again and
+# again in plaintext.
+
+
+def test_redact_removes_the_password_but_keeps_the_user():
+    assert (
+        redact("rtsp://admin:hunter2@192.168.100.143:554/h264Preview_01_sub")
+        == "rtsp://admin:***@192.168.100.143:554/h264Preview_01_sub"
+    )
+
+
+def test_redact_leaves_a_url_without_credentials_alone():
+    assert redact("rtsp://192.168.100.143:554/x") == "rtsp://192.168.100.143:554/x"
+    assert redact("/home/nexus/clip.mp4") == "/home/nexus/clip.mp4"
+
+
+def test_a_dead_camera_does_not_log_its_password():
+    def open_stream(url):
+        raise OSError(f"No route to host: '{url}'")
+
+    with captured_logs() as records:
+        fleet = _fleet(open_stream=open_stream)
+        fleet.start(
+            [Camera("fuera", "rtsp://admin:hunter2@192.168.100.142:554/sub")],
+            lambda name, dets: None,
+        )
+        try:
+            _wait(lambda: any("fuera" in r["message"] for r in records))
+        finally:
+            fleet.stop()
+
+    joined = " ".join(r["message"] for r in records)
+    assert "hunter2" not in joined, joined
+    assert "admin:***@" in joined, joined
+
+
+def test_a_malformed_entry_does_not_log_its_password():
+    with captured_logs() as records:
+        # No `name`, so it is dropped — and the dropped entry is logged.
+        parse_cameras({"cameras": [{"url": "rtsp://admin:hunter2@10.0.0.1/sub"}]})
+    joined = " ".join(r["message"] for r in records)
+    assert "hunter2" not in joined, joined

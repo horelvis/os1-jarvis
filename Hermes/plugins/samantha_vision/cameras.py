@@ -8,6 +8,7 @@ something anybody would say out loud.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +23,26 @@ class Camera:
     url: str
 
 
+# An RTSP URL carries the camera password, and PyAV puts the whole URL
+# into the message of every failure it raises. Logging that verbatim
+# writes the house's credential into the journal in plaintext, where
+# `journalctl` hands it to anyone who can read the user's logs — and a
+# camera that is off fails on a loop, so it lands there over and over.
+# Measured 2026-08-24, the first time the plugin was pointed at the real
+# cameras: `fuera unreachable — [Errno 113] No route to host:
+# 'rtsp://admin:<the actual password>@192.168.100.142:554/…'`.
+_CREDENTIAL = re.compile(r"(?<=://)([^/\s:@]+):[^/\s@]*@")
+
+
+def redact(text: str) -> str:
+    """Strip the password out of any URL in `text`. Never raises.
+
+    The user survives, because "which account cannot log in" is the
+    useful half of the message and is not a secret.
+    """
+    return _CREDENTIAL.sub(r"\1:***@", str(text))
+
+
 def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
     """Read the `cameras` config key. Never raises.
 
@@ -34,7 +55,7 @@ def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
         # `cameras:` written as a name -> url mapping, or as one bare
         # string. Nothing is watched, but the journal says what was read
         # rather than showing a traceback from three frames deeper.
-        logger.warning(f"samantha-vision: 'cameras' is not a list: {raw!r}")
+        logger.warning(f"samantha-vision: 'cameras' is not a list: {redact(repr(raw))}")
         raw = []
     out: list[Camera] = []
     seen: set[str] = set()
@@ -42,13 +63,16 @@ def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
         if not isinstance(entry, dict):
             # `- rtsp://…` instead of `- name: … / url: …`. One bad line
             # is one dropped camera, never the whole house.
-            logger.warning(f"samantha-vision: camera entry is not a mapping: {entry!r}")
+            logger.warning(
+                f"samantha-vision: camera entry is not a mapping: {redact(repr(entry))}"
+            )
             continue
         name = entry.get("name")
         url = entry.get("url")
         if not name or not url:
             logger.warning(
-                f"samantha-vision: camera entry without name or url: {entry!r}"
+                "samantha-vision: camera entry without name or url: "
+                f"{redact(repr(entry))}"
             )
             continue
         if name in seen:
@@ -192,7 +216,7 @@ class CameraFleet:
                 # a week would otherwise be the only thing in the journal.
                 if not reported:
                     logger.warning(
-                        f"samantha-vision: {camera.name} unreachable — {exc}"
+                        f"samantha-vision: {camera.name} unreachable — {redact(exc)}"
                     )
                     reported = True
                 else:
