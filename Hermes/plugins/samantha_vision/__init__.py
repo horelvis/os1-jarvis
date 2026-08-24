@@ -4,8 +4,8 @@ import threading
 
 from loguru import logger
 
+from .alert import make_handler
 from .cameras import CameraFleet, parse_cameras
-from .vision import describe
 
 
 def check_requirements() -> bool:
@@ -28,8 +28,8 @@ def register(ctx):
     there is no later hook — and a registration that blocks or raises is
     reported by Hermes as a retry-forever loop at DEBUG level.
 
-    The cameras still have no voice: `_only_log` is where Task 5 hangs
-    the alert.
+    The alert itself lives in `alert.py` and is wired in here, so
+    `cameras.py` never learns that a gateway exists.
     """
     fleet = CameraFleet()
     ctx.on_unload(fleet.stop)
@@ -52,17 +52,6 @@ def _supervise(ctx, fleet: CameraFleet) -> None:
     """
     try:
         cameras = parse_cameras({"cameras": ctx.get_config("cameras", [])})
-        fleet.start(cameras, _only_log)
+        fleet.start(cameras, make_handler(ctx))
     except Exception as exc:
         logger.error(f"samantha-vision: cameras not started — {exc}")
-
-
-def _only_log(camera_name: str, detections: list) -> None:
-    """What a detection does today: nothing but a line in the journal.
-
-    Task 5 replaces this with the injection that makes him say it. Until
-    then the plugin watches and keeps quiet, which is deliberate — the
-    alert wants the Watcher of Task 4 in front of it, or a camera says
-    "alguien" every three seconds.
-    """
-    logger.info(f"samantha-vision: {camera_name}: {describe(detections)}")

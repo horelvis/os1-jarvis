@@ -26,6 +26,12 @@ plugins:
       allow_tool_override: false
     samantha-vision:
       allow_tool_override: false
+      # Starting a turn nobody asked for is a per-plugin permission, and
+      # it is default-off. Without it `ctx.inject_message()` returns
+      # False and logs one line: the cameras go on watching and he never
+      # mentions a thing. Measured in Task 1 against
+      # `plugins.py::_gateway_injection_allowed`.
+      allow_gateway_injection: true
 
 # ── TTS ───────────────────────────────────────────────────────────────
 # Hermes' default provider is `edge` — Microsoft's cloud. Measured
