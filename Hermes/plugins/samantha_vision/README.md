@@ -21,8 +21,13 @@ you are looking for `SAMANTHA_WIDGET_CAMERA`, this is where it went.
   repo. Without it no thread starts and the plugin is inert — and "he
   stopped noticing people" has no other symptom. Override the path with
   `SAMANTHA_YOLO_MODEL`.
-- **`onnxruntime` and `av`** in the gateway's runtime. `check_requirements()`
-  refuses to load the plugin without them.
+- **`onnxruntime`, `av` and `numpy`** in the gateway's runtime.
+  `Hermes/setup-runtime.sh` installs them; `uv sync` does not, because
+  Hermes moved that extra to lazy-install. Nothing refuses to load the
+  plugin without them — corrected 2026-08-24, this used to claim a
+  `check_requirements()` that Hermes never called and that has been
+  deleted. What actually happens is one line and no threads:
+  `no detector, no cameras watched — No module named 'onnxruntime'`.
 - **`allow_gateway_injection: true`** on this plugin's config entry.
   Starting a turn nobody asked for is default-off; without it
   `ctx.inject_message()` returns `False` and the cameras watch in silence.

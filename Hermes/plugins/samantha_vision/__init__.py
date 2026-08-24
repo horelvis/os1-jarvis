@@ -7,15 +7,19 @@ from loguru import logger
 from .alert import make_handler
 from .cameras import CameraFleet, parse_cameras, redact
 
-
-def check_requirements() -> bool:
-    """True when the plugin can run at all. No network, no cameras."""
-    try:
-        import av  # noqa: F401
-        import onnxruntime  # noqa: F401
-    except ImportError:
-        return False
-    return True
+# There was a `check_requirements()` here until 2026-08-24. It was dead
+# code: nothing in `hermes_cli/plugins.py` looks for it. It is a `kind:
+# platform` convention — a plugin passes it as `check_fn=` to
+# `register_platform(...)`, the way `samantha_kiosk` does — and this
+# plugin is `kind: standalone`, so it had the shape and none of the
+# wiring. Worse, the README cited it as the thing that refuses to load
+# the plugin without `av` and `onnxruntime`, which it never did.
+#
+# What actually happens on a box without them is better: the plugin
+# loads, the supervisor thread runs, and building the detector fails with
+# one line — `no detector, no cameras watched — No module named
+# 'onnxruntime'` (`cameras.py`). That is a named failure mode with a
+# symptom, which is what the manifest asks for.
 
 
 def register(ctx):

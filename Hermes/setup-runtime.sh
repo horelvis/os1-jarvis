@@ -33,11 +33,18 @@ HERMES_TAG="v2026.8.19"          # pyproject version 0.20.5
 # `git ls-remote --tags <repo> "v2026.8.19^{}"`.
 HERMES_COMMIT="fcbd1076a93841fa88855acce810e342a5b78101"
 
-# Declared in both plugin.yaml manifests. Hermes parses `python_dependencies`
+# Declared in the plugin.yaml manifests. Hermes parses `python_dependencies`
 # and warns when one is missing, but never installs them — a plugin whose
 # import fails still shows as "enabled" in `hermes plugins list`. This is the
-# "No module named loguru" failure both manifests warn about.
-PLUGIN_DEPS=(loguru httpx aiohttp)
+# "No module named loguru" failure the manifests warn about.
+#
+# `av`, `onnxruntime` and `numpy` are samantha-vision's, and `uv sync` does
+# NOT bring them: the `voice` extra was removed from `[all]` in Hermes'
+# pyproject in favour of lazy install, so on this box they exist only because
+# Hermes lazy-installed them for STT. A fresh box that skipped that path gets
+# a plugin that loads and logs `no detector, no cameras watched — No module
+# named 'onnxruntime'`, and no camera is ever watched.
+PLUGIN_DEPS=(loguru httpx aiohttp av onnxruntime numpy)
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
@@ -83,15 +90,15 @@ for plugin in samantha_voice samantha_kiosk samantha_vision; do
 done
 
 say "5/6  Enable them"
-# Both plugins are opt-in: `kind: standalone` and `kind: platform` stay dark
+# All three are opt-in: `kind: standalone` and `kind: platform` stay dark
 # until listed in HERMES_HOME/config.yaml's plugins.enabled, and `hermes
 # plugins list` reports "not enabled" until then. The manifest name is
 # kebab-case even though the directory is snake_case.
 #
 # --no-allow-tool-override answers the capability prompt with "no", which is
-# what both plugins want (samantha_voice declares allow_tool_override: false)
-# and what makes this scriptable. Neither plugin replaces a built-in tool.
-for plugin in samantha-voice samantha-kiosk; do
+# what all three want (samantha_voice declares allow_tool_override: false)
+# and what makes this scriptable. None of them replaces a built-in tool.
+for plugin in samantha-voice samantha-kiosk samantha-vision; do
   HERMES_HOME="$HERMES_HOME" "$HERMES_SRC/.venv/bin/hermes" plugins enable \
     "$plugin" --no-allow-tool-override >/dev/null 2>&1 || true
   echo "    $plugin"
@@ -106,4 +113,11 @@ cat <<EOF
                  Hermes/run-gateway.sh plugins list
 
     Nothing was read from or written to ~/.hermes.
+
+    Two things this cannot do for you:
+      * the cameras. They carry a credential, so they live only in
+        \$HERMES_HOME/config.yaml — see
+        Hermes/plugins/samantha_vision/README.md.
+      * the credential itself. Copy .env.example to .env at the repo root
+        and fill it in; run-gateway.sh sources it.
 EOF
