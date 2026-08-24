@@ -1,0 +1,12 @@
+manifest_version: 2
+api_version: 1
+name: samantha-vision
+label: Samantha (vision probe)
+kind: standalone
+version: 0.0.1
+description: >
+  THROWAWAY. Task 1 of the vision plan: prove that a plugin can start a
+  turn nobody asked for. Five seconds after registration it injects one
+  user message into the kiosk session and logs whether the gateway took
+  it. Deleted in task 2, when the real plugin takes this directory.
+author: Horelvis Castillo
