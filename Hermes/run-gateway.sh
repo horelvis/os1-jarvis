@@ -36,8 +36,10 @@ HERMES_BIN="$REPO_ROOT/.hermes/src/.venv/bin/hermes"
 # Credentials, by name and never in a tracked file. `.env` at the repo root
 # is git-ignored and holds RTSP_PASSWORD, which `.hermes/home/config.yaml`
 # references from inside each camera URL as `${RTSP_PASSWORD}`. This is the
-# one chokepoint worth teaching: all three systemd units and every manual
+# one chokepoint worth teaching: both units that start a Hermes process
+# (samantha-hermes.service, samantha-hermes-serve.service) and every manual
 # invocation come through here, so nothing else has to know.
+# samantha-widget.service does not — it needs no credential.
 #
 # `set -a` exports everything the file defines; `set +a` puts it back. A
 # missing file is normal — a box with no cameras needs no credential — and

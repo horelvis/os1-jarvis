@@ -984,7 +984,9 @@ camera URLs in the untracked `.hermes/home/config.yaml`, which is what
 let PyAV write it into the journal in the first place. It now lives in
 `.env` at the repo root — git-ignored, with a tracked `.env.example` —
 which `Hermes/run-gateway.sh` sources; that is the single chokepoint, so
-all three units and every manual invocation get it. URLs say
+both units that start a Hermes process — `samantha-hermes.service` and
+`samantha-hermes-serve.service` — and every manual invocation get it.
+`samantha-widget.service` does not, and needs no credential. URLs say
 `${RTSP_PASSWORD}` and the plugin expands it. The trap, handled
 explicitly: an unset variable is left by `expandvars` as the literal
 `${RTSP_PASSWORD}`, which would then be used as the password and logged,

@@ -42,8 +42,9 @@ RTSP_PASSWORD=…
 ```
 
 `Hermes/run-gateway.sh` sources that file if it is there, which is the
-single chokepoint: all three systemd units and every manual invocation go
-through it, so nothing else has to be taught. `.env.example` is tracked
+single chokepoint: both units that start a Hermes process
+(`samantha-hermes.service`, `samantha-hermes-serve.service`) and every
+manual invocation go through it, so nothing else has to be taught. `.env.example` is tracked
 and carries the key names with no values, so a fresh box knows what is
 missing. The plugin expands `${RTSP_PASSWORD}` when it builds a `Camera`,
 and a URL naming a variable that is **not** set drops that camera with a
@@ -202,10 +203,19 @@ journalctl --user -u samantha-hermes.service -f | grep samantha-vision
   environment does not have. Check `.env` against `.env.example`.
 - `<name>: alguien` — a sighting got through the quiet rules; his reply
   follows on the strip.
-- `nobody to tell, sighting dropped` — nothing to inject into. Either the
-  gateway is still starting, or **the strip has never spoken on this
-  box**: there is no session row until the user talks, and no amount of
-  waiting makes one. Say something to him first.
+- `no live gateway, sighting dropped after 4 attempts` — the gateway is
+  not listening, and that is the **only** thing this line means: it is
+  still starting, or it is going down. Corrected 2026-08-24, when it read
+  that the strip might never have spoken on this box — which cannot
+  produce this line at all, and sent readers hunting for it.
+- `Plugin message injection was not routed: plugin=samantha-vision …` —
+  **Hermes' own line, not ours**, and this is the one that means there is
+  no session to inject into: no row exists until the user has talked to
+  the strip. `inject_message` returns `True` in that case, because the
+  lookup happens inside the coroutine after the task has been scheduled
+  (`gateway/run.py:18715` returns `True`; `:18729` is where the missing
+  row is found; `:18708` logs it), so nothing on our side can see it. Say
+  something to him first.
 
 ## Tests
 
