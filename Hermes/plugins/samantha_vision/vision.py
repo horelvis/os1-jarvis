@@ -254,6 +254,23 @@ ANTI_SPAM_SECONDS = 180
 QUIET_START_HOUR = 23
 QUIET_END_HOUR = 7
 
+# The floor under the night rule, and the only number that gates it.
+#
+# "A person at night beats the anti-spam" was written for a mailbox, not
+# for a mouth: in BarnDoor it produced a notification, here it produces
+# a spoken turn and a model call. `worth_saying` is evaluated once per
+# sampled frame — one to three times a second — and with the window
+# bypassed outright that is not insistence, it is continuous speech.
+# Measured 2026-08-24 against the real Watcher: somebody standing in
+# view all night produced 19,200 utterances over eight hours.
+#
+# So the night rule keeps everything it was for — it still beats the
+# 180 s window, it still sits outside the escalation — and gains one
+# floor: at most one mention per 30 s per (camera, label). He still
+# insists; he stops being noise. 30 s is ours and is not one of the four
+# calibrated constants.
+NIGHT_FLOOR_SECONDS = 30
+
 # The anti-spam window widens for a thing that will not go away.
 #
 # 180 s stops three-second spam and nothing stopped three-MINUTE spam.
@@ -288,8 +305,13 @@ class Watcher:
     besides.
     """
 
-    def __init__(self, anti_spam_seconds: float = ANTI_SPAM_SECONDS) -> None:
+    def __init__(
+        self,
+        anti_spam_seconds: float = ANTI_SPAM_SECONDS,
+        night_floor_seconds: float = NIGHT_FLOOR_SECONDS,
+    ) -> None:
         self.anti_spam_seconds = anti_spam_seconds
+        self.night_floor_seconds = night_floor_seconds
         # All three are keyed (camera, label), not label: two cameras
         # seeing a person are two events, and collapsing them would mean
         # somebody could cross the whole property in silence after the
@@ -338,19 +360,37 @@ class Watcher:
 
             # A person at night beats the anti-spam: the second time
             # somebody is in the garden at 3am is more worth saying than
-            # the first, not less. Unchanged, and deliberately outside the
-            # escalation in BOTH directions — the widened window never
-            # gates it, and it never advances the level either. Counting
-            # the night override's own firings would turn it into its
-            # opposite the moment quiet hours ended, silencing the morning
-            # after because of what happened at 3am.
+            # the first, not less. That rule is BarnDoor's and is kept.
+            #
+            # It sits outside the escalation in THREE ways, and all three
+            # have to be said or the description is incomplete:
+            #
+            #   1. the widened window never gates it — only the 30 s
+            #      night floor does (NIGHT_FLOOR_SECONDS);
+            #   2. its own firings never ADVANCE the level, because
+            #      counting them would turn the override into its
+            #      opposite at dawn;
+            #   3. it RESETS the level to the floor. This is the third
+            #      one, added 2026-08-24 after measuring what its absence
+            #      cost: a key escalated to the hourly level in daylight
+            #      and present all night kept that level across the
+            #      boundary, and the first mention after quiet hours
+            #      ended came 60.0 minutes later instead of ~180 s. The
+            #      morning is when the user wakes up and is exactly when
+            #      he would want to be told, so the level is cleared —
+            #      "this is news, repeatedly" is what the night rule
+            #      means, and it should not leave the day's fatigue
+            #      behind it. The day re-escalates from the floor.
             urgent = item.label == "persona" and is_quiet_hours(hour)
 
             previous = self._last_said.get(key)
-            if previous is not None and (now - previous) < window and not urgent:
+            gate = self.night_floor_seconds if urgent else window
+            if previous is not None and (now - previous) < gate:
                 continue
 
-            if not urgent:
+            if urgent:
+                self._level[key] = 0
+            else:
                 self._level[key] = (
                     0 if fresh else min(level + 1, len(ESCALATION_FACTORS) - 1)
                 )

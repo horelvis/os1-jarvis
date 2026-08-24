@@ -160,13 +160,21 @@ def test_a_different_thing_is_always_news() -> None:
 
 def test_a_person_at_night_beats_the_anti_spam() -> None:
     """The second time somebody is in the garden at 3am is MORE worth
-    saying than the first."""
-    from Hermes.plugins.samantha_vision.vision import Watcher
+    saying than the first.
+
+    Updated 2026-08-24: the 180 s window is still beaten, but there is
+    now a 30 s floor under it, so the second mention lands at 31 s rather
+    than at 10 s. What is tested is unchanged — the night rule beats the
+    anti-spam — only the number it beats it by.
+    """
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
 
     watcher = Watcher()
     watcher.worth_saying([person()], now=1000.0, hour=3, camera="fuera")
 
-    assert watcher.worth_saying([person()], now=1010.0, hour=3, camera="fuera")
+    said_again_at = 1031.0
+    assert said_again_at - 1000.0 < ANTI_SPAM_SECONDS  # still inside the window
+    assert watcher.worth_saying([person()], now=said_again_at, hour=3, camera="fuera")
 
 
 def test_a_car_at_night_does_not_beat_the_anti_spam() -> None:
@@ -222,9 +230,11 @@ def test_the_same_camera_speaks_again_after_the_window() -> None:
 
 
 def test_a_person_at_night_beats_the_anti_spam_per_camera() -> None:
+    """Updated 2026-08-24: 1.0 s became 31.0 s when the night floor
+    arrived. The window it beats is still the 180 s one."""
     watcher = Watcher()
     assert watcher.worth_saying([person()], now=0.0, hour=3, camera="fuera")
-    assert watcher.worth_saying([person()], now=1.0, hour=3, camera="fuera")
+    assert watcher.worth_saying([person()], now=31.0, hour=3, camera="fuera")
 
 
 def test_a_car_at_night_does_not_beat_the_anti_spam_per_camera() -> None:
@@ -357,3 +367,81 @@ def test_two_cameras_seeing_the_same_thing_inside_the_window_both_speak() -> Non
     assert watcher.worth_saying([person()], now=100.0, hour=12, camera="entrada")
     # And the first camera is still, correctly, quiet.
     assert watcher.worth_saying([person()], now=100.0, hour=12, camera="fuera") == []
+
+
+# ── the floor under the night rule ────────────────────────────────────
+#
+# `worth_saying` runs once per sampled frame, one to three times a
+# second. With the window bypassed outright that is not insistence, it is
+# continuous speech: 19,200 utterances over an eight-hour night, measured
+# against the real Watcher before this floor existed.
+
+
+def test_a_person_at_night_is_floored_at_thirty_seconds() -> None:
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    watcher = Watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=3, camera="fuera")
+    assert watcher.worth_saying([person()], now=10.0, hour=3, camera="fuera") == []
+    assert watcher.worth_saying([person()], now=31.0, hour=3, camera="fuera")
+
+
+def test_the_night_floor_is_the_named_constant() -> None:
+    """30 s is ours. It is not one of BarnDoor's four."""
+    from Hermes.plugins.samantha_vision.vision import (
+        ANTI_SPAM_SECONDS,
+        NIGHT_FLOOR_SECONDS,
+        Watcher,
+    )
+
+    assert NIGHT_FLOOR_SECONDS == 30
+    assert ANTI_SPAM_SECONDS == 180
+    watcher = Watcher(night_floor_seconds=5.0)
+    assert watcher.worth_saying([person()], now=0.0, hour=3, camera="fuera")
+    assert watcher.worth_saying([person()], now=4.0, hour=3, camera="fuera") == []
+    assert watcher.worth_saying([person()], now=6.0, hour=3, camera="fuera")
+
+
+def test_a_night_of_standing_there_is_not_thousands_of_utterances() -> None:
+    """The number the floor exists for."""
+    from Hermes.plugins.samantha_vision.vision import Watcher
+
+    watcher = Watcher()
+    spoke = 0
+    tick = 0.0
+    while tick < 8 * 3600:  # eight hours, sampled every 1.5 s
+        if watcher.worth_saying([person()], now=tick, hour=3, camera="fuera"):
+            spoke += 1
+        tick += 1.5
+    assert spoke == 960, spoke  # 8 h / 30 s, not 19_200
+
+
+def test_the_night_does_not_carry_the_days_escalation_into_the_morning() -> None:
+    """He is told at dawn, not an hour after it.
+
+    Measured before the fix: a key escalated to the hourly level in
+    daylight and present all night kept that level across the boundary,
+    and the first mention after quiet hours ended came 60.0 minutes
+    later. The morning is exactly when the user would want to know.
+    """
+    from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
+
+    watcher = Watcher()
+    for tick in range(0, 4000, 30):  # daylight: escalate to the top
+        watcher.worth_saying([person()], now=float(tick), hour=12, camera="entrada")
+
+    tick = 4000.0
+    while tick < 4000.0 + 3600:  # an hour of night, still standing there
+        watcher.worth_saying([person()], now=tick, hour=3, camera="entrada")
+        tick += 1.5
+
+    dawn = tick
+    first = None
+    while tick < dawn + 2 * 3600:
+        if watcher.worth_saying([person()], now=tick, hour=8, camera="entrada"):
+            first = tick - dawn
+            break
+        tick += 1.5
+
+    assert first is not None
+    assert first <= ANTI_SPAM_SECONDS, first  # ~150 s, not ~3600
