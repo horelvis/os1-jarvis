@@ -70,6 +70,17 @@ def done(thinking_ms: int) -> str:
     return json.dumps({"type": "done", "thinking_ms": thinking_ms})
 
 
+def photo(path: str, camera: str) -> str:
+    """A picture for the strip, and only for the strip.
+
+    This frame exists because the photo must not travel in the model's
+    answer: an answer goes wherever the turn goes, and `MEDIA:` would put
+    a picture of the house on any platform that turn was routed to. See
+    the snapshot spec §3.
+    """
+    return json.dumps({"type": "photo", "path": path, "camera": camera})
+
+
 def error(message: str) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     return json.dumps({"type": "error", "error": message})

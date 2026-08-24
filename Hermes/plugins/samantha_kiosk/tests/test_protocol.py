@@ -7,6 +7,7 @@ from Hermes.plugins.samantha_kiosk.protocol import (
     decode_client,
     done,
     error,
+    photo,
     token,
 )
 
@@ -86,3 +87,19 @@ def test_an_absurdly_long_message_is_rejected():
 def test_a_long_but_plausible_message_is_accepted():
     raw = json.dumps({"type": "chat", "message": "a" * 4000, "user_id": "primary"})
     assert decode_client(raw)["message"]
+
+
+def test_photo_frame_carries_the_path_and_the_camera():
+    raw = photo("/tmp/vision/entrada-1000.jpg", "entrada")
+    msg = json.loads(raw)
+    assert msg == {
+        "type": "photo",
+        "path": "/tmp/vision/entrada-1000.jpg",
+        "camera": "entrada",
+    }
+
+
+def test_photo_is_server_to_client_only():
+    # A client must never be able to make the strip open a file.
+    with pytest.raises(ProtocolError):
+        decode_client(json.dumps({"type": "photo", "path": "/etc/shadow"}))

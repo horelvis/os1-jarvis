@@ -31,13 +31,14 @@ import errno
 import os
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 from loguru import logger
 
-from .protocol import ProtocolError, decode_client, done, error, token
+from .protocol import ProtocolError, decode_client, done, error, photo, token
 
 try:
     from gateway.config import Platform
@@ -444,6 +445,33 @@ class KioskAdapter(BasePlatformAdapter):
             logger.warning(f"samantha-kiosk: frame not delivered — {exc}")
             return False
         return True
+
+    async def push_photo(self, path: str, camera: str) -> bool:
+        """Show a photo on the strip. False when it could not be shown.
+
+        The path is validated against the snapshot directory before it is
+        sent: the strip opens whatever it is handed, and this socket is an
+        unauthenticated local listener. The vision plugin is imported here,
+        lazily, rather than at module load: `samantha_kiosk` is the strip's
+        platform and must keep working on a box where `samantha_vision` is
+        absent, broken, or simply not installed — a missing camera plugin
+        must never be the reason the strip goes mute.
+        """
+        try:
+            from Hermes.plugins.samantha_vision.snapshot import snapshot_dir
+        except ImportError as exc:
+            logger.warning(f"samantha-kiosk: samantha_vision unavailable — {exc}")
+            return False
+
+        try:
+            resolved = Path(path).resolve(strict=True)
+            resolved.relative_to(snapshot_dir().resolve())
+        except (OSError, ValueError):
+            logger.warning(
+                f"samantha-kiosk: refusing photo outside the spool: {path!r}"
+            )
+            return False
+        return await self._push(photo(str(resolved), camera))
 
     # ── turn lifecycle ────────────────────────────────────────────────────
     #

@@ -578,3 +578,51 @@ def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
     a = KioskAdapter(Bare())
     assert a.port == 7777
     assert a.turn_timeout == 90.0
+
+
+@pytest.fixture
+def spool(tmp_path, monkeypatch):
+    """A snapshot directory with one real file in it."""
+    from Hermes.plugins.samantha_vision import snapshot
+
+    monkeypatch.setattr(snapshot, "_ROOT", tmp_path)
+    path = tmp_path / "entrada-1000.jpg"
+    path.write_bytes(b"\xff\xd8\xff\xd9")  # shortest valid JPEG marker pair
+    return path
+
+
+@pytest.fixture
+def adapter(tmp_path):
+    """The adapter with no socket attached: _push returns False."""
+    a = KioskAdapter(_cfg(tmp_path))
+    a._ws = None
+    return a
+
+
+@pytest.mark.asyncio
+async def test_push_photo_refuses_a_path_outside_the_snapshot_directory(
+    adapter,
+):
+    assert await adapter.push_photo("/etc/shadow", "entrada") is False
+
+
+@pytest.mark.asyncio
+async def test_push_photo_with_no_strip_connected_is_false_not_an_error(adapter, spool):
+    adapter._ws = None
+    ok = await adapter.push_photo(str(spool), "entrada")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_push_photo_refuses_a_symlink_that_escapes_the_snapshot_directory(
+    adapter, spool, tmp_path
+):
+    # A symlink INSIDE the spool that resolves to a file OUTSIDE it must be
+    # refused too — this is what proves the check follows realpath rather
+    # than just string-matching the given path.
+    outside = tmp_path.parent / "outside-secret.jpg"
+    outside.write_bytes(b"\xff\xd8\xff\xd9")
+    escape = spool.parent / "escape.jpg"
+    escape.symlink_to(outside)
+
+    assert await adapter.push_photo(str(escape), "entrada") is False
