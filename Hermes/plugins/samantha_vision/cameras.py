@@ -67,7 +67,19 @@ def redact(text: str) -> str:
 # RAW url and checked against the environment BEFORE expanding — checking
 # afterwards would also flag a `$` that legitimately arrived inside the
 # value.
-_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+#
+# BRACES ONLY, and that is not a style choice. `expandvars` also expands a
+# bare `$NAME`, but a password is allowed to contain a `$` and passwords
+# are what this URL carries. Measured 2026-08-24, when this pattern still
+# accepted the bare form: `rtsp://admin:pa$secretpart@h/sub` — a URL that
+# worked, and was redacted, before Ruling 21 — was read as naming a
+# variable `secretpart`, so the camera was dropped and a FRAGMENT OF THE
+# PASSWORD was written into the journal by the very warning built to keep
+# it out. Only `${NAME}` is treated as a placeholder now; a bare `$` is
+# part of the value, and `_expand` substitutes the braced form itself
+# rather than delegating to `expandvars`, which would still expand the
+# bare one.
+_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def _expand(url: str) -> tuple[str | None, str | None]:
@@ -75,13 +87,25 @@ def _expand(url: str) -> tuple[str | None, str | None]:
 
     Returns `(url, None)` on success, or `(None, name)` naming the first
     variable that is not set. The URL is never returned half-expanded and
-    the caller must never log it.
+    the caller must never log it — and the name that IS logged comes from
+    a braced placeholder, so it cannot be a slice of somebody's password.
     """
-    for match in _PLACEHOLDER.finditer(url):
-        name = match.group(1) or match.group(2)
-        if name not in os.environ:
-            return None, name
-    return os.path.expandvars(url), None
+    missing: str | None = None
+
+    def substitute(match: re.Match[str]) -> str:
+        nonlocal missing
+        name = match.group(1)
+        value = os.environ.get(name)
+        if value is None:
+            if missing is None:
+                missing = name
+            return ""
+        return value
+
+    expanded = _PLACEHOLDER.sub(substitute, url)
+    if missing is not None:
+        return None, missing
+    return expanded, None
 
 
 def parse_cameras(cfg: dict[str, Any]) -> list[Camera]:
@@ -251,7 +275,16 @@ class CameraFleet:
         the gateway.
         """
         delay = self._retry_seconds
-        reported = False  # this camera's failure has already been logged
+        # One flag PER failure mode, not one for both. They are different
+        # states and an operator reading the journal has to be able to
+        # tell which one a camera is in: sharing a flag meant a camera
+        # flipping between "unreachable" and "no frames" announced the
+        # first one it hit and then logged nothing but DEBUG, leaving a
+        # stale WARNING describing the state it was no longer in. A
+        # persistent single state still costs exactly one line; entering
+        # a DIFFERENT state is news and clears the other flag.
+        reported_unreachable = False
+        reported_empty = False
 
         while not self._stopping.is_set():
             stream = None
@@ -262,9 +295,9 @@ class CameraFleet:
                     if self._stopping.is_set():
                         break
                     frames_seen += 1
-                    if reported:
+                    if reported_unreachable or reported_empty:
                         logger.info(f"samantha-vision: {camera.name} is back")
-                    reported = False
+                    reported_unreachable = reported_empty = False
                     delay = self._retry_seconds
                     self._report(camera, detector, frame, on_detections)
                 # Manifest failure mode #4, and the one this plugin used
@@ -275,12 +308,13 @@ class CameraFleet:
                 # complete silence. From the journal it is indistinguishable
                 # from a camera with nothing in front of it.
                 if frames_seen == 0 and not self._stopping.is_set():
-                    if not reported:
+                    if not reported_empty:
                         logger.warning(
                             f"samantha-vision: {camera.name} connected but "
                             f"produced no frames"
                         )
-                        reported = True
+                        reported_empty = True
+                        reported_unreachable = False
                     else:
                         logger.debug(
                             f"samantha-vision: {camera.name} still producing no frames"
@@ -288,11 +322,12 @@ class CameraFleet:
             except Exception as exc:
                 # Once per camera, not once per attempt: a camera off for
                 # a week would otherwise be the only thing in the journal.
-                if not reported:
+                if not reported_unreachable:
                     logger.warning(
                         f"samantha-vision: {camera.name} unreachable — {redact(exc)}"
                     )
-                    reported = True
+                    reported_unreachable = True
+                    reported_empty = False
                 else:
                     logger.debug(f"samantha-vision: {camera.name} still unreachable")
             finally:

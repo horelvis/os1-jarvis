@@ -478,3 +478,73 @@ def test_a_dollar_inside_the_password_survives_expansion(monkeypatch):
         {"cameras": [{"name": "entrada", "url": "rtsp://admin:${RTSP_PASSWORD}@h/sub"}]}
     )
     assert [c.url for c in cameras] == ["rtsp://admin:a$b-dummy@h/sub"]
+
+
+def test_a_bare_dollar_in_a_password_is_not_a_placeholder(monkeypatch):
+    """A password may contain a `$`, and passwords are what this URL
+    carries. Treating a bare `$word` as a variable dropped the camera and
+    wrote a FRAGMENT OF THE PASSWORD into the journal — via the very
+    warning built to keep it out. Measured 2026-08-24."""
+    monkeypatch.delenv("secretpart", raising=False)
+    with captured_logs() as records:
+        cameras = parse_cameras(
+            {
+                "cameras": [
+                    {"name": "entrada", "url": "rtsp://admin:pa$secretpart@h/sub"}
+                ]
+            }
+        )
+    assert [c.url for c in cameras] == ["rtsp://admin:pa$secretpart@h/sub"]
+    joined = " ".join(r["message"] for r in records)
+    assert "secretpart" not in joined, joined
+
+
+def test_the_two_failure_modes_each_get_their_own_warning():
+    """A camera flipping between unreachable and empty must not leave a
+    stale WARNING describing the state it is no longer in."""
+    state = {"n": 0}
+
+    def open_stream(url):
+        state["n"] += 1
+        # unreachable, empty, unreachable, empty, ...
+        if state["n"] % 2:
+            return FakeStream([], raises=OSError("connection refused"))
+        return FakeStream([])
+
+    with captured_logs() as records:
+        fleet = _fleet(open_stream=open_stream)
+        fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, dets: None)
+        try:
+            assert _wait(lambda: state["n"] >= 4)
+        finally:
+            fleet.stop()
+
+    warnings = [
+        r["message"]
+        for r in records
+        if r["level"].name == "WARNING" and "entrada" in r["message"]
+    ]
+    assert any("unreachable" in m for m in warnings), warnings
+    assert any("no frames" in m for m in warnings), warnings
+
+
+def test_one_persistent_failure_mode_still_costs_exactly_one_line():
+    """The flip case must not undo the once-per-camera discipline."""
+    attempts: list[int] = []
+
+    def open_stream(url):
+        attempts.append(1)
+        return FakeStream([], raises=OSError("connection refused"))
+
+    with captured_logs() as records:
+        fleet = _fleet(open_stream=open_stream)
+        fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, dets: None)
+        try:
+            assert _wait(lambda: len(attempts) >= 4)
+        finally:
+            fleet.stop()
+
+    warnings = [
+        r for r in records if r["level"].name == "WARNING" and "entrada" in r["message"]
+    ]
+    assert len(warnings) == 1, [r["message"] for r in warnings]
