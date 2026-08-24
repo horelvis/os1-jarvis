@@ -11,6 +11,7 @@ import pytest
 from Hermes.plugins.samantha_vision.vision import (
     WATCHED_CLASSES,
     Detection,
+    Watcher,
     _deduplicate,
     describe,
 )
@@ -129,18 +130,18 @@ def test_the_same_thing_again_is_not_news() -> None:
     from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
-    assert watcher.worth_saying([person()], now=1000.0, hour=12)
-    assert watcher.worth_saying([person()], now=1010.0, hour=12) == []
+    assert watcher.worth_saying([person()], now=1000.0, hour=12, camera="fuera")
+    assert watcher.worth_saying([person()], now=1010.0, hour=12, camera="fuera") == []
 
 
 def test_the_same_thing_much_later_is_news_again() -> None:
     from Hermes.plugins.samantha_vision.vision import ANTI_SPAM_SECONDS, Watcher
 
     watcher = Watcher()
-    watcher.worth_saying([person()], now=1000.0, hour=12)
+    watcher.worth_saying([person()], now=1000.0, hour=12, camera="fuera")
     later = 1000.0 + ANTI_SPAM_SECONDS + 1
 
-    assert watcher.worth_saying([person()], now=later, hour=12)
+    assert watcher.worth_saying([person()], now=later, hour=12, camera="fuera")
 
 
 def test_a_different_thing_is_always_news() -> None:
@@ -149,10 +150,10 @@ def test_a_different_thing_is_always_news() -> None:
     from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
-    watcher.worth_saying([person()], now=1000.0, hour=12)
+    watcher.worth_saying([person()], now=1000.0, hour=12, camera="fuera")
     car = Detection("coche", 0.9, 0.5, 0.5)
 
-    assert watcher.worth_saying([car], now=1001.0, hour=12)
+    assert watcher.worth_saying([car], now=1001.0, hour=12, camera="fuera")
 
 
 def test_a_person_at_night_beats_the_anti_spam() -> None:
@@ -161,9 +162,9 @@ def test_a_person_at_night_beats_the_anti_spam() -> None:
     from Hermes.plugins.samantha_vision.vision import Watcher
 
     watcher = Watcher()
-    watcher.worth_saying([person()], now=1000.0, hour=3)
+    watcher.worth_saying([person()], now=1000.0, hour=3, camera="fuera")
 
-    assert watcher.worth_saying([person()], now=1010.0, hour=3)
+    assert watcher.worth_saying([person()], now=1010.0, hour=3, camera="fuera")
 
 
 def test_a_car_at_night_does_not_beat_the_anti_spam() -> None:
@@ -172,9 +173,9 @@ def test_a_car_at_night_does_not_beat_the_anti_spam() -> None:
 
     watcher = Watcher()
     car = Detection("coche", 0.9, 0.5, 0.5)
-    watcher.worth_saying([car], now=1000.0, hour=3)
+    watcher.worth_saying([car], now=1000.0, hour=3, camera="fuera")
 
-    assert watcher.worth_saying([car], now=1010.0, hour=3) == []
+    assert watcher.worth_saying([car], now=1010.0, hour=3, camera="fuera") == []
 
 
 def test_quiet_hours_wrap_around_midnight() -> None:
@@ -193,3 +194,39 @@ def test_the_threshold_matches_what_the_cameras_taught_barndoor() -> None:
     from Hermes.plugins.samantha_vision.vision import DEFAULT_THRESHOLD
 
     assert DEFAULT_THRESHOLD == 0.7
+
+
+# ── the anti-spam key learns there is more than one camera ────────────
+
+
+def test_anti_spam_is_per_camera() -> None:
+    """Somebody walking from one camera to the other is two events."""
+    watcher = Watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=12, camera="fuera")
+    # Same label, same second, different camera: still worth saying.
+    assert watcher.worth_saying([person()], now=0.0, hour=12, camera="entrada")
+
+
+def test_anti_spam_still_silences_the_same_camera() -> None:
+    watcher = Watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=12, camera="fuera")
+    assert not watcher.worth_saying([person()], now=10.0, hour=12, camera="fuera")
+
+
+def test_the_same_camera_speaks_again_after_the_window() -> None:
+    watcher = Watcher()
+    watcher.worth_saying([person()], now=0.0, hour=12, camera="fuera")
+    assert watcher.worth_saying([person()], now=181.0, hour=12, camera="fuera")
+
+
+def test_a_person_at_night_beats_the_anti_spam_per_camera() -> None:
+    watcher = Watcher()
+    assert watcher.worth_saying([person()], now=0.0, hour=3, camera="fuera")
+    assert watcher.worth_saying([person()], now=1.0, hour=3, camera="fuera")
+
+
+def test_a_car_at_night_does_not_beat_the_anti_spam_per_camera() -> None:
+    watcher = Watcher()
+    car = Detection(label="coche", confidence=0.9, x=0.5, y=0.5)
+    assert watcher.worth_saying([car], now=0.0, hour=3, camera="fuera")
+    assert not watcher.worth_saying([car], now=1.0, hour=3, camera="fuera")

@@ -251,15 +251,19 @@ class Watcher:
 
     def __init__(self, anti_spam_seconds: float = ANTI_SPAM_SECONDS) -> None:
         self.anti_spam_seconds = anti_spam_seconds
-        self._last_said: dict[str, float] = {}
+        # Keyed (camera, label), not label: two cameras seeing a person
+        # are two events, and collapsing them would mean somebody could
+        # cross the whole property in silence after the first sighting.
+        self._last_said: dict[tuple[str, str], float] = {}
 
     def worth_saying(
-        self, detections: list[Detection], now: float, hour: int
+        self, detections: list[Detection], now: float, hour: int, *, camera: str
     ) -> list[Detection]:
         """Filter to what she should actually mention, and remember it."""
         out: list[Detection] = []
         for item in detections:
-            previous = self._last_said.get(item.label)
+            key = (camera, item.label)
+            previous = self._last_said.get(key)
             recent = previous is not None and (now - previous) < self.anti_spam_seconds
 
             # A person at night beats the anti-spam: the second time
@@ -269,7 +273,7 @@ class Watcher:
 
             if recent and not urgent:
                 continue
-            self._last_said[item.label] = now
+            self._last_said[key] = now
             out.append(item)
         return out
 
