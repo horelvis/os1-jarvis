@@ -609,10 +609,14 @@ def test_grab_on_an_unknown_camera_is_none_not_an_error():
 
 
 def test_the_watcher_pays_nothing_when_nobody_is_waiting():
-    # `_offer` must not copy or store a frame unless somebody asked.
+    # `_offer` must not copy or store a frame unless somebody asked. Not
+    # `.get(...) is None`: that also passes if the key exists holding
+    # `None`, which is exactly the shape of the bug this guards against
+    # (`_offer` pinning a frame for a caller that already left) — the
+    # key must be absent entirely.
     fleet = _fleet()
     fleet._offer("entrada", np.zeros((4, 4, 3), dtype="uint8"))
-    assert fleet._pending.get("entrada") is None
+    assert "entrada" not in fleet._pending
 
 
 def test_grab_never_returns_a_frame_the_watcher_already_analysed():
@@ -644,7 +648,7 @@ def test_a_second_caller_does_not_lose_the_first_ones_frame_to_a_race():
     results: dict[str, np.ndarray | None] = {}
 
     def first():
-        results["first"] = fleet.grab("entrada", timeout=0.1)
+        results["first"] = fleet.grab("entrada", timeout=1.0)
 
     def second():
         results["second"] = fleet.grab("entrada", timeout=2.0)
@@ -652,11 +656,20 @@ def test_a_second_caller_does_not_lose_the_first_ones_frame_to_a_race():
     t1 = threading.Thread(target=first)
     t1.start()
     assert _wait(lambda: "entrada" in fleet._wanted)
+    e1 = fleet._wanted["entrada"]
+
     t2 = threading.Thread(target=second)
     t2.start()
-    # Give `second` time to overwrite the slot, then let `first` time out
-    # and run its cleanup, BEFORE the frame ever arrives — that ordering
-    # is what makes the race real rather than accidental.
+    # A barrier, not a guess: wait until `second` has actually overwritten
+    # the slot, rather than hoping it does so before `first`'s timeout.
+    # A fixed head start (as this test originally gave `t2`) proved
+    # nothing on a loaded box — 0/1 s of scheduling slack either side of
+    # a race is not a race any more, and the test stayed green while
+    # guarding nothing.
+    assert _wait(lambda: fleet._wanted.get("entrada") is not e1)
+
+    # `first` now times out (its own Event, `e1`, will never be set) and
+    # runs its cleanup — the exact moment the bug lived in.
     t1.join(timeout=2.0)
     assert results.get("first") is None
 

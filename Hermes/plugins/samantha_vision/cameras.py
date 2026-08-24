@@ -288,6 +288,15 @@ class CameraFleet:
         if event is None or event.is_set():
             return
         with self._grab_lock:
+            # Re-check under the lock: `_wanted` was read above WITHOUT
+            # it, so the caller we found may have already timed out and
+            # finished its own cleanup in the gap between that read and
+            # this one. Storing anyway would pin a multi-MB frame in
+            # `_pending` for nobody, forever — the next `grab()` for this
+            # camera reinitialises the slot, but nothing else ever clears
+            # a stray entry left behind here.
+            if self._wanted.get(camera) is not event:
+                return
             self._pending[camera] = frame
         event.set()
 
@@ -306,6 +315,16 @@ class CameraFleet:
             if not event.wait(timeout):
                 return None
             with self._grab_lock:
+                # Re-check identity here too: a caller can be pre-empted
+                # by a later `grab()` for the same camera AFTER waking
+                # (its own Event was already set) but BEFORE it reaches
+                # this read. Without this check it would read whatever
+                # the later caller's frame turned out to be — the same
+                # ndarray object, aliased between two callers — instead
+                # of the honest "you were pre-empted, and got nothing"
+                # this method promises elsewhere.
+                if self._wanted.get(camera) is not event:
+                    return None
                 return self._pending.get(camera)
         finally:
             with self._grab_lock:
