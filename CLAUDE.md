@@ -752,7 +752,11 @@ CosyVoice runs in Docker from `tts-server/cosyvoice/` and listens on
 
 ```bash
 ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
-xwininfo -name "samantha-widget"   # did you photograph the strip, or the lock screen?
+xwininfo -name "Samantha"          # did you photograph the strip, or the lock screen?
+# The title is "Samantha" — window.py:36 sets it, and no code anywhere
+# calls the window "samantha-widget"; that is only the unit's name. This
+# line asked for the wrong one, so it answered "No window with name ...
+# exists!" with the strip on screen and running (2026-08-25).
 ```
 
 Nothing about his appearance is provable from a test, and a screenshot of

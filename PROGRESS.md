@@ -1,5 +1,51 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-25 — Arranca el servidor y JARVIS no está: tres causas, ninguna de código ✅
+
+El síntoma era «el servidor se inicia y no vemos a Jarvis activo». Hermes
+y CosyVoice estaban en pie; la tira, no. Tres causas encadenadas, y las
+tres son despliegue que nunca se re-aplicó, no lógica rota:
+
+**1. La unidad instalada apuntaba a un worktree borrado.**
+`~/.config/systemd/user/samantha-widget.service` seguía siendo la copia
+del 23-ago, con `ExecStart` en
+`.claude/worktrees/widget-gtk4-spec/widget/.venv/bin/python`. Ese
+worktree ya no existe. La versión correcta llevaba en `systemd/` desde el
+24-ago sin que nadie ejecutara el `cp` del §5. Y ni ella ni
+`samantha-llamacpp` estaban `enabled`: aunque se arreglara el
+`ExecStart`, un reinicio volvía a dejar la pantalla vacía.
+
+**2. `samantha-llamacpp.service` no estaba instalado en absoluto**, así
+que `:8000` no escuchaba mientras Hermes apunta a `custom:local` →
+`http://127.0.0.1:8000/v1`. Con la tira en pantalla, cada turno habría
+muerto igual.
+
+**3. `--split-mode row` dejó de ser inofensivo.** Al instalar la unidad,
+llama-server se negó a cargar: `device CUDA0 does not support split
+buffers`. La flag reparte tensores entre **varias** GPUs y aquí hay una;
+el `improvement-sweep` del 04-ago ya la había marcado como no-op que
+sobraba, pero la corrección nunca llegó al fichero. En la build de
+llama.cpp del 23-ago ha pasado de no-op a error fatal. Medido las dos
+veces: con la flag el modelo no carga; sin ella, `/health` responde a los
+4 s.
+
+**El comando del §5 para comprobarlo estaba mal**, y es la razón de que
+esto parezca peor de lo que era: `xwininfo -name "samantha-widget"`
+contesta *No window with name … exists!* con la tira dibujada en
+pantalla, porque `window.py:36` la titula **«Samantha»**. Corregido en
+CLAUDE.md, con el porqué.
+
+**Verificado en vivo:** ventana `0xa00004 "Samantha"` en `900x96+510+984`,
+captura con la línea terracota en reposo sobre el escritorio, WebSocket
+establecido contra `127.0.0.1:7777`, 22.9 GB de 24.5 en la GPU, y un
+turno entero por el socket del kiosko — «Siempre oído, señor.». De
+paso quedó medido que el adaptador del kiosko admite **una** conexión:
+el probe desplazó a la tira, la tira reconectó y cerró el probe.
+
+**Changed files:** `systemd/samantha-llamacpp.service` (fuera
+`--split-mode row`, con el porqué), `CLAUDE.md` (§5, el `xwininfo`).
+Sin cambios en el widget ni en los plugins.
+
 ## 2026-08-25 — La foto a demanda: se le puede preguntar, y la tira crece ✅
 
 Le dices «enséñame la entrada» y la foto aparece sobre la tira quince

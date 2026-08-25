@@ -60,7 +60,10 @@ ExecStart=%h/git/llama.cpp/build/bin/llama-server \
     --ctx-size ${SAMANTHA_LLAMA_CTX} \
     --jinja \
     --flash-attn on \
-    --split-mode row \
+# NOT --split-mode row: it splits tensors across several GPUs and this
+# box has one. It used to be a harmless no-op; on b10603 it is fatal —
+# "device CUDA0 does not support split buffers" — and the model never
+# loads, so the gateway answers nothing (measured 2026-08-25).
     --temp 0.6 \
     --top-k 20 \
     --top-p 0.95 \
