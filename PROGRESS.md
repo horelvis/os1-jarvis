@@ -1,5 +1,67 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-25 — La cámara en vivo: doce tareas de trece, y una noche de hallazgos ✅⏸
+
+Se le puede pedir que enseñe una cámara **en movimiento** sobre la tira.
+Doce de las trece tareas del plan están cerradas con revisión limpia; la
+decimotercera —la verificación contra la casa real— necesita voz humana y
+queda pendiente.
+
+**Lo que se construyó**, de abajo arriba: el contrato del canal de la
+tira gana `live`, `live_end` y tramas binarias con 4 bytes de epoch; el
+adaptador sabe empujar bytes; el vigilante de cámaras ofrece un grifo por
+paquete; una sesión posee la vista con su tope de dos minutos; dos
+órdenes habladas la abren y la cierran; la tira bifurca por tipo antes de
+parsear, decodifica H.264 en su propio hilo y lo pinta cada 40 ms; y sólo
+el rectángulo del vídeo recibe clics — el arreglo que §12 aplazó en
+agosto, ahora hecho con `XShapeCombineRectangles` por ctypes.
+
+**Los cuatro fallos que la revisión pescó, y ninguno lo habría dicho un
+test:**
+
+1. **El grifo no se encendía nunca.** `cameras.py` resolvía el tap una
+   vez por conexión RTSP, es decir cada varias horas, así que `set_tap`
+   sobre una flota en marcha no hacía nada. La función entera habría
+   salido como una banda negra. El test que lo «probaba» pasaba porque el
+   falso tenía un generador finito y el vigilante reabría en bucle;
+   producción no se acaba nunca.
+2. **Pedir la cámara podía congelar el cerebro cinco segundos.**
+   `codec_parameters()` abría un contenedor si no había, y `open()` es un
+   `av.open()` bloqueante con timeout de 5 s, llamado desde el bucle de
+   eventos del gateway.
+3. **`stop()` podía cerrar el códec con un `decode()` dentro.** Dos hilos
+   sobre el mismo contexto C: caída del proceso del widget, no de la
+   vista. Ahora, si el hilo no ha muerto, se suelta el códec sin cerrarlo.
+4. **El vídeo iba a 4 fps.** El plan puso la recogida de fotogramas en el
+   tick de 250 ms de la banda. Medido después del arreglo, capturando la
+   banda a 50 Hz y contando fotogramas distintos: **14 por segundo**,
+   frente a ~4.
+
+**Y tres cosas que se aprendieron sobre los ojos**, todas medidas:
+
+- Una persona **sentada** en la entrada da 0.62 / 0.71 / 0.64 en veintisiete
+  segundos. Con el listón en 0.7 y una sola mirada, `mirar` decía «vacía»
+  dos de cada tres veces mientras el vigilante avisaba. `mirar` ahora
+  **vota sobre tres fotogramas** y se queda con el máximo.
+- Se descargó y probó `yolov9-s` a 640 contra el `yolov9-t` a 320 que
+  corre: sube la media seis centésimas, cuesta diez veces más (97 ms
+  contra 10) y **no es uniformemente mejor** — es peor en el fotograma que
+  el pequeño acierta. Cinco pasadas del pequeño cuestan la mitad que una
+  del grande. El modelo grande queda descargado; la palanca era mirar
+  varias veces, no mirar mejor.
+- Bajar el listón a 0.45 *además* de votar produjo falsos positivos en una
+  hora: dos cambios que se multiplican. Revertido al 0.7 de BarnDoor.
+
+**Fuera del plan, la misma tarde:** llegó un micrófono USB y JARVIS oyó
+una voz humana por primera vez; la voz clonada resultó ser la de Samantha
+porque el clip por defecto nunca se cambió al de JARVIS; y el suelo
+nocturno de 30 s se descubrió disparando un turno completo del LLM cada
+medio minuto con alguien en la entrada — la GPU al 95% y 68 °C. Cortada
+la inyección, 10% y 46 °C.
+
+**Pendiente:** la tarea 13 (hablarle y comprobar las tres salidas), volver
+a activar `allow_gateway_injection`, y las reglas de alerta.
+
 ## 2026-08-25 — Y al encender: qué arranca solo y qué espera al login ✅
 
 Cola de la entrada de abajo. Aquellas tres causas quedaron arregladas en
