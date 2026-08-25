@@ -18,6 +18,7 @@ Two details that are not obvious and are load-bearing:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from typing import Any, Callable
 
@@ -26,7 +27,7 @@ import websockets
 DEFAULT_URI = "ws://127.0.0.1:7777/ws"
 DEFAULT_USER_ID = "primary"
 
-_SERVER_TYPES = {"token", "done", "error", "transcription", "photo"}
+_SERVER_TYPES = {"token", "done", "error", "transcription", "photo", "live", "live_end"}
 
 # Said out loud when the gateway is unreachable. Silence would leave the
 # user talking to a wall — one of the few Spanish strings in this package.
@@ -35,6 +36,13 @@ _NO_GATEWAY = "No te oigo bien ahora mismo. Dame un momento."
 
 class ProtocolError(ValueError):
     """Raised for anything the gateway should not have sent."""
+
+
+def decode_live_frame(raw: bytes) -> tuple[int, bytes]:
+    """Split one binary frame into (epoch, packet). Raises ProtocolError."""
+    if len(raw) < 4:
+        raise ProtocolError(f"live frame is {len(raw)} bytes, needs at least 4")
+    return int.from_bytes(raw[:4], "big"), bytes(raw[4:])
 
 
 def encode_chat(text: str, user_id: str = DEFAULT_USER_ID) -> str:
@@ -68,6 +76,13 @@ class GatewayClient:
         # own and never a token: an answer travels wherever the turn is
         # routed, and a path in one would be read aloud.
         self.on_photo: Callable[[str, str], None] = lambda _p, _c: None
+        # A live view: opened, fed packets, and closed. The picture never
+        # travels as a token either — see on_photo above for why.
+        self.on_live_open: Callable[[str, int, bytes, int, int], None] = (
+            lambda _c, _e, _x, _w, _h: None
+        )
+        self.on_live_frame: Callable[[int, bytes], None] = lambda _e, _p: None
+        self.on_live_end: Callable[[int, str], None] = lambda _e, _r: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -102,7 +117,18 @@ class GatewayClient:
                 self._connected.clear()
             await asyncio.sleep(self.retry_seconds)
 
-    def _dispatch(self, raw: str) -> None:
+    def _dispatch(self, raw: str | bytes) -> None:
+        # Branch BEFORE parsing. `websockets` yields str for text frames
+        # and bytes for binary ones, and json.loads accepts bytes — so a
+        # video frame would parse, fail as "not an object", and vanish
+        # down the path that deliberately ignores unknown types.
+        if isinstance(raw, (bytes, bytearray)):
+            try:
+                epoch, packet = decode_live_frame(bytes(raw))
+            except ProtocolError:
+                return
+            self.on_live_frame(epoch, packet)
+            return
         try:
             msg = decode_server(raw)
         except ProtocolError:
@@ -118,3 +144,17 @@ class GatewayClient:
             path = msg.get("path", "")
             if isinstance(path, str) and path:
                 self.on_photo(path, str(msg.get("camera", "")))
+        elif kind == "live":
+            try:
+                extradata = base64.b64decode(msg.get("extradata", "") or "")
+            except (ValueError, TypeError):
+                return
+            self.on_live_open(
+                str(msg.get("camera", "")),
+                int(msg.get("epoch", 0)),
+                extradata,
+                int(msg.get("width", 0)),
+                int(msg.get("height", 0)),
+            )
+        elif kind == "live_end":
+            self.on_live_end(int(msg.get("epoch", 0)), str(msg.get("reason", "")))

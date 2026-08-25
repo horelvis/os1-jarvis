@@ -7,6 +7,7 @@ than on the strip.
 """
 
 import asyncio
+import base64
 import json
 
 import pytest
@@ -15,6 +16,7 @@ import websockets
 from samantha_widget.gateway import (
     GatewayClient,
     ProtocolError,
+    decode_live_frame,
     decode_server,
     encode_chat,
 )
@@ -174,3 +176,62 @@ def test_dispatch_ignores_an_unknown_type_without_calling_handlers() -> None:
     gw.on_error = lambda m: seen.append("error")
     gw._dispatch(json.dumps({"type": "nonesuch"}))
     assert seen == []
+
+
+def test_a_binary_frame_is_not_parsed_as_json():
+    # Today `_dispatch` assumes text and json.loads accepts bytes, so a
+    # binary frame would be dropped by the branch that ignores unknown
+    # types — silently, which is the worst way to lose video.
+    seen = []
+    gw = GatewayClient()
+    gw.on_live_frame = lambda epoch, packet: seen.append((epoch, packet))
+
+    gw._dispatch((7).to_bytes(4, "big") + b"\x00\x00\x01\x65abc")
+
+    assert seen == [(7, b"\x00\x00\x01\x65abc")]
+
+
+def test_a_truncated_binary_frame_is_dropped_not_raised():
+    gw = GatewayClient()
+    gw._dispatch(b"\x00\x00")  # no room for an epoch
+
+
+def test_live_open_carries_the_decoded_extradata():
+    seen = []
+    gw = GatewayClient()
+    gw.on_live_open = lambda *args: seen.append(args)
+
+    gw._dispatch(
+        json.dumps(
+            {
+                "type": "live",
+                "camera": "entrada",
+                "epoch": 7,
+                "codec": "h264",
+                "extradata": base64.b64encode(b"sps").decode("ascii"),
+                "width": 704,
+                "height": 480,
+            }
+        )
+    )
+
+    assert seen == [("entrada", 7, b"sps", 704, 480)]
+
+
+def test_live_end_reaches_the_callback():
+    seen = []
+    gw = GatewayClient()
+    gw.on_live_end = lambda epoch, reason: seen.append((epoch, reason))
+
+    gw._dispatch(json.dumps({"type": "live_end", "epoch": 7, "reason": "timeout"}))
+
+    assert seen == [(7, "timeout")]
+
+
+def test_an_unknown_text_type_is_still_dropped_in_silence():
+    gw = GatewayClient()
+    gw._dispatch(json.dumps({"type": "something-from-the-future"}))
+
+
+def test_decode_live_frame_splits_the_header():
+    assert decode_live_frame((7).to_bytes(4, "big") + b"abc") == (7, b"abc")
