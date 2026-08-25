@@ -251,10 +251,31 @@ class SamanthaApp(Gtk.Application):
             print(f"foto: {camera} -> {path}", file=sys.stderr, flush=True)
             GLib.idle_add(band.show_photo, path, camera)
 
+        def on_live_open(
+            camera: str, epoch: int, extradata: bytes, w: int, h: int
+        ) -> None:
+            # Opening resizes the window, so it crosses through idle_add
+            # like on_photo does.
+            print(f"vídeo: {camera} ({w}x{h})", file=sys.stderr, flush=True)
+            GLib.idle_add(band.live_open, camera, epoch, extradata, w, h)
+
+        def on_live_frame(epoch: int, packet: bytes) -> None:
+            # Deliberately NOT idle_add: this fires up to 25 times a
+            # second, and `PhotoArea.live_frame` is thread-safe and never
+            # blocks — see its docstring.
+            band.live_frame(epoch, packet)
+
+        def on_live_end(epoch: int, reason: str) -> None:
+            print(f"vídeo terminado: {reason}", file=sys.stderr, flush=True)
+            GLib.idle_add(band.live_end, epoch, reason)
+
         client.on_token = on_token
         client.on_done = on_done
         client.on_error = on_error
         client.on_photo = on_photo
+        client.on_live_open = on_live_open
+        client.on_live_frame = on_live_frame
+        client.on_live_end = on_live_end
 
         # ── the microphone, always open ───────────────────────────────
         detector = UtteranceDetector(SileroDetector())

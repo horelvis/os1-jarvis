@@ -25,6 +25,8 @@ gi.require_version("Graphene", "1.0")
 
 from gi.repository import Gdk, GLib, Graphene, Gtk  # noqa: E402
 
+from .live import LiveModel  # noqa: E402
+from .live_decode import LiveDecoder  # noqa: E402
 from .photo import PhotoModel, hits, tile_rects  # noqa: E402
 
 # How often the band asks whether it is time to fade. Four times a
@@ -40,6 +42,12 @@ class PhotoArea(Gtk.Widget):
     def __init__(self, on_resize: Callable[[int], None]) -> None:
         super().__init__()
         self.model = PhotoModel()
+        self.live = LiveModel()
+        self._decoder = LiveDecoder(on_overflow=self._on_overflow)
+        # The newest decoded picture, built on the main thread from
+        # whatever the decoder thread last produced. None until the
+        # first frame of a view arrives.
+        self._live_texture: Gdk.Texture | None = None
         self._on_resize = on_resize
         # path → texture, or None for a file that could not be loaded.
         # Cached both ways: retrying a missing file every frame would
@@ -71,11 +79,90 @@ class PhotoArea(Gtk.Widget):
         # that (see `_wanted_height`).
         self._apply()
 
+    def live_open(
+        self, camera: str, epoch: int, extradata: bytes, width: int, height: int
+    ) -> None:
+        """A live view started. Runs on the GTK thread (via idle_add).
+
+        `width`/`height` are the stream's nominal size, carried through
+        for anyone who logs this; the tile itself is laid out to the
+        band's fixed 16:9, the same as a photo, not to the video's real
+        aspect. Any view already up — a different camera, or a retry of
+        this one — is torn down first: a new epoch means a new decoder.
+        """
+        self._decoder.stop()
+        self._live_texture = None
+        self.live.open(camera, epoch, time.monotonic())
+        self._decoder.start(extradata)
+        self._apply()
+
+    def live_frame(self, epoch: int, packet: bytes) -> None:
+        """A packet arrived. NOT on the GTK thread — see the module docstring.
+
+        Deliberately does nothing with `_apply` or `queue_draw`: `feed`
+        must never block, and neither can this.
+        """
+        if not self.live.accepts(epoch):
+            return
+        self._decoder.feed(packet)
+
+    def live_end(self, epoch: int, reason: str) -> None:
+        """A view ended. Runs on the GTK thread (via idle_add or `_on_overflow`)."""
+        if not self.live.close(epoch, time.monotonic()):
+            # Nothing was up, or this named a view that already ended —
+            # in either case there is nothing here to tear down, and a
+            # newer view (if any) must be left running.
+            return
+        self._decoder.stop()
+        self._live_texture = None
+        self._apply()
+
+    def live_rect(self) -> tuple[float, float, float, float] | None:
+        """Where the live picture is drawn, in this widget's own coordinates.
+
+        None while there is no view up. `do_snapshot` paints exactly this
+        rectangle; a caller outside the widget (Task 11's X11 input
+        region) reads it from here rather than recomputing it, because
+        two computations of the same rectangle drift, and the symptom is
+        clicks landing next to the picture instead of on it.
+        """
+        if not self.live.visible:
+            return None
+        width = float(self.get_width())
+        height = float(self.get_height())
+        if width <= 0 or height <= 0:
+            return None
+        return tile_rects(width, height, 1)[0]
+
+    def _on_overflow(self) -> None:
+        """The decoder fell too far behind to keep up.
+
+        Called from whichever thread was feeding it a packet — the
+        gateway's asyncio thread in real use, never the GTK thread — so
+        closing has to cross back through `idle_add` like every other
+        GTK-bound call the gateway triggers.
+        """
+        epoch = self.live.epoch
+        if epoch is not None:
+            GLib.idle_add(self.live_end, epoch, "atascado")
+
     # ── what the user does to it ──────────────────────────────────────
 
     def _on_pressed(
         self, gesture: Gtk.GestureClick, _n: int, x: float, y: float
     ) -> None:
+        if self.live.visible:
+            # There is no per-photo gesture here either: a click ON the
+            # picture is the only thing this row answers, and for a live
+            # view it means one thing — close it. This is the way out
+            # spec §9.4 leans on, on a box with no microphone.
+            rect = self.live_rect()
+            if rect is not None and hits(x, y, [rect]):
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+                epoch = self.live.epoch
+                if epoch is not None:
+                    self.live_end(epoch, "click")
+            return
         if not self.model.visible:
             return
         rects = tile_rects(
@@ -104,6 +191,21 @@ class PhotoArea(Gtk.Widget):
             print(
                 f"la banda falló al desvanecerse: {exc!r}", file=sys.stderr, flush=True
             )
+
+        frame = self._decoder.take()
+        if frame is not None:
+            # Built here, on the main thread, from the plain buffer the
+            # decoder thread produced. `Gdk.MemoryTexture.new` does not
+            # copy, so this is cheap even at 25 Hz.
+            self._live_texture = Gdk.MemoryTexture.new(
+                frame.width,
+                frame.height,
+                Gdk.MemoryFormat.R8G8B8,
+                GLib.Bytes.new(frame.data),
+                frame.stride,
+            )
+            self.queue_draw()
+
         return True  # GLib.SOURCE_CONTINUE
 
     def _wanted_height(self) -> int:
@@ -114,10 +216,13 @@ class PhotoArea(Gtk.Widget):
         114 px of nothing and hold it there for the full fifteen
         seconds — the failure that is worse than not showing the photo,
         because it is visible and says nothing.
+
+        A live view has no such failure mode — it needs no file — so it
+        is not gated the same way. The two cannot fight over the
+        window's height: whichever wants more wins.
         """
-        if not self._loadable():
-            return 0
-        return self.model.height
+        photo_height = self.model.height if self._loadable() else 0
+        return max(photo_height, self.live.height)
 
     def _apply(self) -> None:
         self._forget_unused()
@@ -161,7 +266,21 @@ class PhotoArea(Gtk.Widget):
     def do_snapshot(self, snapshot: Gtk.Snapshot) -> None:
         width = float(self.get_width())
         height = float(self.get_height())
-        if width <= 0 or height <= 0 or not self.model.visible:
+        if width <= 0 or height <= 0:
+            return
+
+        if self.live.visible and self._live_texture is not None:
+            # Same geometry the photo row uses for a single tile — this
+            # is also exactly what `live_rect` hands to a caller outside
+            # the widget, so the two never disagree about where the
+            # picture is.
+            x, y, w, h = tile_rects(width, height, 1)[0]
+            rect = Graphene.Rect()
+            rect.init(x, y, w, h)
+            snapshot.append_texture(self._live_texture, rect)
+            return
+
+        if not self.model.visible:
             return
 
         textures = self._loadable()
