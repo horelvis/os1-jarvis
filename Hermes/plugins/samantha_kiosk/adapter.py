@@ -38,7 +38,17 @@ from urllib.parse import urlsplit
 from aiohttp import WSMsgType, web
 from loguru import logger
 
-from .protocol import ProtocolError, decode_client, done, error, photo, token
+from .protocol import (
+    ProtocolError,
+    decode_client,
+    done,
+    error,
+    live,
+    live_end,
+    live_frame,
+    photo,
+    token,
+)
 
 try:
     from gateway.config import Platform
@@ -479,6 +489,49 @@ class KioskAdapter(BasePlatformAdapter):
             )
             return False
         return await self._push(photo(str(resolved), camera))
+
+    async def _push_bytes(self, payload: bytes) -> bool:
+        """Write one binary frame to the strip. False means it did not land.
+
+        The text twin of this is `_push`. They are separate because
+        aiohttp has separate methods, and because a video frame that
+        cannot be delivered must be as quiet as a dropped photo: this is
+        called up to 25 times a second and a warning per frame would
+        drown the journal in the first minute of a camera going away.
+        """
+        ws = self._ws
+        if ws is None or ws.closed:
+            return False
+        try:
+            await ws.send_bytes(payload)
+        except (ConnectionResetError, RuntimeError) as exc:
+            logger.debug(f"samantha-kiosk: live frame not delivered — {exc}")
+            return False
+        return True
+
+    async def push_live_open(
+        self, camera: str, epoch: int, extradata: bytes, width: int, height: int
+    ) -> bool:
+        """Tell the strip a live view is starting."""
+        return await self._push(live(camera, epoch, extradata, width, height))
+
+    async def push_live_frame(self, epoch: int, packet: bytes) -> bool:
+        """One access unit. False when it did not land, never an exception."""
+        try:
+            payload = live_frame(epoch, packet)
+        except ProtocolError as exc:
+            logger.warning(f"samantha-kiosk: refusing a live frame — {exc}")
+            return False
+        return await self._push_bytes(payload)
+
+    async def push_live_close(self, epoch: int, reason: str) -> bool:
+        """Tell the strip the view ended, and why."""
+        try:
+            payload = live_end(epoch, reason)
+        except ProtocolError as exc:
+            logger.warning(f"samantha-kiosk: refusing a live_end — {exc}")
+            return False
+        return await self._push(payload)
 
     # ── turn lifecycle ────────────────────────────────────────────────────
     #

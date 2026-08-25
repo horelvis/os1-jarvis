@@ -700,3 +700,52 @@ async def test_push_photo_refuses_a_symlink_loop_rather_than_raising(
 
     assert ok is False
     assert connected_adapter._ws.sent == []
+
+
+class _Socket:
+    """An aiohttp WebSocketResponse as far as _push is concerned."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.texts: list[str] = []
+        self.blobs: list[bytes] = []
+
+    async def send_str(self, payload: str) -> None:
+        self.texts.append(payload)
+
+    async def send_bytes(self, payload: bytes) -> None:
+        self.blobs.append(payload)
+
+
+def test_push_live_frame_goes_out_as_a_binary_frame(adapter):
+    sock = _Socket()
+    adapter._ws = sock
+
+    assert asyncio.run(adapter.push_live_frame(7, b"\x00\x00\x01\x65abc")) is True
+    assert sock.texts == []
+    assert sock.blobs == [(7).to_bytes(4, "big") + b"\x00\x00\x01\x65abc"]
+
+
+def test_push_live_open_and_close_go_out_as_text(adapter):
+    sock = _Socket()
+    adapter._ws = sock
+
+    assert asyncio.run(adapter.push_live_open("entrada", 7, b"", 704, 480)) is True
+    assert asyncio.run(adapter.push_live_close(7, "asked")) is True
+    assert sock.blobs == []
+    assert len(sock.texts) == 2
+
+
+def test_an_oversized_packet_is_dropped_not_raised(adapter):
+    sock = _Socket()
+    adapter._ws = sock
+
+    huge = b"\x00" * (4 * 1024 * 1024 + 1)
+    assert asyncio.run(adapter.push_live_frame(7, huge)) is False
+    assert sock.blobs == []
+
+
+def test_nothing_connected_is_false_not_an_exception(adapter):
+    adapter._ws = None
+    assert asyncio.run(adapter.push_live_frame(7, b"abc")) is False
+    assert asyncio.run(adapter.push_live_close(7, "asked")) is False
