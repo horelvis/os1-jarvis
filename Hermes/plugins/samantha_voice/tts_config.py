@@ -23,10 +23,19 @@ class TTSConfig:
     # Per-read timeout, not a whole-body cap: a healthy stream never
     # trips it, a wedged server fails loudly instead of hanging.
     timeout_s: float = 60.0
-    # ~8 s of his voice, and the literal transcript of it. Zero-shot
+    # ~7 s of his voice, and the literal transcript of it. Zero-shot
     # needs both: cross_lingual discards prompt_text and sounds robotic.
-    ref_wav: str = "~/.samantha/voices/ref/samantha.wav"
-    ref_transcript_path: str = "~/.samantha/voices/ref/samantha.txt"
+    #
+    # This said `samantha.wav` until 2026-08-25, and that is why he spoke
+    # in Samantha's voice for two days after becoming JARVIS. The clip
+    # beside it — `jarvis.wav`, recorded 2026-08-23 the day the persona
+    # changed — was only ever reachable by exporting
+    # SAMANTHA_TTS_COSYVOICE_REF_WAV by hand, and nothing on this box
+    # exported it: not the unit, not run-gateway.sh, not .env. A voice
+    # that depends on somebody remembering an environment variable is
+    # not the voice he has; the default is.
+    ref_wav: str = "~/.samantha/voices/ref/jarvis.wav"
+    ref_transcript_path: str = "~/.samantha/voices/ref/jarvis.txt"
     # Character given to the VOICE, not to the words: a system prompt
     # before <|endofprompt|> that conditions delivery. Empty keeps the
     # server's own "You are a helpful assistant."
