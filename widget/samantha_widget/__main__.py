@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 import threading
+from typing import TYPE_CHECKING
 
 import gi
 
@@ -23,6 +24,9 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
+
+if TYPE_CHECKING:
+    from .photo_area import PhotoArea
 
 # Set to any of the four state names to freeze the wave there and skip
 # the voice loop entirely — how each state gets photographed, since
@@ -52,6 +56,12 @@ _FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
 # camera takes a whole live turn — the counterpart of SAMANTHA_WIDGET_SAY
 # for the half of him you can see.
 _SHOW_ON_START = os.environ.get("SAMANTHA_WIDGET_PHOTO")
+
+# Feed the band a local video file as if the gateway had pushed it. The
+# counterpart of SAMANTHA_WIDGET_PHOTO for the half of him that moves:
+# the band, the decoder and the input region, with no gateway and no
+# camera in the room.
+_LIVE_ON_START = os.environ.get("SAMANTHA_WIDGET_LIVE")
 
 # Write every utterance the VAD closes to this directory as a WAV.
 # Diagnostic only: when a transcription comes back as nonsense there is
@@ -113,6 +123,19 @@ class SamanthaApp(Gtk.Application):
                 return False  # GLib.SOURCE_REMOVE
 
             GLib.timeout_add(2000, _show_them)
+
+        if _LIVE_ON_START:
+
+            def _feed_it() -> bool:
+                threading.Thread(
+                    target=_feed_live_file,
+                    args=(_LIVE_ON_START, band),
+                    name="fake-live",
+                    daemon=True,
+                ).start()
+                return False  # GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(2000, _feed_it)
 
         if _DEMO_STATE:
             state = WaveState(_DEMO_STATE)
@@ -467,6 +490,59 @@ def _feed_fake_mic(text: str, on_frame, transcriber) -> None:
         delay = next_at - time.monotonic()
         if delay > 0:
             time.sleep(delay)
+
+
+def _feed_live_file(path: str, area: PhotoArea) -> None:
+    """Push a local video file into the band, as if the gateway had.
+
+    The counterpart of `_feed_fake_mic`: no gateway, no camera, only the
+    band, the decoder and (once the input region lands) the X11 region —
+    the way `SAMANTHA_WIDGET_PHOTO` lets the thumbnail half be built and
+    photographed with neither.
+
+    Runs on its own thread so opening the file and pacing the packets
+    never touches the GTK main loop. `live_open`/`live_end` resize the
+    window, so — exactly like the gateway's own wiring — they cross
+    through `idle_add`; `live_frame` does not, because the real path
+    never does either.
+    """
+    import time
+
+    import av
+
+    print(f"vídeo de prueba: {path}", file=sys.stderr, flush=True)
+    try:
+        container = av.open(path)
+        stream = container.streams.video[0]
+        extradata = bytes(stream.codec_context.extradata or b"")
+        width = int(stream.codec_context.width)
+        height = int(stream.codec_context.height)
+        rate = float(stream.average_rate or 15)
+    except Exception as exc:
+        print(f"vídeo de prueba no abrió: {exc!r}", file=sys.stderr, flush=True)
+        return
+
+    GLib.idle_add(area.live_open, "prueba", 1, extradata, width, height)
+
+    period = 1.0 / rate if rate > 0 else 1.0 / 15.0
+    next_at = time.monotonic()
+    sent = 0
+    try:
+        for packet in container.demux(stream):
+            data = bytes(packet)
+            if not data:
+                # The flush packet demux() yields at end of stream.
+                continue
+            area.live_frame(1, data)
+            sent += 1
+            next_at += period
+            delay = next_at - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+    finally:
+        container.close()
+    print(f"vídeo de prueba: {sent} paquetes enviados", file=sys.stderr, flush=True)
+    GLib.idle_add(area.live_end, 1, "asked")
 
 
 def _preload() -> None:

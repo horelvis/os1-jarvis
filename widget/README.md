@@ -65,6 +65,7 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_MIC_GATE=1` | Deafen the microphone while he speaks. Off by default since 2026-08-25: it is what made interrupting him impossible, because `detector.speaking` had to be true before a frame could reach the detector, and only his own voice through the room could open that latch. Set it on a box with no echo cancellation, or he answers himself. |
 | `SAMANTHA_WIDGET_DUMP` | Write every closed utterance to this directory as a WAV. When a transcription comes back as nonsense, nothing else tells you whether the audio was bad or the model was. |
 | `SAMANTHA_WIDGET_PHOTO` | Show these photos (comma-separated paths) two seconds after starting, exactly as if the gateway had pushed them. The counterpart of `SAMANTHA_WIDGET_SAY` for the half of him you can see: the band, the click and the fade without needing a live turn. |
+| `SAMANTHA_WIDGET_LIVE` | Feed the band this video file as if the gateway had pushed it. The counterpart of `SAMANTHA_WIDGET_PHOTO` for the half of him that moves — the decoder, the band and the input region, with no gateway and no camera. |
 
 ### The models it needs
 
