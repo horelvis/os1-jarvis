@@ -1,5 +1,44 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-25 — Y al encender: qué arranca solo y qué espera al login ✅
+
+Cola de la entrada de abajo. Aquellas tres causas quedaron arregladas en
+caliente; esto es lo que decide el **próximo** encendido, medido sobre el
+arranque de hoy (11:10).
+
+**Lo que pasó de verdad al encender:** el gestor de usuario levantó a las
+11:12:44 solo `samantha-hermes` y `samantha-hermes-serve`.
+`samantha-llamacpp` aún no estaba `enabled` —su enlace en
+`default.target.wants` es de las 12:02—, así que el cerebro arrancó sin
+modelo detrás. Y `graphical-session.target` no se activó hasta las
+**11:57:50**: 47 minutos de máquina encendida sin sesión gráfica.
+
+**Esa espera no es un fallo, es la forma del producto.** La tira es
+mueble de un escritorio (`PartOf=graphical-session.target`), y GDM no
+tiene autologin. Hasta que alguien inicia sesión no hay `DISPLAY=:1` en
+el que existir. Ofrecido activar el autologin y **descartado por el
+usuario**: cualquiera que encienda la máquina entraría al escritorio. Se
+queda así, y queda escrito para que no se re-diagnostique cada vez.
+
+**Lo que sí se arregló:** `samantha-llamacpp` tenía el limitador de
+arranques por defecto —5 en 10 s— con `RestartSec=5`. Hoy a las 12:00 se
+rindió tras **cuatro** intentos y quedó parado; el mismo patrón en un
+arranque en frío, con el driver de NVIDIA aún no listo, deja el gateway
+en pie y mudo. `StartLimitIntervalSec=0`: reintenta indefinidamente. El
+limitador es un guardia contra bucles de fallos instantáneos y este
+servicio falla un rato y luego funciona.
+
+**Verificado:** las cuatro unidades `enabled`, linger `yes`,
+`systemd-analyze --user verify` limpio, `default.target` arrastrando
+llamacpp + hermes + hermes-serve y `graphical-session.target` la tira;
+`StartLimitIntervalUSec=0` efectivo tras el `daemon-reload` y sin
+tocar el proceso vivo; `:8000`, `:7777` y `:8093` escuchando y el modelo
+contestando por `/v1/chat/completions`.
+
+**Changed files:** `systemd/samantha-llamacpp.service`
+(`StartLimitIntervalSec=0`, y el `--split-mode row` de la entrada de
+abajo, que se había quedado sin commitear).
+
 ## 2026-08-25 — Arranca el servidor y JARVIS no está: tres causas, ninguna de código ✅
 
 El síntoma era «el servidor se inicia y no vemos a Jarvis activo». Hermes

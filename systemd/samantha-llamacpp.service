@@ -19,6 +19,14 @@
 [Unit]
 Description=Samantha LLM runtime (llama-server, llama.cpp)
 After=network.target
+# No rate limit on restarts. The default (5 starts in 10 s) is a loop
+# guard written for services that fail instantly and forever; this one
+# fails for a while and then succeeds — a cold boot can reach it before
+# the NVIDIA driver is ready, and four retries at RestartSec=5 spend the
+# whole allowance in 20 s. Measured 2026-08-25: it gave up after four
+# attempts and stayed dead, so the gateway came up with no model behind
+# it and he answered nothing until somebody restarted it by hand.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
