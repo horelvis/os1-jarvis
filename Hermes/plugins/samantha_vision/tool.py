@@ -40,26 +40,6 @@ from .vision import describe
 # answered honestly, because he simply goes quiet.
 GRAB_TIMEOUT = 2.0
 
-# The confidence floor for a question, which is deliberately NOT the
-# floor for an alert. 0.7 is BarnDoor's, one of the four constants
-# arrived at against these very cameras, and it stays where it is on the
-# unprompted path: a false positive there interrupts somebody out loud.
-#
-# Asking is the other way round. The user is already looking at the
-# camera in their head; a false positive costs a sentence they can
-# argue with, and a false NEGATIVE costs their trust in his eyes.
-# Measured 2026-08-25, a person sitting in the entrance: YOLO returned
-# 0.62, 0.71 and 0.64 on three snapshots twenty-seven seconds apart, so
-# 0.7 fell inside the band and he said "vacía" twice out of three while
-# the watcher — sampling continuously, needing only one frame over the
-# line — kept announcing somebody was there. He contradicted himself
-# because the two paths were asking the same question at the same bar.
-#
-# 0.45 is not a new invention: it is the floor this plugin's own spec
-# guessed before BarnDoor's rules supplied 0.7 (CLAUDE.md §12,
-# 2026-08-23).
-ASKED_THRESHOLD = 0.45
-
 # How many frames one question is worth. Three, because the frames a
 # camera offers arrive at the watcher's sampling cadence — roughly one
 # every two thirds of a second — and a spoken answer that takes four
@@ -167,7 +147,7 @@ def make_handler(
         if detector is None:
             return []
         try:
-            return list(detector.detect(frame, threshold=ASKED_THRESHOLD))
+            return list(detector.detect(frame))
         except Exception as exc:
             logger.warning(f"samantha-vision: {camera} detect failed — {redact(exc)}")
             return []

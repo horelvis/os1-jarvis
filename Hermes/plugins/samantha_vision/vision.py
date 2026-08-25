@@ -101,19 +101,8 @@ class Detector:
         side = spec.shape[-1] if isinstance(spec.shape[-1], int) else _INPUT_SIZE
         self.input_size = int(side)
 
-    def detect(self, frame, *, threshold: float | None = None) -> list[Detection]:
-        """`frame` is an HxWx3 uint8 RGB array. Returns what it recognises.
-
-        `threshold` overrides this detector's floor for one call, because
-        the two paths that ask are not asking the same question. The
-        unprompted watcher wants a high bar: a false positive there
-        interrupts somebody out loud. A person who has ASKED wants a low
-        one: a false positive costs a wrong sentence they can argue with.
-        Measured 2026-08-25 against a seated person in the entrance —
-        three snapshots, one 0.71 and two at 0.62 and 0.64, so the 0.7
-        floor sat inside the band and `mirar` answered "vacía" twice out
-        of three while the watcher, sampling continuously, kept firing.
-        """
+    def detect(self, frame) -> list[Detection]:
+        """`frame` is an HxWx3 uint8 RGB array. Returns what it recognises."""
         np = self._np
         tensor = self._letterbox(frame)
         raw = self._session.run(None, {self._input_name: tensor})[0]
@@ -124,8 +113,7 @@ class Detector:
         best = scores.argmax(axis=1)
         confidence = scores[np.arange(len(scores)), best]
 
-        floor = self.threshold if threshold is None else threshold
-        keep = confidence >= floor
+        keep = confidence >= self.threshold
         out: list[Detection] = []
         for index in np.flatnonzero(keep):
             class_id = int(best[index])

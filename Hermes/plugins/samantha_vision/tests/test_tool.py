@@ -20,12 +20,8 @@ import numpy as np
 import pytest
 
 from Hermes.plugins.samantha_vision import snapshot
-from Hermes.plugins.samantha_vision.tool import (
-    ASKED_THRESHOLD,
-    VOTE_FRAMES,
-    make_handler,
-)
-from Hermes.plugins.samantha_vision.vision import DEFAULT_THRESHOLD, Detection
+from Hermes.plugins.samantha_vision.tool import VOTE_FRAMES, make_handler
+from Hermes.plugins.samantha_vision.vision import Detection
 
 
 class _Fleet:
@@ -71,18 +67,13 @@ class _ExplodingPush:
 class _Detector:
     def __init__(self, detections):
         self._detections = detections
-        # RECORDED, not swallowed: the asked path and the alert path use
-        # different confidence floors, and a fake that quietly accepted
-        # any keyword would hide the day they stopped differing.
-        self.thresholds: list[float | None] = []
 
-    def detect(self, frame, *, threshold: float | None = None):
-        self.thresholds.append(threshold)
+    def detect(self, frame):
         return list(self._detections)
 
 
 class _ExplodingDetector:
-    def detect(self, frame, *, threshold: float | None = None):
+    def detect(self, frame):
         raise RuntimeError("onnxruntime fell over")
 
 
@@ -301,25 +292,6 @@ def test_grab_does_not_block_the_event_loop():
     assert ticks > 5, ticks
 
 
-def test_asking_uses_a_lower_confidence_floor_than_the_alert():
-    """`mirar` must not ask the same bar as the unprompted watcher.
-
-    Measured 2026-08-25 against a person sitting in the entrance: YOLO
-    returned 0.62, 0.71 and 0.64 on three snapshots twenty-seven seconds
-    apart. With the alert's 0.7 floor on both paths he said "vacía" twice
-    out of three while the watcher, needing only one frame over the line,
-    kept announcing somebody was there — he contradicted himself.
-    """
-    detector = _Detector([])
-    fleet = _Fleet(_frame(), detector=detector)
-    handler = make_handler(fleet, ["entrada"], _Spy())
-
-    asyncio.run(handler({"camara": "entrada"}))
-
-    assert detector.thresholds == [ASKED_THRESHOLD] * VOTE_FRAMES
-    assert ASKED_THRESHOLD < DEFAULT_THRESHOLD
-
-
 class _SequenceFleet:
     """A camera whose successive frames disagree, as real ones do."""
 
@@ -336,7 +308,7 @@ class _SequenceFleet:
         # answerable: the value is the frame's number.
         return np.full((4, 4, 3), self._index, dtype=np.uint8)
 
-    def detect(self, frame, *, threshold: float | None = None):
+    def detect(self, frame):
         index = int(frame[0][0][0])
         return list(self._per_frame[index]) if index < len(self._per_frame) else []
 
