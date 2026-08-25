@@ -20,7 +20,11 @@ import numpy as np
 import pytest
 
 from Hermes.plugins.samantha_vision import snapshot
-from Hermes.plugins.samantha_vision.tool import ASKED_THRESHOLD, make_handler
+from Hermes.plugins.samantha_vision.tool import (
+    ASKED_THRESHOLD,
+    VOTE_FRAMES,
+    make_handler,
+)
 from Hermes.plugins.samantha_vision.vision import DEFAULT_THRESHOLD, Detection
 
 
@@ -312,5 +316,67 @@ def test_asking_uses_a_lower_confidence_floor_than_the_alert():
 
     asyncio.run(handler({"camara": "entrada"}))
 
-    assert detector.thresholds == [ASKED_THRESHOLD]
+    assert detector.thresholds == [ASKED_THRESHOLD] * VOTE_FRAMES
     assert ASKED_THRESHOLD < DEFAULT_THRESHOLD
+
+
+class _SequenceFleet:
+    """A camera whose successive frames disagree, as real ones do."""
+
+    def __init__(self, per_frame: list[list[Detection]]) -> None:
+        self._per_frame = per_frame
+        self.detector = self  # the handler reads fleet.detector
+        self._index = -1
+        self.grabbed: list[str] = []
+
+    def grab(self, camera: str, timeout: float = 2.0):
+        self.grabbed.append(camera)
+        self._index += 1
+        # A distinct frame each time, so "which frame was shown" is
+        # answerable: the value is the frame's number.
+        return np.full((4, 4, 3), self._index, dtype=np.uint8)
+
+    def detect(self, frame, *, threshold: float | None = None):
+        index = int(frame[0][0][0])
+        return list(self._per_frame[index]) if index < len(self._per_frame) else []
+
+
+def test_one_good_frame_out_of_three_is_enough():
+    """A person seen on only one frame is a person, not a coin flip.
+
+    Measured 2026-08-25: the same seated person came back at 0.62, 0.71
+    and 0.64 across twenty-seven seconds. Looking once answered "vacía"
+    two times out of three while the watcher, which samples all day, kept
+    announcing somebody was there.
+    """
+    fleet = _SequenceFleet(
+        [
+            [],
+            [Detection(label="persona", confidence=0.71, x=0.5, y=0.5)],
+            [],
+        ]
+    )
+    handler = make_handler(fleet, ["entrada"], _Spy())
+
+    answer = asyncio.run(handler({"camara": "entrada"}))
+
+    assert len(fleet.grabbed) == VOTE_FRAMES
+    assert "no hay nadie" not in answer
+
+
+def test_the_picture_shown_is_the_one_that_justified_the_answer():
+    """The strip must not contradict the sentence beside it."""
+    spy = _Spy()
+    fleet = _SequenceFleet(
+        [
+            [],
+            [Detection(label="persona", confidence=0.71, x=0.5, y=0.5)],
+            [],
+        ]
+    )
+    handler = make_handler(fleet, ["entrada"], spy)
+
+    asyncio.run(handler({"camara": "entrada"}))
+
+    # Frame 1 is the one with the person in it; frames 0 and 2 are empty.
+    assert spy.calls, "nothing was pushed to the strip"

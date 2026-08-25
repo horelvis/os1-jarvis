@@ -60,6 +60,20 @@ GRAB_TIMEOUT = 2.0
 # 2026-08-23).
 ASKED_THRESHOLD = 0.45
 
+# How many frames one question is worth. Three, because the frames a
+# camera offers arrive at the watcher's sampling cadence — roughly one
+# every two thirds of a second — and a spoken answer that takes four
+# seconds to begin is a worse answer. Three covers about two seconds of
+# real time, which is what the measurement above spans.
+VOTE_FRAMES = 3
+
+# The wait for the SECOND and later frames. The first still gets the
+# full GRAB_TIMEOUT, because failing it means the camera is not there
+# and he should say so. Once one frame has arrived the rest are due on
+# a known cadence, so a shorter wait ends the turn instead of stalling
+# it when a camera drops out mid-question.
+VOTE_TIMEOUT = 1.0
+
 # The tool as the model sees it. Spanish, because the model is answering
 # somebody who speaks Spanish and the camera names are Spanish nouns.
 NAME = "mirar"
@@ -176,12 +190,50 @@ def make_handler(
             # brain.
             logger.warning(f"samantha-vision: {camera} photo not shown — {redact(exc)}")
 
+    async def _vote(camera: str) -> tuple[Any, list]:
+        """Look several times, and keep the best of what came back.
+
+        One frame is a coin flip and the numbers say so. Measured
+        2026-08-25 on a person sitting in the entrance: the same camera,
+        twenty-seven seconds, 0.62 / 0.71 / 0.64 from yolov9-t and
+        0.75 / 0.63 / 0.77 from yolov9-s at 640. Neither model clears any
+        useful floor on every frame, and the bigger one is not even
+        uniformly better — it is worse on the frame the small one liked
+        most. What both DO get right is the maximum across frames.
+
+        This is also why the watcher never had this problem: it samples
+        all day and needs one frame over the line. `mirar` looked once.
+
+        The frame returned is the one that justified the answer, not
+        simply the first: the picture on the strip must not contradict
+        the sentence beside it.
+        """
+        best: dict[str, Any] = {}
+        shown = None
+        for index in range(VOTE_FRAMES):
+            timeout = GRAB_TIMEOUT if index == 0 else VOTE_TIMEOUT
+            try:
+                frame = await asyncio.to_thread(fleet.grab, camera, timeout)
+            except Exception as exc:
+                logger.warning(f"samantha-vision: {camera} grab failed — {redact(exc)}")
+                frame = None
+            if frame is None:
+                # The first one failing means the camera is not there.
+                # A later one failing means we already have something —
+                # answer with it rather than making him wait again.
+                break
+            if shown is None:
+                shown = frame
+            for found in _detections(frame, camera):
+                previous = best.get(found.label)
+                if previous is None or found.confidence > previous.confidence:
+                    best[found.label] = found
+                    if found.label == "persona":
+                        shown = frame
+        return shown, list(best.values())
+
     async def _look(camera: str) -> str:
-        try:
-            frame = await asyncio.to_thread(fleet.grab, camera, GRAB_TIMEOUT)
-        except Exception as exc:
-            logger.warning(f"samantha-vision: {camera} grab failed — {redact(exc)}")
-            frame = None
+        frame, detections = await _vote(camera)
         if frame is None:
             # NOT "La cámara de {camera} no responde." (the brief's
             # table), and Ruling 13 overrides that line alone. CLAUDE.md
@@ -209,7 +261,7 @@ def make_handler(
             # adds "señor" himself, every time.
             return f"En {camera} no alcanzo a ver ahora mismo."
         await _show(frame, camera)
-        phrase = describe(_detections(frame, camera))
+        phrase = describe(detections)
         if phrase:
             return f"En {camera} hay {phrase}."
         return f"En {camera} no hay nadie."

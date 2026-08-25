@@ -90,7 +90,16 @@ class Detector:
         options.inter_op_num_threads = 1
         options.intra_op_num_threads = 2
         self._session = ort.InferenceSession(str(path), sess_options=options)
-        self._input_name = self._session.get_inputs()[0].name
+        spec = self._session.get_inputs()[0]
+        self._input_name = spec.name
+        # Read the side from the model rather than trusting a constant.
+        # The exported shape is [1, 3, S, S]; swapping yolov9-t-320 for a
+        # 640 export used to mean editing this file, and a mismatch is
+        # not an error you get told about — onnxruntime would simply
+        # refuse the tensor, or worse, a square that happened to fit
+        # would silently detect nothing.
+        side = spec.shape[-1] if isinstance(spec.shape[-1], int) else _INPUT_SIZE
+        self.input_size = int(side)
 
     def detect(self, frame, *, threshold: float | None = None) -> list[Detection]:
         """`frame` is an HxWx3 uint8 RGB array. Returns what it recognises.
@@ -141,9 +150,10 @@ class Detector:
         YOLO copes with the distortion better than with the lost pixels.
         """
         np = self._np
+        size = self.input_size
         height, width = frame.shape[:2]
-        ys = (np.arange(_INPUT_SIZE) * height // _INPUT_SIZE).clip(0, height - 1)
-        xs = (np.arange(_INPUT_SIZE) * width // _INPUT_SIZE).clip(0, width - 1)
+        ys = (np.arange(size) * height // size).clip(0, height - 1)
+        xs = (np.arange(size) * width // size).clip(0, width - 1)
         resized = frame[ys][:, xs]
 
         tensor = resized.astype(np.float32) / 255.0
