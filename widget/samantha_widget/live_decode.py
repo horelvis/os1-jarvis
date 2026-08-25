@@ -123,10 +123,27 @@ class LiveDecoder:
         try:
             self._queue.put_nowait(None)
         except queue.Full:
+            # The sentinel didn't land, but that no longer strands the
+            # worker: `_run` polls `_stopping` on its own (see below).
             pass
         thread, self._thread = self._thread, None
         if thread is not None:
             thread.join(timeout=1.0)
+            if thread.is_alive():
+                # Still inside codec.decode(). Closing now would race
+                # close() against a live decode() on the same PyAV
+                # context from two threads — undefined behaviour in the
+                # underlying C library, and a crash risk for the whole
+                # widget process. Leaking the codec until the process
+                # ends is enormously cheaper than that.
+                logger.warning(
+                    "live: decoder thread still running after stop(); "
+                    "leaking the codec instead of closing it under it"
+                )
+                self._codec = None
+                with self._lock:
+                    self._latest = None
+                return
         codec, self._codec = self._codec, None
         if codec is not None:
             try:
@@ -138,7 +155,14 @@ class LiveDecoder:
 
     def _run(self) -> None:
         while not self._stopping.is_set():
-            packet = self._queue.get()
+            try:
+                # A short timeout, not a bare get(): a full queue means
+                # stop()'s put_nowait(None) can silently fail to land
+                # (see stop() above), and a thread parked in a blocking
+                # get() would then never notice `_stopping` at all.
+                packet = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
             if packet is None:
                 return
             try:
@@ -147,7 +171,7 @@ class LiveDecoder:
                 # A broken packet is not worth the view, but it is worth
                 # one line: this is the failure that otherwise looks like
                 # a black band nobody can explain.
-                logger.debug(f"live: packet not decoded — {exc}")
+                logger.warning(f"live: packet not decoded — {exc}")
                 continue
             for frame in frames:
                 with self._lock:
