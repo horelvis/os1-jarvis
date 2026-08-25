@@ -1,17 +1,33 @@
 """One live view: which camera, since when, and the one way out.
 
 The tap runs on the watcher thread and the pushes are coroutines living
-on the gateway's loop, so this class is the seam between the two. It
-holds no lock: the only field the two threads share is the epoch, and an
-int assignment is atomic under CPython. What the tap does when it decides
-a frame should go out is schedule a coroutine — it never awaits.
+on the gateway's loop, so this class is the seam between the two.
+
+It holds no lock, and more than the epoch crosses threads unlocked:
+`camera`, `_started`, `_keyframe_seen` and `_loop` are all written by
+`open()`/`close()` on the gateway thread and read by `_on_packet` on the
+watcher thread. That is tolerable not because the reads and writes
+cannot race, but because of what a stale read can do: every tap
+installed by `open()` is bound to the camera it was opened for (see
+`_bind_tap`), so a packet arriving from a camera that has stopped being
+"the" view is dropped by comparing that bound name against `self.camera`
+— before it can touch `self.epoch` or reach a push. The epoch stamps a
+push that already knows it is talking about the right camera; it does
+not decide that on its own. (An earlier version of this docstring
+claimed the epoch alone was enough. It was not — a packet already in
+flight when a view switched could be stamped with the NEW epoch and
+pushed as if it belonged to it. Binding the camera into the tap is what
+actually closes that.)
+
+What the tap does when it decides a frame should go out is schedule a
+coroutine — it never awaits.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Coroutine
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
@@ -25,9 +41,9 @@ from .cameras import redact
 # night.
 CEILING_SECONDS = 120.0
 
-PushOpen = Callable[[str, int, bytes, int, int], Awaitable[bool]]
-PushFrame = Callable[[int, bytes], Awaitable[bool]]
-PushClose = Callable[[int, str], Awaitable[bool]]
+PushOpen = Callable[[str, int, bytes, int, int], Coroutine[Any, Any, bool]]
+PushFrame = Callable[[int, bytes], Coroutine[Any, Any, bool]]
+PushClose = Callable[[int, str], Coroutine[Any, Any, bool]]
 
 
 class LiveSession:
@@ -89,7 +105,7 @@ class LiveSession:
         self._started = self._now()
         self._keyframe_seen = False
         self._loop = asyncio.get_running_loop()
-        self._fleet.set_tap(camera, self._on_packet)
+        self._fleet.set_tap(camera, self._bind_tap(camera))
         return True
 
     async def close(self, reason: str) -> bool:
@@ -106,9 +122,34 @@ class LiveSession:
 
     # -- the watcher thread --------------------------------------------
 
-    def _on_packet(self, packet: bytes, keyframe: bool) -> None:
-        """Called on the watcher thread, up to 25 times a second."""
-        if self.camera is None:
+    def _bind_tap(self, camera: str) -> Callable[[bytes, bool], None]:
+        """Close over the camera THIS tap was opened for.
+
+        `cameras.py` now resolves `self._taps` live, per packet, rather
+        than snapshotting it once when a stream opens — so `clear_tap`
+        and a fresh `set_tap` both take effect immediately, on a
+        connection already running. That closes the window where a
+        reconnect was the only thing that ever picked up a change. It
+        does not close the narrower one where a packet from the OLD
+        camera is already inside `_watch`'s demux loop, past the point
+        where it reads `self._taps`, when `close()`/`open()` switch the
+        view — the comparison in `_on_packet` is what catches that one.
+        """
+
+        def _tap(packet: bytes, keyframe: bool) -> None:
+            self._on_packet(camera, packet, keyframe)
+
+        return _tap
+
+    def _on_packet(self, camera: str, packet: bytes, keyframe: bool) -> None:
+        """Called on the watcher thread, up to 25 times a second.
+
+        `camera` is the one this tap was bound to at `open()` time, not
+        whatever `self.camera` happens to hold when this runs — a packet
+        from a view that has already been switched away from is dropped
+        here, before it can touch the epoch or reach a push.
+        """
+        if camera != self.camera:
             return
 
         if self._now() - self._started > self._ceiling:

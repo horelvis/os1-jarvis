@@ -197,6 +197,40 @@ def test_a_failed_open_leaves_no_session_behind():
     assert fleet.taps == {}
 
 
+def test_a_stale_camera_packet_is_dropped_after_a_switch():
+    """A tap is bound to the camera it was opened for — checked in
+    `_on_packet`, not read from `self.camera` at call time.
+
+    This is defence in depth on top of the `cameras.py` fix (Task 4 fix
+    round 1) that makes `set_tap`/`clear_tap` reach an already-running
+    stream immediately: even with that fixed, a packet from the OLD
+    camera can already be past the point in `_watch`'s demux loop where
+    it reads `self._taps`, so it can still call this tap after the
+    switch. Before the fix, `_on_packet` only checked `self.camera is
+    None` — nothing tied a packet to the camera it actually came from —
+    so a stale "entrada" packet arriving after switching to "fuera"
+    would be stamped with "fuera"'s epoch and pushed as if it belonged
+    to it.
+    """
+
+    async def scenario():
+        session, fleet, pushes = _session()
+        await session.open("entrada", extradata=b"", size=(704, 480))
+        stale_tap = fleet.taps["entrada"]
+
+        await session.open("fuera", extradata=b"", size=(704, 480))
+
+        # Simulate a packet from "entrada" that was already in flight
+        # when the switch happened, arriving on the OLD tap after
+        # "fuera" is current.
+        stale_tap(b"leftover-from-entrada", True)
+        await _drain()
+
+        assert pushes.frames == []
+
+    asyncio.run(scenario())
+
+
 def test_a_raising_open_is_swallowed_not_propagated():
     """`open()` never raises at its caller — a view is never worth a turn.
 

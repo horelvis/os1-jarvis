@@ -155,6 +155,32 @@ class FakeStream:
         self.closed = True
 
 
+class ForeverStream(FakeStream):
+    """Like `FakeStream`, but `frames()` never ends on its own.
+
+    Needed specifically for the tests proving `set_tap`/`clear_tap`
+    reach an ALREADY-RUNNING stream: `FakeStream.frames()` is finite,
+    so `_watch` reopens it on every iteration, and a fix that only
+    refreshes the tap on reconnect would still pass those tests by
+    coincidence — the finite fake cannot tell "read live" apart from
+    "read fresh every time it happens to reconnect". This one keeps a
+    single `frames()` call running (yielding the same frames on a
+    short loop) until `stop()` sets `_stopping`, so a test built on it
+    can prove something changed WITHOUT a reconnect ever happening —
+    `streams` staying at length 1 is that proof.
+    """
+
+    def __init__(self, frames: list, stopping: threading.Event) -> None:
+        super().__init__(frames)
+        self._stopping = stopping
+
+    def frames(self, every: int = 10, tap=None):
+        self.tap = tap
+        while not self._stopping.is_set():
+            yield from self._frames
+            time.sleep(0.005)
+
+
 def dead(message: str = "connection refused"):
     """A camera that is off: constructed fine, fails on the first read."""
     return lambda url: FakeStream([], raises=OSError(message))
@@ -870,6 +896,23 @@ def test_a_preempted_waiter_gets_none_not_the_next_callers_frame():
 # `camera.url` instead of `camera.name`, or the `.get()` dropped so every
 # camera shares one tap — fails a test instead of passing every one of
 # them silently.
+#
+# `_watch` now hands `frames()` a live INDIRECTION (`_live_tap`) rather
+# than a value read once from `self._taps` — so `streams[-1].tap` is
+# never `None` and never the raw callable passed to `set_tap` any more;
+# it is always that indirection. Checking identity against it (`is
+# my_tap`, `is None`) stopped meaning anything the moment the fix
+# landed, so these tests now CALL what they capture and look at where
+# the packet arrived, exactly like `test_live.py`'s own tests treat a
+# tap as something invocable rather than something to compare.
+#
+# The three tests below still use the plain, finite `FakeStream`, which
+# means `_watch` keeps reconnecting throughout them — enough to prove
+# the wiring is correct (right camera, right tap, cleared means
+# cleared), but NOT enough to rule out a fix that only refreshes the
+# tap on reconnect, which is exactly the bug this file used to hide
+# (see the finding that follows). `ForeverStream`, below, is what rules
+# that out.
 
 
 def test_set_tap_reaches_the_watcher():
@@ -887,13 +930,12 @@ def test_set_tap_reaches_the_watcher():
     try:
         assert _wait(lambda: bool(streams))
 
-        my_tap = lambda data, key: None
-        fleet.set_tap("entrada", my_tap)
+        received: list[tuple[bytes, bool]] = []
+        fleet.set_tap("entrada", lambda data, key: received.append((data, key)))
 
-        # `_watch` re-opens the stream on every iteration (frames() is a
-        # finite generator here), so the NEXT stream it opens is where the
-        # tap must show up.
-        assert _wait(lambda: streams[-1].tap is my_tap)
+        assert _wait(lambda: bool(streams) and streams[-1].tap is not None)
+        streams[-1].tap(b"packet", True)
+        assert received == [(b"packet", True)]
     finally:
         fleet.stop()
 
@@ -918,20 +960,25 @@ def test_set_tap_is_keyed_by_camera_name_not_shared():
     try:
         assert _wait(lambda: streams["fuera"] and streams["entrada"])
 
-        my_tap = lambda data, key: None
-        fleet.set_tap("entrada", my_tap)
+        received: list[tuple[bytes, bool]] = []
+        fleet.set_tap("entrada", lambda data, key: received.append((data, key)))
+        assert _wait(lambda: streams["entrada"][-1].tap is not None)
+        streams["entrada"][-1].tap(b"packet", True)
+        assert received == [(b"packet", True)]
 
-        assert _wait(lambda: streams["entrada"][-1].tap is my_tap)
-        # "fuera" was never given a tap: its most recent stream must never
-        # see one, no matter how many times it reopens meanwhile.
-        assert _wait(lambda: streams["fuera"][-1].tap is not None, timeout=0.3) is False
+        # "fuera" was never given a tap: its indirection must resolve to
+        # nothing, no matter how many times it reopens meanwhile.
+        assert _wait(lambda: streams["fuera"][-1].tap is not None)
+        streams["fuera"][-1].tap(b"packet", True)
+        assert received == [(b"packet", True)]  # unchanged
     finally:
         fleet.stop()
 
 
 def test_clear_tap_stops_it():
-    """After `clear_tap`, the next stream the watcher opens gets no tap —
-    a leftover tap would keep feeding a live view that asked to close."""
+    """After `clear_tap`, the indirection resolves to nothing — the next
+    stream the watcher opens gets no tap either, so a leftover tap never
+    keeps feeding a live view that asked to close."""
     streams: list[FakeStream] = []
 
     def open_stream(url):
@@ -942,16 +989,90 @@ def test_clear_tap_stops_it():
     fleet = _fleet(open_stream=open_stream)
     fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
     try:
-        my_tap = lambda data, key: None
-        fleet.set_tap("entrada", my_tap)
-        assert _wait(lambda: bool(streams) and streams[-1].tap is my_tap)
+        received: list[tuple[bytes, bool]] = []
+        fleet.set_tap("entrada", lambda data, key: received.append((data, key)))
+        assert _wait(lambda: bool(streams) and streams[-1].tap is not None)
+        streams[-1].tap(b"one", True)
+        assert received == [(b"one", True)]
 
         fleet.clear_tap("entrada")
         assert "entrada" not in fleet._taps
 
-        # `_watch` re-opens the stream on every iteration, and once cleared
-        # nothing sets `_taps["entrada"]` again — so the poll settles on
-        # `None` and stays there.
-        assert _wait(lambda: streams[-1].tap is None)
+        assert _wait(lambda: bool(streams) and streams[-1].tap is not None)
+        streams[-1].tap(b"two", False)
+        assert received == [(b"one", True)]  # nothing new arrived
+    finally:
+        fleet.stop()
+
+
+# ── the tap, on a stream that never reconnects ──────────────────────────
+#
+# The three tests above use the finite `FakeStream`, so `_watch` keeps
+# reopening the stream throughout them — which means a fix that only
+# refreshed the captured tap ON RECONNECT would still pass every one of
+# them. That is exactly how the ORIGINAL bug hid: `_watch` read
+# `self._taps.get(camera.name)` once per `stream.frames()` call, which
+# in this house happens once every several hours, not once per packet —
+# `set_tap`/`clear_tap` on the stream already running did nothing at
+# all until the next reconnect. `ForeverStream` keeps ONE connection
+# running for the life of the test, so these two prove the tap is read
+# live WITHIN a connection, not merely refreshed BETWEEN them.
+
+
+def test_set_tap_reaches_an_already_running_stream():
+    """`set_tap`, called after the stream is already open and iterating,
+    must reach it without a reconnect."""
+    streams: list[ForeverStream] = []
+
+    def open_stream(url):
+        stream = ForeverStream([[PERSON]], fleet._stopping)
+        streams.append(stream)
+        return stream
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert _wait(lambda: bool(streams) and streams[-1].tap is not None)
+        wrapper = streams[-1].tap  # captured BEFORE set_tap is ever called
+
+        received: list[tuple[bytes, bool]] = []
+        fleet.set_tap("entrada", lambda data, key: received.append((data, key)))
+        wrapper(b"packet", True)
+
+        assert received == [(b"packet", True)]
+        # And it never had to reconnect to pick that up.
+        assert len(streams) == 1
+    finally:
+        fleet.stop()
+
+
+def test_clear_tap_stops_an_already_running_stream():
+    """`clear_tap`, likewise, must silence a stream already running — a
+    leftover tap on a connection that never reconnects would otherwise
+    keep feeding a view that asked to close for as long as the camera
+    stays up, which can be hours."""
+    streams: list[ForeverStream] = []
+
+    def open_stream(url):
+        stream = ForeverStream([[PERSON]], fleet._stopping)
+        streams.append(stream)
+        return stream
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert _wait(lambda: bool(streams) and streams[-1].tap is not None)
+        wrapper = streams[-1].tap
+
+        received: list[tuple[bytes, bool]] = []
+        fleet.set_tap("entrada", lambda data, key: received.append((data, key)))
+        wrapper(b"one", True)
+        assert received == [(b"one", True)]
+
+        fleet.clear_tap("entrada")
+        wrapper(b"two", False)
+
+        assert received == [(b"one", True)]  # nothing new arrived
+        assert len(streams) == 1
     finally:
         fleet.stop()
