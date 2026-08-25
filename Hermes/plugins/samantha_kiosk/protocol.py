@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any
+from typing import Any, Dict
 
 _CLIENT_TYPES = {"chat", "listen"}
 
@@ -31,7 +31,7 @@ class ProtocolError(ValueError):
     """Raised for anything the kiosk should not have sent."""
 
 
-def decode_client(raw: str) -> dict[str, Any]:
+def decode_client(raw: str) -> Dict[str, Any]:
     """Parse and validate one client message. Raises ProtocolError."""
     try:
         msg = json.loads(raw)
