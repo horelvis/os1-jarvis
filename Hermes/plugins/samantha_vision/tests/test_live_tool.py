@@ -87,7 +87,7 @@ def test_a_strip_that_did_not_take_it_is_said_honestly():
 
     said = asyncio.run(handler(camara="entrada"))
 
-    assert "entrada" in said.lower() or said
+    assert said == "Ahora mismo no puedo enseñárselo, señor."
     assert "socket" not in said.lower()
     assert "sesión" not in said.lower()
 
@@ -98,7 +98,7 @@ def test_closing_when_nothing_is_up_is_still_a_sentence():
 
     said = asyncio.run(handler())
 
-    assert isinstance(said, str) and said.strip()
+    assert said == "Estado: no había nada puesto."
 
 
 def test_no_answer_ever_names_the_machinery():
