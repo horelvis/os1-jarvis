@@ -497,10 +497,13 @@ there is no Web Speech API.
   Always run with `PYTHONNOUSERSITE=1`; `pip list --local` is the only
   honest view of what the venv holds.
 
-**Status:** never verified against a human voice — this box has no
-microphone plugged in. `SAMANTHA_WIDGET_FAKE_MIC` pushes synthesised
-speech through the real path, which is how everything downstream of the
-microphone was proved.
+**Status (2026-08-25):** verified against a human voice. A USB
+microphone (`UACDemoV1.0`, `hw:2,0`) arrived; PipeWire's `default`
+source routes to it, measured at RMS 0.0066 / peak 0.075 against the
+0.0000 exactly — digital silence — that the onboard input used to give.
+Five turns spoken and answered, transcriptions clean.
+`SAMANTHA_WIDGET_FAKE_MIC` remains how the path is exercised with
+nobody in the room.
 
 > **The v3 decision, superseded, kept for the history.** Microphone
 > capture and speech recognition happened in the **browser** via the Web
@@ -645,10 +648,13 @@ currently off; the persona; reminders that reach him unprompted;
 the LLM local on this box at 57 tok/s.
 
 **Not working / not done:**
-- **He has never heard a human voice.** No microphone is plugged into
-  this box. Everything downstream of it is proved via
-  `SAMANTHA_WIDGET_FAKE_MIC`. This is the last task of widget plan 2 and
-  it needs hardware, not code.
+- ~~**He has never heard a human voice.**~~ **He has, since 2026-08-25.**
+  A USB microphone (`UACDemoV1.0`, `hw:2,0`) is plugged in, PipeWire's
+  `default` source routes to it, and the local override that kept the
+  microphone shut — `samantha-widget.service.d/no-mic.conf` — is gone.
+  Five spoken turns, transcribed clean, answered out loud. That was the
+  last task of widget plan 2 and it is done. `SAMANTHA_WIDGET_FAKE_MIC`
+  stays: it is still how the path is exercised without a human present.
 - **He can be asked to look — and that is the whole of what "asking"
   means.** Since 2026-08-25 the `mirar` tool answers "enséñame la
   entrada" with a sentence, and the photo appears above the strip for
