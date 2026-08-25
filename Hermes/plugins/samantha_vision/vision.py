@@ -20,6 +20,7 @@ since the cameras are not on this machine.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -223,21 +224,51 @@ class CameraStream:
             self._container.close()
             self._container = None
 
-    def frames(self, every: int = 10):
+    def frames(self, every: int = 10, tap: Callable[[bytes, bool], None] | None = None):
         """Yield HxWx3 RGB arrays, one every `every` decoded frames.
 
         Cameras deliver 15-30 fps and nothing in a house changes that
         fast. Sampling keeps the GPU free for Whisper and CosyVoice,
         which are on the critical path of a conversation; a camera is not.
+
+        `tap`, when given, is handed every packet's raw bytes and whether
+        it is a keyframe, BEFORE it is decoded. This is a demux loop
+        rather than `decode(video=0)` for exactly that reason: the packet
+        has to be in our hands while it is still compressed, or a live
+        view would have to re-encode what this method just decoded.
+        Sampling is unchanged — it counts decoded frames, not packets —
+        so YOLO's load is exactly what it was.
         """
         if self._container is None:
             self.open()
         assert self._container is not None
 
-        for index, frame in enumerate(self._container.decode(video=0)):
-            if index % every:
-                continue
-            yield frame.to_ndarray(format="rgb24")
+        index = 0
+        for packet in self._container.demux(video=0):
+            if tap is not None:
+                try:
+                    tap(bytes(packet), bool(packet.is_keyframe))
+                except Exception:
+                    # A live view is never worth a camera. Whoever is
+                    # watching loses a frame; the watcher keeps watching.
+                    pass
+            for frame in packet.decode():
+                if index % every == 0:
+                    yield frame.to_ndarray(format="rgb24")
+                index += 1
+
+    def codec_parameters(self) -> tuple[bytes, int, int]:
+        """SPS/PPS, width and height. Empty extradata is legal (spec §4.1)."""
+        if self._container is None:
+            self.open()
+        assert self._container is not None
+        stream = self._container.streams.video[0]
+        extradata = stream.codec_context.extradata or b""
+        return (
+            bytes(extradata),
+            int(stream.codec_context.width),
+            int(stream.codec_context.height),
+        )
 
 
 # ── deciding whether it is worth saying ───────────────────────────────

@@ -135,7 +135,11 @@ class FakeStream:
         self._raises = raises
         self.closed = False
 
-    def frames(self, every: int = 10):
+    def frames(self, every: int = 10, tap=None):
+        # `tap` is accepted, not exercised: this fake predates the tap
+        # (Task 3) and none of these tests feed compressed packets. It
+        # only has to match the real `CameraStream.frames()` signature
+        # closely enough that `_watch`'s call does not blow up.
         if self._raises is not None:
             raise self._raises
         yield from self._frames

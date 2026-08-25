@@ -8,10 +8,12 @@ what comes out when she does.
 
 import itertools
 
+import numpy as np
 import pytest
 
 from Hermes.plugins.samantha_vision.vision import (
     WATCHED_CLASSES,
+    CameraStream,
     Detection,
     Watcher,
     _deduplicate,
@@ -445,3 +447,72 @@ def test_the_night_does_not_carry_the_days_escalation_into_the_morning() -> None
 
     assert first is not None
     assert first <= ANTI_SPAM_SECONDS, first  # ~150 s, not ~3600
+
+
+# ── the tap: packets in our hands before they are decoded ─────────────
+
+
+class _Packet:
+    """A PyAV packet as far as the tap is concerned."""
+
+    def __init__(self, data: bytes, *, keyframe: bool, frames: list) -> None:
+        self._data = data
+        self.is_keyframe = keyframe
+        self._frames = frames
+
+    def __bytes__(self) -> bytes:
+        return self._data
+
+    def decode(self):
+        return self._frames
+
+
+class _Frame:
+    def to_ndarray(self, format: str):
+        assert format == "rgb24"
+        return np.zeros((4, 4, 3), dtype=np.uint8)
+
+
+class _Container:
+    def __init__(self, packets):
+        self._packets = packets
+
+    def demux(self, video=0):
+        return iter(self._packets)
+
+    def close(self):
+        pass
+
+
+def test_the_tap_sees_every_packet_and_its_keyframe_flag():
+    seen = []
+    stream = CameraStream("rtsp://fake")
+    stream._container = _Container(
+        [
+            _Packet(b"aaa", keyframe=True, frames=[_Frame()]),
+            _Packet(b"bbb", keyframe=False, frames=[_Frame()]),
+        ]
+    )
+
+    list(stream.frames(every=1, tap=lambda data, key: seen.append((data, key))))
+
+    assert seen == [(b"aaa", True), (b"bbb", False)]
+
+
+def test_sampling_still_applies_to_the_frames_yielded():
+    # The tap is per PACKET; the sampling is per decoded FRAME. Changing
+    # one must not change the other: YOLO's load is calibrated on it.
+    stream = CameraStream("rtsp://fake")
+    stream._container = _Container(
+        [_Packet(b"x", keyframe=True, frames=[_Frame()]) for _ in range(10)]
+    )
+
+    yielded = list(stream.frames(every=10, tap=None))
+
+    assert len(yielded) == 1
+
+
+def test_no_tap_costs_nothing_and_still_decodes():
+    stream = CameraStream("rtsp://fake")
+    stream._container = _Container([_Packet(b"x", keyframe=True, frames=[_Frame()])])
+    assert len(list(stream.frames(every=1))) == 1

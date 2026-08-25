@@ -230,6 +230,12 @@ class CameraFleet:
         self._wanted: dict[str, threading.Event] = {}
         self._grab_lock = threading.Lock()
 
+        # One tap per camera, or none. Read by the watcher thread on every
+        # packet and written by the gateway thread when a view opens, so
+        # it is a plain dict lookup and nothing more: a lock here would be
+        # taken 25 times a second for a value that changes twice a day.
+        self._taps: dict[str, Any] = {}
+
     def start(
         self,
         cameras: list[Camera],
@@ -283,6 +289,14 @@ class CameraFleet:
             thread.join(timeout=timeout)
             if thread.is_alive():
                 logger.debug(f"samantha-vision: {thread.name} still in a read, left")
+
+    def set_tap(self, camera: str, tap) -> None:
+        """Send this camera's packets to `tap` as well as to YOLO."""
+        self._taps[camera] = tap
+
+    def clear_tap(self, camera: str) -> None:
+        """Stop sending packets. Safe to call when there is no tap."""
+        self._taps.pop(camera, None)
 
     # -- handing a frame to someone asking right now ------------------------
 
@@ -373,7 +387,9 @@ class CameraFleet:
             frames_seen = 0
             try:
                 stream = self._open_stream(camera.url)
-                for frame in stream.frames(self._sample_every):
+                for frame in stream.frames(
+                    self._sample_every, tap=self._taps.get(camera.name)
+                ):
                     if self._stopping.is_set():
                         break
                     frames_seen += 1
