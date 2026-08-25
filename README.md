@@ -15,7 +15,7 @@ is the short version.
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  widget  (one Python process, GTK4 main loop)            │
-│    the strip · Silero · Whisper · YOLO · playback        │
+│    the strip · Silero · Whisper · playback               │
 │    speaks CosyVoice directly; never waits for audio      │
 └───────────────┬─────────────────────────┬────────────────┘
       ws://127.0.0.1:7777/ws     http://127.0.0.1:8093
@@ -24,6 +24,7 @@ is the short version.
 │  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
 │   + samantha_kiosk (surface) │  └────────────────────────┘
 │   + samantha_voice (TTS)     │
+│   + samantha_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
 └───────────────┬──────────────┘       (Qwen3.8-27B, local)
                 └──────────────────────────────┘
@@ -38,8 +39,11 @@ is the short version.
 - **Ears:** Silero v5 VAD on the CPU decides when somebody is talking;
   faster-whisper `large-v3-turbo` transcribes on the GPU.
 - **Voice:** CosyVoice 3 zero-shot, cloned, on `:8093`.
-- **Eyes:** YOLOv9 over the house's RTSP cameras. A detection never
-  becomes a recited report — it becomes a turn, in his words.
+- **Eyes:** YOLOv9 over the house's RTSP cameras, inside the gateway as
+  the `samantha_vision` plugin. A detection never becomes a recited
+  report — it becomes a turn, in his words. He can also be **asked** to
+  look, and then the photo appears above the strip for a few seconds and
+  reaches nothing else.
 - **Hardware:** one box, one RTX 4090. VRAM is the budget everything
   competes for: CosyVoice ~5.5 GB, Whisper ~2.5 GB, and what is left
   decides the quantisation of the model.
@@ -64,8 +68,9 @@ DISPLAY=:1 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD/../backend:$PWD/.. \
 `--system-site-packages` is required (PyGObject and the GTK4 typelib are
 system packages) and it makes the venv a minefield in two specific ways.
 `widget/README.md` maps them, along with every environment switch, the
-models to download, and how to point him at a camera. Read it before the
-first run rather than after.
+models to download, and the photo band. Read it before the first run
+rather than after. The cameras are configured in the plugin, not here:
+`Hermes/plugins/samantha_vision/README.md`.
 
 The gateway and CosyVoice have to be up for him to answer or speak;
 `systemd/` holds the user units.
@@ -92,7 +97,9 @@ See [PROGRESS.md](PROGRESS.md) for what each day cost and what it found.
 - **[CLAUDE.md](CLAUDE.md)** — the specification, and the decision log
   that explains why anything is the way it is. Read first.
 - **[widget/README.md](widget/README.md)** — running the strip: the venv,
-  the models, the cameras, the environment switches.
+  the models, the photo band, the environment switches.
+- **[Hermes/plugins/samantha_vision/README.md](Hermes/plugins/samantha_vision/README.md)**
+  — the cameras: configuring them, the quiet rules, and `mirar`.
 - **[docs/personality.md](docs/personality.md)** — his voice, his style
   and what he never does. Required before writing any user-facing string.
 - **[PROGRESS.md](PROGRESS.md)** — the log, newest first.
@@ -104,7 +111,7 @@ See [PROGRESS.md](PROGRESS.md) for what each day cost and what it found.
 os1-samantha/
 ├── CLAUDE.md           ← the spec (read first)
 ├── PROGRESS.md         ← the log
-├── widget/             ← the strip: GTK4, VAD, STT, TTS, vision
+├── widget/             ← the strip: GTK4, VAD, STT, TTS, the photo band
 ├── Hermes/             ← the pinned gateway, its config and his persona
 ├── tts-server/         ← CosyVoice 3, in Docker
 ├── systemd/            ← user units for gateway, widget, llama-server

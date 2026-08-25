@@ -5,8 +5,8 @@ label: Samantha (vision)
 kind: standalone
 version: 1.0.0
 description: >
-  Owns the house cameras. Watches them, and says something when one of
-  them sees something worth saying.
+  Owns the house cameras. Watches them and says something when one of
+  them sees something worth saying, and answers when he is asked to look.
 author: Horelvis Castillo
 
 # ─────────────────────────────────────────────────────────────────────
@@ -31,6 +31,17 @@ author: Horelvis Castillo
 #    so nothing else here notices: it looks exactly like a camera with an
 #    empty driveway in front of it. One WARNING, then DEBUG per retry,
 #    same discipline as #2.
+#
+# 5. THE SNAPSHOT DIRECTORY STOPS BEING PRUNED. Every `mirar` writes a
+#    JPEG into $HERMES_HOME/cache/images/vision/ (the directory 0700, the
+#    files 0600), and pruning runs on that same write: the newest 20 are
+#    kept, nothing older than an hour survives. What is in there is
+#    pictures of the inside and the outside of this house, so a directory
+#    that stops being pruned is a privacy leak as much as a disk leak.
+#    Nothing announces its size, and nothing announces its age. A prune
+#    that cannot list or unlink logs one WARNING per file and the picture
+#    the user asked for still appears, so the visible behaviour of a
+#    directory growing without limit is: everything working.
 #
 # #2 and #4 keep SEPARATE once-per-camera flags. A camera that stays in
 # one state costs exactly one WARNING; a camera flipping between the two

@@ -994,13 +994,15 @@ WebSocket those two processes already share. No adapter other than the
 kiosk ever sees it.
 
 **`MEDIA:` was the first design, and it fitted.** A tool result
-containing `MEDIA:/path.jpg` is turned into a native attachment by the
-**base** platform adapter — `extract_media()` in
-`gateway/platforms/base.py`, described there as the single source of
-truth for every extractor that turns response text into attachments, with
-`stream_consumer.py` stripping the tag before the text is shown. It is
-machinery every adapter inherits. One mechanism, both surfaces, nothing
-to write.
+containing `MEDIA:/path.jpg` is turned into a native attachment by
+`extract_media()` on the **base** platform adapter
+(`.hermes/src/gateway/platforms/base.py`), which the delivery path calls
+generically on whatever adapter the turn landed on —
+`adapter.extract_media(response)` at `.hermes/src/gateway/run.py:3505`,
+`:22214` and `:22552` — with
+`.hermes/src/gateway/stream_consumer.py` stripping the tag before the
+text is shown. It is machinery every adapter inherits. One mechanism,
+both surfaces, nothing to write.
 
 **It was rejected because it is a *platform* convention, and that is the
 whole of its purpose:** any adapter can render it. A tool that emits one
