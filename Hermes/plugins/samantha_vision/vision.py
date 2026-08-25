@@ -278,10 +278,23 @@ class CameraStream:
                 index += 1
 
     def codec_parameters(self) -> tuple[bytes, int, int]:
-        """SPS/PPS, width and height. Empty extradata is legal (spec §4.1)."""
+        """SPS/PPS, width and height, from a stream that is ALREADY open.
+
+        It never opens one. `open()` is a blocking network call and this
+        is reached from the gateway's event loop, so opening here would
+        freeze every platform for up to the RTSP timeout. A caller that
+        finds no container has asked about a camera that is not
+        streaming yet; the tool above turns that into a sentence, which
+        is the honest answer.
+
+        Empty extradata is legal (spec §4.1) and is not this method's
+        concern to open a connection over.
+        """
         if self._container is None:
-            self.open()
-        assert self._container is not None
+            # No URL in the message: it is a credential, and `redact()`
+            # is a safety net for the log line, not a reason to hand it
+            # one in the first place.
+            raise RuntimeError("stream not open yet")
         stream = self._container.streams.video[0]
         extradata = stream.codec_context.extradata or b""
         return (

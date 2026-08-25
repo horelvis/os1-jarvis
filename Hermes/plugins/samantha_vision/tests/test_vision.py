@@ -603,3 +603,24 @@ def test_codec_parameters_when_extradata_is_empty_bytes():
     stream._container = _CodecContainer(b"", 704, 480)
 
     assert stream.codec_parameters() == (b"", 704, 480)
+
+
+# ── codec_parameters: never opens a connection ──────────────────────────
+#
+# `ver_en_vivo`'s handler is async and calls `fleet.codec_parameters(...)`
+# directly from the gateway's event loop. `open()` is `av.open(...)`, a
+# blocking RTSP call that can take up to the 5 s timeout — reachable here
+# would freeze every platform, every turn, for that long. A container
+# that is not open yet means the camera is not streaming: the honest
+# answer is to say so, not to go make it true.
+
+
+def test_codec_parameters_does_not_open_a_connection_when_none_is_open():
+    stream = CameraStream("rtsp://fake")
+    opened: list[bool] = []
+    stream.open = lambda: opened.append(True)  # would prove it, if called
+
+    with pytest.raises(RuntimeError):
+        stream.codec_parameters()
+
+    assert not opened, "codec_parameters() must not open a connection"
