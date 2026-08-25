@@ -539,6 +539,12 @@ def _feed_live_file(path: str, area: PhotoArea) -> None:
             delay = next_at - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
+    except Exception as exc:
+        # A mid-stream failure here must still reach live_end — the real
+        # camera tap can drop out mid-view too, and the alternative is
+        # the band stuck open at 900x480 on a frozen frame with no way
+        # to tell it apart from a genuinely live one.
+        print(f"vídeo de prueba falló a mitad: {exc!r}", file=sys.stderr, flush=True)
     finally:
         container.close()
     print(f"vídeo de prueba: {sent} paquetes enviados", file=sys.stderr, flush=True)

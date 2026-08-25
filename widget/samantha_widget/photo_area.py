@@ -35,6 +35,15 @@ from .photo import PhotoModel, hits, tile_rects  # noqa: E402
 # relied on to receive anyway.
 _TICK_MS = 250
 
+# How often a live view is drained, while one is up. The decoder
+# produces at most 25 frames a second (live_decode.py); this samples
+# faster than that so the band keeps up with whatever it just decoded
+# instead of picking up one frame in six, which is what the 250 ms fade
+# tick above did the first time this was wired in and looked like a
+# slideshow rather than video. Armed only while a view is open — see
+# live_open/live_end — so an idle strip pays nothing for it.
+_LIVE_TICK_MS = 40
+
 
 class PhotoArea(Gtk.Widget):
     """The band above the wave. Zero pixels tall until there is something in it."""
@@ -48,6 +57,9 @@ class PhotoArea(Gtk.Widget):
         # whatever the decoder thread last produced. None until the
         # first frame of a view arrives.
         self._live_texture: Gdk.Texture | None = None
+        # The id of the timer draining the decoder, while one is armed.
+        # None means no live view is up — see live_open/live_end.
+        self._live_tick_id: int | None = None
         self._on_resize = on_resize
         # path → texture, or None for a file that could not be loaded.
         # Cached both ways: retrying a missing file every frame would
@@ -94,6 +106,11 @@ class PhotoArea(Gtk.Widget):
         self._live_texture = None
         self.live.open(camera, epoch, time.monotonic())
         self._decoder.start(extradata)
+        if self._live_tick_id is None:
+            # Armed once, kept running across a same-view reopen (a new
+            # epoch on top of one already up does not pass through here
+            # twice armed).
+            self._live_tick_id = GLib.timeout_add(_LIVE_TICK_MS, self._on_live_tick)
         self._apply()
 
     def live_frame(self, epoch: int, packet: bytes) -> None:
@@ -115,6 +132,9 @@ class PhotoArea(Gtk.Widget):
             return
         self._decoder.stop()
         self._live_texture = None
+        if self._live_tick_id is not None:
+            GLib.source_remove(self._live_tick_id)
+            self._live_tick_id = None
         self._apply()
 
     def live_rect(self) -> tuple[float, float, float, float] | None:
@@ -191,12 +211,22 @@ class PhotoArea(Gtk.Widget):
             print(
                 f"la banda falló al desvanecerse: {exc!r}", file=sys.stderr, flush=True
             )
+        return True  # GLib.SOURCE_CONTINUE
 
+    def _on_live_tick(self) -> bool:
+        """Drain the decoder's mailbox, while a live view is up.
+
+        Armed by `live_open` and disarmed by `live_end` — see
+        `_LIVE_TICK_MS` — so this never runs, and never costs anything,
+        while the band is at rest.
+        """
         frame = self._decoder.take()
-        if frame is not None:
+        if frame is None:
+            return True  # GLib.SOURCE_CONTINUE
+        try:
             # Built here, on the main thread, from the plain buffer the
             # decoder thread produced. `Gdk.MemoryTexture.new` does not
-            # copy, so this is cheap even at 25 Hz.
+            # copy, so this is cheap even at this rate.
             self._live_texture = Gdk.MemoryTexture.new(
                 frame.width,
                 frame.height,
@@ -204,8 +234,15 @@ class PhotoArea(Gtk.Widget):
                 GLib.Bytes.new(frame.data),
                 frame.stride,
             )
-            self.queue_draw()
-
+        except Exception as exc:
+            # A malformed frame — a bad stride, a zero-size buffer — is
+            # exactly the edge case the decoder exists to hand off rather
+            # than absorb. Uncaught, this is the failure CLAUDE.md §2.3
+            # documents by name: the strip appears, never draws again,
+            # and logs nothing. Drop the frame, not the tick.
+            print(f"vídeo: fotograma inválido: {exc!r}", file=sys.stderr, flush=True)
+            return True  # GLib.SOURCE_CONTINUE
+        self.queue_draw()
         return True  # GLib.SOURCE_CONTINUE
 
     def _wanted_height(self) -> int:
