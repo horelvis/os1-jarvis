@@ -134,12 +134,19 @@ class FakeStream:
         self._frames = frames
         self._raises = raises
         self.closed = False
+        # Whatever `_watch` last handed this stream as `tap`. RECORDED, not
+        # discarded: a fake that silently swallows the parameter the real
+        # object acts on is a sink — a typo in `_watch` (`camera.url`
+        # instead of `.name`, a dropped `.get()`) would pass every test
+        # here without this.
+        self.tap = None
 
     def frames(self, every: int = 10, tap=None):
-        # `tap` is accepted, not exercised: this fake predates the tap
-        # (Task 3) and none of these tests feed compressed packets. It
-        # only has to match the real `CameraStream.frames()` signature
-        # closely enough that `_watch`'s call does not blow up.
+        # Set before anything that could raise or return early, so even a
+        # dead or empty stream still shows what `_watch` passed it — a
+        # generator's body only starts running on the first `next()`, which
+        # `for frame in stream.frames(...)` triggers immediately.
+        self.tap = tap
         if self._raises is not None:
             raise self._raises
         yield from self._frames
@@ -854,3 +861,97 @@ def test_a_preempted_waiter_gets_none_not_the_next_callers_frame():
     # And the later caller's own state must have survived our finally.
     assert fleet._wanted.get("entrada") is later_event
     assert fleet._pending.get("entrada") is theirs
+
+
+# ── the tap: set_tap/clear_tap actually reach the watcher ──────────────
+#
+# `FakeStream.frames()` now RECORDS the `tap` it was handed (`self.tap`)
+# instead of discarding it, precisely so a wiring bug — `_watch` reading
+# `camera.url` instead of `camera.name`, or the `.get()` dropped so every
+# camera shares one tap — fails a test instead of passing every one of
+# them silently.
+
+
+def test_set_tap_reaches_the_watcher():
+    """`fleet.set_tap` must be visible to the stream `_watch` opens: the
+    watcher has to read `self._taps` live, not a copy taken at start()."""
+    streams: list[FakeStream] = []
+
+    def open_stream(url):
+        stream = FakeStream([[PERSON]])
+        streams.append(stream)
+        return stream
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert _wait(lambda: bool(streams))
+
+        my_tap = lambda data, key: None
+        fleet.set_tap("entrada", my_tap)
+
+        # `_watch` re-opens the stream on every iteration (frames() is a
+        # finite generator here), so the NEXT stream it opens is where the
+        # tap must show up.
+        assert _wait(lambda: streams[-1].tap is my_tap)
+    finally:
+        fleet.stop()
+
+
+def test_set_tap_is_keyed_by_camera_name_not_shared():
+    """Setting the tap on one camera must not leak into another's stream —
+    keying on the URL, or on nothing at all, would make every camera
+    share one tap."""
+    streams: dict[str, list[FakeStream]] = {"fuera": [], "entrada": []}
+    urls = {"rtsp://x/1": "fuera", "rtsp://x/2": "entrada"}
+
+    def open_stream(url):
+        stream = FakeStream([[PERSON]])
+        streams[urls[url]].append(stream)
+        return stream
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start(
+        [Camera("fuera", "rtsp://x/1"), Camera("entrada", "rtsp://x/2")],
+        lambda name, seen: None,
+    )
+    try:
+        assert _wait(lambda: streams["fuera"] and streams["entrada"])
+
+        my_tap = lambda data, key: None
+        fleet.set_tap("entrada", my_tap)
+
+        assert _wait(lambda: streams["entrada"][-1].tap is my_tap)
+        # "fuera" was never given a tap: its most recent stream must never
+        # see one, no matter how many times it reopens meanwhile.
+        assert _wait(lambda: streams["fuera"][-1].tap is not None, timeout=0.3) is False
+    finally:
+        fleet.stop()
+
+
+def test_clear_tap_stops_it():
+    """After `clear_tap`, the next stream the watcher opens gets no tap —
+    a leftover tap would keep feeding a live view that asked to close."""
+    streams: list[FakeStream] = []
+
+    def open_stream(url):
+        stream = FakeStream([[PERSON]])
+        streams.append(stream)
+        return stream
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        my_tap = lambda data, key: None
+        fleet.set_tap("entrada", my_tap)
+        assert _wait(lambda: bool(streams) and streams[-1].tap is my_tap)
+
+        fleet.clear_tap("entrada")
+        assert "entrada" not in fleet._taps
+
+        # `_watch` re-opens the stream on every iteration, and once cleared
+        # nothing sets `_taps["entrada"]` again — so the poll settles on
+        # `None` and stays there.
+        assert _wait(lambda: streams[-1].tap is None)
+    finally:
+        fleet.stop()

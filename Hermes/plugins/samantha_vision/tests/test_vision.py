@@ -516,3 +516,60 @@ def test_no_tap_costs_nothing_and_still_decodes():
     stream = CameraStream("rtsp://fake")
     stream._container = _Container([_Packet(b"x", keyframe=True, frames=[_Frame()])])
     assert len(list(stream.frames(every=1))) == 1
+
+
+# ── codec_parameters: empty extradata is legal, not an error ───────────
+#
+# Many RTSP cameras send SPS/PPS in-band with every keyframe instead of
+# in the container's extradata, so `stream.codec_context.extradata` can
+# legitimately be `None` (PyAV's own default) or `b""`. Either must come
+# back as `b""`, never raise — that is the whole point of the method.
+
+
+class _CodecContext:
+    def __init__(self, extradata, width: int, height: int) -> None:
+        self.extradata = extradata
+        self.width = width
+        self.height = height
+
+
+class _VideoStream:
+    def __init__(self, codec_context: _CodecContext) -> None:
+        self.codec_context = codec_context
+
+
+class _Streams:
+    def __init__(self, video_stream: _VideoStream) -> None:
+        self.video = [video_stream]
+
+
+class _CodecContainer:
+    """Stands in for `av.open(...)`, just enough for `codec_parameters()`."""
+
+    def __init__(self, extradata, width: int = 704, height: int = 480) -> None:
+        self.streams = _Streams(_VideoStream(_CodecContext(extradata, width, height)))
+
+    def close(self):
+        pass
+
+
+def test_codec_parameters_reads_extradata_width_and_height():
+    stream = CameraStream("rtsp://fake")
+    stream._container = _CodecContainer(b"sps-pps", 704, 480)
+
+    assert stream.codec_parameters() == (b"sps-pps", 704, 480)
+
+
+def test_codec_parameters_when_extradata_is_none():
+    """PyAV's own default for a stream with no out-of-band SPS/PPS."""
+    stream = CameraStream("rtsp://fake")
+    stream._container = _CodecContainer(None, 704, 480)
+
+    assert stream.codec_parameters() == (b"", 704, 480)
+
+
+def test_codec_parameters_when_extradata_is_empty_bytes():
+    stream = CameraStream("rtsp://fake")
+    stream._container = _CodecContainer(b"", 704, 480)
+
+    assert stream.codec_parameters() == (b"", 704, 480)

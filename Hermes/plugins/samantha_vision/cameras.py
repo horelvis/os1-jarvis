@@ -290,7 +290,7 @@ class CameraFleet:
             if thread.is_alive():
                 logger.debug(f"samantha-vision: {thread.name} still in a read, left")
 
-    def set_tap(self, camera: str, tap) -> None:
+    def set_tap(self, camera: str, tap: Callable[[bytes, bool], None] | None) -> None:
         """Send this camera's packets to `tap` as well as to YOLO."""
         self._taps[camera] = tap
 
