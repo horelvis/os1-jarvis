@@ -18,6 +18,8 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 
+from loguru import logger
+
 # _NET_WM_STATE actions (EWMH 1.5, §7.5)
 NET_WM_STATE_REMOVE = 0
 NET_WM_STATE_ADD = 1
@@ -32,6 +34,24 @@ _SUBSTRUCTURE_NOTIFY = 1 << 19
 _SUBSTRUCTURE_REDIRECT = 1 << 20
 
 _CLIENT_MESSAGE = 33
+
+# XShape (X11/extensions/shape.h), the constants `set_input_region` needs
+# and the only place in this file that reaches libXext rather than
+# libX11.
+_SHAPE_INPUT = 2  # ShapeInput: the pointer-hit-testing shape, not the visible one
+_SHAPE_SET = 0  # ShapeSet: replace the shape outright
+_SHAPE_YX_BANDED = 3  # YXBanded ordering: no ordering guarantee is made
+
+
+class _XRectangle(ctypes.Structure):
+    """XRectangle, as XShapeCombineRectangles wants an array of."""
+
+    _fields_ = [
+        ("x", ctypes.c_short),
+        ("y", ctypes.c_short),
+        ("width", ctypes.c_ushort),
+        ("height", ctypes.c_ushort),
+    ]
 
 
 class _XClientMessageEvent(ctypes.Structure):
@@ -96,26 +116,99 @@ def build_state_event(root: int, xid: int, atoms: list[int], action: int) -> XEv
 class Ewmh:
     """A thin, live connection to the X server for the two things GTK4 lost."""
 
-    def __init__(self, display_name: str | None = None) -> None:
-        path = ctypes.util.find_library("X11") or "libX11.so.6"
-        self._x11 = ctypes.CDLL(path)
-        self._x11.XOpenDisplay.restype = ctypes.c_void_p
-        self._x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-        self._x11.XInternAtom.restype = ctypes.c_ulong
-        self._x11.XInternAtom.argtypes = [
-            ctypes.c_void_p,
-            ctypes.c_char_p,
-            ctypes.c_int,
-        ]
-        self._x11.XDefaultRootWindow.restype = ctypes.c_ulong
-        self._x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    def __init__(
+        self,
+        display_name: str | None = None,
+        *,
+        xid: int | None = None,
+        x11: ctypes.CDLL | None = None,
+        xext: ctypes.CDLL | None = None,
+    ) -> None:
+        """Open a live X connection, unless `x11` says not to.
 
-        name = display_name.encode() if display_name else None
-        self._display = self._x11.XOpenDisplay(name)
-        if not self._display:
-            raise RuntimeError(f"cannot open X display {display_name or '$DISPLAY'}")
-        self._root = self._x11.XDefaultRootWindow(self._display)
+        `xid`, `x11` and `xext` exist for `tests/test_ewmh.py`: passing
+        `x11` skips the whole real-display setup below, because a fake
+        has none of the methods that setup would call on it — a plain
+        `object()` cannot even take the `.restype` assignments, and that
+        is deliberate (see the "missing xext" test). Production code
+        never passes them; it gets the real libX11 this class has always
+        opened, plus libXext, loaded lazily and tolerated if absent
+        (`set_input_region` is the only thing here that needs it).
+
+        `xid` is new for the same reason libXext is: every other method
+        on this class takes the window id as a call argument rather than
+        storing it, because it predates `set_input_region` needing one
+        stored. Passing it here does not change those methods.
+        """
+        if x11 is not None:
+            self._x11 = x11
+            self._display = 0
+            self._root = 0
+            self._xext = xext
+        else:
+            path = ctypes.util.find_library("X11") or "libX11.so.6"
+            self._x11 = ctypes.CDLL(path)
+            self._x11.XOpenDisplay.restype = ctypes.c_void_p
+            self._x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            self._x11.XInternAtom.restype = ctypes.c_ulong
+            self._x11.XInternAtom.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_char_p,
+                ctypes.c_int,
+            ]
+            self._x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            self._x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+
+            name = display_name.encode() if display_name else None
+            self._display = self._x11.XOpenDisplay(name)
+            if not self._display:
+                raise RuntimeError(
+                    f"cannot open X display {display_name or '$DISPLAY'}"
+                )
+            self._root = self._x11.XDefaultRootWindow(self._display)
+            self._xext = xext if xext is not None else self._load_xext()
+
         self._atoms: dict[str, int] = {}
+        self._xid = xid
+
+    @staticmethod
+    def _load_xext() -> ctypes.CDLL | None:
+        """libXext, if this box has one. Its absence is not an error.
+
+        Nothing before `set_input_region` existed needed it, so a box
+        without it keeps every click landing on the whole band — exactly
+        the behaviour this file has always had.
+        """
+        try:
+            path = ctypes.util.find_library("Xext") or "libXext.so.6"
+            xext = ctypes.CDLL(path)
+        except OSError:
+            logger.debug("ewmh: libXext not found, input region unavailable")
+            return None
+
+        xext.XShapeCombineRectangles.restype = None
+        xext.XShapeCombineRectangles.argtypes = [
+            ctypes.c_void_p,  # Display*
+            ctypes.c_ulong,  # Window
+            ctypes.c_int,  # destKind
+            ctypes.c_int,  # xOff
+            ctypes.c_int,  # yOff
+            ctypes.POINTER(_XRectangle),
+            ctypes.c_int,  # n_rects
+            ctypes.c_int,  # op
+            ctypes.c_int,  # ordering
+        ]
+        xext.XShapeCombineMask.restype = None
+        xext.XShapeCombineMask.argtypes = [
+            ctypes.c_void_p,  # Display*
+            ctypes.c_ulong,  # Window
+            ctypes.c_int,  # destKind
+            ctypes.c_int,  # xOff
+            ctypes.c_int,  # yOff
+            ctypes.c_ulong,  # Pixmap src (0 == None: the whole window)
+            ctypes.c_int,  # op
+        ]
+        return xext
 
     def atom(self, name: str) -> int:
         if name not in self._atoms:
@@ -209,3 +302,63 @@ class Ewmh:
 
     def flush(self) -> None:
         self._x11.XFlush(ctypes.c_void_p(self._display))
+
+    def set_input_region(self, rects: list[tuple[int, int, int, int]]) -> bool:
+        """Which parts of the window take the pointer. False when it could not.
+
+        The band is as wide as the strip and mostly transparent, so
+        without this it swallows every click over its whole area — for
+        fifteen seconds with a photo, and for up to two minutes with a
+        live view, which is what made this worth doing (CLAUDE.md §12,
+        deferred 2026-08-25).
+
+        `Gdk.Surface.set_input_region` is the GTK way and wants a
+        `cairo.Region`; Cairo is the trap this machine is built around
+        (CLAUDE.md §2.3), so this goes through XShape by hand, the same
+        way everything else in this file reaches past what GTK4 lost.
+
+        `rects` are `(x, y, width, height)` in WINDOW coordinates — the
+        caller's job to work out, not this method's; `window.py` is
+        where that translation happens. An empty list restores the
+        whole window, which is also what a missing libXext or a window
+        not yet mapped leaves it as: this can only ever narrow the
+        window's input area, never widen it past "the whole thing".
+        """
+        xext = self._xext
+        if xext is None:
+            logger.debug("ewmh: no libXext, input region left alone")
+            return False
+        if self._xid is None:
+            logger.debug("ewmh: no xid yet, input region left alone")
+            return False
+
+        try:
+            if not rects:
+                xext.XShapeCombineMask(
+                    self._display, self._xid, _SHAPE_INPUT, 0, 0, 0, _SHAPE_SET
+                )
+            else:
+                array = (_XRectangle * len(rects))()
+                for slot, (x, y, width, height) in zip(array, rects):
+                    slot.x, slot.y = int(x), int(y)
+                    slot.width, slot.height = int(width), int(height)
+                xext.XShapeCombineRectangles(
+                    self._display,
+                    self._xid,
+                    _SHAPE_INPUT,
+                    0,
+                    0,
+                    array,
+                    len(rects),
+                    _SHAPE_SET,
+                    _SHAPE_YX_BANDED,
+                )
+            self.flush()
+        except Exception as exc:
+            # Losing the input region costs clicks; raising costs the
+            # strip. Whatever reached here — a missing symbol, a dead
+            # display, a fake in a test that does not implement one of
+            # these — is worth a line in the log and nothing more.
+            logger.warning(f"ewmh: input region not set — {exc}")
+            return False
+        return True

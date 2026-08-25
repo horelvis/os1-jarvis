@@ -132,6 +132,58 @@ class StripWindow(Gtk.ApplicationWindow):
         self.set_default_size(w, h + extra)
         self._place(*wanted)
         GLib.idle_add(self._settle, wanted)
+        self._update_input_region(extra, w, h)
+
+    def _current_live_rect(self) -> tuple[float, float, float, float] | None:
+        """Ask the band what it is showing, without re-deriving it.
+
+        `self._band` is always the `PhotoArea` built in `__main__.py`,
+        but it is stored here as a plain `Gtk.Widget` — `set_content`
+        takes the same type for the wave, which has no `live_rect`. A
+        band with no such method reads as "nothing to punch a hole
+        for", not as a crash: this is a query, and the input region is
+        allowed to lag a frame, never to raise.
+        """
+        band = self._band
+        if band is None:
+            return None
+        live_rect = getattr(band, "live_rect", None)
+        if live_rect is None:
+            return None
+        return live_rect()
+
+    def _update_input_region(self, extra: int, w: int, h: int) -> None:
+        """Punch a hole in the band for the desktop underneath it.
+
+        Only a live view earns this (CLAUDE.md §12, 2026-08-25): a photo
+        swallowing the whole band for fifteen seconds was an accepted
+        trade, and a live view up to two minutes is what stopped that
+        trade holding. `None` from `_current_live_rect` — nothing up, or
+        a photo — restores the whole window, same as before this method
+        existed.
+
+        `live_rect()` is in the band widget's own coordinates. Those ARE
+        window coordinates with no translation needed: the band is the
+        first child of `self._frame`, a `Gtk.Box` with no margin or
+        padding in `theme.CSS` (`samantha_widget/theme.py`), so its
+        top-left sits exactly on the window's — confirmed against the
+        drawing itself, `photo_area.py`'s `do_snapshot`, which paints
+        `live_rect()` with no offset either. The wave's own strip sits
+        below the band, at `y = extra`, `height = h` — the two numbers
+        that describe where the band ends and the strip at rest begins.
+        """
+        if self._ewmh is None:
+            return
+        live_rect = self._current_live_rect()
+        if live_rect is None:
+            self._ewmh.set_input_region([])
+            return
+        lx, ly, lw, lh = live_rect
+        rects = [
+            (round(lx), round(ly), round(lw), round(lh)),
+            (0, extra, w, h),
+        ]
+        self._ewmh.set_input_region(rects)
 
     def _place(self, x: int, y: int, w: int, h: int) -> bool:
         if self._ewmh is None or self._xid is None:
@@ -197,7 +249,7 @@ class StripWindow(Gtk.ApplicationWindow):
         self._rect = (x, y, w, h)
         self._wanted = (x, y, w, h)
 
-        self._ewmh = Ewmh()
+        self._ewmh = Ewmh(xid=xid)
         # Two at a time. A third atom in one message is dropped silently
         # — that is the whole reason ewmh.py refuses more than two.
         self._ewmh.add_state(xid, "_NET_WM_STATE_ABOVE", "_NET_WM_STATE_SKIP_TASKBAR")
