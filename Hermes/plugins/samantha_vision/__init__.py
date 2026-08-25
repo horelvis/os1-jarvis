@@ -6,6 +6,17 @@ from loguru import logger
 
 from .alert import make_handler
 from .cameras import CameraFleet, parse_cameras, redact
+from .live import LiveSession
+from .live_tool import (
+    CLOSE_DESCRIPTION,
+    CLOSE_NAME,
+    CLOSE_SCHEMA,
+    OPEN_DESCRIPTION,
+    OPEN_NAME,
+    OPEN_SCHEMA,
+)
+from .live_tool import EMOJI as LIVE_EMOJI
+from .live_tool import make_close_handler, make_open_handler
 from .tool import (
     DESCRIPTION,
     EMOJI,
@@ -73,6 +84,29 @@ def register(ctx):
         is_async=True,
     )
 
+    session = LiveSession(fleet, push_live_open, push_live_frame, push_live_close)
+
+    ctx.register_tool(
+        name=OPEN_NAME,
+        toolset=TOOLSET,
+        description=OPEN_DESCRIPTION,
+        emoji=LIVE_EMOJI,
+        schema=OPEN_SCHEMA,
+        handler=make_open_handler(session, fleet, names),
+        check_fn=lambda: bool(names),
+        is_async=True,
+    )
+    ctx.register_tool(
+        name=CLOSE_NAME,
+        toolset=TOOLSET,
+        description=CLOSE_DESCRIPTION,
+        emoji=LIVE_EMOJI,
+        schema=CLOSE_SCHEMA,
+        handler=make_close_handler(session),
+        check_fn=lambda: bool(names),
+        is_async=True,
+    )
+
     threading.Thread(
         target=_supervise,
         args=(ctx, fleet, names),
@@ -129,4 +163,54 @@ async def push_photo(path: str, camera: str) -> bool:
         # A photo is never worth a turn. He has already said his sentence
         # by the time this runs, or is about to.
         logger.warning(f"samantha-vision: photo not shown — {redact(exc)}")
+        return False
+
+
+async def _adapter():
+    """The strip's adapter, or None. Resolved at call time, every time."""
+    from gateway.config import Platform
+    from gateway.run import _gateway_runner_ref
+
+    runner = _gateway_runner_ref()
+    if runner is None:
+        return None
+    return getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+
+
+async def push_live_open(
+    camera: str, epoch: int, extradata: bytes, width: int, height: int
+) -> bool:
+    """Open a live view on the strip, and nowhere else. Never raises."""
+    try:
+        adapter = await _adapter()
+        if adapter is None:
+            return False
+        return bool(
+            await adapter.push_live_open(camera, epoch, extradata, width, height)
+        )
+    except Exception as exc:
+        logger.warning(f"samantha-vision: live not opened — {redact(exc)}")
+        return False
+
+
+async def push_live_frame(epoch: int, packet: bytes) -> bool:
+    """One frame. Quiet on failure: this runs up to 25 times a second."""
+    try:
+        adapter = await _adapter()
+        if adapter is None:
+            return False
+        return bool(await adapter.push_live_frame(epoch, packet))
+    except Exception:
+        return False
+
+
+async def push_live_close(epoch: int, reason: str) -> bool:
+    """Tell the strip the view ended. Never raises."""
+    try:
+        adapter = await _adapter()
+        if adapter is None:
+            return False
+        return bool(await adapter.push_live_close(epoch, reason))
+    except Exception as exc:
+        logger.warning(f"samantha-vision: live not closed — {redact(exc)}")
         return False

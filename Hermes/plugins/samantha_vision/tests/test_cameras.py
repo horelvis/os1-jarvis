@@ -11,6 +11,7 @@ import time
 from contextlib import contextmanager
 
 import numpy as np
+import pytest
 
 from loguru import logger
 
@@ -130,9 +131,15 @@ class FakeStream:
     connects-but-yields-nothing case was ever caught here.
     """
 
-    def __init__(self, frames: list, raises: Exception | None = None) -> None:
+    def __init__(
+        self,
+        frames: list,
+        raises: Exception | None = None,
+        codec: tuple[bytes, int, int] = (b"", 0, 0),
+    ) -> None:
         self._frames = frames
         self._raises = raises
+        self._codec = codec
         self.closed = False
         # Whatever `_watch` last handed this stream as `tap_for` — the
         # RESOLVER (Task 4 fix round 2), not a tap itself any more.
@@ -141,6 +148,9 @@ class FakeStream:
         # `_watch` (`camera.url` instead of `.name`, a dropped `.get()`)
         # would pass every test here without this.
         self.tap_for = None
+
+    def codec_parameters(self) -> tuple[bytes, int, int]:
+        return self._codec
 
     def frames(self, every: int = 10, tap_for=None):
         # Set before anything that could raise or return early, so even a
@@ -171,8 +181,13 @@ class ForeverStream(FakeStream):
     `streams` staying at length 1 is that proof.
     """
 
-    def __init__(self, frames: list, stopping: threading.Event) -> None:
-        super().__init__(frames)
+    def __init__(
+        self,
+        frames: list,
+        stopping: threading.Event,
+        codec: tuple[bytes, int, int] = (b"", 0, 0),
+    ) -> None:
+        super().__init__(frames, codec=codec)
         self._stopping = stopping
 
     def frames(self, every: int = 10, tap_for=None):
@@ -1088,5 +1103,77 @@ def test_clear_tap_stops_an_already_running_stream():
 
         assert received == [(b"one", True)]  # nothing new arrived
         assert len(streams) == 1
+    finally:
+        fleet.stop()
+
+
+# ── codec_parameters: the fleet delegates to the open stream ───────────
+#
+# `ver_en_vivo` calls this to know the size to open the view at. Getting
+# it from the WRONG camera's stream would not raise — it would open a
+# live view at the wrong resolution, silently, which is worse than the
+# KeyError this raises for a camera with no stream at all.
+
+
+def test_codec_parameters_reaches_the_right_cameras_own_stream():
+    """Two cameras, two different sizes — asking for one must never
+    return the other's. A fleet that indexed on "the last stream
+    opened" instead of the camera's own entry would pass this only by
+    coincidence of ordering."""
+    urls = {"rtsp://x/1": "entrada", "rtsp://x/2": "fuera"}
+    codecs = {
+        "entrada": (b"entrada-sps", 640, 360),
+        "fuera": (b"fuera-sps", 1280, 720),
+    }
+
+    def open_stream(url):
+        name = urls[url]
+        return ForeverStream([[PERSON]], fleet._stopping, codec=codecs[name])
+
+    fleet = _fleet(open_stream=open_stream)
+    fleet.start(
+        [Camera("entrada", "rtsp://x/1"), Camera("fuera", "rtsp://x/2")],
+        lambda name, seen: None,
+    )
+    try:
+        assert _wait(lambda: "entrada" in fleet._streams and "fuera" in fleet._streams)
+        assert fleet.codec_parameters("entrada") == (b"entrada-sps", 640, 360)
+        assert fleet.codec_parameters("fuera") == (b"fuera-sps", 1280, 720)
+    finally:
+        fleet.stop()
+
+
+def test_codec_parameters_raises_for_a_camera_with_no_live_stream():
+    """No stream ever opened for this name: KeyError, not an invented
+    size — a made-up size would open a live view onto nothing."""
+    fleet = _fleet(open_stream=lambda url: FakeStream([[PERSON]]))
+    with pytest.raises(KeyError):
+        fleet.codec_parameters("no-existe")
+
+
+def test_codec_parameters_forgets_a_stream_once_it_closes():
+    """`_watch`'s `finally` must drop the entry — a camera that died must
+    not go on reporting a size that no longer has a decoder behind it.
+
+    Uses its OWN stopping event, distinct from `fleet._stopping`, so this
+    stream's lifetime is entirely under the test's control: present until
+    we say otherwise, gone the instant we do — no race with how fast
+    `_watch` happens to iterate.
+    """
+    camera_stopping = threading.Event()
+
+    def open_stream(url):
+        return ForeverStream([[PERSON]], camera_stopping, codec=(b"sps", 640, 360))
+
+    fleet = _fleet(open_stream=open_stream, retry_seconds=100.0)
+    fleet.start([Camera("entrada", "rtsp://x/1")], lambda name, seen: None)
+    try:
+        assert _wait(lambda: "entrada" in fleet._streams)
+        assert fleet.codec_parameters("entrada") == (b"sps", 640, 360)
+
+        camera_stopping.set()  # end this stream's frames(), as if it died
+        assert _wait(lambda: "entrada" not in fleet._streams)
+        with pytest.raises(KeyError):
+            fleet.codec_parameters("entrada")
     finally:
         fleet.stop()

@@ -174,3 +174,23 @@ def test_supervise_fills_in_the_camera_names_the_tool_reads():
     ctx = FakeCtx(config=[{"name": "entrada", "url": "rtsp://camera/sub"}])
     _supervise(ctx, FakeFleet(), names)
     assert names == ["entrada"]
+
+
+def test_register_declares_both_live_tools():
+    ctx = FakeCtx(config=[])
+    register(ctx)
+
+    names = {call["name"] for call in ctx.tools}
+    assert {"mirar", "ver_en_vivo", "dejar_de_ver"} <= names
+
+
+def test_the_live_tools_are_hidden_until_the_cameras_are_known():
+    ctx = FakeCtx(config=[])
+    register(ctx)
+
+    for call in ctx.tools:
+        if call["name"] in {"ver_en_vivo", "dejar_de_ver"}:
+            # Same seam `mirar` uses: an empty `names` list means the
+            # config has not been read, and offering a tool that cannot
+            # work is worse than not offering it.
+            assert call["check_fn"]() is False

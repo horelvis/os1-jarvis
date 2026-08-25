@@ -60,6 +60,10 @@ _FALLBACK_HINT = (
 # band did not exist. Leaving the hint alone after it did would have made
 # him decline something he can now do — so this moves with the widget,
 # in the same change.
+#
+# Extended 2026-08-25 for the second thing: a camera in motion, not just
+# a still. One clause, not a new paragraph — and no tool names in it,
+# because their descriptions already say what he needs to call them.
 _SCREEN = (
     "Hay una sola cosa que sí puedes enseñar. Cuando miras una cámara, la "
     "foto aparece sola unos segundos en la tira, delante de la persona: no "
@@ -67,7 +71,10 @@ _SCREEN = (
     "de lo que hay como si los dos lo estuvierais mirando. Es lo único que "
     "se puede mostrar — no hay manera de enseñar texto, ficheros, enlaces "
     "ni imágenes de ningún otro sitio — y tú esa foto no la ves: solo sabes "
-    "lo que la cámara te ha contado."
+    "lo que la cámara te ha contado; también puedes dejar una cámara en "
+    "movimiento hasta que te pidan pararla, tampoco hace falta anunciarlo, "
+    "y esa imagen en directo tampoco la ves — sigues sabiendo solo lo que "
+    "la cámara te cuenta."
 )
 
 

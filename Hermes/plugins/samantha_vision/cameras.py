@@ -236,6 +236,14 @@ class CameraFleet:
         # taken 25 times a second for a value that changes twice a day.
         self._taps: dict[str, Any] = {}
 
+        # The open stream for a camera currently being watched, or absent
+        # for one that is not. `_watch` fills this in once the stream
+        # opens and drops it in the `finally` that closes it, so a camera
+        # between attempts — or one that has died — has no entry here,
+        # which is what lets `codec_parameters` tell "no live stream" from
+        # "the wrong one" instead of returning a stale size.
+        self._streams: dict[str, Any] = {}
+
     def start(
         self,
         cameras: list[Camera],
@@ -289,6 +297,16 @@ class CameraFleet:
             thread.join(timeout=timeout)
             if thread.is_alive():
                 logger.debug(f"samantha-vision: {thread.name} still in a read, left")
+
+    def codec_parameters(self, camera: str) -> tuple[bytes, int, int]:
+        """SPS/PPS and size for a camera that is being watched.
+
+        Raises KeyError for a camera with no live stream: the caller
+        turns that into a sentence, and inventing a size would open a
+        view onto nothing.
+        """
+        stream = self._streams[camera]
+        return stream.codec_parameters()
 
     def set_tap(self, camera: str, tap: Callable[[bytes, bool], None] | None) -> None:
         """Send this camera's packets to `tap` as well as to YOLO."""
@@ -420,6 +438,7 @@ class CameraFleet:
             frames_seen = 0
             try:
                 stream = self._open_stream(camera.url)
+                self._streams[camera.name] = stream
                 for frame in stream.frames(
                     self._sample_every, tap_for=self._tap_for(camera.name)
                 ):
@@ -471,6 +490,10 @@ class CameraFleet:
                 else:
                     logger.debug(f"samantha-vision: {camera.name} still unreachable")
             finally:
+                # Dropped here, not just on success: a camera that dies
+                # mid-read must not go on reporting a size that no longer
+                # has a decoder behind it.
+                self._streams.pop(camera.name, None)
                 if stream is not None:
                     try:
                         stream.close()

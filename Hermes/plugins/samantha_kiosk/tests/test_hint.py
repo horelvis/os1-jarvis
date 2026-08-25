@@ -51,3 +51,8 @@ def test_a_missing_persona_file_still_yields_a_hint(monkeypatch):
 
     monkeypatch.setattr(samantha_kiosk, "_PERSONA_FILE", _PERSONA_FILE / "nope")
     assert samantha_kiosk._platform_hint() == _FALLBACK_HINT
+
+
+def test_the_hint_says_he_can_show_something_that_moves():
+    hint = _platform_hint().lower()
+    assert "movimiento" in hint or "directo" in hint
