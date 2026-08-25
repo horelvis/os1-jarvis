@@ -58,6 +58,20 @@ _SHOW_ON_START = os.environ.get("SAMANTHA_WIDGET_PHOTO")
 # no way to tell from the text whether the audio was bad or Whisper was.
 _DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
 
+# Deafen the microphone while he speaks. Unconditional until 2026-08-25,
+# when a real microphone arrived and showed what it cost: to interrupt
+# him, `detector.speaking` had to be true ALREADY, and it could not
+# become true while every frame was being dropped. The only voice that
+# could open that latch was his own, coming back through the room — so
+# the gate both let him answer himself (22.6 s of his own reply
+# transcribed as the user's, measured) and made "stop" unreachable.
+#
+# Echo cancellation removes his voice from the input instead
+# (~/.config/pipewire/pipewire.conf.d/99-echo-cancel.conf), so the
+# frames can flow and cutting in works. Set this to 1 on a box without
+# it, or he will hear himself and reply to it.
+_MIC_GATE = os.environ.get("SAMANTHA_WIDGET_MIC_GATE") == "1"
+
 
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
@@ -246,9 +260,12 @@ class SamanthaApp(Gtk.Application):
         detector = UtteranceDetector(SileroDetector())
 
         def on_frame(frame: bytes) -> None:
-            if player.busy and not detector.speaking:
-                # She is talking and nobody has cut in. Do not let her
-                # own voice, coming back through the room, start a turn.
+            if _MIC_GATE and player.busy and not detector.speaking:
+                # No echo cancellation on this box: he is talking and
+                # nobody has cut in, so drop the frame rather than let
+                # his own voice, coming back through the room, start a
+                # turn. The cost of this branch is that he cannot be
+                # interrupted — see _MIC_GATE.
                 return
 
             was_speaking = detector.speaking
