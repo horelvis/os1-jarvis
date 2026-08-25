@@ -224,14 +224,33 @@ class CameraStream:
             self._container.close()
             self._container = None
 
-    def frames(self, every: int = 10, tap: Callable[[bytes, bool], None] | None = None):
+    def frames(
+        self,
+        every: int = 10,
+        tap_for: Callable[[], Callable[[bytes, bool], None] | None] | None = None,
+    ):
         """Yield HxWx3 RGB arrays, one every `every` decoded frames.
 
         Cameras deliver 15-30 fps and nothing in a house changes that
         fast. Sampling keeps the GPU free for Whisper and CosyVoice,
         which are on the critical path of a conversation; a camera is not.
 
-        `tap`, when given, is handed every packet's raw bytes and whether
+        `tap_for`, when given, is called once PER PACKET to find out
+        whether anyone wants it right now — not handed a tap directly.
+        This method itself is called once per RTSP connect, which in
+        this house is once every several hours, so a plain `tap`
+        argument would be fixed for the life of that connection: a live
+        view opened or closed hours later would have no way to reach it.
+        `tap_for` is cheap to call when nobody is watching (a closure
+        call and a dict `.get()`, no allocation) — the caller answers
+        with `None` — and `bytes(packet)`, the one conversion that costs
+        something, only runs when `tap_for()` actually returns a tap.
+        Handing every packet a never-`None` `tap` (Task 4 fix round 1)
+        fixed the liveness but cost that conversion on every packet of
+        every camera, forever, for nobody watching — this is what fix
+        round 2 undoes.
+
+        The resolved tap is handed every packet's raw bytes and whether
         it is a keyframe, BEFORE it is decoded. This is a demux loop
         rather than `decode(video=0)` for exactly that reason: the packet
         has to be in our hands while it is still compressed, or a live
@@ -245,6 +264,7 @@ class CameraStream:
 
         index = 0
         for packet in self._container.demux(video=0):
+            tap = tap_for() if tap_for is not None else None
             if tap is not None:
                 try:
                     tap(bytes(packet), bool(packet.is_keyframe))

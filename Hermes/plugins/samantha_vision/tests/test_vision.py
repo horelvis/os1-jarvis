@@ -494,7 +494,10 @@ def test_the_tap_sees_every_packet_and_its_keyframe_flag():
         ]
     )
 
-    list(stream.frames(every=1, tap=lambda data, key: seen.append((data, key))))
+    def my_tap(data, key):
+        seen.append((data, key))
+
+    list(stream.frames(every=1, tap_for=lambda: my_tap))
 
     assert seen == [(b"aaa", True), (b"bbb", False)]
 
@@ -507,7 +510,7 @@ def test_sampling_still_applies_to_the_frames_yielded():
         [_Packet(b"x", keyframe=True, frames=[_Frame()]) for _ in range(10)]
     )
 
-    yielded = list(stream.frames(every=10, tap=None))
+    yielded = list(stream.frames(every=10, tap_for=None))
 
     assert len(yielded) == 1
 
@@ -516,6 +519,33 @@ def test_no_tap_costs_nothing_and_still_decodes():
     stream = CameraStream("rtsp://fake")
     stream._container = _Container([_Packet(b"x", keyframe=True, frames=[_Frame()])])
     assert len(list(stream.frames(every=1))) == 1
+
+
+def test_a_resolver_present_but_finding_no_tap_costs_no_conversion():
+    """The regression this pins: `tap_for` being registered (non-`None`)
+    must not by itself force `bytes(packet)` to run — only a RESOLVED
+    tap may.
+
+    Task 4 fix round 1 handed `frames()` a tap that was never `None` (an
+    indirection that read `self._taps` live), which fixed liveness but
+    meant `bytes(packet)` ran on every packet, of every camera,
+    continuously — whether or not anyone was watching. `cameras.py`
+    hands `tap_for` a live resolver on every connection, live view or
+    not, so the common case in production is exactly this one: a
+    resolver present, resolving to nothing. Proven with a packet whose
+    `__bytes__` raises if it is ever called.
+    """
+
+    class _ExplodingPacket(_Packet):
+        def __bytes__(self) -> bytes:
+            raise AssertionError("bytes(packet) must not run with no tap resolved")
+
+    stream = CameraStream("rtsp://fake")
+    stream._container = _Container(
+        [_ExplodingPacket(b"x", keyframe=True, frames=[_Frame()])]
+    )
+
+    assert len(list(stream.frames(every=1, tap_for=lambda: None))) == 1
 
 
 # ── codec_parameters: empty extradata is legal, not an error ───────────

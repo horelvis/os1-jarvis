@@ -298,37 +298,38 @@ class CameraFleet:
         """Stop sending packets. Safe to call when there is no tap."""
         self._taps.pop(camera, None)
 
-    def _live_tap(self, camera: str) -> Callable[[bytes, bool], None]:
-        """A stable callable that reads `self._taps` live, per packet.
+    def _tap_for(
+        self, camera: str
+    ) -> Callable[[], Callable[[bytes, bool], None] | None]:
+        """A stable resolver, handed to `stream.frames()`'s `tap_for`.
 
-        `_watch` hands this to `stream.frames()` exactly once per RTSP
-        connect — and in this house that is once every several hours,
-        not once per packet. `stream.frames()` calls whatever it was
-        given, unconditionally, for the life of that ONE connection; it
-        never asks again. Handing it `self._taps.get(camera)` directly,
-        evaluated once at that call, would freeze whatever `set_tap` had
-        or had not done BEFORE the stream opened — a `set_tap` hours
-        later would have no stream to reach until the next reconnect,
-        and a `clear_tap` would leave the old tap running until then too
-        (Task 4 fix round 1 — a live view would have shipped as a black
-        band, silently, and nothing here would have said so).
+        `_watch` calls `stream.frames()` exactly once per RTSP connect —
+        and in this house that is once every several hours, not once per
+        packet — so a plain tap value captured at that call would freeze
+        whatever `set_tap` had or had not done BEFORE the stream opened:
+        a `set_tap` hours later would have no stream to reach until the
+        next reconnect, and a `clear_tap` would leave the old tap running
+        until then too (Task 4 fix round 1 — a live view would have
+        shipped as a black band, silently, and nothing here would have
+        said so).
 
-        This closure is the fix: it is what stays constant across the
-        connection's lifetime, and IT does the dict lookup fresh on
-        every packet, so `set_tap`/`clear_tap` on an already-open stream
-        take effect on the very next packet. One `.get()` per packet —
-        no allocation beyond the closure itself (made once per connect,
+        This resolver is what stays constant across the connection's
+        lifetime; what changes is what it RETURNS, read fresh from
+        `self._taps` on every call. `frames()` (Task 4 fix round 2) is
+        the one that decides, per packet, whether to call it at all and
+        whether the packet is worth converting to bytes for — this
+        method only answers "what tap, if any, right now", it does not
+        decide when that question gets asked. One `.get()` per packet —
+        no allocation beyond the resolver itself (made once per connect,
         not per packet) and no lock, matching the reasoning already
         given for `self._taps` above: a value that changes twice a day
         does not need one.
         """
 
-        def _tap(packet: bytes, keyframe: bool) -> None:
-            tap = self._taps.get(camera)
-            if tap is not None:
-                tap(packet, keyframe)
+        def _resolve() -> Callable[[bytes, bool], None] | None:
+            return self._taps.get(camera)
 
-        return _tap
+        return _resolve
 
     # -- handing a frame to someone asking right now ------------------------
 
@@ -420,7 +421,7 @@ class CameraFleet:
             try:
                 stream = self._open_stream(camera.url)
                 for frame in stream.frames(
-                    self._sample_every, tap=self._live_tap(camera.name)
+                    self._sample_every, tap_for=self._tap_for(camera.name)
                 ):
                     if self._stopping.is_set():
                         break
