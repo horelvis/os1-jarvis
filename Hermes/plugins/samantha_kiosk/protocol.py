@@ -5,14 +5,16 @@ defined in `frontend/src/core/types.ts:37-45`, pinned here so that a change
 on either side fails a test instead of the kiosk. Field names are part of
 the contract: the frontend reads `msg.token`, `msg.thinking_ms`, `msg.error`.
 
-Audio frames are not here. They arrive in plan 3b as binary WebSocket
-frames alongside these text ones, and do not change this format.
+Binary WebSocket frames arrive alongside these text ones: audio frames in
+plan 3b, and video frames (H.264 packets) immediately — with the `live`,
+`live_end`, and `live_frame` handlers. They do not change this format.
 """
 
 from __future__ import annotations
 
+import base64
 import json
-from typing import Any, Dict
+from typing import Any
 
 _CLIENT_TYPES = {"chat", "listen"}
 
@@ -29,7 +31,7 @@ class ProtocolError(ValueError):
     """Raised for anything the kiosk should not have sent."""
 
 
-def decode_client(raw: str) -> Dict[str, Any]:
+def decode_client(raw: str) -> dict[str, Any]:
     """Parse and validate one client message. Raises ProtocolError."""
     try:
         msg = json.loads(raw)
@@ -84,3 +86,61 @@ def photo(path: str, camera: str) -> str:
 def error(message: str) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     return json.dumps({"type": "error", "error": message})
+
+
+# One access unit of H.264. A substream keyframe from these cameras is a
+# few tens of KB; 4 MB is aiohttp's own default and generous enough that
+# a real frame can never hit it. Bytes carry no path to validate, so this
+# cap is what replaces `push_photo`'s spool check as the guard on a
+# socket any process on this box can open.
+MAX_LIVE_FRAME_BYTES = 4 * 1024 * 1024
+
+# Why a view ended. There is deliberately no reason for "the gateway
+# stopped": a process on its way down cannot promise to send anything, so
+# the strip treats a socket that closes with a view open as a close in
+# its own right (spec §4.2).
+LIVE_REASONS = frozenset({"asked", "timeout", "lost"})
+
+
+def live(camera: str, epoch: int, extradata: bytes, width: int, height: int) -> str:
+    """Open a live view on the strip.
+
+    `extradata` is the codec's parameter sets (SPS/PPS). It travels here
+    because a decoder cannot start without them; sending packets alone is
+    how a restream ends up as a black rectangle that reads as a bug in
+    the drawing code. Empty is legal: many cameras send them in-band with
+    every keyframe instead.
+    """
+    return json.dumps(
+        {
+            "type": "live",
+            "camera": camera,
+            "epoch": epoch,
+            "codec": "h264",
+            "extradata": base64.b64encode(extradata).decode("ascii"),
+            "width": width,
+            "height": height,
+        }
+    )
+
+
+def live_end(epoch: int, reason: str) -> str:
+    """Close a live view, and say why."""
+    if reason not in LIVE_REASONS:
+        raise ProtocolError(f"unknown live_end reason: {reason!r}")
+    return json.dumps({"type": "live_end", "epoch": epoch, "reason": reason})
+
+
+def live_frame(epoch: int, packet: bytes) -> bytes:
+    """One access unit, stamped with the view it belongs to.
+
+    The epoch exists because closing and the packets in flight race: you
+    say "ya está", the gateway closes, and three frames of the previous
+    view are still on the socket. Without a number to stamp them the
+    strip paints them onto a band that has already shrunk.
+    """
+    if len(packet) > MAX_LIVE_FRAME_BYTES:
+        raise ProtocolError(
+            f"live frame is {len(packet)} bytes, over the {MAX_LIVE_FRAME_BYTES} cap"
+        )
+    return epoch.to_bytes(4, "big") + packet

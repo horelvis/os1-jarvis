@@ -1,12 +1,17 @@
+import base64
 import json
 
 import pytest
 
 from Hermes.plugins.samantha_kiosk.protocol import (
+    MAX_LIVE_FRAME_BYTES,
     ProtocolError,
     decode_client,
     done,
     error,
+    live,
+    live_end,
+    live_frame,
     photo,
     token,
 )
@@ -103,3 +108,44 @@ def test_photo_is_server_to_client_only():
     # A client must never be able to make the strip open a file.
     with pytest.raises(ProtocolError):
         decode_client(json.dumps({"type": "photo", "path": "/etc/shadow"}))
+
+
+def test_live_carries_the_codec_header_so_a_decoder_can_start():
+    msg = json.loads(live("entrada", 7, b"\x00\x00\x01\x67sps", 704, 480))
+    assert msg["type"] == "live"
+    assert msg["camera"] == "entrada"
+    assert msg["epoch"] == 7
+    assert msg["codec"] == "h264"
+    assert base64.b64decode(msg["extradata"]) == b"\x00\x00\x01\x67sps"
+    assert (msg["width"], msg["height"]) == (704, 480)
+
+
+def test_live_survives_a_camera_that_reports_no_extradata():
+    # Many RTSP cameras send SPS/PPS in-band with every keyframe and leave
+    # codec_context.extradata empty. That is not an error, and the frame
+    # must still open the view.
+    msg = json.loads(live("entrada", 1, b"", 704, 480))
+    assert msg["extradata"] == ""
+
+
+def test_live_end_says_why():
+    msg = json.loads(live_end(7, "timeout"))
+    assert msg == {"type": "live_end", "epoch": 7, "reason": "timeout"}
+
+
+def test_live_end_refuses_a_reason_nobody_defined():
+    with pytest.raises(ProtocolError):
+        live_end(7, "because")
+
+
+def test_live_frame_stamps_the_epoch_in_four_big_endian_bytes():
+    payload = live_frame(7, b"\x00\x00\x01\x65payload")
+    assert payload[:4] == (7).to_bytes(4, "big")
+    assert payload[4:] == b"\x00\x00\x01\x65payload"
+
+
+def test_live_frame_refuses_a_packet_over_the_cap():
+    # The socket is an unauthenticated local listener; bytes need no path
+    # validation, so the size cap is the guard that replaces it.
+    with pytest.raises(ProtocolError):
+        live_frame(7, b"\x00" * (MAX_LIVE_FRAME_BYTES + 1))
