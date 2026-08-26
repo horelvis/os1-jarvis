@@ -66,6 +66,9 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_DUMP` | Write every closed utterance to this directory as a WAV. When a transcription comes back as nonsense, nothing else tells you whether the audio was bad or the model was. |
 | `SAMANTHA_WIDGET_PHOTO` | Show these photos (comma-separated paths) two seconds after starting, exactly as if the gateway had pushed them. The counterpart of `SAMANTHA_WIDGET_SAY` for the half of him you can see: the band, the click and the fade without needing a live turn. |
 | `SAMANTHA_WIDGET_LIVE` | Feed the band this video file as if the gateway had pushed it. The counterpart of `SAMANTHA_WIDGET_PHOTO` for the half of him that moves — the decoder, the band and the input region, with no gateway and no camera. |
+| `SAMANTHA_WIDGET_WAKE_WORD` | The name he answers to. `jarvis` by default; **empty turns the wake word off entirely**, which is how he behaved before 2026-08-26 — everything heard is for him. Matching is deliberately loose: Whisper renders it as "Carbis", "Harvish", "Jervis" and "Harvies", all measured, and an exact match would ignore four of five. |
+| `SAMANTHA_WIDGET_WAKE_WINDOW` | Seconds after he answers during which the next sentence needs no name (default 30). Each answer pushes it out; sentences inside it do not. |
+| `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. The only way to photograph the struck-through glyphs, since there is no way to send this window a click. |
 
 ### The models it needs
 
