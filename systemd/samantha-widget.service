@@ -21,6 +21,19 @@ Environment=PYTHONUNBUFFERED=1
 # installed IN the venv (pip install --ignore-installed), so the user
 # site directory is simply switched off.
 Environment=PYTHONNOUSERSITE=1
+
+# The character given to the VOICE, not to the words: CosyVoice takes a
+# system prompt before <|endofprompt|> that conditions delivery (§2.6).
+# Empty means the server's own "You are a helpful assistant.", which is
+# a personality too — just nobody's. Asked for by the user 2026-08-26:
+# he speaks Spanish, and he speaks it from the south.
+#
+# Kept SHORT deliberately. CosyVoice warns in its own log when the text
+# to say is shorter than the prompt — "too short than prompt text …
+# this may lead to bad performance" — and his lines are short ("A
+# mandar, señor"). The prompt is prepended to the reference transcript,
+# so every word here is a word the synthesiser weighs against his.
+Environment="SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT=Español con acento andaluz, cercano y relajado."
 # Hermes' markers.py and tts.py, the same way Hermes/run-gateway.sh
 # reaches them. Without this she runs and is mute: speech.py falls back
 # to a local copy of has_unclosed_tag, so the only symptom is silence.
