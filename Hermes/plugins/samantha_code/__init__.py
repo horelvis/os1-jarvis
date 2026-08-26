@@ -1,73 +1,47 @@
-"""samantha-code — the coding assistant, watched live on the strip.
+"""samantha-code — the assistant's work, visible on the strip.
 
-Hermes can already CALL the assistant: `a2a_call` reaches the bridge and
-comes back with the answer. What it cannot do is show the work while it
-happens, because that call waits for the end.
+**It registers no tools, and that is the design.** An earlier version of
+this plugin offered one, and the model called it with no arguments at
+all — `args={}`, `user_task="None"`, measured six times, which is the
+same failure §4 records for `mirar`. Delegating coding is done through
+the skills Hermes already ships (`claude-code`, `opencode`, `codex`),
+which are written on `terminal`, and the model fills THOSE arguments
+correctly.
 
-So this plugin registers one tool, and its whole job is the difference
-between those two: it opens the bridge's `message/stream`, pushes every
-line the assistant writes into the strip's terminal as it is written,
-and hands the model only the sentence worth saying. The picture on the
-strip and the words in his mouth travel separately — the same split the
-camera already makes (§12, 2026-08-25), for the same reason.
+So this plugin does the one thing those skills cannot: show the work
+while it happens. `terminal` returns when the command ends, so a task
+that takes four minutes is four minutes of nothing on screen. The
+wrapper on the gateway's PATH (`Hermes/bin/claude`) tees a
+non-interactive run into a file; this follows that file and pushes each
+line into the strip's terminal.
 
-It is small on purpose. It does not run the assistant, choose the
-project, or know what Claude Code is; the bridge does all of that behind
-A2A, which is what keeps another assistant a configuration change.
+Nothing here sits in the path of a turn. If the file never appears the
+thread sleeps; if the strip is not connected the lines are dropped. The
+assistant works either way — what is lost is watching it.
 """
 
 from __future__ import annotations
 
+import os
 import threading
-from typing import Any
+from pathlib import Path
 
 from loguru import logger
 
-from .sse import events, lines_of, state_of
+from .live import DEFAULT_LIVE, follow, summarise
 
-NAME = "trabajar"
-TOOLSET = "codigo"
-EMOJI = "🛠"
-
-DESCRIPTION = (
-    "Encarga una tarea de programación al asistente de código y enséñala "
-    "en la pantalla mientras la hace. Di en qué proyecto es y qué hay que "
-    "hacer. Úsala en vez de a2a_call cuando el usuario esté delante: la "
-    "diferencia es que ve el trabajo."
-)
-
-SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "tarea": {
-            "type": "string",
-            "description": (
-                "Qué hay que hacer, con el proyecto dentro. "
-                "Ej: 'en barndoor, arregla el log de la cámara'."
-            ),
-        }
-    },
-    "required": ["tarea"],
-}
-
-# Where the bridge is. Not configurable on purpose, for now: it is a
-# localhost service this repo starts itself
-# (`systemd/samantha-code-a2a.service`), and a setting naming it would
-# be one more thing to keep in step with the unit.
-BRIDGE_URL = "http://127.0.0.1:9910"
-
-# A coding task is minutes, not seconds. The stream ends when the task
-# reaches a terminal state; this is the ceiling under which it must.
-TIMEOUT = 1800.0
-
-# The kiosk platform, hard-coded for the same reason `samantha_vision`
-# hard-codes it: a setting naming the platform would let a picture — or
-# here, the contents of somebody's repository — be routed somewhere
-# else by a config change (§12, 2026-08-25).
+# The kiosk platform, hard-coded for the reason `samantha_vision`
+# hard-codes it: a setting naming the platform would let the contents of
+# somebody's repository be routed elsewhere by a config change
+# (§12, 2026-08-25).
 KIOSK_PLATFORM = "samantha_kiosk"
 
+# Clears the terminal: erase display, cursor home. Sent at the start of
+# a run so one task's output does not sit under the next one's.
+CLEAR = "\x1b[2J\x1b[H"
 
-async def _adapter():
+
+def _adapter():
     """The strip's adapter, or None."""
     try:
         from gateway.config import Platform
@@ -81,168 +55,61 @@ async def _adapter():
         return None
 
 
-async def push_console(text: str) -> bool:
-    """Write one line into the strip's terminal. Never raises."""
-    try:
-        adapter = await _adapter()
-        if adapter is None:
-            return False
-        return bool(await adapter.push_console(text))
-    except Exception:
-        return False
+def _push(text: str) -> None:
+    """Put one line on the strip, from a thread that is not the loop's.
 
-
-def _loop():
-    """The gateway's own event loop, the one that lives between turns.
-
-    The same trap `samantha_vision.live` documents and paid for: the
-    loop a turn brings with it stops running when the turn ends, so
-    anything scheduled onto it afterwards is silently dropped.
+    Scheduled onto the GATEWAY's loop, never the caller's: this thread
+    outlives every turn, and the loop a turn brings with it stops the
+    moment that turn ends — the bug that cost the live camera a day
+    (§12, 2026-08-26).
     """
+    import asyncio
+
+    adapter = _adapter()
+    if adapter is None:
+        return
+    loop = getattr(adapter, "loop", None)
+    push = getattr(adapter, "push_console", None)
+    if loop is None or push is None or loop.is_closed():
+        return
     try:
-        from gateway.config import Platform
-        from gateway.run import _gateway_runner_ref
-
-        runner = _gateway_runner_ref()
-        if runner is None:
-            return None
-        adapter = getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
-        return getattr(adapter, "loop", None)
-    except Exception:
-        return None
+        asyncio.run_coroutine_threadsafe(push(text), loop)
+    except RuntimeError:
+        pass
 
 
-def make_handler(url: str = BRIDGE_URL, timeout: float = TIMEOUT):
-    """Build the `trabajar` handler. It never raises at the model."""
-
-    async def handler(args: Any = None, **kwargs: Any) -> str:
-        # Hermes hands a tool its arguments in more than one shape: the
-        # whole dict as the first positional (which `mirar` has always
-        # known), or by keyword. Reading only one is how this returned
-        # "¿qué hay que hacer?" in 0.00s while the model was holding a
-        # perfectly good task — measured 2026-08-26, and the same trap
-        # `ver_en_vivo` fell into the same day.
-        # One line per call, and it is what found the wall this tool is
-        # currently stuck against: the model calls it with NOTHING —
-        # `args={}`, and Hermes' own `user_task` arrives as the string
-        # "None". Kept because the day somebody changes the model or the
-        # schema, this line says immediately whether that moved.
-        logger.info(
-            f"samantha-code: args={type(args).__name__}:{str(args)[:80]} "
-            f"user_task={str(kwargs.get('user_task'))[:60]}"
-        )
-        task = ""
-        for candidate in (args, kwargs):
-            if isinstance(candidate, dict):
-                for key in ("tarea", "task", "prompt", "message"):
-                    value = candidate.get(key)
-                    if value:
-                        task = str(value).strip()
-                        break
-            elif isinstance(candidate, str) and candidate.strip():
-                task = candidate.strip()
-            if task:
-                break
-        if not task:
-            # Measured 2026-08-26: the model calls this with NO arguments
-            # (`args={}`, kwargs `task_id session_id user_task`) and the
-            # tool answered "¿qué hay que hacer?" in 0.00s while the
-            # request was sitting right there. Hermes hands every tool
-            # the user's own sentence as `user_task`; when the model
-            # forgets to fill the schema, that is the task.
-            task = str(kwargs.get("user_task") or "").strip()
-        if not task:
-            return "¿Qué hay que hacer, señor, y en qué proyecto?"
-
-        import asyncio
-
-        payload = {
-            "jsonrpc": "2.0",
-            "id": "1",
-            "method": "message/stream",
-            "params": {
-                "message": {
-                    "messageId": "m1",
-                    "role": "ROLE_USER",
-                    "parts": [{"kind": "text", "text": task}],
-                }
-            },
-        }
-
-        spoken: list[str] = []
-        failed = threading.Event()
-        # The GATEWAY's loop, not the turn's — `_loop()` exists for this
-        # and the first version of this line did not use it. The turn's
-        # loop is alive while the tool awaits, so it would have worked
-        # by accident today and gone quiet the first time anything
-        # outlived its turn.
-        loop = _loop() or asyncio.get_running_loop()
-
-        def read() -> None:
-            """Drain the stream on a worker thread.
-
-            `urllib` blocks, and the gateway's loop must not: a coding
-            task holds this open for minutes and everything else — the
-            cameras, a reminder, the next thing said out loud — runs on
-            that loop.
-            """
-            seen = pushed = 0
-            try:
-                for event in events(url, payload, timeout):
-                    seen += 1
-                    destination, text = lines_of(event)
-                    if not text:
-                        continue
-                    if destination == "voice":
-                        spoken.append(text)
-                        continue
-                    if loop is None:
-                        # The gateway's loop, not the turn's. Without it
-                        # nothing can be scheduled and the console stays
-                        # empty with no other symptom — the shape of the
-                        # bug the live camera had (§12, 2026-08-26).
-                        logger.warning("samantha-code: sin loop, la consola no verá nada")
-                    else:
-                        asyncio.run_coroutine_threadsafe(push_console(text), loop)
-                        pushed += 1
-                    state = state_of(event)
-                    if state.endswith("FAILED"):
-                        failed.set()
-                logger.info(
-                    f"samantha-code: {seen} eventos, {pushed} a la consola, "
-                    f"{len(spoken)} dichos"
-                )
-            except Exception as exc:
-                logger.warning(f"samantha-code: stream failed — {exc}")
-                failed.set()
-
-        await asyncio.to_thread(read)
-
-        if not spoken:
-            return (
-                "El asistente no ha llegado a decir nada, señor."
-                if failed.is_set()
-                else "Hecho, sin novedades que contar."
-            )
-        # The last thing it said is the result; the rest were questions
-        # asked and answered along the way.
-        return spoken[-1]
-
-    return handler
+def watch(path: Path, stop: threading.Event) -> None:
+    """Follow the file and put what appears on the strip."""
+    logger.info(f"samantha-code: mirando {path}")
+    for kind, text in follow(path, stop.is_set):
+        if kind == "start":
+            _push(CLEAR)
+            continue
+        if kind == "end":
+            continue
+        line = summarise(text)
+        if line:
+            _push(line + "\n")
 
 
 def register(ctx):
-    """Register the tool. Pure — nothing here touches the network."""
+    """Start the follower. Pure: nothing here touches the network.
+
+    The thread is a daemon and owns its own failure, like the camera
+    threads: a plugin that took the gateway down because a log file went
+    away would be a poor trade for a convenience.
+    """
+    path = Path(os.environ.get("SAMANTHA_CODE_LIVE", "") or DEFAULT_LIVE).expanduser()
+    stop = threading.Event()
     try:
-        ctx.register_tool(
-            name=NAME,
-            toolset=TOOLSET,
-            schema=SCHEMA,
-            description=DESCRIPTION,
-            handler=make_handler(),
-            emoji=EMOJI,
-            is_async=True,
-        )
-        logger.info("samantha-code: registrada la herramienta 'trabajar'")
-    except Exception as exc:
-        logger.warning(f"samantha-code: no se pudo registrar — {exc}")
+        ctx.on_unload(stop.set)
+    except Exception:
+        pass
+
+    def run() -> None:
+        try:
+            watch(path, stop)
+        except Exception as exc:
+            logger.warning(f"samantha-code: el seguidor se detuvo — {exc}")
+
+    threading.Thread(target=run, name="samantha-code-live", daemon=True).start()

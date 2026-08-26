@@ -1,0 +1,43 @@
+#!/bin/bash
+# `claude`, with a copy of everything it says going to the strip.
+#
+# The official skills run the assistant as
+# `terminal(command="claude -p '…'")`, and `terminal` returns when the
+# command ends — so the work is invisible until it is finished. This
+# wrapper is what makes it visible: it is first on the gateway's PATH,
+# so every `claude` JARVIS runs goes through it, and it tees the output
+# into a file that `samantha_code` follows and pushes onto the strip.
+#
+# Doing it here rather than asking the model to redirect: the model does
+# not reliably fill in a tool's arguments (measured 2026-08-26, six
+# calls), and a feature that depends on it remembering a pipe is a
+# feature that works in a demo.
+#
+# stdout stays byte-for-byte what the real binary printed, because
+# `terminal` hands that back to Hermes as the tool result.
+set -o pipefail
+
+REAL="${SAMANTHA_CLAUDE_REAL:-$HOME/.local/bin/claude}"
+LIVE="${SAMANTHA_CODE_LIVE:-$HOME/.samantha/code-live.log}"
+
+# A non-interactive run is the only one worth watching: an interactive
+# session has a terminal of its own, and teeing it would fight the TUI.
+watched=false
+for arg in "$@"; do
+  case "$arg" in
+    -p|--print) watched=true ;;
+  esac
+done
+
+if [ "$watched" = false ]; then
+  exec "$REAL" "$@"
+fi
+
+mkdir -p "$(dirname "$LIVE")"
+# The markers are the protocol between this and the plugin: one clears
+# the console and starts showing, the other says the work is over.
+printf '\036START %s\n' "$(date '+%H:%M:%S')" >> "$LIVE"
+"$REAL" "$@" 2>&1 | tee -a "$LIVE"
+status=${PIPESTATUS[0]}
+printf '\036END %s\n' "$status" >> "$LIVE"
+exit "$status"

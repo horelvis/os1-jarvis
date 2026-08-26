@@ -27,6 +27,34 @@ from stream import CONSOLE, VOICE, Event, classify, parse
 # forever.
 SILENCE_TIMEOUT = 900.0
 
+# A copy of what the assistant says, for whoever is watching. The
+# gateway's `samantha_code` plugin follows this file and puts each line
+# on the strip; nothing else reads it, and a failure to write it costs
+# the view and never the work.
+#
+# Written HERE rather than by the wrapper on the gateway's PATH, because
+# this is where the work actually happens: measured 2026-08-26, the
+# model reaches for `a2a_call` — this bridge — rather than for the
+# skills that shell out to `claude`, so a wrapper around the binary sat
+# unused while the assistant ran.
+LIVE_LOG = Path(
+    os.environ.get("SAMANTHA_CODE_LIVE", "")
+    or (Path.home() / ".samantha" / "code-live.log")
+).expanduser()
+
+START = "\x1eSTART"
+END = "\x1eEND"
+
+
+def _tee(text: str) -> None:
+    """Append one line to the live log. Never raises."""
+    try:
+        LIVE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LIVE_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    except OSError:
+        pass
+
 
 @dataclass
 class Run:
@@ -64,6 +92,7 @@ def run(
     as the user, which is the whole point and also the reason the
     project root is checked before anything gets here.
     """
+    _tee(f"{START} {cwd.name}")
     command = assistant.command(prompt)
     process = subprocess.Popen(
         command,
@@ -85,14 +114,20 @@ def run(
                     # never worth saying.
                     text = line.strip()
                     if text:
+                        _tee(text[:200])
                         yield Event(CONSOLE, text[:200])
                     continue
-                yield from classify(event)
+                for produced in classify(event):
+                    if produced.destination == CONSOLE:
+                        _tee(produced.text)
+                    yield produced
             else:
                 text = line.rstrip()
                 if text:
+                    _tee(text[:200])
                     yield Event(CONSOLE, text[:200])
     finally:
+        _tee(f"{END} 0")
         process.stdout.close() if process.stdout else None
         process.wait(timeout=30)
 

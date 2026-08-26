@@ -54,5 +54,12 @@ fi
 export HERMES_HOME="$REPO_ROOT/.hermes/home"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
+# `Hermes/bin` first, so the `claude` the assistant skills run is our
+# wrapper: it passes stdout through untouched and tees a copy into
+# ~/.samantha/code-live.log, which `samantha_code` follows and puts on
+# the strip. Without this the work is invisible until `terminal`
+# returns, which for a real task is minutes of nothing on screen.
+export PATH="$REPO_ROOT/Hermes/bin:$PATH"
+
 [ $# -eq 0 ] && set -- gateway
 exec "$HERMES_BIN" "$@"
