@@ -1,5 +1,35 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (noche II) — Se le puede escribir ✅
+
+Primera pieza del diseño de
+`docs/superpowers/specs/2026-08-26-samantha-code-design.md`, que nació
+de «vamos a conectar Hermes con Claude Code» y acabó en algo más útil de
+entrada: **un cuarto interruptor abre una línea en la tira y le escribes**.
+Enter envía y la cierra; Escape la cierra sin enviar. Lo escrito es un
+mensaje normal para JARVIS —misma sesión, mismo todo— así que sirve
+cuando hay ruido, cuando Whisper destroza un nombre, o cuando lo que
+quieres decir lleva una ruta dentro.
+
+Se saltan a propósito dos cosas del camino hablado: la palabra de
+activación (has pulsado un botón: te estás dirigiendo a él) y el filtro
+de eco (no se ha oído nada).
+
+**Tres cosas que costaron una medición cada una:** la ventana sumaba mal
+las alturas —la banda y la línea se pisaban—, GTK4 pinta el campo de un
+`Entry` en su nodo interno `text` (estilizar sólo el widget deja la caja
+gris del tema sobre el escritorio), y Escape cerraba la aplicación
+entera, que era una tecla de demostración de cuando la tira no tenía
+foco.
+
+**Y la tira ya se puede teclear desde un script:** `tools/type.py`, XTEST
+por ctypes, hermano de `click.py`. Los dos caminos de este commit se
+probaron así.
+
+**Lo que queda del diseño:** la banda como terminal para la salida del
+asistente, y el asistente de código en sí (`trabajar_en`, el proceso
+hijo, y el filtro que decide qué merece la voz: preguntas y decisiones).
+
 ## 2026-08-26 (noche) — Se le puede interrumpir, y el aviso enseña la foto ✅
 
 **El mic-gate ha salido.** El usuario lo pidió: quería poder cortarle a

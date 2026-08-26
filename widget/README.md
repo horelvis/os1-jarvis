@@ -176,7 +176,7 @@ existe, y reiniciar el gateway tampoco: la sesión vive en `state.db` y
 se reanuda tal cual. Hermes Desktop parece obedecer al instante sólo
 porque abre una sesión propia.
 
-### The three switches
+### The four switches
 
 At the right end of the strip, in the wave's own colour: his ears, his
 voice, and the door.
@@ -185,6 +185,7 @@ voice, and the door.
 |---|---|
 | microphone | Stops listening. Frames are dropped rather than the stream closed — closing PortAudio from its own callback is the segfault §2.8 is written around. Press again to hear. |
 | speaker | Stops him talking, at once, mid-sentence. He still listens. Clauses are dropped rather than queued, so unmuting never says a minute-old answer out loud. |
+| line | Opens a line you type at him in. Enter sends and closes it, Escape closes it without sending. What it sends is a plain message — same session as the spoken path, minus the wake word and the echo filter. |
 | cross | Closes him. **Two presses within three seconds** — the first arms it and the cross lights up. He comes back only with `systemctl --user start samantha-widget`. |
 
 To press one from a script — the strip has no keyboard shortcut and
@@ -192,5 +193,6 @@ To press one from a script — the strip has no keyboard shortcut and
 
 ```bash
 DISPLAY=:1 xwininfo -name "Samantha" | grep -E "Absolute|Width"
-DISPLAY=:1 .venv/bin/python tools/click.py 1309 1032   # the microphone, at 900x96 centred
+DISPLAY=:1 .venv/bin/python tools/click.py 1345 1032          # the typed line, at 900x96 centred
+DISPLAY=:1 .venv/bin/python tools/type.py "hola" --enter      # and type into it
 ```
