@@ -22,18 +22,24 @@ Environment=PYTHONUNBUFFERED=1
 # site directory is simply switched off.
 Environment=PYTHONNOUSERSITE=1
 
-# The character given to the VOICE, not to the words: CosyVoice takes a
-# system prompt before <|endofprompt|> that conditions delivery (§2.6).
-# Empty means the server's own "You are a helpful assistant.", which is
-# a personality too — just nobody's. Asked for by the user 2026-08-26:
-# he speaks Spanish, and he speaks it from the south.
+# NO voice prompt here, and it cost a measurement to learn why.
 #
-# Kept SHORT deliberately. CosyVoice warns in its own log when the text
-# to say is shorter than the prompt — "too short than prompt text …
-# this may lead to bad performance" — and his lines are short ("A
-# mandar, señor"). The prompt is prepended to the reference transcript,
-# so every word here is a word the synthesiser weighs against his.
-Environment="SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT=Español con acento andaluz, cercano y relajado."
+# §2.6 describes `SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT` as conditioning
+# delivery, and the server does prepend it before <|endofprompt|>. But
+# the call is `inference_zero_shot`, where `prompt_text` must be the
+# TRANSCRIPT OF THE REFERENCE CLIP — that pairing is what the voice is
+# cloned from. Text prepended to it no longer describes the audio, the
+# clone drifts, and CosyVoice says so on every line:
+#
+#   synthesis text "aquí estaré." too short than prompt text
+#   "Español con acento andaluz, cercano y relajado.<|endofprompt|>…"
+#
+# Set for an Andalusian accent on 2026-08-26 and removed the same
+# evening: the accent did not change (that comes from the clip) and the
+# user reported the voice had turned female. Conditioning delivery needs
+# `inference_instruct2`, which takes the instruction and the reference
+# wav as separate arguments — the server already exposes it; the client
+# does not use it.
 # Hermes' markers.py and tts.py, the same way Hermes/run-gateway.sh
 # reaches them. Without this she runs and is mute: speech.py falls back
 # to a local copy of has_unclosed_tag, so the only symptom is silence.
