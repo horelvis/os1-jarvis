@@ -74,46 +74,40 @@ window decoration {{
 /* The line you type at him in. Terracotta text on the desktop showing
    through, like everything else here: it is part of the strip, not a
    dialog that landed on it. */
-/* Both the entry AND its inner `text` node: GTK4 paints the field on
-   the child, so styling only the widget leaves the theme's grey box
-   sitting on the desktop. Measured by looking at it, 2026-08-26. */
-.samantha-prompt,
-.samantha-prompt > text {{
-  /* Transparent, like everything else here. The theme paints a grey
-     field with an inset shadow otherwise, and a grey box on the desktop
-     is a dialog that landed on the strip rather than part of it. */
-  background: rgba(0, 0, 0, 0.30);
-  background-image: none;
-  color: {TERRACOTTA};
-  caret-color: {TERRACOTTA};
-  border: none;
-  box-shadow: none;
-  outline: none;
-  min-height: 0;
-}}
-
+/* The typed line is a real `Gtk.Entry`, and since 2026-08-26 it LOOKS
+   like one: the theme paints the field, the border and the focus ring,
+   and this only sets the colour of the text and how much room it takes.
+   An earlier version stripped all of that to match the strip, and the
+   result read as something drawn rather than something you type in —
+   "¿no puedes usar un input box real?" */
 .samantha-prompt {{
   font-size: 15px;
-  padding: 7px 12px;
   margin: 0 16px 8px 16px;
-  /* A box, not just a line. The first version drew only an underline
-     and the user could see nothing but the letters floating on the
-     desktop (2026-08-26). The border says where the field is; the fill
-     is barely there, enough to keep terracotta legible over a light
-     wallpaper without becoming a dialog. */
-  border: 1px solid {LINE};
-  border-radius: 8px;
+}}
+
+.samantha-prompt,
+.samantha-prompt > text {{
+  /* Dark, so the field belongs to the strip instead of being a white
+     hole in it — terracotta text on white was what the theme gave and
+     it does not go together (user, 2026-08-26). The theme still draws
+     the border and the focus ring, so it still reads as the real entry
+     it is. */
+  background-color: #1b1013;
+  background-image: none;
+}}
+
+.samantha-prompt > text {{
+  /* White, not terracotta. The colour is the strip's signature and it
+     belongs to the wave and the icons; in a dark field at 15px it is
+     just hard to read (user, 2026-08-26). The caret keeps it — one
+     terracotta detail, where it helps you find the cursor. */
+  color: #f2ece9;
+  caret-color: {TERRACOTTA};
 }}
 
 .samantha-prompt > text > placeholder {{
-  color: {TERRACOTTA};
-  opacity: 0.45;
+  color: #f2ece9;
+  opacity: 0.35;
 }}
 
-.samantha-prompt:focus,
-.samantha-prompt:focus-within {{
-  outline: none;
-  box-shadow: none;
-  border: none;
-}}
 """

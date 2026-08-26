@@ -19,7 +19,7 @@ from .geometry import placement_is_wrong, strip_rect  # noqa: E402
 
 # How much taller the strip gets while the typed line is open. One line
 # of text with room to breathe — it is an entry, not a message box.
-PROMPT_HEIGHT = 44
+PROMPT_HEIGHT = 38
 
 # How long to leave the window manager before checking it obeyed, and
 # how many times to insist. Three tries at 120 ms is a third of a

@@ -34,7 +34,7 @@ from gi.repository import Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 from . import theme  # noqa: E402
 from .bars_model import BarsModel, WaveformModel  # noqa: E402
-from .switches import CLOSE, MIC, TEXT, Switches  # noqa: E402
+from .switches import CLOSE, SIZE as SWITCH_SIZE, Switches  # noqa: E402
 from .wave_model import WaveModel, WaveState  # noqa: E402
 
 _LINE_WIDTH = 2.0
@@ -64,8 +64,18 @@ _HORIZONTAL_PAD_PX = 6.0
 # most a strip may ask for.
 _SWITCH_ON = 0.85
 _SWITCH_OFF = 0.28
-# Thickness of the strike, and of the microphone's stand.
-_SWITCH_STROKE = 2.0
+# The themed icons, by switch and state. `-symbolic` on purpose: those
+# are recoloured at paint time, so they arrive in the strip's own
+# terracotta rather than in the theme's grey. The muted variants mean
+# "off" needs no strike drawn over it.
+_ICON_NAMES = {
+    ("mic", True): "audio-input-microphone-symbolic",
+    ("mic", False): "microphone-sensitivity-muted-symbolic",
+    ("voice", True): "audio-volume-high-symbolic",
+    ("voice", False): "audio-volume-muted-symbolic",
+    ("text", True): "input-keyboard-symbolic",
+    ("close", True): "window-close-symbolic",
+}
 
 
 class WaveArea(Gtk.Widget):
@@ -85,6 +95,8 @@ class WaveArea(Gtk.Widget):
         # answers a press. `on_switch` is set by `__main__.py`, which is
         # the only place that knows how to actually stop a microphone.
         self.switches = Switches()
+        # Themed icons, looked up on first paint (see `_icon`).
+        self._icons: dict[str, object] = {}
         self.on_switch: Callable[[str, bool], None] = lambda _name, _on: None
         press = Gtk.GestureClick()
         press.connect("pressed", self._on_pressed)
@@ -191,7 +203,7 @@ class WaveArea(Gtk.Widget):
         stroke.set_line_join(Gsk.LineJoin.ROUND)
         snapshot.append_stroke(builder.to_path(), stroke, self._colour)
 
-    # ── the two switches ──────────────────────────────────────────────
+    # ── the four switches ─────────────────────────────────────────────
 
     def _reserved(self, width: float, height: float) -> float:
         """Width the switches take at the right, or zero when there are none."""
@@ -200,166 +212,82 @@ class WaveArea(Gtk.Widget):
             return 0.0
         return width - boxes[0].x
 
-    def _fill(self, snapshot: Gtk.Snapshot, alpha: float, rect) -> None:
-        """One rectangle, in the strip's colour at `alpha`."""
-        colour = Gdk.RGBA()
-        colour.red, colour.green, colour.blue = (
-            self._colour.red,
-            self._colour.green,
-            self._colour.blue,
-        )
-        colour.alpha = alpha
-        snapshot.append_color(colour, rect)
+    def _icon(self, name: str):
+        """The themed icon for `name`, looked up once and kept.
+
+        Real icons rather than rectangles drawn by hand (user,
+        2026-08-26). They are `-symbolic`, so they are recoloured to the
+        strip's terracotta at paint time instead of arriving grey.
+
+        The display does not exist before the widget is realized, so the
+        lookup happens on first paint and not in `__init__`.
+        """
+        if name in self._icons:
+            return self._icons[name]
+        icon = None
+        try:
+            display = self.get_display()
+            if display is not None:
+                theme = Gtk.IconTheme.get_for_display(display)
+                icon = theme.lookup_icon(
+                    name,
+                    None,
+                    int(SWITCH_SIZE),
+                    1,
+                    Gtk.TextDirection.NONE,
+                    Gtk.IconLookupFlags.PRELOAD,
+                )
+        except Exception:
+            # A missing icon theme costs the glyphs, never the wave.
+            icon = None
+        self._icons[name] = icon
+        return icon
 
     def _snapshot_switches(
         self, snapshot: Gtk.Snapshot, width: float, height: float
     ) -> None:
-        """Draw the microphone and the speaker, on or off.
-
-        Rectangles only, like the bars: `append_color` needs no path and
-        therefore no Cairo, which is the trap this machine is built
-        around (CLAUDE.md §2.3). A microphone is a capsule over a stand;
-        a speaker is a block with a step. Neither is a picture of the
-        thing — at 26 px nothing is — but the pair is distinguishable at
-        a glance, which is all a switch has to be.
-        """
+        """Draw the four switches, each in the state it is in."""
         for box in self.switches.boxes(width, height):
             on = self.switches.is_on(box.name)
-            alpha = _SWITCH_ON if on else _SWITCH_OFF
-            unit = box.size / 8.0
-            if box.name == MIC:
-                # The capsule, then the stand under it.
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit * 2.5, box.y + unit, unit * 3, unit * 4
-                    ),
-                )
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit * 3.5, box.y + unit * 5, unit, unit * 2
-                    ),
-                )
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit * 2, box.y + unit * 6.5, unit * 4, _SWITCH_STROKE
-                    ),
-                )
-            elif box.name == TEXT:
-                # Two lines of text and a cursor: "write here". Drawn
-                # lit always — it is an action, not a sense with a state.
-                for row, (offset, length) in enumerate(((2.0, 4.5), (4.0, 3.0))):
-                    self._fill(
-                        snapshot,
-                        alpha,
-                        Graphene.Rect().init(
-                            box.x + unit * 1.5,
-                            box.y + unit * offset,
-                            unit * length,
-                            _SWITCH_STROKE,
-                        ),
-                    )
-                    del row
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit * 6.2, box.y + unit * 1.5, _SWITCH_STROKE, unit * 5
-                    ),
-                )
+            name = _ICON_NAMES.get((box.name, on)) or _ICON_NAMES.get((box.name, True))
+            if name is None:
                 continue
-            elif box.name == CLOSE:
-                self._snapshot_cross(snapshot, box, alpha)
-                continue
+            colour = Gdk.RGBA()
+            colour.red, colour.green, colour.blue = (
+                self._colour.red,
+                self._colour.green,
+                self._colour.blue,
+            )
+            if box.name == CLOSE and self.switches.armed(time.monotonic()):
+                colour.alpha = 1.0
             else:
-                # The speaker: a small block, and a taller one beside it.
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit, box.y + unit * 3, unit * 2, unit * 2
-                    ),
-                )
-                self._fill(
-                    snapshot,
-                    alpha,
-                    Graphene.Rect().init(
-                        box.x + unit * 3, box.y + unit * 1.5, unit * 2, unit * 5
-                    ),
-                )
-                if on:
-                    # Two ticks of sound coming out of it. They are what
-                    # disappears when he is told to be quiet, so they
-                    # carry the state as much as the dimming does.
-                    self._fill(
-                        snapshot,
-                        alpha,
-                        Graphene.Rect().init(
-                            box.x + unit * 5.6,
-                            box.y + unit * 3,
-                            _SWITCH_STROKE,
-                            unit * 2,
-                        ),
-                    )
-                    self._fill(
-                        snapshot,
-                        alpha,
-                        Graphene.Rect().init(
-                            box.x + unit * 6.8,
-                            box.y + unit * 2,
-                            _SWITCH_STROKE,
-                            unit * 4,
-                        ),
-                    )
-            if not on:
-                # Struck through. Dimming alone is a difference you have
-                # to remember; a bar across it is one you can see.
-                self._fill(
-                    snapshot,
-                    _SWITCH_ON,
-                    Graphene.Rect().init(
-                        box.x + unit,
-                        box.y + box.size / 2 - _SWITCH_STROKE / 2,
-                        box.size - unit * 2,
-                        _SWITCH_STROKE,
-                    ),
-                )
+                colour.alpha = _SWITCH_ON if on else _SWITCH_OFF
 
-    def _snapshot_cross(self, snapshot: Gtk.Snapshot, box, alpha: float) -> None:
-        """The close switch: two bars crossed, brighter once armed.
-
-        Rotated, which nothing else on the strip is: `append_color` only
-        takes axis-aligned rectangles, and a cross that is not rotated
-        reads as a plus sign — "add", the opposite of what it does.
-        `save`/`restore` around it so the rotation cannot leak into
-        whatever is drawn next.
-        """
-        armed = self.switches.armed(time.monotonic())
-        unit = box.size / 8.0
-        length = box.size - unit * 3
-        for angle in (45.0, -45.0):
+            icon = self._icon(name)
             snapshot.save()
-            snapshot.translate(
-                Graphene.Point().init(box.x + box.size / 2, box.y + box.size / 2)
-            )
-            snapshot.rotate(angle)
-            self._fill(
-                snapshot,
-                _SWITCH_ON if armed else alpha,
-                Graphene.Rect().init(
-                    -length / 2, -_SWITCH_STROKE / 2, length, _SWITCH_STROKE
-                ),
-            )
+            snapshot.translate(Graphene.Point().init(box.x, box.y))
+            try:
+                if icon is None:
+                    raise ValueError("no icon")
+                icon.snapshot_symbolic(snapshot, box.size, box.size, [colour])
+            except Exception:
+                # No theme, or a paintable that is not symbolic: a plain
+                # square still shows there is something to press.
+                snapshot.append_color(
+                    colour, Graphene.Rect().init(0, 0, box.size, box.size)
+                )
             snapshot.restore()
 
     def _on_pressed(
-        self, _gesture: Gtk.GestureClick, _n: int, x: float, y: float
+        self, _gesture: Gtk.GestureClick, n_press: int, x: float, y: float
     ) -> None:
+        if n_press > 1:
+            # A double click emits `pressed` again with n_press=2, and
+            # the close switch COUNTS presses — two of them shut him
+            # down. Without this, double-clicking it skips the
+            # confirmation entirely. Measured 2026-08-26: three
+            # "interruptor" lines from one click.
+            return
         action = self.switches.press(
             x,
             y,
