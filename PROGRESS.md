@@ -1,5 +1,37 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (noche) — Se le puede interrumpir, y el aviso enseña la foto ✅
+
+**El mic-gate ha salido.** El usuario lo pidió: quería poder cortarle a
+media frase, y no se puede interrumpir a quien no escucha.
+
+**El cancelador de eco estaba puesto y nadie lo usaba.** El módulo de
+PipeWire estaba cargado y bien enlazado —micro USB a
+`echo-cancel-capture`, `echo-cancel-playback` al altavoz— pero los
+dispositivos por defecto apuntaban a los crudos, así que el widget
+capturaba y reproducía **por fuera**. Medido con su propio clip: micro
+crudo RMS 0.083, salida del cancelador 0.037. Apuntados los defaults al
+cancelador (`wpctl set-default`, confirmado en `pw-link`), su frase
+**seguía** apareciendo en la transcripción. El altavoz estaba además
+amplificado a 1.53; ahora a 0.6.
+
+**Así que la segunda línea es de texto, no de audio** (`echo.py`): el
+widget sabe exactamente qué acaba de decir, y cualquier tramo de la
+transcripción que coincida con una frase suya de los últimos 45 s se
+recorta. Lo demás que se dijo en la sala sobrevive. Medido antes y
+después con la misma frase: 18 s de su propia voz en la transcripción
+antes, «Buenas.» después.
+
+Lo que no puede hacer es separar a una persona que diga sus mismas
+palabras a la vez, y no lo intenta. Ese es el precio de poder
+interrumpirle.
+
+**Y antes, esa misma tarde:** el aviso de cámara ya enseña la captura
+del instante (verificado con el reloj de la imagen coincidiendo con el
+segundo del aviso), las palabras dejaron de cortarse a media frase
+(0,7 s → 1,2 s de silencio), tiene buscador —Hermes ya traía proveedores
+sin clave— y ningún turno puede irse en bucle (`agent.max_turns: 25`).
+
 ## 2026-08-26 (tarde III) — Vuelve la regla de BarnDoor, y un techo por turno ✅
 
 **Quitada la escalada de las alertas.** Lo que le hacía callarse era
