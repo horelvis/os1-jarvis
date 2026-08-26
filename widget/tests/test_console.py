@@ -3,6 +3,7 @@
 from samantha_widget.console import (
     HEIGHT,
     LINE_HEIGHT,
+    LINGER_SECONDS,
     MAX_LINE_CHARS,
     PADDING,
     Console,

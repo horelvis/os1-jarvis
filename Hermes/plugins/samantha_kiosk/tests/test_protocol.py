@@ -6,6 +6,7 @@ import pytest
 from Hermes.plugins.samantha_kiosk.protocol import (
     MAX_LIVE_FRAME_BYTES,
     ProtocolError,
+    console,
     decode_client,
     done,
     error,
@@ -149,3 +150,18 @@ def test_live_frame_refuses_a_packet_over_the_cap():
     # validation, so the size cap is the guard that replaces it.
     with pytest.raises(ProtocolError):
         live_frame(7, b"\x00" * (MAX_LIVE_FRAME_BYTES + 1))
+
+
+def test_console_lines_carry_no_end_marker_by_default():
+    frame = json.loads(console("compilando"))
+    assert frame == {"type": "console", "text": "compilando"}
+
+
+def test_the_end_of_the_work_is_a_flag_and_needs_no_text():
+    """The strip closes the console on this; the last line is separate.
+
+    A run that dies mid-sentence still ends, so the fact that it ended
+    cannot ride on what was written.
+    """
+    frame = json.loads(console("", done=True))
+    assert frame == {"type": "console", "text": "", "done": True}

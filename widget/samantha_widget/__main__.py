@@ -536,6 +536,13 @@ class SamanthaApp(Gtk.Application):
             GLib.idle_add(window.write_console, text)
 
         client.on_console = on_console
+
+        def on_console_done() -> None:
+            # Only starts the clock; the console decides when to go, and
+            # anything else arriving cancels it.
+            GLib.idle_add(window.finish_console)
+
+        client.on_console_done = on_console_done
         client.on_photo = on_photo
         client.on_live_open = on_live_open
         client.on_live_frame = on_live_frame

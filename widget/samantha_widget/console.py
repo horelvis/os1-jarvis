@@ -21,6 +21,8 @@ Two things it deliberately is not:
 
 from __future__ import annotations
 
+import os
+
 # How many lines are kept. Ten is about what fits in the height below
 # without the strip becoming a panel, and about as far back as a glance
 # is worth.
@@ -36,6 +38,16 @@ LINE_HEIGHT = 15
 # the lines that fit — 22 was one line short.
 PADDING = 34
 HEIGHT = LINE_HEIGHT * MAX_LINES + PADDING
+
+# How long it stays up after the work has finished. There has to be a
+# way out that costs nothing — a strip left at four times its height all
+# afternoon because nobody clicked is worse than one that closes while
+# you were still reading, since the work can be asked for again and the
+# desktop underneath cannot. A minute is long enough to read the closing
+# lines. A click closes it sooner (`photo_area` has done the same for a
+# photo since 2026-08-25), and any new output cancels it: output means
+# the run is alive, whatever the marker said.
+LINGER_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_CONSOLE_LINGER", "60"))
 
 # Longer than this and a line is cut: a single 4,000-character blob from
 # a tool would otherwise push everything else out of the window and wrap
@@ -53,6 +65,10 @@ class Console:
         # there is one to ask (see `window.write_console`). The constant
         # is only the guess used before the widget exists.
         self.line_height = LINE_HEIGHT
+        # When the work said it was over, or None while it is running.
+        # Not a countdown: the clock is read at each tick, so a widget
+        # that was busy elsewhere does not lose the deadline.
+        self.finished_at: float | None = None
 
     @property
     def visible(self) -> bool:
@@ -78,6 +94,11 @@ class Console:
         every caller's.
         """
         before = self.height
+        # Anything arriving means the run is alive. An `END` marker can
+        # be followed by more output — a wrapper writing after the child
+        # exits — and closing over the top of it would be a bug the user
+        # sees as flicker.
+        self.finished_at = None
         for raw in text.splitlines():
             line = raw.rstrip()
             if not line.strip():
@@ -88,10 +109,24 @@ class Console:
         del self.lines[: -self.max_lines]
         return self.height != before
 
+    def finish(self, now: float) -> None:
+        """The work is over. Start the clock that puts this away."""
+        if self.lines:
+            self.finished_at = now
+
+    def tick(self, now: float) -> bool:
+        """Let time pass. True when the strip has to change size."""
+        if self.finished_at is None:
+            return False
+        if now - self.finished_at < LINGER_SECONDS:
+            return False
+        return self.clear()
+
     def clear(self) -> bool:
         """Put it away. True when the strip has to change size."""
         before = self.height
         self.lines = []
+        self.finished_at = None
         return self.height != before
 
     def text(self) -> str:

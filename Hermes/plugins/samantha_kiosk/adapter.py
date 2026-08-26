@@ -512,9 +512,9 @@ class KioskAdapter(BasePlatformAdapter):
             return False
         return True
 
-    async def push_console(self, text: str) -> bool:
+    async def push_console(self, text: str, *, done: bool = False) -> bool:
         """Write lines into the strip's terminal. False when nothing took it."""
-        return await self._push(console(text))
+        return await self._push(console(text, done=done))
 
     async def push_live_open(
         self, camera: str, epoch: int, extradata: bytes, width: int, height: int

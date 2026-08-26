@@ -235,3 +235,41 @@ def test_an_unknown_text_type_is_still_dropped_in_silence():
 
 def test_decode_live_frame_splits_the_header():
     assert decode_live_frame((7).to_bytes(4, "big") + b"abc") == (7, b"abc")
+
+
+def test_console_lines_reach_the_console_and_do_not_end_it() -> None:
+    gw = GatewayClient()
+    lines: list[str] = []
+    ended: list[bool] = []
+    gw.on_console = lines.append
+    gw.on_console_done = lambda: ended.append(True)
+    gw._dispatch(json.dumps({"type": "console", "text": "compilando"}))
+    assert lines == ["compilando"]
+    assert ended == []
+
+
+def test_the_end_of_the_work_reaches_the_console_with_no_text() -> None:
+    """An empty frame with `done` is how the run says it is over.
+
+    The console is the one thing on the band with no end of its own — a
+    photo fades, a live view hits a ceiling — so it has to be told.
+    """
+    gw = GatewayClient()
+    lines: list[str] = []
+    ended: list[bool] = []
+    gw.on_console = lines.append
+    gw.on_console_done = lambda: ended.append(True)
+    gw._dispatch(json.dumps({"type": "console", "text": "", "done": True}))
+    assert lines == []
+    assert ended == [True]
+
+
+def test_a_last_line_and_the_end_can_arrive_together() -> None:
+    gw = GatewayClient()
+    lines: list[str] = []
+    ended: list[bool] = []
+    gw.on_console = lines.append
+    gw.on_console_done = lambda: ended.append(True)
+    gw._dispatch(json.dumps({"type": "console", "text": "— terminado", "done": True}))
+    assert lines == ["— terminado"]
+    assert ended == [True]

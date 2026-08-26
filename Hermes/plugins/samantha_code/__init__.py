@@ -55,7 +55,7 @@ def _adapter():
         return None
 
 
-def _push(text: str) -> None:
+def _push(text: str, *, done: bool = False) -> None:
     """Put one line on the strip, from a thread that is not the loop's.
 
     Scheduled onto the GATEWAY's loop, never the caller's: this thread
@@ -73,7 +73,7 @@ def _push(text: str) -> None:
     if loop is None or push is None or loop.is_closed():
         return
     try:
-        asyncio.run_coroutine_threadsafe(push(text), loop)
+        asyncio.run_coroutine_threadsafe(push(text, done=done), loop)
     except RuntimeError:
         pass
 
@@ -86,6 +86,11 @@ def watch(path: Path, stop: threading.Event) -> None:
             _push(CLEAR)
             continue
         if kind == "end":
+            # The run is over. The strip keeps the last lines up for a
+            # minute and then puts itself away — the console is the one
+            # thing on the band with no natural end of its own (a photo
+            # fades, a live view hits its ceiling), so it is told.
+            _push("", done=True)
             continue
         line = summarise(text)
         if line:

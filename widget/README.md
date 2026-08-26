@@ -71,6 +71,7 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_BARGE_RMS` | How loud the room must be, while he is speaking, before a frame may start a turn (default 0.05). This is what lets you interrupt him without him interrupting himself: his own echo has to fall below it and your voice above it. **Calibrate it against the room, not the code** — with the speaker beside the microphone his echo measured 0.178, louder than a person, and no value works; moved apart at half volume it is 0.027-0.048 against a voice at 0.054-0.088. Set it to 0 to let every frame through. |
 | `SAMANTHA_WIDGET_TRACE_MIC=1` | Log what the microphone hears while HE is speaking. The instrument for the number above. |
 | `SAMANTHA_WIDGET_SILENCE` | Seconds of quiet that end a turn (default 1.2). Lower cuts people off mid-sentence; higher makes him slower to answer. |
+| `SAMANTHA_WIDGET_CONSOLE_LINGER` | Seconds the console stays up after the work finishes, before it puts itself away (default 60). A press on it closes it sooner; `0` makes it go the moment the run ends. |
 | `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
 
 ### The models it needs

@@ -83,7 +83,7 @@ def photo(path: str, camera: str) -> str:
     return json.dumps({"type": "photo", "path": path, "camera": camera})
 
 
-def console(text: str) -> str:
+def console(text: str, *, done: bool = False) -> str:
     """Lines for the strip's terminal, server to client.
 
     The third thing the band can hold, after the photo and the live
@@ -93,8 +93,18 @@ def console(text: str) -> str:
 
     Added 2026-08-26 for the code bridge. `decode_client` is untouched —
     the strip never sends one of these.
+
+    `done` says the work is over, so the strip can put the console away
+    on its own. It is a separate flag rather than a sentinel line
+    because the last thing written and the fact that it was the last
+    thing are different facts: a run that dies mid-sentence still ends,
+    and a strip that closed only on a magic string would stay open
+    forever waiting for it.
     """
-    return json.dumps({"type": "console", "text": text})
+    frame = {"type": "console", "text": text}
+    if done:
+        frame["done"] = True
+    return json.dumps(frame)
 
 
 def error(message: str) -> str:

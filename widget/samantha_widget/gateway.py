@@ -95,6 +95,10 @@ class GatewayClient:
         # Lines for the strip's terminal. Not tokens: what a coding
         # assistant writes is shown, never spoken.
         self.on_console: Callable[[str], None] = lambda _t: None
+        # The work is over: the console can put itself away. Separate
+        # from `on_console` because an empty frame carries it — there is
+        # nothing left to write, only the fact that there will not be.
+        self.on_console_done: Callable[[], None] = lambda: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -156,6 +160,8 @@ class GatewayClient:
             text = msg.get("text")
             if isinstance(text, str) and text:
                 self.on_console(text)
+            if msg.get("done"):
+                self.on_console_done()
         elif kind == "photo":
             path = msg.get("path", "")
             if isinstance(path, str) and path:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from typing import Callable
 
 import gi
@@ -16,6 +17,7 @@ from gi.repository import Gdk, GdkX11, GLib, Gtk, Pango  # noqa: E402
 
 from . import theme  # noqa: E402
 from .ewmh import Ewmh  # noqa: E402
+from . import console as console_mod  # noqa: E402
 from .console import Console  # noqa: E402
 from .geometry import placement_is_wrong, strip_rect  # noqa: E402
 
@@ -179,7 +181,21 @@ class StripWindow(Gtk.ApplicationWindow):
         self._console.set_vexpand(False)
         self._console.set_propagate_natural_height(False)
         self._console.set_visible(False)
+        # A press anywhere on it puts it away — the same gesture that
+        # dismisses a photo and closes a live camera, because they are
+        # the same band and a third way of closing things would be a
+        # third thing to remember. CAPTURE, or VTE takes the press first
+        # and starts a selection with it: this is somewhere to glance
+        # (see `console.py`), not somewhere to select from.
+        dismiss = Gtk.GestureClick()
+        dismiss.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        dismiss.connect("pressed", self._on_console_pressed)
+        self._console.add_controller(dismiss)
         self._frame.prepend(self._console)
+        # Reads the clock rather than counting down, so a second that
+        # went missing while the widget was busy is not a second the
+        # console overstays.
+        GLib.timeout_add_seconds(1, self._on_console_tick)
 
         self._content: Gtk.Widget | None = None
         self._band: Gtk.Widget | None = None
@@ -249,9 +265,48 @@ class StripWindow(Gtk.ApplicationWindow):
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
         return False  # GLib.SOURCE_REMOVE
 
+    def finish_console(self) -> None:
+        """The work is over: start the clock that puts this away."""
+        self.console.finish(time.monotonic())
+        # One line per run, not per line of output. A console that
+        # closes at the wrong moment is otherwise indistinguishable from
+        # one that closes at the right one — which cost a measurement
+        # here (2026-08-26).
+        print(
+            f"console: fin del trabajo, se cierra en {console_mod.LINGER_SECONDS:.0f}s"
+            f" ({len(self.console.lines)} lineas)",
+            file=sys.stderr,
+        )
+
+    def _on_console_tick(self) -> bool:
+        if self.console.tick(time.monotonic()):
+            print("console: cerrada por el reloj", file=sys.stderr)
+            self.clear_console()
+        return True  # GLib.SOURCE_CONTINUE
+
+    def _on_console_pressed(
+        self, gesture: Gtk.GestureClick, n_press: int, _x: float, _y: float
+    ) -> None:
+        """A press closes it. Multi-press is ignored, the way CLOSE is:
+        GTK fires `pressed` again for the second click of a double, and
+        answering both would close a console the first press had already
+        taken away."""
+        if n_press > 1:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.clear_console()
+
     def clear_console(self) -> None:
-        """Put the lines away."""
-        if self.console.clear():
+        """Put the lines away.
+
+        The window shrinks on what IT is currently adding, not on what
+        the model reports changing. The model can already be empty — the
+        clock's `tick` clears it before saying so — and asking the model
+        instead left the strip at 330 px with an empty console inside it,
+        logged as closed (measured 2026-08-26).
+        """
+        self.console.clear()
+        if self._console_extra:
             self._console_extra = 0
             self._resize()
         if self._term is not None:
