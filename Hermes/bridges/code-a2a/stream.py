@@ -99,8 +99,15 @@ def classify(event: dict) -> list[Event]:
     if kind == "result":
         text = str(event.get("result") or "").strip()
         failed = bool(event.get("is_error")) or subtype != "success"
+        # The console gets a CLOSING LINE, not the text. Claude Code's
+        # final `result` repeats the last thing the assistant said, so
+        # writing both put the whole summary on the strip twice —
+        # visible in a screenshot 2026-08-26. The words still reach the
+        # voice, which is where they belong; the console only needs to
+        # show that it is over.
+        closing = "— terminado" if not failed else "— terminado con errores"
         return [
-            Event(CONSOLE, f"— {text}"[:200] if text else "— (sin resultado)"),
+            Event(CONSOLE, closing),
             Event(VOICE, text or "Terminado, señor.", final=True, failed=failed),
         ]
 

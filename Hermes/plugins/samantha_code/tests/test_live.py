@@ -91,3 +91,15 @@ def test_what_the_assistant_says_is_kept():
 
 def test_noise_becomes_nothing():
     assert summarise('{"type":"system","subtype":"thinking_tokens"}') == ""
+
+
+def test_the_result_closes_the_run_without_repeating_the_summary():
+    """The assistant's `result` echoes its own last message.
+
+    Printing both showed the whole summary twice on the strip. The
+    console gets a closing line; the words reach the user by voice.
+    """
+    event = '{"type":"result","subtype":"success","result":"Corregido y verificado."}'
+    assert summarise(event) == "— terminado"
+    broken = '{"type":"result","subtype":"error","result":"no pude"}'
+    assert summarise(broken) == "— terminado con errores"

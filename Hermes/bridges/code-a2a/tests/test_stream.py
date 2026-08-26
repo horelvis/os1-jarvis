@@ -99,3 +99,30 @@ def test_a_result_with_no_text_still_says_something():
     out = classify({"type": "result", "subtype": "success", "result": ""})
     spoken = [e for e in out if e.destination == VOICE][0]
     assert spoken.text.strip()
+
+
+def test_the_final_summary_is_not_written_to_the_console_twice():
+    """Claude Code's `result` repeats the assistant's last message.
+
+    Writing both put the whole summary on the strip twice — seen in a
+    screenshot 2026-08-26. The console gets a closing line; the words go
+    to the voice, which is where they were always going.
+    """
+    events = _events()
+    console = [e.text for e in events if e.destination == CONSOLE]
+    spoken = [e.text for e in events if e.destination == VOICE]
+
+    assert console[-1].startswith("— terminado")
+    # The assistant's own message stays — it is what the work produced.
+    # What must not happen is seeing it TWICE, which is what the result
+    # echoing it used to cause. Compared on a slice: the console cuts
+    # long lines and the voice does not.
+    final = spoken[-1]
+    echoes = [line for line in console if final[:40] in line]
+    assert len(echoes) == 1, echoes
+
+
+def test_a_failed_run_says_so_on_the_console_too():
+    out = classify({"type": "result", "subtype": "error", "result": "se rompió"})
+    console = [e.text for e in out if e.destination == CONSOLE]
+    assert console == ["— terminado con errores"]

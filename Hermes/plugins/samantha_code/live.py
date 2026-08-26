@@ -143,5 +143,12 @@ def summarise(line: str) -> str:
                 return (f"· {name}: {detail}" if detail else f"· {name}")[:MAX_CHARS]
         return ""
     if kind == "result":
-        return f"— {str(event.get('result') or '').strip()}"[:MAX_CHARS]
+        # A CLOSING LINE, not the text. The assistant's final `result`
+        # repeats the last message it already sent, so printing both put
+        # the same summary on the strip twice (seen 2026-08-26). The
+        # bridge's own classifier does the same thing for the same
+        # reason — the two are deliberately not shared (see the note
+        # above), so the rule is written in both.
+        failed = bool(event.get("is_error")) or event.get("subtype") != "success"
+        return "— terminado con errores" if failed else "— terminado"
     return ""
