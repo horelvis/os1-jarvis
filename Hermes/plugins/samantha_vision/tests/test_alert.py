@@ -148,3 +148,80 @@ def test_the_dropped_warning_blames_the_gateway_not_a_missing_session():
     assert len(warnings) == 1, warnings
     assert "no live gateway" in warnings[0]
     assert "session" not in warnings[0].lower(), warnings[0]
+
+
+# ── the picture that comes with the sighting ──────────────────────────
+#
+# Asked for by the user 2026-08-26: "cuando captura algún movimiento
+# debe mostrar esa captura, no solo decirlo". §12's entry of 2026-08-25
+# had left this deliberately undone — "the unprompted alert carries NO
+# photo, anywhere… if that is ever wanted, the mechanism is already
+# there" — and this is that mechanism being wired to the alert path.
+#
+# The frame is the one the watcher just ran YOLO over, so nothing is
+# opened, decoded or grabbed for it.
+
+
+def test_a_sighting_shows_the_frame_it_was_seen_in():
+    sent, shown = [], []
+    handler = make_handler(
+        None,
+        deliver_prompt=sent.append,
+        show_frame=lambda frame, camera: shown.append((frame, camera)),
+        now=lambda: 0.0,
+        hour=lambda: 12,
+    )
+    handler("entrada", [person()], frame="<pixels>")
+
+    assert shown == [("<pixels>", "entrada")]
+    assert len(sent) == 1
+
+
+def test_nothing_worth_saying_shows_nothing():
+    sent, shown = [], []
+    clock = [0.0]
+    handler = make_handler(
+        None,
+        deliver_prompt=sent.append,
+        show_frame=lambda frame, camera: shown.append(camera),
+        now=lambda: clock[0],
+        hour=lambda: 12,
+    )
+    handler("entrada", [person()], frame="<pixels>")
+    clock[0] = 10.0  # inside the window: not news
+    handler("entrada", [person()], frame="<pixels>")
+
+    assert shown == ["entrada"], "the suppressed sighting must not push a photo"
+
+
+def test_a_sighting_with_no_frame_still_speaks():
+    # `_report` is the only caller and always has one, but a handler that
+    # needed a frame would be a handler that goes silent when something
+    # upstream changes.
+    sent, shown = [], []
+    handler = make_handler(
+        None,
+        deliver_prompt=sent.append,
+        show_frame=lambda frame, camera: shown.append(camera),
+        now=lambda: 0.0,
+        hour=lambda: 12,
+    )
+    handler("entrada", [person()])
+    assert len(sent) == 1 and shown == []
+
+
+def test_a_photo_that_fails_does_not_cost_the_sentence():
+    # A picture is never worth the words. Same rule `mirar` follows.
+    def broken(frame, camera):
+        raise RuntimeError("no disk")
+
+    sent = []
+    handler = make_handler(
+        None,
+        deliver_prompt=sent.append,
+        show_frame=broken,
+        now=lambda: 0.0,
+        hour=lambda: 12,
+    )
+    handler("entrada", [person()], frame="<pixels>")
+    assert len(sent) == 1

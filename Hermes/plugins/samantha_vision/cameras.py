@@ -522,7 +522,13 @@ class CameraFleet:
         if not seen:
             return
         try:
-            on_detections(camera.name, seen)
+            # The frame goes up with the detections: since 2026-08-26 a
+            # sighting shows the picture it was seen in, and this is the
+            # only place that still has it. Passed positionally would
+            # break every handler that takes two arguments — the fakes
+            # in the tests among them — so it is a keyword with a
+            # default on the other side.
+            on_detections(camera.name, seen, frame)
         except Exception as exc:
             logger.warning(
                 f"samantha-vision: {camera.name} handler failed — {redact(exc)}"

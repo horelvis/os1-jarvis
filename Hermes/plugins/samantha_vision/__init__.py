@@ -1,6 +1,8 @@
 """samantha-vision — the house cameras, and what is worth saying."""
 
 import threading
+import time
+from typing import Any
 
 from loguru import logger
 
@@ -134,7 +136,7 @@ def _supervise(ctx, fleet: CameraFleet, names: list[str] | None = None) -> None:
         if names is not None:
             # In place: `register()` handed this same list to the tool.
             names[:] = [camera.name for camera in cameras]
-        fleet.start(cameras, make_handler(ctx))
+        fleet.start(cameras, make_handler(ctx, show_frame=_show_sighting))
     except Exception as exc:
         logger.error(f"samantha-vision: cameras not started — {redact(exc)}")
 
@@ -181,6 +183,29 @@ async def _adapter():
     if runner is None:
         return None
     return getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+
+
+def _show_sighting(frame: Any, camera: str) -> None:
+    """Put the frame a sighting was seen in on the strip.
+
+    Runs on the watcher thread, so the push is scheduled onto the
+    gateway's loop rather than awaited — the same seam `live.py`
+    documents, and for the same reason: this thread must not block on a
+    socket, and the loop a turn brings with it does not outlive the turn.
+
+    Never raises: `alert.py` catches too, and between them a picture is
+    never worth a sighting.
+    """
+    import asyncio
+
+    from .snapshot import write_jpeg
+
+    path = write_jpeg(frame, camera, now=time.time())
+    loop = _kiosk_loop()
+    if loop is None or loop.is_closed():
+        logger.debug(f"samantha-vision: {camera} photo not shown — no loop")
+        return
+    asyncio.run_coroutine_threadsafe(push_photo(str(path), camera), loop)
 
 
 def _kiosk_loop():

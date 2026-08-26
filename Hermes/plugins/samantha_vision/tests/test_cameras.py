@@ -233,7 +233,7 @@ def test_detections_arrive_carrying_the_camera_name():
     fleet = _fleet(open_stream=lambda url: FakeStream([[PERSON]]))
     fleet.start(
         [Camera("entrada", "rtsp://x/1")],
-        lambda name, detections: seen.append((name, detections)),
+        lambda name, detections, frame=None: seen.append((name, detections)),
     )
     try:
         assert _wait(lambda: seen != [])
@@ -276,7 +276,7 @@ def test_each_camera_runs_in_its_own_named_thread():
     """`journalctl` and a traceback both have to say which camera."""
     threads: set[str] = set()
 
-    def on_detections(name, detections):
+    def on_detections(name, detections, frame=None):
         threads.add(threading.current_thread().name)
 
     fleet = _fleet(open_stream=lambda url: FakeStream([[PERSON]]))
@@ -302,7 +302,7 @@ def test_one_dead_camera_does_not_take_the_others_with_it():
     fleet = _fleet(open_stream=open_stream)
     fleet.start(
         [Camera("rota", "rtsp://dead/1"), Camera("buena", "rtsp://x/2")],
-        lambda name, detections: delivered.append(name),
+        lambda name, detections, frame=None: delivered.append(name),
     )
     try:
         assert _wait(lambda: "buena" in delivered)
@@ -336,7 +336,7 @@ def test_a_handler_that_raises_does_not_kill_the_camera():
     """Task 5 hangs a gateway call here. It must not cost us an eye."""
     calls: list[int] = []
 
-    def on_detections(name, detections):
+    def on_detections(name, detections, frame=None):
         calls.append(1)
         raise RuntimeError("the gateway said no")
 

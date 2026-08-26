@@ -155,6 +155,7 @@ def make_handler(
     *,
     watcher: Watcher | None = None,
     deliver_prompt: Callable[[str], bool] | None = None,
+    show_frame: Callable[[Any, str], Any] | None = None,
     now: Callable[[], float] = time.time,
     hour: Callable[[], int] = lambda: datetime.now().hour,
 ) -> Callable[[str, list], None]:
@@ -167,9 +168,10 @@ def make_handler(
     """
     watcher = watcher or Watcher()
     send = deliver_prompt or (lambda prompt: deliver(ctx, prompt))
+    show = show_frame
     lock = threading.Lock()
 
-    def on_detections(camera_name: str, detections: list) -> None:
+    def on_detections(camera_name: str, detections: list, frame: Any = None) -> None:
         try:
             with lock:
                 worth = watcher.worth_saying(
@@ -181,6 +183,28 @@ def make_handler(
             if not phrase:
                 return
             logger.info(f"samantha-vision: {camera_name}: {phrase}")
+
+            # The picture first, then the words: he should not be
+            # describing something that is not on screen yet. It is the
+            # frame YOLO just looked at — nothing is opened or grabbed
+            # for it — and a failure here costs the picture, never the
+            # sentence, which is the rule `mirar` already follows.
+            #
+            # Asked for by the user 2026-08-26. §12 (2026-08-25) had
+            # left the unprompted alert deliberately mute in pictures,
+            # on the grounds that an image appearing unbidden is a
+            # larger thing than one you asked for. It is: it is also
+            # what the user wants, and the anti-spam window is what
+            # bounds how often it can happen.
+            if show is not None and frame is not None:
+                try:
+                    show(frame, camera_name)
+                except Exception as exc:
+                    logger.warning(
+                        f"samantha-vision: {camera_name}: photo not shown — "
+                        f"{redact(exc)}"
+                    )
+
             send(build_prompt(camera_name, phrase))
         except Exception as exc:
             # `cameras.py` catches this too. Belt and braces on purpose:
