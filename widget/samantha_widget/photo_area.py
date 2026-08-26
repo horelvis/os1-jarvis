@@ -223,6 +223,15 @@ class PhotoArea(Gtk.Widget):
         frame = self._decoder.take()
         if frame is None:
             return True  # GLib.SOURCE_CONTINUE
+        if self._live_texture is None:
+            # Once per view: the first decoded frame is the moment the
+            # band stops being a hole in the desktop and starts being a
+            # camera. Its absence is the whole diagnosis when it isn't.
+            print(
+                f"vídeo: primer fotograma {frame.width}x{frame.height}",
+                file=sys.stderr,
+                flush=True,
+            )
         try:
             # Built here, on the main thread, from the plain buffer the
             # decoder thread produced. `Gdk.MemoryTexture.new` does not

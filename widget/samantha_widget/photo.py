@@ -20,7 +20,9 @@ from dataclasses import dataclass
 #
 # 114 → 900x210 for the band-plus-wave; 384 → 900x480, which puts a
 # single 16:9 frame at 654x368, near enough the 640x360 the camera
-# grabs to read as "native size".
+# grabs to read as "native size". NATIVE is the default size of a
+# camera: one camera opens at it, and a row of them falls back to
+# THUMB because four at 480 do not fit in 900.
 THUMB = 114
 NATIVE = 384
 
@@ -95,20 +97,27 @@ class PhotoModel:
             # A new question. The previous batch does not linger next to
             # the answer to a different one.
             self.photos = []
-            self._enlarged = False
             self._since = now
         self.photos.append(Photo(path=path, camera=camera))
         # Oldest first out: the last camera asked about is the one most
         # likely to be the one meant.
         del self.photos[:-MAX_PHOTOS]
         self._last_show = now
+        # A camera asked for by name arrives alone, and one camera is
+        # worth looking at: it opens at the size a click used to be
+        # needed for (user, 2026-08-26). The second frame of a batch
+        # takes that back — four at 480 do not fit in 900 — which is why
+        # this sits after the append and not before it.
+        self._enlarged = len(self.photos) == 1
         return self.height != before
 
     def click(self, now: float) -> bool:
-        """Enlarge the batch, or — the second time — put it away.
+        """Enlarge the batch, or — once it is enlarged — put it away.
 
         There is no per-photo gesture. Picking one of four would be a
-        UI, and the strip is not one; the whole row grows together.
+        UI, and the strip is not one; the whole row grows together. A
+        single camera is already enlarged when it lands, so for the
+        common case this is one press and it is gone.
         """
         if not self.photos:
             return False

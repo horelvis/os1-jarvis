@@ -282,10 +282,25 @@ class SamanthaApp(Gtk.Application):
             print(f"vídeo: {camera} ({w}x{h})", file=sys.stderr, flush=True)
             GLib.idle_add(band.live_open, camera, epoch, extradata, w, h)
 
+        # Counted per view, printed once: "the gateway is sending" and
+        # "the band is painting" are separate claims, and a band that
+        # opens and stays empty is the gap between them. Measured
+        # 2026-08-26, when it was.
+        arrived = {"epoch": 0, "n": 0}
+
         def on_live_frame(epoch: int, packet: bytes) -> None:
             # Deliberately NOT idle_add: this fires up to 25 times a
             # second, and `PhotoArea.live_frame` is thread-safe and never
             # blocks — see its docstring.
+            if epoch != arrived["epoch"]:
+                arrived["epoch"], arrived["n"] = epoch, 0
+            arrived["n"] += 1
+            if arrived["n"] == 1:
+                print(
+                    f"vídeo: primer paquete, {len(packet)} B",
+                    file=sys.stderr,
+                    flush=True,
+                )
             band.live_frame(epoch, packet)
 
         def on_live_end(epoch: int, reason: str) -> None:

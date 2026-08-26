@@ -22,10 +22,13 @@ def test_it_starts_hidden():
     assert not m.visible and m.height == 0
 
 
-def test_showing_it_asks_for_the_thumbnail_height():
+def test_one_camera_is_shown_at_the_default_camera_size():
+    # A camera asked for by name arrives alone, and a camera the user
+    # asked to see is shown at the size a camera is worth looking at —
+    # the one a click used to be needed for (user, 2026-08-26).
     m = PhotoModel()
     assert m.show("/tmp/a.jpg", "entrada", now=0.0) is True
-    assert m.visible and m.height == THUMB
+    assert m.visible and m.height == NATIVE
 
 
 def test_it_fades_on_its_own():
@@ -36,29 +39,45 @@ def test_it_fades_on_its_own():
     assert not m.visible and m.height == 0
 
 
-def test_a_click_makes_it_native_and_resets_the_clock():
+def test_a_click_on_a_row_makes_it_native_and_resets_the_clock():
+    # Two or more still start small — four at 480 do not fit — so the
+    # click that enlarges them is still there for a row.
     m = PhotoModel()
     m.show("/tmp/a.jpg", "entrada", now=0.0)
+    m.show("/tmp/b.jpg", "fuera", now=0.05)
+    assert m.height == THUMB
     assert m.click(now=10.0) is True
     assert m.height == NATIVE
     assert m.tick(now=20.0) is False  # the clock restarted at 10.0
 
 
-def test_a_second_click_dismisses_it():
+def test_a_second_click_on_a_row_dismisses_it():
     m = PhotoModel()
     m.show("/tmp/a.jpg", "entrada", now=0.0)
+    m.show("/tmp/b.jpg", "fuera", now=0.05)
     m.click(now=1.0)
     assert m.click(now=2.0) is True
     assert not m.visible
 
 
-def test_two_photos_sit_side_by_side_and_grow_the_strip_once():
-    # Asking with no camera named looks at all of them (spec §4.3), so two
-    # frames arrive milliseconds apart. Replacing would mean you only ever
-    # see the last camera. Spec §5.
+def test_one_camera_needs_only_one_click_to_go_away():
+    # It arrives at the size the click used to give, so there is nothing
+    # left for a first click to do but put it away.
     m = PhotoModel()
     m.show("/tmp/a.jpg", "entrada", now=0.0)
-    assert m.show("/tmp/b.jpg", "fuera", now=0.05) is False  # no resize
+    assert m.click(now=1.0) is True
+    assert not m.visible
+
+
+def test_a_second_photo_makes_the_band_a_row_again():
+    # Asking with no camera named looks at all of them (spec §4.3), so two
+    # frames arrive milliseconds apart. Replacing would mean you only ever
+    # see the last camera. Spec §5. The first of them was shown at the
+    # camera size; the second turns the band back into a row, because
+    # four at 480 do not fit in 900.
+    m = PhotoModel()
+    m.show("/tmp/a.jpg", "entrada", now=0.0)
+    assert m.show("/tmp/b.jpg", "fuera", now=0.05) is True  # native -> thumb
     assert [p.path for p in m.photos] == ["/tmp/a.jpg", "/tmp/b.jpg"]
     assert m.height == THUMB
 
@@ -82,12 +101,14 @@ def test_a_fifth_photo_pushes_the_first_out():
     assert [p.path for p in m.photos] == [f"/tmp/{i}.jpg" for i in range(1, 5)]
 
 
-def test_a_new_batch_shrinks_an_enlarged_one_back_down():
+def test_a_new_batch_of_several_shrinks_an_enlarged_one_back_down():
     m = PhotoModel()
     m.show("/tmp/a.jpg", "entrada", now=0.0)
+    m.show("/tmp/b.jpg", "fuera", now=0.05)
     m.click(now=1.0)
     assert m.height == NATIVE
-    assert m.show("/tmp/b.jpg", "fuera", now=30.0) is True
+    assert m.show("/tmp/c.jpg", "fuera", now=30.0) is False  # one, still native
+    m.show("/tmp/d.jpg", "entrada", now=30.05)
     assert m.height == THUMB
 
 
