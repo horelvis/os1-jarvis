@@ -26,12 +26,15 @@ import argparse
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import card
 import projects
 import runner
+import sdk_runner
+import sessions
 import tasks
 from assistants import pick
 from stream import CONSOLE, VOICE
@@ -63,6 +66,12 @@ class Bridge:
         self.assistant = pick(assistant_name)
         self.url = url
         self.tasks: dict[str, tasks.Task] = {}
+        # The runs that are happening RIGHT NOW, by task id. Only ever
+        # holds live ones: this is what `tasks/cancel` reaches into, and
+        # a finished run left here would answer "stopped" about work
+        # that had already ended.
+        self.runs: dict[str, sdk_runner.SdkRun] = {}
+        self.sessions = sessions.Sessions()
         self.lock = threading.Lock()
 
     def card(self) -> dict:
@@ -80,6 +89,72 @@ class Bridge:
         except projects.Ambiguous:
             project = None
         return project, text
+
+    @property
+    def stoppable(self) -> bool:
+        """Whether work can be stopped and conversations continued.
+
+        Only Claude Code, and only when its SDK is installed. OpenCode
+        goes down the CLI path, where neither is expressible — which is
+        why the bridge keeps both engines rather than replacing one.
+        """
+        return self.assistant.name == "claude" and sdk_runner.available()
+
+    def events_for(self, task, prompt: str, project, *, fresh: bool = False):
+        """Do the work, yielding what it says. Stoppable where it can be.
+
+        Also where the session is kept: the id comes back at the end of
+        a run and is written down against the project, so the next one
+        continues instead of starting over. Written in a `finally` — an
+        interrupted run has a session too, and losing it would mean
+        "sigue con lo de antes" started from nothing after every stop.
+        """
+        if not self.stoppable:
+            yield from runner.run(self.assistant, prompt, project.path)
+            return
+        resume = None if fresh else self.sessions.get(project.path, time.time())
+        run = sdk_runner.start(prompt, project.path, resume=resume)
+        with self.lock:
+            self.runs[task.id] = run
+        try:
+            yield from run.events()
+        finally:
+            with self.lock:
+                self.runs.pop(task.id, None)
+            if run.session_id:
+                self.sessions.remember(project.path, run.session_id, time.time())
+
+    def stop(self, task_id: str) -> bool:
+        """Reach into a running task and stop it. False if none is."""
+        with self.lock:
+            run = self.runs.get(task_id)
+        return bool(run is not None and run.interrupt())
+
+
+def _fresh(params: dict) -> bool:
+    """Whether the caller asked to start the conversation over.
+
+    A resumed session carrying a bad assumption is worse than no
+    session, because it is invisible from the outside — so there has to
+    be a way to say "from scratch" without deleting a file by hand.
+    """
+    meta = params.get("metadata")
+    return bool(isinstance(meta, dict) and meta.get("fresh"))
+
+
+def _ending(task, spoken: str, failed: bool) -> tuple[str, str]:
+    """The state a finished run leaves the task in, and what to say.
+
+    A task someone cancelled is already terminal by the time the run
+    unwinds, and overwriting that with COMPLETED would report success
+    for work that was stopped. The cancel wins.
+    """
+    if task.state == tasks.CANCELED:
+        return tasks.CANCELED, spoken or "Lo he dejado, señor."
+    return (
+        tasks.FAILED if failed else tasks.COMPLETED,
+        spoken or "Terminado.",
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -190,9 +265,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         task.advance(tasks.WORKING, f"Trabajando en {project.name}.")
-        result = runner.collect(self.bridge.assistant, prompt, project.path)
-        state = tasks.FAILED if result.failed else tasks.COMPLETED
-        task.advance(state, result.spoken or "Terminado.")
+        events = list(
+            self.bridge.events_for(task, prompt, project, fresh=_fresh(params))
+        )
+        result = runner.Run(events=events, returncode=0)
+        task.advance(*_ending(task, result.spoken, result.failed))
         # Everything shown, as one artifact: the console lines the caller
         # may or may not want to read.
         task.artifacts = [
@@ -249,7 +326,9 @@ class Handler(BaseHTTPRequestHandler):
         )
         spoken = ""
         failed = False
-        for event in runner.run(self.bridge.assistant, prompt, project.path):
+        for event in self.bridge.events_for(
+            task, prompt, project, fresh=_fresh(params)
+        ):
             if event.destination == VOICE:
                 spoken = event.text
                 failed = failed or event.failed
@@ -265,13 +344,7 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 }
             )
-        emit(
-            {
-                "statusUpdate": task.advance(
-                    tasks.FAILED if failed else tasks.COMPLETED, spoken or "Terminado."
-                )
-            }
-        )
+        emit({"statusUpdate": task.advance(*_ending(task, spoken, failed))})
 
     def _get(self, request_id, params: dict) -> None:
         task = self.bridge.tasks.get(
@@ -289,7 +362,13 @@ class Handler(BaseHTTPRequestHandler):
         if task is None:
             self._error(request_id, INVALID_REQUEST, "no such task")
             return
-        task.advance(tasks.CANCELED, "Cancelado.")
+        # Actually stop it. Until 2026-08-26 this only moved the task to
+        # CANCELED while the assistant carried on working to the end —
+        # the protocol saying one thing and the machine doing another.
+        stopped = self.bridge.stop(task.id)
+        task.advance(
+            tasks.CANCELED, "Lo dejo." if stopped else "No había nada trabajando."
+        )
         self._send_json({"jsonrpc": "2.0", "id": request_id, "result": task.as_dict()})
 
 

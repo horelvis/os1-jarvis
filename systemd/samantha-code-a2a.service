@@ -6,9 +6,15 @@ After=network.target
 
 [Service]
 Type=simple
-# Stdlib only, so any Python 3.11+ does. The widget's venv is used
-# because it is the one this repo keeps current, not for its packages.
-ExecStart=%h/git/os1-samantha/widget/.venv/bin/python %h/git/os1-samantha/Hermes/bridges/code-a2a/server.py --port 9910 --root %h/git
+# Its own venv since 2026-08-26: the bridge needs `claude-agent-sdk`
+# (~386 MB with the CLI it bundles) to stop a run and to continue a
+# conversation. It is kept out of the widget's environment on purpose —
+# that one holds Whisper on the GPU and is not worth disturbing for a
+# dependency only this process imports.
+#   python3 -m venv .venv && .venv/bin/pip install claude-agent-sdk
+# Without it the bridge still works: it falls back to driving the CLI,
+# and loses exactly those two abilities.
+ExecStart=%h/git/os1-samantha/Hermes/bridges/code-a2a/.venv/bin/python %h/git/os1-samantha/Hermes/bridges/code-a2a/server.py --port 9910 --root %h/git
 WorkingDirectory=%h/git/os1-samantha/Hermes/bridges/code-a2a
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONNOUSERSITE=1

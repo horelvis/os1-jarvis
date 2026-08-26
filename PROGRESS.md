@@ -1,5 +1,37 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (noche V) — El puente usa el SDK: se le puede parar, y recuerda ✅
+
+Pedido: *"integra el SDK: interrupt y sesión persistente"*, tras el spike
+de la misma noche.
+
+**Se puede parar.** `tasks/cancel` llegaba al registro de tareas y no al
+asistente: marcaba CANCELED y el trabajo seguía hasta el final. Ahora
+para de verdad — cancel a los 18,0 s, stream cerrado a los 18,1 s, en
+mitad de un comando de 90 segundos.
+
+**Y continúa.** Cada ejecución devuelve un `session_id`; `sessions.py`
+lo guarda contra la RUTA del proyecto y lo devuelve en la siguiente. Un
+run cambió `suma()` y el siguiente contestó *"de memoria, sin abrir
+nada"* con la función y el cambio exacto.
+
+**Lo que costó una medición, y no está en el código:** la primera prueba
+del interrupt no probó nada. El asistente mandó el bucle a segundo plano
+y terminó en 15 s, así que a los 20 s no había nada que cancelar. La
+segunda tampoco: la sesión se reanudó y contestó *"Terminado, señor."*
+en dos segundos sin trabajar, porque **ya lo había hecho** — que es la
+sesión funcionando y es indistinguible de un fallo. La tercera, con
+`fresh`, es la que mide.
+
+**Cómo encaja:** el SDK sustituye el motor DENTRO del puente. A2A sigue
+siendo la cara hacia fuera y el CLI sigue siendo el respaldo, así que
+una máquina sin el SDK —o con OpenCode— se comporta como antes. Venv
+propio para el puente (~386 MB, el SDK empaqueta el CLI); el del widget
+no se toca porque tiene Whisper en la GPU.
+
+44 tests en el puente. La consola de la tira sigue alimentándose igual.
+
+
 ## 2026-08-26 (noche IV) — Delega en Claude Code, por el camino que ya existía ✅
 
     tú:     «Jarvis, delega en Claude Code: en prueba-a2a el test falla.»

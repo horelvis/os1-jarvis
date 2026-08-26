@@ -1074,6 +1074,47 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-26 — The bridge drives the SDK, so a task can be stopped
+
+**Decision (the user's):** integrate `claude-agent-sdk` into the code
+bridge, for two abilities and not for elegance — **`interrupt()`** and a
+**session that continues**.
+
+**What the spike found first, and it corrects the premise the request
+arrived with** (`docs/superpowers/specs/2026-08-26-claude-agent-sdk-spike.md`):
+the SDK is not an embedded engine. Inside, it runs
+`claude --output-format stream-json --verbose` as a subprocess and
+parses the lines — to the letter what `runner.py` already did. Nothing
+is saved on parsing; what is bought is what sits on top.
+
+**And it was buying a fix, not a feature.** `tasks/cancel` existed and
+moved a task to CANCELED while the assistant carried on working to the
+end. The protocol was saying one thing and the machine doing another,
+which is worse than not offering cancel at all. Measured after: cancel
+at 18.0 s, stream closed at 18.1 s, in the middle of a 90-second
+command.
+
+**Two things measured that invert the obvious reading:**
+
+- **The permission gate is the `PreToolUse` hook, not `can_use_tool`.**
+  The callback was never consulted for `Bash` — with `allowed_tools`,
+  without it, and with `setting_sources=[]`. The SDK warns about the
+  first case itself. Nothing here depends on it yet (the run is
+  `bypassPermissions`, which is what `--dangerously-skip-permissions`
+  was), but any future "JARVIS asks before an `rm`" is a hook.
+- **A resumed session can decide the work is already done.** Asked twice
+  for the same thing, the second run answered "Terminado, señor." in two
+  seconds having done nothing — correct, and indistinguishable from a
+  failure. `metadata: {"fresh": true}` is the way out, and sessions
+  expire after two days on their own.
+
+**Cost, stated rather than discovered:** a ~386 MB venv of its own for
+the bridge (the SDK bundles the CLI; the widget's environment holds
+Whisper and is not worth disturbing), and one path in this repo now tied
+to Claude Code specifically. That is exactly why A2A stays the outward
+face and the CLI stays the fallback: a box without the SDK, or with
+OpenCode, behaves as it did before.
+
 ### 2026-08-26 — He delegates coding, and `terminal` stops being forbidden
 
 **Decision (the user's):** JARVIS gets the `terminal` toolset, and

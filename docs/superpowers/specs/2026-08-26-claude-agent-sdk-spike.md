@@ -80,3 +80,12 @@ What that would buy, in the order it matters here:
 
 Worth doing, for `interrupt()` and the session — not for the parsing,
 which works. Not urgent: what exists is verified and in use.
+
+## Taken up, the same evening
+
+Done: `sdk_runner.py` drives the SDK, `sessions.py` keeps a session per
+project, and `tasks/cancel` reaches a running assistant instead of only
+marking a task. A2A stays the outward face and the CLI stays the
+fallback, so a box without the SDK — or with OpenCode instead — behaves
+as before. Measured against the house: stopped at 18.1 s inside a
+90-second command, and a second run recalling the first "de memoria".
