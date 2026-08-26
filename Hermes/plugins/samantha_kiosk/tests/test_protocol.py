@@ -165,3 +165,8 @@ def test_the_end_of_the_work_is_a_flag_and_needs_no_text():
     """
     frame = json.loads(console("", done=True))
     assert frame == {"type": "console", "text": "", "done": True}
+
+
+def test_a_run_starting_resets_the_console():
+    frame = json.loads(console("", reset=True))
+    assert frame == {"type": "console", "text": "", "reset": True}

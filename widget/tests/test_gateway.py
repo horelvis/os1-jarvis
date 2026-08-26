@@ -273,3 +273,24 @@ def test_a_last_line_and_the_end_can_arrive_together() -> None:
     gw._dispatch(json.dumps({"type": "console", "text": "— terminado", "done": True}))
     assert lines == ["— terminado"]
     assert ended == [True]
+
+
+def test_a_new_run_empties_the_console_first() -> None:
+    """The box is sized by the model, so wiping only the terminal widget
+    left a short run sitting in a hole made for the long one before it."""
+    gw = GatewayClient()
+    order: list[str] = []
+    gw.on_console_reset = lambda: order.append("reset")
+    gw.on_console = lambda t: order.append(f"line:{t}")
+    gw._dispatch(json.dumps({"type": "console", "text": "", "reset": True}))
+    gw._dispatch(json.dumps({"type": "console", "text": "primera"}))
+    assert order == ["reset", "line:primera"]
+
+
+def test_a_reset_can_carry_its_first_line() -> None:
+    gw = GatewayClient()
+    order: list[str] = []
+    gw.on_console_reset = lambda: order.append("reset")
+    gw.on_console = lambda t: order.append(f"line:{t}")
+    gw._dispatch(json.dumps({"type": "console", "text": "arrancando", "reset": True}))
+    assert order == ["reset", "line:arrancando"]

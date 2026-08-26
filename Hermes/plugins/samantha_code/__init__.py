@@ -36,11 +36,6 @@ from .live import DEFAULT_LIVE, follow, summarise
 # (§12, 2026-08-25).
 KIOSK_PLATFORM = "samantha_kiosk"
 
-# Clears the terminal: erase display, cursor home. Sent at the start of
-# a run so one task's output does not sit under the next one's.
-CLEAR = "\x1b[2J\x1b[H"
-
-
 def _adapter():
     """The strip's adapter, or None."""
     try:
@@ -55,7 +50,7 @@ def _adapter():
         return None
 
 
-def _push(text: str, *, done: bool = False) -> None:
+def _push(text: str, *, done: bool = False, reset: bool = False) -> None:
     """Put one line on the strip, from a thread that is not the loop's.
 
     Scheduled onto the GATEWAY's loop, never the caller's: this thread
@@ -73,7 +68,7 @@ def _push(text: str, *, done: bool = False) -> None:
     if loop is None or push is None or loop.is_closed():
         return
     try:
-        asyncio.run_coroutine_threadsafe(push(text, done=done), loop)
+        asyncio.run_coroutine_threadsafe(push(text, done=done, reset=reset), loop)
     except RuntimeError:
         pass
 
@@ -83,7 +78,12 @@ def watch(path: Path, stop: threading.Event) -> None:
     logger.info(f"samantha-code: mirando {path}")
     for kind, text in follow(path, stop.is_set):
         if kind == "start":
-            _push(CLEAR)
+            # A reset, not an ANSI clear. The escape sequence wiped the
+            # terminal widget and left the MODEL holding the last run's
+            # lines — and the model is what decides how tall the strip
+            # is, so a short run sat in a box built for the long one
+            # before it (seen 2026-08-26).
+            _push("", reset=True)
             continue
         if kind == "end":
             # The run is over. The strip keeps the last lines up for a

@@ -99,6 +99,9 @@ class GatewayClient:
         # from `on_console` because an empty frame carries it — there is
         # nothing left to write, only the fact that there will not be.
         self.on_console_done: Callable[[], None] = lambda: None
+        # A new run starts: empty it first, so its first line is at the
+        # top of an empty box rather than under the last run's.
+        self.on_console_reset: Callable[[], None] = lambda: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -157,6 +160,8 @@ class GatewayClient:
         elif kind == "error":
             self.on_error(msg.get("error", ""))
         elif kind == "console":
+            if msg.get("reset"):
+                self.on_console_reset()
             text = msg.get("text")
             if isinstance(text, str) and text:
                 self.on_console(text)

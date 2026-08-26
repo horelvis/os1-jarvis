@@ -83,7 +83,7 @@ def photo(path: str, camera: str) -> str:
     return json.dumps({"type": "photo", "path": path, "camera": camera})
 
 
-def console(text: str, *, done: bool = False) -> str:
+def console(text: str, *, done: bool = False, reset: bool = False) -> str:
     """Lines for the strip's terminal, server to client.
 
     The third thing the band can hold, after the photo and the live
@@ -100,10 +100,19 @@ def console(text: str, *, done: bool = False) -> str:
     thing are different facts: a run that dies mid-sentence still ends,
     and a strip that closed only on a magic string would stay open
     forever waiting for it.
+
+    `reset` empties it before writing: a new run's output should not
+    appear under the last one's. It is a flag rather than an ANSI clear
+    for a reason measured on 2026-08-26 — an escape sequence wipes the
+    terminal WIDGET but says nothing to the model that decides how tall
+    the strip is, so the box kept the previous run's height and showed
+    four lines in a hole made for ten.
     """
     frame = {"type": "console", "text": text}
     if done:
         frame["done"] = True
+    if reset:
+        frame["reset"] = True
     return json.dumps(frame)
 
 

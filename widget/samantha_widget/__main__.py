@@ -543,6 +543,11 @@ class SamanthaApp(Gtk.Application):
             GLib.idle_add(window.finish_console)
 
         client.on_console_done = on_console_done
+
+        def on_console_reset() -> None:
+            GLib.idle_add(window.clear_console)
+
+        client.on_console_reset = on_console_reset
         client.on_photo = on_photo
         client.on_live_open = on_live_open
         client.on_live_frame = on_live_frame
