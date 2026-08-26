@@ -1,5 +1,50 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (tarde) — El calor no eran las cámaras, y un botón para cerrarle ✅
+
+**El usuario preguntó por qué se calienta el PC, y la respuesta cambia un
+diagnóstico de ayer.** Medido en ese momento, sin nadie hablándole: GPU a
+**67 °C, 93% y 391 W**. `llama-server` llevaba **15.099 tokens generados
+en una sola petición**, a 50 tok/s, y seguía — con el vigilante de 90 s
+del kiosko habiendo cerrado ese turno minutos antes («dropping a reply
+that arrived after the 90s watchdog»). Nadie esperaba esos tokens. Un
+`/stop` lo cortó: **67 °C → 54 °C y 391 W → 71 W** al instante.
+
+**Y el mismo patrón está en el diario de ayer: 12.576 tokens en una
+generación.** El 2026-08-25 esa carga se atribuyó a las alertas de
+cámara y se respondió apagando `allow_gateway_injection`. Con la
+inyección apagada ha vuelto a ocurrir, así que la causa era —al menos en
+parte— **otra**: turnos que no terminan. El interruptor sigue apagado y
+conviene revisar esa decisión con este dato delante.
+
+**Tope puesto donde de verdad corta:** `--n-predict 2048` en
+`samantha-llamacpp.service`. Son ~40 s de generación, muy por encima de
+cualquier respuesta hablada (una larga no llega a 200 tokens). Acota el
+daño; no arregla un modelo que entra en bucle, que es un límite de
+iteraciones del lado de Hermes y no está configurado.
+
+**Antes de eso, la misma mañana, «no responde a ninguna pregunta»**, y
+eran dos causas silenciosas: un run atascado (todo lo dicho después se
+plegaba dentro de él) y que **una sesión nueva se come su primer turno**
+con el aviso `📬 No home channel is set`, que la tira descarta —
+correctamente— por ser mensaje de sistema. `/stop` y `/sethome` los
+resolvieron; los dos están en §5 de CLAUDE.md.
+
+**El tercer interruptor: cerrarle.** Dos pulsaciones en tres segundos —
+la primera enciende la cruz—, porque es el único control de la tira que
+no se deshace desde la tira. Y sale con `os._exit(0)`: cerrar
+«bien» desmonta PortAudio, onnxruntime y CUDA desde el hilo de GTK y
+**segfaultea** (`status=11/SEGV`), que con `Restart=on-failure` hacía que
+el botón de cerrar lo *reiniciara*. Verificado: `ExecMainStatus=0`,
+`NRestarts=0`, ventana desaparecida.
+
+**Y la tira ya se puede pulsar desde un script.** `widget/tools/click.py`
+mueve el puntero por XTEST con ctypes, igual que `ewmh.py` llega a
+libX11: `xdotool` no está instalado pero `libXtst` sí. Las seis
+pulsaciones de esta tarde se probaron así, no se razonaron. CLAUDE.md
+llevaba desde agosto diciendo que no se podía enviar un clic a esta
+ventana.
+
 ## 2026-08-26 — La cámara se mueve de verdad, y JARVIS responde a su nombre ✅
 
 La tarea 13 empezó como una verificación y acabó encontrando que **la

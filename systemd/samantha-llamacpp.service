@@ -78,6 +78,20 @@ ExecStart=%h/git/llama.cpp/build/bin/llama-server \
     --min-p 0 \
     --presence-penalty 1.5 \
     --no-context-shift \
+# A ceiling on ONE generation, and the reason it exists is thermal.
+# Measured 2026-08-26: a single request reached 15,099 tokens and was
+# still going, at 50 tok/s, with the kiosk's 90 s watchdog having closed
+# that turn minutes earlier — nobody was waiting for those tokens and
+# the GPU sat at 93% and 391 W producing them. The same shape is in
+# yesterday's journal (12,576), which means the GPU load blamed on the
+# camera alerts on 2026-08-25, and answered by switching gateway
+# injection off, was at least partly THIS.
+#
+# 2048 is ~40 s of generation and far beyond any spoken reply (a long
+# one is under 200). It bounds the damage; it does not fix a model that
+# loops, which is a Hermes-side iteration limit and is not configured
+# here.
+    --n-predict 2048 \
     --metrics
 
 Restart=on-failure
