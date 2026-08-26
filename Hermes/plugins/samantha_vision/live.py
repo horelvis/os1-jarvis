@@ -58,6 +58,7 @@ class LiveSession:
         *,
         now: Callable[[], float] = time.monotonic,
         ceiling: float = CEILING_SECONDS,
+        loop_provider: Callable[[], asyncio.AbstractEventLoop | None] = lambda: None,
     ) -> None:
         self._fleet = fleet
         self._push_open = push_open
@@ -65,9 +66,12 @@ class LiveSession:
         self._push_close = push_close
         self._now = now
         self._ceiling = ceiling
+        self._loop_provider = loop_provider
 
         self.camera: str | None = None
         self.epoch = 0
+        self._packets = 0
+        self._loop_reported = False
         self.expired = False
         self._started = 0.0
         self._keyframe_seen = False
@@ -104,8 +108,28 @@ class LiveSession:
         self.expired = False
         self._started = self._now()
         self._keyframe_seen = False
-        self._loop = asyncio.get_running_loop()
+        # NOT `asyncio.get_running_loop()` on its own. That is the loop
+        # of the TURN, and a turn's loop stops running the moment the
+        # turn ends — every packet after that was queued onto a dead
+        # loop and silently dropped, which is what a band that opens at
+        # 900x480 and stays empty forever looks like from the outside
+        # (measured 2026-08-26; the ceiling never fires either, because
+        # it is only checked on a packet that arrives). The gateway's
+        # own loop, the one the kiosk's websocket handler runs on, keeps
+        # running between turns. The running loop is the fallback for a
+        # gateway that has not accepted a strip connection yet.
+        self._loop = self._loop_provider() or asyncio.get_running_loop()
+        self._packets = 0
+        self._loop_reported = False
         self._fleet.set_tap(camera, self._bind_tap(camera))
+        # Two lines per view, and they answer the only question worth
+        # asking when a band opens and stays black: did the watcher
+        # thread ever hand this session a packet? Measured 2026-08-26 —
+        # a view that never receives one also never expires, because the
+        # ceiling below is only ever checked on a packet.
+        logger.debug(
+            f"samantha-vision: tap installed for {camera} (epoch {self.epoch})"
+        )
         return True
 
     async def close(self, reason: str) -> bool:
@@ -114,6 +138,9 @@ class LiveSession:
         if camera is None:
             return False
         self._fleet.clear_tap(camera)
+        logger.debug(
+            f"samantha-vision: {camera} closed after {self._packets} packets ({reason})"
+        )
         try:
             await self._push_close(self.epoch, reason)
         except Exception as exc:
@@ -152,6 +179,12 @@ class LiveSession:
         if camera != self.camera:
             return
 
+        self._packets += 1
+        if self._packets == 1:
+            logger.debug(
+                f"samantha-vision: first packet from {camera} (keyframe={keyframe})"
+            )
+
         if self._now() - self._started > self._ceiling:
             self.expired = True
             self._schedule(self.close("timeout"))
@@ -163,6 +196,12 @@ class LiveSession:
             if not keyframe:
                 return
             self._keyframe_seen = True
+            # The other half of the pair above: "packets arrive" and
+            # "packets are being sent" are different claims, and a band
+            # that stays empty is the difference between them.
+            logger.debug(
+                f"samantha-vision: streaming {camera} from packet {self._packets}"
+            )
 
         self._schedule(self._push_frame(self.epoch, packet))
 
@@ -174,8 +213,26 @@ class LiveSession:
             # down mid-delivery. Close it rather than leak it: an
             # unawaited coroutine warns loudly the next time the
             # garbage collector runs, and always at the wrong moment.
+            #
+            # It said nothing at all until 2026-08-26, and that silence
+            # is exactly what a dead view looks like from outside: the
+            # tap fires, the packets are counted, and every one of them
+            # is dropped here. One line per view, not per packet.
+            if not self._loop_reported:
+                self._loop_reported = True
+                logger.warning(
+                    "samantha-vision: no loop to deliver on "
+                    f"(loop={'none' if loop is None else 'closed'}) — "
+                    "the view will stay empty"
+                )
             coro.close()
             return
+        if not self._loop_reported:
+            self._loop_reported = True
+            logger.debug(
+                f"samantha-vision: delivering on loop {id(loop):x} "
+                f"(running={loop.is_running()})"
+            )
         try:
             asyncio.run_coroutine_threadsafe(coro, loop)
         except RuntimeError as exc:

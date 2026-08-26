@@ -349,6 +349,8 @@ class KioskAdapter(BasePlatformAdapter):
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
         self._ws = None
+        # Set when a strip connects; see the websocket handler below.
+        self.loop: asyncio.AbstractEventLoop | None = None
         if self._runner is not None:
             await self._runner.cleanup()
         self._runner = None
@@ -641,6 +643,12 @@ class KioskAdapter(BasePlatformAdapter):
         # resumes. Swapping in one step closes that window. See
         # test_concurrent_reconnects_dont_clobber_the_newest_socket, which
         # carries the full mechanism.
+        # The loop this handler runs on is the gateway's own, and it
+        # keeps running between turns — unlike the loop a turn brings
+        # with it. `samantha_vision` schedules live frames from the
+        # watcher thread and needs one that will still be alive when it
+        # does; see `LiveSession.open`.
+        self.loop = asyncio.get_running_loop()
         previous, self._ws = self._ws, ws
         if previous is not None and not previous.closed:
             await previous.close()

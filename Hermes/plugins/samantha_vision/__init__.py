@@ -84,7 +84,13 @@ def register(ctx):
         is_async=True,
     )
 
-    session = LiveSession(fleet, push_live_open, push_live_frame, push_live_close)
+    session = LiveSession(
+        fleet,
+        push_live_open,
+        push_live_frame,
+        push_live_close,
+        loop_provider=_kiosk_loop,
+    )
 
     ctx.register_tool(
         name=OPEN_NAME,
@@ -177,6 +183,28 @@ async def _adapter():
     return getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
 
 
+def _kiosk_loop():
+    """The loop the strip's websocket lives on, or None.
+
+    Synchronous on purpose: `LiveSession.open` needs it while deciding
+    where to schedule, and it is a pair of attribute lookups. See that
+    method for why the turn's own loop is the wrong answer.
+    """
+    try:
+        from gateway.config import Platform
+        from gateway.run import _gateway_runner_ref
+
+        runner = _gateway_runner_ref()
+        if runner is None:
+            return None
+        adapter = getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+        return getattr(adapter, "loop", None)
+    except Exception:
+        # A missing loop costs a live view; raising here would cost the
+        # turn that asked for one.
+        return None
+
+
 async def push_live_open(
     camera: str, epoch: int, extradata: bytes, width: int, height: int
 ) -> bool:
@@ -193,14 +221,35 @@ async def push_live_open(
         return False
 
 
+# The first frame of each view, and whether it landed. `_schedule` fires
+# these and never looks at the result, and the handler below swallows
+# every exception — between them, a view that delivers nothing looks
+# exactly like a view that delivers everything. One line per view.
+_first_delivery: dict[str, int | bool] = {"epoch": 0}
+
+
+def _note_delivery(epoch: int, ok: bool, exc: BaseException | None = None) -> None:
+    if _first_delivery["epoch"] == epoch:
+        return
+    _first_delivery["epoch"] = epoch
+    if exc is not None:
+        logger.warning(f"samantha-vision: first frame raised — {redact(exc)}")
+    else:
+        logger.debug(f"samantha-vision: first frame of epoch {epoch} landed={ok}")
+
+
 async def push_live_frame(epoch: int, packet: bytes) -> bool:
     """One frame. Quiet on failure: this runs up to 25 times a second."""
     try:
         adapter = await _adapter()
         if adapter is None:
+            _note_delivery(epoch, False)
             return False
-        return bool(await adapter.push_live_frame(epoch, packet))
-    except Exception:
+        ok = bool(await adapter.push_live_frame(epoch, packet))
+        _note_delivery(epoch, ok)
+        return ok
+    except Exception as exc:
+        _note_delivery(epoch, False, exc)
         return False
 
 

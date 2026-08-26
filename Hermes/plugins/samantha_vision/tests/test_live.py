@@ -254,3 +254,98 @@ def test_a_raising_open_is_swallowed_not_propagated():
     assert asyncio.run(session.open("entrada", extradata=b"", size=(704, 480))) is False
     assert session.camera is None
     assert fleet.taps == {}
+
+
+# ── whose loop the frames are delivered on ────────────────────────────
+#
+# Measured on the live gateway, 2026-08-26: `open()` captured the loop
+# with `asyncio.get_running_loop()`, which is the loop of the TURN. That
+# loop stops running the moment the turn ends, so every frame after it
+# was queued onto a dead loop and never sent — the band opened at
+# 900x480, stayed empty, and never closed, because the ceiling is only
+# ever checked on a packet that arrives. The log line that found it read
+# `delivering on loop 7498a1292050 (running=False)`.
+#
+# The fix is that the session asks for the gateway's own loop, the one
+# the kiosk's websocket handler runs on, and falls back to the running
+# one only when there is nobody to ask.
+
+
+def _loop_in_a_thread():
+    """A loop that keeps running after the 'turn' ends, like the gateway's."""
+    import threading
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    return loop, thread
+
+
+def test_frames_are_delivered_on_the_gateways_loop_not_the_turns():
+    import time as _time
+
+    sent: list[tuple[int, bytes]] = []
+
+    async def push_open(camera, epoch, extradata, width, height):
+        return True
+
+    async def push_frame(epoch, packet):
+        sent.append((epoch, packet))
+        return True
+
+    async def push_close(epoch, reason):
+        return True
+
+    gateway_loop, _thread = _loop_in_a_thread()
+    fleet = _Fleet()
+    session = LiveSession(
+        fleet,
+        push_open,
+        push_frame,
+        push_close,
+        loop_provider=lambda: gateway_loop,
+    )
+
+    # The turn: its own loop, which ends here and never runs again.
+    asyncio.run(session.open("entrada", extradata=b"sps", size=(640, 360)))
+
+    # The watcher thread, afterwards. This is the case production is in.
+    fleet.taps["entrada"](b"keyframe", True)
+    fleet.taps["entrada"](b"more", False)
+
+    deadline = _time.monotonic() + 2.0
+    while len(sent) < 2 and _time.monotonic() < deadline:
+        _time.sleep(0.01)
+
+    gateway_loop.call_soon_threadsafe(gateway_loop.stop)
+    assert [packet for _epoch, packet in sent] == [b"keyframe", b"more"]
+
+
+def test_with_nobody_to_ask_it_still_uses_the_running_loop():
+    # The provider returning None must not be worse than the old
+    # behaviour — a gateway that has not accepted a strip connection yet
+    # has no loop to offer, and the turn's is better than nothing.
+    async def scenario():
+        sent = []
+
+        async def push_open(camera, epoch, extradata, width, height):
+            return True
+
+        async def push_frame(epoch, packet):
+            sent.append(packet)
+            return True
+
+        async def push_close(epoch, reason):
+            return True
+
+        fleet = _Fleet()
+        session = LiveSession(
+            fleet, push_open, push_frame, push_close, loop_provider=lambda: None
+        )
+        await session.open("entrada", extradata=b"sps", size=(640, 360))
+        fleet.taps["entrada"](b"keyframe", True)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return sent
+
+    assert asyncio.run(scenario()) == [b"keyframe"]
