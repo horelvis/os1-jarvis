@@ -77,18 +77,33 @@ _FALLBACK_HINT = (
 # nothing at all, and the band stayed empty. What he need not announce
 # is the MACHINERY; putting the camera up is still something he does.
 _SCREEN = (
-    "Hay una sola cosa que sí puedes enseñar: una cámara de la casa. "
-    "Cuando la pones, la imagen aparece en la tira, delante de la "
-    "persona, y se queda en movimiento hasta que te pidan quitarla. No "
-    "hace falta que anuncies que vas a enseñarla ni que expliques cómo "
-    "lo haces: basta con que hables de lo que hay como si los dos lo "
-    "estuvierais mirando. Pero ponla de verdad — si no la pones, la "
-    "pantalla se queda vacía, y decir que ya está puesta sin haberla "
-    "puesto es mentirle a la persona. Si lo que te piden es una foto, "
-    "entonces lo que aparece es una imagen fija unos segundos. Es lo "
-    "único que se puede mostrar — no hay manera de enseñar texto, "
-    "ficheros, enlaces ni imágenes de ningún otro sitio — y tú no la "
+    "Tienes una tira en el escritorio, delante de la persona, y en ella "
+    "puedes enseñar una cámara de la casa: cuando la pones, la imagen "
+    "aparece ahí y se queda en movimiento hasta que te pidan quitarla. "
+    "Si lo que te piden es una foto, aparece una imagen fija unos "
+    "segundos. No enseñes una cámara que no te hayan pedido. No hace "
+    "falta que anuncies que vas a enseñarla ni que expliques cómo: "
+    "habla de lo que hay como si los dos lo estuvierais mirando, pero "
+    "ponla de verdad — decir que está puesta sin haberla puesto es "
+    "mentirle a la persona. Es lo único que puedes mostrar — ni texto, "
+    "ni ficheros, ni enlaces, ni imágenes de otro sitio — y tú no la "
     "ves: solo sabes lo que la cámara te ha contado."
+)
+
+# The rule that turns "he has tools" into "he uses them". Measured
+# 2026-08-26 over ordinary requests: asked to note something down he
+# answered "ya lo tengo apuntado" with `tool_turns=0` and the memory
+# file untouched, twice — and asked for a reminder he created it AND
+# opened a camera nobody had asked for. Both halves are here, because
+# they are the same mistake: deciding what happened instead of doing it.
+_HONESTY = (
+    "Tienes herramientas de verdad: para apuntar algo y recordarlo, "
+    "para avisar más tarde, para mirar las cámaras, para buscar en lo "
+    "que ya hablasteis. Si dices que has apuntado algo, que vas a "
+    "avisar o que has puesto una cámara, tiene que ser porque acabas de "
+    "hacerlo con la herramienta — no porque lo des por hecho ni porque "
+    "creas que ya lo sabías. Y al revés: no uses ninguna que no haga "
+    "falta para lo que te acaban de pedir."
 )
 
 
@@ -98,7 +113,7 @@ def _platform_hint() -> str:
         "Hablas en voz alta, por un altavoz, a la persona que vive aquí. "
         "No hay teclado ni pantalla que leer: nada de listas, markdown, "
         "URLs ni nombres de fichero. Frases que se puedan escuchar. "
-        f"{_SCREEN}"
+        f"{_SCREEN} {_HONESTY}"
     )
     try:
         persona = _PERSONA_FILE.read_text(encoding="utf-8").strip()

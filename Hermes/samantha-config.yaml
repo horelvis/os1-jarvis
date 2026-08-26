@@ -119,6 +119,48 @@ agent:
 # the local provider (measured 2026-08-25). Offering a tool that cannot
 # work is what `check_fn` exists to prevent; a toolset of our own keeps
 # that promise at the toolset level too.
+# ── He is told what time it is ────────────────────────────────────────
+#
+# Hermes' own system prompt says, verbatim: "Current time, date,
+# timezone → use terminal (e.g. date)". This platform deliberately does
+# NOT have `terminal` (see the toolsets below), so that instruction sends
+# him to a tool that is not there — measured 2026-08-26, the error
+# `'terminal' is not a deferrable tool` and a run that burned 15,099
+# tokens against it. Having failed, he invents the time: asked for a
+# reminder "in six minutes" at 14:23 he filed it for 17:34, because he
+# believed it was 17:28. Three hours out, and a reminder that never
+# arrives.
+#
+# With this on, every user message reaches him prefixed
+# `[Wed 2026-08-26 14:34:47 CEST]`, so the clock is a fact in front of
+# him rather than something to go and fetch. Default is OFF because it
+# changes what every gateway user sees; here it is the difference
+# between reminders working and not.
+gateway:
+  message_timestamps:
+    enabled: true
+
+# ── The tools are offered directly, not through a search bridge ───────
+#
+# Hermes hides tool schemas behind three bridge tools — `tool_search`,
+# `tool_describe`, `tool_call` — and on "auto" that bridge activates as
+# soon as ONE deferrable tool exists (`tool_search.should_activate`).
+# Every plugin tool is deferrable, so `mirar` alone kept it on
+# permanently, and the strip's whole toolset was reachable only by
+# searching for it first.
+#
+# Measured 2026-08-26: asked to note something down, he answered "el
+# café ya lo tengo apuntado" having called nothing at all — the memory
+# file was untouched. And a run burned 15,099 tokens against
+# `tool_call(terminal)`, a tool this platform does not even have,
+# answered by `'terminal' is not a deferrable tool`.
+#
+# The bridge is for agents with hundreds of tools. This platform has six
+# toolsets, whose schemas fit the 64K context many times over, and one
+# indirection fewer is one fewer thing for a 27B model to get wrong.
+tools:
+  tool_search: false
+
 platform_toolsets:
   samantha_kiosk:
     - memory
