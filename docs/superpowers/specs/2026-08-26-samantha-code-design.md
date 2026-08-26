@@ -103,10 +103,27 @@ rather than a one-shot `-p`.
 ### The strip's typed line
 
 A single-line entry that appears on the band, takes one instruction, and
-disappears — no history, no scrollback. It is opened deliberately (a
-key, or a switch beside the other three), never by focus. `photo.py`
-already models the band as pure state with a height the window grows to;
-this is a second thing that band can hold.
+disappears — no history, no scrollback. `photo.py` already models the
+band as pure state with a height the window grows to; this is a second
+thing that band can hold.
+
+**It gets its own switch, a fourth one** (user, 2026-08-26: "añadir
+botón para enviar texto plano a Jarvis"). Pressing it opens the line;
+Enter sends and closes it; Escape closes it without sending. Never
+opened by focus, and closed again the moment it is done — that is what
+keeps the strip a strip.
+
+**And it is not only for code.** What it sends is a plain message to
+JARVIS, exactly as if it had been spoken: the same session, the same
+session key, the same everything downstream. That makes it worth
+building FIRST and on its own — it is the way to talk to him when the
+room is noisy, when the microphone mishears a name, or when what you
+have to say contains a path. Everything else in this document is built
+on top of it.
+
+This also means the typed path skips two things the spoken one has, and
+should: no wake word (you pressed a button; he is being addressed) and
+no echo filter (nothing was heard).
 
 ### The band as a terminal
 
