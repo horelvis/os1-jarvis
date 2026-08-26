@@ -29,11 +29,15 @@ camera a day (§12, 2026-08-26), in a different file.
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import threading
 from collections.abc import Iterator
 from pathlib import Path
 
+import gates
+from answers import assent
+from milestones import Milestones, plain
 from runner import END, START, Run, _tee
 from stream import CONSOLE, VOICE, Event
 
@@ -49,6 +53,10 @@ PERMISSION_MODE = "bypassPermissions"
 # A run that has produced nothing for this long is hung rather than
 # thinking. Same number and same reasoning as `runner.SILENCE_TIMEOUT`.
 SILENCE_TIMEOUT = 900.0
+
+# A gate nobody answers is denied. The checkpoint's cousin lives in
+# worker.py; this one is here because the hook is.
+GATE_TIMEOUT = 300.0
 
 # Put on the queue when the run is over; nothing else uses it.
 _DONE = object()
@@ -77,6 +85,12 @@ class SdkRun:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client = None
         self._ready = threading.Event()
+        self.patterns = gates.load_patterns(os.environ.get("SAMANTHA_CODE_GATES"))
+        self.gate_timeout = GATE_TIMEOUT
+        self.pending: str | None = None
+        self.pending_text: str = ""
+        self._answers: queue.Queue = queue.Queue()
+        self._milestones = Milestones()
 
     # ── what the caller does to it ────────────────────────────────────
 
@@ -110,6 +124,10 @@ class SdkRun:
                 try:
                     item = self._queue.get(timeout=SILENCE_TIMEOUT)
                 except queue.Empty:
+                    if self.pending is not None:
+                        # A held question is not a hang: the user is
+                        # being asked, and nobody types under a timer.
+                        continue
                     self.failed = True
                     yield Event(CONSOLE, "! el asistente lleva demasiado callado")
                     self.interrupt()
@@ -121,6 +139,80 @@ class SdkRun:
                 yield item
         finally:
             _tee(f"{END} {'1' if self.failed else '0'}")
+
+    # ── being asked, and answering back ─────────────────────────────────
+
+    def answer(self, text: str) -> bool:
+        """Resolve the held question or gate. Thread-safe; False when
+        nothing waits — the caller then knows the moment has passed."""
+        if self.pending is None:
+            return False
+        self._answers.put(text)
+        return True
+
+    async def _await_answer(self, timeout: float | None) -> str | None:
+        """Block the hook (never the loop) until the user answers."""
+
+        def take() -> str | None:
+            try:
+                return self._answers.get(timeout=timeout)
+            except queue.Empty:
+                return None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, take)
+
+    def _ask(self, qkind: str, text: str) -> None:
+        self.pending, self.pending_text = qkind, text
+        self._queue.put(Event(CONSOLE, f"? {text}", kind=qkind, detail=text))
+
+    def _resolve(self) -> None:
+        self.pending, self.pending_text = None, ""
+        self._queue.put(Event(CONSOLE, "", kind="resolved"))
+
+    @staticmethod
+    def _deny(reason: str) -> dict:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    async def _pre_tool(self, input_data, tool_use_id, context) -> dict:
+        """The customs post. Sees every tool; holds two kinds of them."""
+        name = str(input_data.get("tool_name") or "")
+        args = input_data.get("tool_input") or {}
+
+        if name == "AskUserQuestion":
+            question = _question_text(args)
+            self._ask("question", question)
+            reply = await self._await_answer(None)
+            self._resolve()
+            # P2 per the probe of 2026-08-27 (docs/superpowers/specs/
+            # 2026-08-27-askuserquestion-probe.md): a PreToolUse deny
+            # whose reason carries the answer steers the model — there
+            # is no result-injection path (can_use_tool only rewrites
+            # the tool's input, and the answer is necessarily a result).
+            return self._deny(
+                f"El usuario responde: {reply}. Continúa con esa respuesta."
+            )
+
+        risky = gates.dangerous(name, args, self.patterns)
+        if risky:
+            self._ask("gate", risky)
+            reply = await self._await_answer(self.gate_timeout)
+            self._resolve()
+            if reply is None:
+                return self._deny(
+                    "El usuario no está. No lo hagas; sigue sin ello y dilo al final."
+                )
+            if assent(reply):
+                return {}
+            return self._deny(f"El usuario no lo autoriza: {reply}. Sigue sin ello.")
+
+        return {}
 
     # ── the loop, on its own thread ───────────────────────────────────
 
@@ -143,16 +235,24 @@ class SdkRun:
             AssistantMessage,
             ClaudeAgentOptions,
             ClaudeSDKClient,
+            HookMatcher,
             ResultMessage,
             TextBlock,
+            ToolResultBlock,
             ToolUseBlock,
         )
+
+        try:
+            from claude_agent_sdk import UserMessage
+        except ImportError:  # older/newer SDK builds may not carry it
+            UserMessage = ()  # isinstance() against an empty tuple is always False
 
         self._loop = asyncio.get_running_loop()
         options = ClaudeAgentOptions(
             cwd=str(self.cwd),
             permission_mode=PERMISSION_MODE,
             resume=self.resume,
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._pre_tool])]},
         )
         async with ClaudeSDKClient(options=options) as client:
             self._client = client
@@ -164,9 +264,43 @@ class SdkRun:
                     for block in msg.content:
                         if isinstance(block, TextBlock) and block.text.strip():
                             spoken = block.text.strip()
-                            self._queue.put(Event(CONSOLE, spoken[:200]))
+                            m = self._milestones.note(block.text)
+                            if m is not None:
+                                self._queue.put(
+                                    Event(
+                                        CONSOLE, plain(m), kind=m.kind, detail=m.detail
+                                    )
+                                )
                         elif isinstance(block, ToolUseBlock):
-                            self._queue.put(Event(CONSOLE, _tool_line(block)))
+                            m = self._milestones.feed(block.name, block.input or {})
+                            if m is not None:
+                                self._queue.put(
+                                    Event(
+                                        CONSOLE, plain(m), kind=m.kind, detail=m.detail
+                                    )
+                                )
+                elif isinstance(msg, UserMessage):
+                    content = msg.content
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, ToolResultBlock):
+                                text = block.content
+                                if isinstance(text, list):
+                                    text = " ".join(
+                                        str(c.get("text", ""))
+                                        for c in text
+                                        if isinstance(c, dict)
+                                    )
+                                m = self._milestones.result(str(text or ""))
+                                if m is not None:
+                                    self._queue.put(
+                                        Event(
+                                            CONSOLE,
+                                            plain(m),
+                                            kind=m.kind,
+                                            detail=m.detail,
+                                        )
+                                    )
                 elif isinstance(msg, ResultMessage):
                     self.session_id = getattr(msg, "session_id", None) or None
                     self.failed = bool(getattr(msg, "is_error", False))
@@ -193,17 +327,27 @@ class SdkRun:
         return Event(VOICE, text or "Terminado, señor.", final=True, failed=self.failed)
 
 
-def _tool_line(block) -> str:
-    """One console line for a tool call. Same shape the CLI path shows."""
-    args = getattr(block, "input", None) or {}
-    detail = ""
-    if isinstance(args, dict):
-        for key in ("command", "file_path", "pattern", "skill"):
-            if args.get(key):
-                detail = str(args[key])
-                break
-    name = getattr(block, "name", "?")
-    return (f"· {name}: {detail}" if detail else f"· {name}")[:200]
+def _question_text(args: dict) -> str:
+    """The question out of AskUserQuestion's input.
+
+    Shape per the probe (docs/superpowers/specs/
+    2026-08-27-askuserquestion-probe.md): `questions` is a list, each
+    entry a dict with `question` and an `options` list of
+    `{label, description}`. Only the first question is read — one
+    `AskUserQuestion` call can carry several, and the gate is designed
+    for the common case of one.
+    """
+    questions = args.get("questions") if isinstance(args, dict) else None
+    if isinstance(questions, list) and questions and isinstance(questions[0], dict):
+        q = str(questions[0].get("question") or "")
+        options = questions[0].get("options")
+        if isinstance(options, list):
+            labels = [str(o.get("label", "")) for o in options if isinstance(o, dict)]
+            if any(labels):
+                return f"{q} ({' / '.join(l for l in labels if l)})"
+        if q:
+            return q
+    return str(args)[:200]
 
 
 def collect(run: SdkRun) -> Run:

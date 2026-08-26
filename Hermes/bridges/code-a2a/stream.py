@@ -49,6 +49,10 @@ class Event:
     # Set on the final event of a run, so the session knows it is over.
     final: bool = False
     failed: bool = False
+    # Semantic milestones and questions carry what they are, so the
+    # plugin can render its own words instead of parsing ours.
+    kind: str = ""
+    detail: str = ""
 
 
 def parse(line: str) -> dict | None:
