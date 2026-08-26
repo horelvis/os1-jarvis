@@ -96,6 +96,24 @@ agent:
   disabled_toolsets:
     - tts
 
+  # A ceiling on one turn's tool-calling iterations. Absent, Hermes is
+  # UNLIMITED by default (`resolve_turn_limit`: "max_turns is unlimited
+  # unless the user sets an explicit positive integer cap"), which is
+  # what `api_calls=1/9223372036854775807` in the log means.
+  #
+  # Measured 2026-08-26: a turn looping on a tool this platform does not
+  # have ran until somebody noticed — 15,099 tokens in one generation,
+  # the GPU at 93% and 391 W, with the kiosk's 90 s watchdog having
+  # closed that turn minutes earlier. Nobody was waiting for any of it.
+  # The same shape is in the previous day's journal.
+  #
+  # 25 against the 1-4 an ordinary spoken turn uses, and the 5-9 a turn
+  # with several tools uses: generous for anything real, and it bounds a
+  # loop at seconds instead of at whenever a human walks past the
+  # machine. This is the backstop; `--n-predict 2048` on llama-server
+  # caps ONE generation, not a loop of them.
+  max_turns: 25
+
 # ── Which tools the strip may use ─────────────────────────────────────
 # Per PLATFORM, resolved by gateway/run.py::
 # _resolve_enabled_toolsets_for_source. `agent.enabled_toolsets` is NOT a
