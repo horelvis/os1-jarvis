@@ -1074,6 +1074,46 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-26 — BarnDoor's rule back, and a ceiling on a turn
+
+**Two decisions, and the second is what makes the first affordable.**
+
+**The escalation is removed.** The user: "no es práctico si solo mira
+cada cierto tiempo, es necesario usar el mismo que BarnDoor". This
+reverses the first half of the 2026-08-24 entry below. What stays is
+BarnDoor's rule whole — 180 s per `(camera, label)`, a person during
+quiet hours beating it, and the 30 s night floor the user decided on
+after the 19,200-utterances measurement. What goes is ours: the ×5 and
+×20 widening, and the `_last_seen` / `_level` bookkeeping it needed.
+
+**The cost is exactly the one the escalation was built for, and it is
+now a test rather than a surprise:** six hours of somebody standing in
+the driveway is 120 mentions, not eight. With `allow_gateway_injection`
+on, each of those is a spoken turn and a model call. The trade the user
+made is insistence over quiet, knowingly; the escalation's own cost was
+that any person at a camera sitting at the hourly level was silenced for
+up to an hour, which is the failure mode of a thing whose job is telling
+you who is around the house.
+
+**And `agent.max_turns: 25`.** Hermes is unlimited by default —
+`resolve_turn_limit`: "max_turns is unlimited unless the user sets an
+explicit positive integer cap" — which is what
+`api_calls=1/9223372036854775807` meant in every log line. Twice on
+2026-08-26 a turn looped on a tool this platform does not have and ran
+until somebody noticed: 15,099 tokens in one generation, GPU at 93% and
+391 W, the kiosk's 90 s watchdog having closed that turn minutes
+earlier. 25 against the 1-4 an ordinary spoken turn uses. It is the
+backstop `--n-predict 2048` is not: that caps one generation, this caps
+a loop of them.
+
+**A trap this uncovered, and it will bite again:** `apply-config.sh`
+deep-merges the tracked config over the live one, so applying any
+setting re-asserts every OTHER tracked value. Applying the timestamp fix
+silently turned `allow_gateway_injection` back on — the switch that had
+been off since 2026-08-25 — because the tracked file says `true`. A
+local override that matters must be changed in the tracked file, not
+only in `.hermes/home/config.yaml`.
+
 ### 2026-08-26 — The tools were reachable; the clock was not
 
 **The user's complaint was that Hermes' tools do not get invoked, which

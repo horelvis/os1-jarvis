@@ -1,5 +1,34 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (tarde III) — Vuelve la regla de BarnDoor, y un techo por turno ✅
+
+**Quitada la escalada de las alertas.** Lo que le hacía callarse era
+nuestro, no de BarnDoor: la ventana se ensanchaba en re-disparos
+consecutivos (180 s → 15 min → 1 h), así que alguien que se quedaba
+plantado se mencionaba una vez por hora — y mientras un `(cámara,
+etiqueta)` estaba en ese nivel, **cualquier** persona en esa cámara
+quedaba silenciada hasta una hora. Fuera, junto con los dos diccionarios
+que necesitaba. Queda la regla plana: 180 s por cámara y etiqueta,
+persona en horas de silencio saltándosela, y el suelo nocturno de 30 s.
+
+**El coste vuelve con ella, y ahora está escrito en un test en vez de
+descubrirse en el salón:** seis horas de alguien parado en la entrada son
+**120 menciones**, no ocho. Con la inyección encendida, cada una es un
+turno hablado y una llamada al modelo.
+
+**Y `agent.max_turns: 25`.** Hermes es ilimitado por defecto, que es lo
+que significaba `api_calls=1/9223372036854775807` en cada línea del log.
+Hoy, dos veces, un turno entró en bucle contra una herramienta que esta
+plataforma no tiene y corrió hasta que alguien lo vio. Verificado en
+vivo: `iteration 1/25` y `api_calls=1/25`.
+
+**Un aviso para la próxima:** `apply-config.sh` fusiona el fichero
+versionado sobre el vivo, así que aplicar un ajuste **re-afirma todos los
+demás**. Aplicar el arreglo de la hora volvió a encender
+`allow_gateway_injection`, apagado desde ayer, porque el fichero
+versionado dice `true`. Un override local que importe hay que cambiarlo
+en el fichero versionado, no sólo en `.hermes/home/config.yaml`.
+
 ## 2026-08-26 (tarde II) — Las herramientas sí estaban; lo que faltaba era el reloj ✅
 
 El usuario: «sigue con los problemas para invocar herramientas de Hermes,
