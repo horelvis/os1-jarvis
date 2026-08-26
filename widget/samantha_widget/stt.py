@@ -38,8 +38,17 @@ def clean(text: str) -> str:
 
 
 class Transcriber:
-    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
+    def __init__(self, model_name: str = DEFAULT_MODEL, *, hint: str = "") -> None:
         self.model_name = model_name
+        # Words this box expects to hear, handed to the decoder as its
+        # `initial_prompt`. It exists for exactly one word: his name.
+        # Measured 2026-08-26, before it — "Jarvis, ¿qué día es hoy?"
+        # came back as "Carbis", "Harvish", "Jervis", "Harvies", "Ya
+        # viste", "ya Luis" and "¿Y har visto". A wake word cannot be
+        # matched out of that reliably, however loose the comparison,
+        # so the fix belongs where the word is decoded rather than where
+        # it is compared.
+        self.hint = hint
         self._model = None
 
     @property
@@ -66,5 +75,9 @@ class Transcriber:
             language="es",  # never auto-detect: she lives in Spanish
             beam_size=1,  # latency over correctness (CLAUDE.md §1.4)
             vad_filter=False,  # Silero already cut this to one utterance
+            # Biases the decoder towards the words this house uses. Kept
+            # to one short sentence: a long prompt is context the model
+            # spends attention on, and it can start echoing it.
+            initial_prompt=self.hint or None,
         )
         return clean(" ".join(segment.text for segment in segments))

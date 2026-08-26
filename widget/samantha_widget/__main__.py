@@ -213,7 +213,12 @@ class SamanthaApp(Gtk.Application):
         player.start()
         speaker = Speaker(player)
         chunker = ClauseChunker()
-        transcriber = Transcriber()
+        # The hint carries his name so Whisper stops inventing spellings
+        # of it — see `Transcriber.hint`. A house where the wake word is
+        # off has nothing to bias towards.
+        transcriber = Transcriber(
+            hint=f"Hola {_WAKE_WORD.capitalize()}." if _WAKE_WORD else ""
+        )
         client = GatewayClient()
 
         def on_switch(name: str, on: bool) -> None:
