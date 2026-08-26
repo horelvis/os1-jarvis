@@ -11,8 +11,12 @@ integrated; the throwaway project and venv are gone.
 `claude-agent-sdk` **0.2.144** installs, imports and runs here with no
 API key — it authenticates the way the CLI already does.
 
-It is **not an embedded engine**, which is the premise worth correcting
-before any design rests on it. Inside, `_internal/transport/
+It is **not an embedded engine** — a phrase from the analysis the user
+brought in ("es el mismo motor de Claude Code embebido"), and one worth
+pinning down before a design rests on it, because the same analysis also
+said the CLI ships bundled and spoke of "ventajas sobre el subprocess
+crudo". Both of those are right. What does not follow is the reading
+that the subprocess is gone. Inside, `_internal/transport/
 subprocess_cli.py` runs:
 
     claude --output-format stream-json --verbose …
