@@ -47,12 +47,16 @@ can act on it. Not a window you open. Something that is there.
 - **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process.
 - **VAD:** Silero v5 over onnxruntime, CPU, always listening.
 - **TTS:** CosyVoice 3 zero-shot on `:8093`, JARVIS' cloned voice.
+- **Ears:** he answers to his name (§2.8). Everything else in the room
+  is heard and dropped.
 - **Vision:** YOLOv9 over onnxruntime against the house's RTSP cameras,
   borrowed from BarnDoor. Since 2026-08-24 it runs **inside the
   gateway**, as the plugin `samantha_vision` — one thread per named
   camera. The widget no longer opens a camera. Since 2026-08-25 he can
   also be **asked** (`mirar`), and the still he takes appears above the
-  strip and nowhere else (§12).
+  strip and nowhere else (§12). Since 2026-08-26 asking to see a camera
+  gives the **moving** picture at 900x480, and a still only when a still
+  is what was asked for.
 - **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
   (§2.7) still exists in `backend/` but the gateway path never uses it.
 - **Language:** Spanish (Spain) — every user-facing string, prompt and
@@ -479,8 +483,23 @@ MiniLM-L12-v2 model in-process (no extra daemon, no torch). Cost:
 the speakers, through PortAudio (`sounddevice`). There is no browser, so
 there is no Web Speech API.
 
-- **Always listening.** Silero v5 VAD over onnxruntime, on the CPU,
-  decides where an utterance starts and stops. No wake word, no shortcut.
+- **Always listening, and answering to his name since 2026-08-26.**
+  Silero v5 VAD over onnxruntime, on the CPU, decides where an utterance
+  starts and stops; `wake.py` then decides whether it was addressed to
+  him. The 2026-08-22 decision below said "no wake word, no shortcut"
+  and the user reversed it — a room he is in can now be talked in
+  without talking to him. `SAMANTHA_WIDGET_WAKE_WORD` empty restores the
+  old behaviour exactly. Two things that cost a measurement each:
+  **Whisper does not hear "Jarvis"** (five spellings in one morning, so
+  matching is a similarity ratio, not a comparison), and **the name was
+  being discarded before Whisper saw it** — the detector cleared its
+  buffer on every quiet frame, so the first syllable of a turn never
+  survived. It keeps half a second of run-up now, and without that the
+  wake word does not work at all.
+- **Two switches on the strip** (2026-08-26): his ears and his voice,
+  drawn at the right end of the wave. They exist because the obvious
+  alternative does not work — "deja de escucharme" has to be heard to be
+  obeyed, and "cállate" has to be heard over his own voice.
 - **Transcription** is faster-whisper in the same process (§2.6).
 - **Playback** is raw PCM from CosyVoice, written to the output stream
   clause by clause, strictly sequentially — synthesising clauses
@@ -664,11 +683,28 @@ the LLM local on this box at 57 tok/s.
   ("puerta cerrada, el porche vacío" against a tool that said only
   "no hay nadie"). He also calls `mirar` with **no** camera 5 times out
   of 5, even when one was named, so a question about one camera comes
-  back as a survey of all of them.
+  back as a survey of all of them. **Corrected 2026-08-26:** the "no
+  camera 5 times out of 5" was measured through `mirar`, whose handler
+  reads the whole argument dict. `ver_en_vivo` named that parameter
+  `camara` and crashed on it instead — `'dict' object has no attribute
+  'casefold'` — which is why the live view answered "la imagen en
+  directo no me llega ahora mismo" and sounded like a camera fault.
 - **"Who came this morning" still has no answer.** There is no
   detections table and no `revisar`; they are plan 2 of the vision
-  spec. Nor is there live video: it was considered and dropped (a
-  second decoder, continuous bandwidth, and a window that stays).
+  spec.
+- ~~**Nor is there live video.**~~ **There is, since 2026-08-26.**
+  "Enséñame la entrada" puts the camera on the strip, moving, at
+  900x480, until he is told to put it away, the picture is clicked, or
+  two minutes pass. Measured against the house: ~1.2 s from the camera's
+  burned-in clock to the screen, 11.7% CPU for the widget and 38.5% for
+  the gateway, and the ceiling closing at 120.0 s exactly after 1200
+  packets. The "considered and dropped" this line used to carry was
+  reversed by the plan of 2026-08-25 and finished the day after.
+- **Two of the three ways out are proven, the third is not.** The
+  ceiling was measured; the spoken "ya está" and the click on the
+  picture were not, because there is no way to send this window a click
+  (no `xdotool`) and driving two sentences into one session is not
+  something the fake microphone can do. Both want a human in the room.
 - **Plan 3 is unwritten:** removing the kiosk, `backend/` and
   `frontend/`. Deliberately parked until the widget convinces.
 - **The Hermes config is git-ignored**, so `tts:` must be re-applied by
@@ -940,6 +976,9 @@ If you encounter:
 | The `photo` frame, and the path it refuses | `Hermes/plugins/samantha_kiosk/{protocol,adapter}.py` |
 | A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
 | The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
+| Whether he was being spoken to | `widget/samantha_widget/wake.py` |
+| The two switches (drawing / pure model) | `widget/samantha_widget/{wave,switches}.py` |
+| The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/samantha_widget/live_decode.py` |
 | Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
 | The surface Hermes speaks through | `Hermes/plugins/samantha_kiosk/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
@@ -994,6 +1033,111 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-26 — He answers to his name, and the strip gains two switches
+
+**Decision (the user's):** he only wakes on a word, "Jarvis" by default,
+and after he answers the next thirty seconds need no name. This reverses
+"always listening… no wake word, no shortcut" — §2.8, and the 2026-08-22
+entry below, where it was one of four things closed in that
+brainstorming.
+
+**Why the reversal is not a small one.** "Always listening" was a
+product claim, not a technical default: he is present, and a presence
+you have to summon is an application. What changed it is that the box
+lives in a room where people talk to each other, and everything said in
+it became a turn. The compromise is the window: a name opens the
+conversation, and the conversation stays open for half a minute after
+each answer, so only the FIRST sentence pays.
+
+**Two measurements that decided the design, both of which invert the
+obvious implementation:**
+
+- **Whisper does not hear "Jarvis."** One synthesised sentence through
+  the real path came back as "Carbis", "Harvish", "Jervis", "Jarvis"
+  and "Harvies" in one morning. Exact matching would ignore four of
+  five, and being ignored is the one failure a wake word cannot afford
+  — the user repeats himself, louder, and concludes it is broken. The
+  comparison is a similarity ratio at 0.6, which is where all five pass.
+  It is ours, and measured; it is NOT a fifth BarnDoor constant.
+- **The name was being thrown away before Whisper saw it.** The
+  detector cleared its buffer on every frame under the VAD threshold,
+  so a turn began at the first frame loud enough to count and the
+  syllable in front of it was gone: "Jarvis, ¿qué día es hoy?" arrived
+  as "¿Qué día es hoy?" and was dropped for not being addressed to him.
+  It keeps half a second of run-up now. That discard cost nothing while
+  everything heard was for him, which is why nothing found it in four
+  months.
+
+**And two switches, drawn at the right end of the wave** — his ears and
+his voice. The strip had nothing to press at all (§1.5), and this is the
+second exception after the photo. The argument for them is that the
+alternative does not exist: "deja de escucharme" has to be heard to be
+obeyed, and "cállate" has to be heard over his own voice. A switch you
+press is the only kind that works when the thing being switched is the
+one that would have to listen.
+
+**Cost, stated plainly:** the strip is now something you can click, in
+two places, and §1.5's "nothing to click" is true only of the rest of
+it. The wave gives up a tenth of its width. And a wake word means a
+sentence he genuinely should have heard can be missed — the loose
+matching is what keeps that rare, and it buys the opposite error, where
+he answers something not addressed to him.
+
+### 2026-08-26 — Showing a camera is the moving picture, and it delivers on the gateway's loop
+
+**Decision (the user's):** asking to see a camera gives the live view,
+at 900x480, and a still only when a still is what was asked for. Before
+this, "muéstrame la cámara de la entrada" took a photo — measured, twice
+— because `mirar` was built first and both the tool descriptions and the
+`platform_hint` were written in that order.
+
+**What it took to make true was not the wording.** The live view had
+never actually worked, and could not be seen to fail: the band opened at
+900x480, stayed empty, and never closed. Three symptoms, one cause —
+`LiveSession.open` captured its event loop with
+`asyncio.get_running_loop()`, which is the loop of the TURN. That loop
+stops running the moment the turn ends, so every packet the watcher
+thread scheduled after it was queued onto a dead loop and dropped in the
+one branch of `_schedule` that logged nothing. The ceiling never fired
+either — it is only checked on a packet that arrives, and none did.
+
+**The adapter now remembers the loop its websocket handler runs on** —
+the gateway's own, which lives between turns — and the session asks for
+it, falling back to the running loop when no strip has connected yet.
+
+**Three things worth carrying, because each cost a round:**
+
+- **The tests had normalised the bug.** `test_live.py`'s own docstring
+  explained that "the loop `open()` captured has already been closed by
+  the time `asyncio.run()` returns", and worked around it by driving
+  whole scenarios inside one `asyncio.run`. That IS the production
+  failure, written down as a quirk of testing.
+- **Nothing was observable between the tap and the pixel.** The fix
+  took one measurement and four rounds of instrumenting; the log lines
+  stay — `tap installed`, `first packet`, `streaming`, `first frame
+  landed`, and the loop's own `running=` flag. One per view, none per
+  packet. A band that opens black is otherwise indistinguishable from
+  one that works.
+- **`ver_en_vivo` crashed on the argument Hermes actually passes.**
+  Hermes hands a tool the whole argument dict as its first parameter,
+  which `mirar` has always known (it calls it `args`); the live tool
+  named it `camara` and met it with `.casefold()`. What he said out loud
+  was "la imagen en directo no me llega ahora mismo" — a camera fault
+  that was not one.
+
+**And the hint taught him to lie.** "No tienes que pedirlo ni
+anunciarlo, ya está ahí" was true of the photo, which appears as a side
+effect of looking, and false of the live view, which appears only if he
+opens it. Measured twice: "ya la tiene delante, señor", having called
+nothing at all, band empty. What he need not announce is the machinery;
+putting the camera up is still something he does.
+
+**Measured after, against the house:** ~1.2 s from the camera's
+burned-in clock to the screen, 11.7% CPU for the widget and 38.5% for
+the gateway, and the ceiling closing at 120.0 s exactly after 1200
+packets, with `_NET_WM_STATE_ABOVE/STICKY/SKIP_*` intact on the way
+back to 900x96.
 
 ### 2026-08-25 — The photo reaches the strip and nothing else
 
