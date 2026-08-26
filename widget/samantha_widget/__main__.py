@@ -71,6 +71,25 @@ _WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
 # this voice) to turn it back on; `wake.py`'s filter over the transcript
 # is what actually works here today.
 _HOTWORD_MODEL = os.environ.get("SAMANTHA_WIDGET_HOTWORD", "")
+# Diagnostic: log what the microphone hears WHILE he is speaking.
+_TRACE_MIC = os.environ.get("SAMANTHA_WIDGET_TRACE_MIC") == "1"
+
+# How loud the room has to be, WHILE he is speaking, before a frame is
+# allowed to start a turn. This is the partial version of
+# SAMANTHA_WIDGET_MIC_GATE: that dropped every frame and made him
+# impossible to interrupt; this drops only the quiet ones, so his own
+# voice coming back through the room cannot start a turn while somebody
+# talking near the microphone still can.
+#
+# Measured 2026-08-26: the user's voice sits at RMS 0.054-0.088 in the
+# dumped utterances. His echo is well below that with the speaker at a
+# sane volume — the number below is where they separate on THIS box, and
+# it is the one thing here worth re-measuring in another room.
+try:
+    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.035"))
+except ValueError:
+    _BARGE_RMS = 0.035
+_trace = {"n": 0}
 try:
     _HOTWORD_SENSITIVITY = float(
         os.environ.get("SAMANTHA_WIDGET_HOTWORD_SENSITIVITY", "")
@@ -483,6 +502,36 @@ class SamanthaApp(Gtk.Application):
                 # turn. The cost of this branch is that he cannot be
                 # interrupted — see _MIC_GATE.
                 return
+
+            if _TRACE_MIC and player.busy:
+                # While HE is talking: what the microphone is actually
+                # picking up, and whether the detector thinks somebody
+                # is speaking. This is the only place that can answer
+                # "why can I not interrupt him".
+                import numpy as _np
+
+                _s = _np.frombuffer(frame, dtype=_np.int16).astype(_np.float32)
+                _rms = float(_np.sqrt(_np.mean((_s / 32768.0) ** 2)))
+                _trace["n"] += 1
+                if _trace["n"] % 15 == 0:
+                    print(
+                        f"mic mientras habla: rms {_rms:.4f} "
+                        f"detector={'habla' if detector.speaking else 'silencio'}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+            if _BARGE_RMS > 0 and player.busy and not detector.speaking:
+                import numpy as _np
+
+                _s = _np.frombuffer(frame, dtype=_np.int16).astype(_np.float32)
+                if float(_np.sqrt(_np.mean((_s / 32768.0) ** 2))) < _BARGE_RMS:
+                    # Too quiet to be somebody talking over him: his own
+                    # voice, back through the room. Dropped rather than
+                    # fed to the detector, which would otherwise start a
+                    # turn and interrupt him mid-sentence — measured,
+                    # and reported as "ahora se autointerrumpe".
+                    return
 
             was_speaking = detector.speaking
             utterance = detector.push(frame)
