@@ -24,6 +24,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
+from .hotword import SENSITIVITY as HOTWORD_SENSITIVITY  # noqa: E402
+from .hotword import Hotword  # noqa: E402
 from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
@@ -53,6 +55,32 @@ _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
 _FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
 # His name, and how long a conversation stays open after he answers.
 _WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
+# Hear his name instead of reading it (user, 2026-08-26). Empty disables
+# the acoustic detector and leaves only `wake.py`'s filter over the
+# transcript. `SAMANTHA_WIDGET_HOTWORD_SENSITIVITY` moves the threshold;
+# the model is trained on English and the phrase is said with a Spanish
+# accent, so the right value is a measurement, not a constant.
+# Empty by default, and the reason is a measurement rather than a
+# preference. openWakeWord's bundled `hey_jarvis` is trained on English:
+# the user saying "Hey Jarvis" into the real microphone scored 0.25-0.29
+# against the 0.6 threshold, and synthesised Spanish peaked at 0.359.
+# There is no gap left to put a threshold in — 0.25 would fire on the
+# television — and it costs ~6 points of CPU on every frame, all day, to
+# never fire. Set it to `hey_jarvis` (or a path to a model trained on
+# this voice) to turn it back on; `wake.py`'s filter over the transcript
+# is what actually works here today.
+_HOTWORD_MODEL = os.environ.get("SAMANTHA_WIDGET_HOTWORD", "")
+try:
+    _HOTWORD_SENSITIVITY = float(
+        os.environ.get("SAMANTHA_WIDGET_HOTWORD_SENSITIVITY", "")
+    )
+except ValueError:
+    _HOTWORD_SENSITIVITY = HOTWORD_SENSITIVITY
+# Log every score above this, to calibrate against a real voice.
+try:
+    _HOTWORD_TRACE = float(os.environ.get("SAMANTHA_WIDGET_HOTWORD_TRACE", ""))
+except ValueError:
+    _HOTWORD_TRACE = 0.0
 
 # Start with these switches already off: "mic", "voice", or both. The
 # counterpart of SAMANTHA_WIDGET_STATE for the two glyphs at the end of
@@ -277,6 +305,7 @@ class SamanthaApp(Gtk.Application):
         # SAMANTHA_WIDGET_WAKE_WORD restores the "everything heard is for
         # him" of every version before that.
         wake = WakeWord(_WAKE_WORD, window=_WAKE_WINDOW)
+        hotword = Hotword(_HOTWORD_MODEL, sensitivity=_HOTWORD_SENSITIVITY)
         if wake.word:
             print(
                 f"palabra de activación: {wake.word} (ventana {wake.window:.0f}s)",
@@ -415,6 +444,14 @@ class SamanthaApp(Gtk.Application):
         detector = UtteranceDetector(SileroDetector())
 
         def on_frame(frame: bytes) -> None:
+            if hotword.heard(frame):
+                # He was called by name. Open the conversation exactly as
+                # an answer does, and let the utterance the VAD is
+                # already collecting through when it closes.
+                print("oye su nombre", file=sys.stderr, flush=True)
+                wake.answered(time.monotonic())
+            elif _HOTWORD_TRACE and hotword.last_score >= _HOTWORD_TRACE:
+                print(f"hotword: {hotword.last_score:.2f}", file=sys.stderr, flush=True)
             if not wave.switches.mic_on:
                 # The microphone switch on the strip. The stream stays
                 # open — closing PortAudio from this callback is the
@@ -493,7 +530,27 @@ class SamanthaApp(Gtk.Application):
                 flush=True,
             )
 
+        def _load_hotword() -> None:
+            # Sub-second, but on its own thread anyway: it is a model
+            # load, and the GTK loop must not wait for one.
+            if not _HOTWORD_MODEL:
+                return
+            try:
+                hotword.load()
+            except Exception as exc:
+                # Losing the acoustic detector costs the wake word its
+                # first line of defence, not the strip: `wake.py`'s
+                # filter over the transcript still runs.
+                print(f"hotword NO cargó: {exc!r}", file=sys.stderr, flush=True)
+                return
+            print(
+                f"oído para '{_HOTWORD_MODEL}' (umbral {_HOTWORD_SENSITIVITY})",
+                file=sys.stderr,
+                flush=True,
+            )
+
         threading.Thread(target=_load_whisper, daemon=True).start()
+        threading.Thread(target=_load_hotword, daemon=True).start()
 
         if _FAKE_MIC_TEXT:
             threading.Thread(
