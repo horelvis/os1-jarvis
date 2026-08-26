@@ -20,6 +20,8 @@ clock, so the animation cannot drift out of step with the screen.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -31,6 +33,7 @@ from gi.repository import Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 from . import theme  # noqa: E402
 from .bars_model import BarsModel, WaveformModel  # noqa: E402
+from .switches import MIC, Switches  # noqa: E402
 from .wave_model import WaveModel, WaveState  # noqa: E402
 
 _LINE_WIDTH = 2.0
@@ -53,6 +56,16 @@ _BAR_MIN_PX = 1.5
 _VERTICAL_HEADROOM = 0.86
 _HORIZONTAL_PAD_PX = 6.0
 
+# The two switches (user, 2026-08-26). Drawn in the same colour as the
+# wave and nothing else — no chrome, no border, no label. A sense that
+# is ON is a solid glyph; one that is OFF is the same glyph dimmed, with
+# a bar struck through it. Reading them costs a glance, which is the
+# most a strip may ask for.
+_SWITCH_ON = 0.85
+_SWITCH_OFF = 0.28
+# Thickness of the strike, and of the microphone's stand.
+_SWITCH_STROKE = 2.0
+
 
 class WaveArea(Gtk.Widget):
     def __init__(self) -> None:
@@ -66,6 +79,16 @@ class WaveArea(Gtk.Widget):
         self._last_frame_us: int | None = None
         self._colour = Gdk.RGBA()
         self._colour.parse(theme.LINE)
+
+        # His ears and his voice, and the only thing on the strip that
+        # answers a press. `on_switch` is set by `__main__.py`, which is
+        # the only place that knows how to actually stop a microphone.
+        self.switches = Switches()
+        self.on_switch: Callable[[str, bool], None] = lambda _name, _on: None
+        press = Gtk.GestureClick()
+        press.connect("pressed", self._on_pressed)
+        self.add_controller(press)
+
         self.add_tick_callback(self._tick)
 
     def set_state(self, state: WaveState) -> None:
@@ -116,6 +139,8 @@ class WaveArea(Gtk.Widget):
         else:
             self._snapshot_line(snapshot, width, height)
 
+        self._snapshot_switches(snapshot, width, height)
+
     def _snapshot_columns(
         self,
         snapshot: Gtk.Snapshot,
@@ -125,7 +150,13 @@ class WaveArea(Gtk.Widget):
     ) -> None:
         centre = height / 2
         span = (height / 2) * _VERTICAL_HEADROOM
-        usable = max(1.0, width - 2 * _HORIZONTAL_PAD_PX)
+        # The switches get their own end of the strip. Drawing bars
+        # under them makes both unreadable — measured by looking at it,
+        # 2026-08-26 — and the wave losing a tenth of its width costs
+        # nothing, because it has no left-to-right meaning.
+        usable = max(
+            1.0, width - 2 * _HORIZONTAL_PAD_PX - self._reserved(width, height)
+        )
         slot = usable / len(heights)
         bar_width = max(_BAR_MIN_WIDTH_PX, slot * _BAR_FILL)
         # Centres each bar inside its own slot, so the row reads as
@@ -158,3 +189,130 @@ class WaveArea(Gtk.Widget):
         stroke.set_line_cap(Gsk.LineCap.ROUND)
         stroke.set_line_join(Gsk.LineJoin.ROUND)
         snapshot.append_stroke(builder.to_path(), stroke, self._colour)
+
+    # ── the two switches ──────────────────────────────────────────────
+
+    def _reserved(self, width: float, height: float) -> float:
+        """Width the switches take at the right, or zero when there are none."""
+        boxes = self.switches.boxes(width, height)
+        if not boxes:
+            return 0.0
+        return width - boxes[0].x
+
+    def _fill(self, snapshot: Gtk.Snapshot, alpha: float, rect) -> None:
+        """One rectangle, in the strip's colour at `alpha`."""
+        colour = Gdk.RGBA()
+        colour.red, colour.green, colour.blue = (
+            self._colour.red,
+            self._colour.green,
+            self._colour.blue,
+        )
+        colour.alpha = alpha
+        snapshot.append_color(colour, rect)
+
+    def _snapshot_switches(
+        self, snapshot: Gtk.Snapshot, width: float, height: float
+    ) -> None:
+        """Draw the microphone and the speaker, on or off.
+
+        Rectangles only, like the bars: `append_color` needs no path and
+        therefore no Cairo, which is the trap this machine is built
+        around (CLAUDE.md §2.3). A microphone is a capsule over a stand;
+        a speaker is a block with a step. Neither is a picture of the
+        thing — at 26 px nothing is — but the pair is distinguishable at
+        a glance, which is all a switch has to be.
+        """
+        for box in self.switches.boxes(width, height):
+            on = self.switches.is_on(box.name)
+            alpha = _SWITCH_ON if on else _SWITCH_OFF
+            unit = box.size / 8.0
+            if box.name == MIC:
+                # The capsule, then the stand under it.
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit * 2.5, box.y + unit, unit * 3, unit * 4
+                    ),
+                )
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit * 3.5, box.y + unit * 5, unit, unit * 2
+                    ),
+                )
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit * 2, box.y + unit * 6.5, unit * 4, _SWITCH_STROKE
+                    ),
+                )
+            else:
+                # The speaker: a small block, and a taller one beside it.
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit, box.y + unit * 3, unit * 2, unit * 2
+                    ),
+                )
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit * 3, box.y + unit * 1.5, unit * 2, unit * 5
+                    ),
+                )
+                if on:
+                    # Two ticks of sound coming out of it. They are what
+                    # disappears when he is told to be quiet, so they
+                    # carry the state as much as the dimming does.
+                    self._fill(
+                        snapshot,
+                        alpha,
+                        Graphene.Rect().init(
+                            box.x + unit * 5.6,
+                            box.y + unit * 3,
+                            _SWITCH_STROKE,
+                            unit * 2,
+                        ),
+                    )
+                    self._fill(
+                        snapshot,
+                        alpha,
+                        Graphene.Rect().init(
+                            box.x + unit * 6.8,
+                            box.y + unit * 2,
+                            _SWITCH_STROKE,
+                            unit * 4,
+                        ),
+                    )
+            if not on:
+                # Struck through. Dimming alone is a difference you have
+                # to remember; a bar across it is one you can see.
+                self._fill(
+                    snapshot,
+                    _SWITCH_ON,
+                    Graphene.Rect().init(
+                        box.x + unit,
+                        box.y + box.size / 2 - _SWITCH_STROKE / 2,
+                        box.size - unit * 2,
+                        _SWITCH_STROKE,
+                    ),
+                )
+
+    def _on_pressed(
+        self, _gesture: Gtk.GestureClick, _n: int, x: float, y: float
+    ) -> None:
+        name = self.switches.hit(
+            x, y, float(self.get_width()), float(self.get_height())
+        )
+        if name is None:
+            # The rest of the strip is not a button, and must not behave
+            # like one. CLAUDE.md §1.5.
+            return
+        on = self.switches.toggle(name)
+        self.queue_draw()
+        self.on_switch(name, on)

@@ -53,6 +53,15 @@ _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
 _FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
 # His name, and how long a conversation stays open after he answers.
 _WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
+
+# Start with these switches already off: "mic", "voice", or both. The
+# counterpart of SAMANTHA_WIDGET_STATE for the two glyphs at the end of
+# the strip — the struck-through state cannot be photographed otherwise,
+# because there is no way to send a click to this window (xdotool is not
+# installed, CLAUDE.md §5).
+_SWITCHES_OFF = {
+    s.strip() for s in os.environ.get("SAMANTHA_WIDGET_SWITCHES", "").split(",")
+}
 try:
     _WAKE_WINDOW = float(os.environ.get("SAMANTHA_WIDGET_WAKE_WINDOW", ""))
 except ValueError:
@@ -207,6 +216,37 @@ class SamanthaApp(Gtk.Application):
         transcriber = Transcriber()
         client = GatewayClient()
 
+        def on_switch(name: str, on: bool) -> None:
+            """One of the two switches on the strip was pressed."""
+            print(
+                f"interruptor: {name} {'encendido' if on else 'apagado'}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if name == "voice" and not on:
+                # Silence now, not after the current sentence: the
+                # reason somebody presses this is that he is talking.
+                speaker.interrupt()
+            if name == "mic" and not on:
+                # Whatever he was told before the switch went off is not
+                # a conversation any more.
+                wake.close()
+
+        def say(clause: str) -> None:
+            """Speak a clause, unless his voice is switched off."""
+            if not wave.switches.voice_on:
+                # Dropped rather than queued: a queue that fills up
+                # while he is muted would empty itself the moment he
+                # is unmuted, and say a minute-old answer out loud.
+                return
+            speaker.enqueue(clause)
+
+        wave.on_switch = on_switch
+        if "mic" in _SWITCHES_OFF:
+            wave.switches.mic_on = False
+        if "voice" in _SWITCHES_OFF:
+            wave.switches.voice_on = False
+
         # He answers to his name (user, 2026-08-26). An empty
         # SAMANTHA_WIDGET_WAKE_WORD restores the "everything heard is for
         # him" of every version before that.
@@ -280,7 +320,7 @@ class SamanthaApp(Gtk.Application):
             machine.token(token)
             for clause in chunker.push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                speaker.enqueue(clause)
+                say(clause)
 
         def on_done(_ms: int) -> None:
             # He has answered, so the next sentence needs no name for a
@@ -288,12 +328,12 @@ class SamanthaApp(Gtk.Application):
             wake.answered(time.monotonic())
             for clause in chunker.flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                speaker.enqueue(clause)
+                say(clause)
             machine.done()
 
         def on_error(message: str) -> None:
             if message:
-                speaker.enqueue(message)
+                say(message)
             machine.error(message)
 
         def on_photo(path: str, camera: str) -> None:
@@ -349,6 +389,16 @@ class SamanthaApp(Gtk.Application):
         detector = UtteranceDetector(SileroDetector())
 
         def on_frame(frame: bytes) -> None:
+            if not wave.switches.mic_on:
+                # The microphone switch on the strip. The stream stays
+                # open — closing PortAudio from this callback is the
+                # segfault CLAUDE.md §2.8 is written around — and every
+                # frame is dropped instead, which is the same thing from
+                # the room's side. The detector is reset so a half-heard
+                # sentence does not resume when it comes back on.
+                if detector.speaking:
+                    detector.reset()
+                return
             if _MIC_GATE and player.busy and not detector.speaking:
                 # No echo cancellation on this box: he is talking and
                 # nobody has cut in, so drop the frame rather than let
