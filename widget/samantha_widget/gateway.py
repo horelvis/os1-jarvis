@@ -27,7 +27,16 @@ import websockets
 DEFAULT_URI = "ws://127.0.0.1:7777/ws"
 DEFAULT_USER_ID = "primary"
 
-_SERVER_TYPES = {"token", "done", "error", "transcription", "photo", "live", "live_end"}
+_SERVER_TYPES = {
+    "token",
+    "done",
+    "error",
+    "transcription",
+    "photo",
+    "live",
+    "live_end",
+    "console",
+}
 
 # Said out loud when the gateway is unreachable. Silence would leave the
 # user talking to a wall — one of the few Spanish strings in this package.
@@ -83,6 +92,9 @@ class GatewayClient:
         )
         self.on_live_frame: Callable[[int, bytes], None] = lambda _e, _p: None
         self.on_live_end: Callable[[int, str], None] = lambda _e, _r: None
+        # Lines for the strip's terminal. Not tokens: what a coding
+        # assistant writes is shown, never spoken.
+        self.on_console: Callable[[str], None] = lambda _t: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -140,6 +152,10 @@ class GatewayClient:
             self.on_done(int(msg.get("thinking_ms", 0)))
         elif kind == "error":
             self.on_error(msg.get("error", ""))
+        elif kind == "console":
+            text = msg.get("text")
+            if isinstance(text, str) and text:
+                self.on_console(text)
         elif kind == "photo":
             path = msg.get("path", "")
             if isinstance(path, str) and path:

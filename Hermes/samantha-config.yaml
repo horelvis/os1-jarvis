@@ -19,6 +19,7 @@ plugins:
     - samantha-kiosk
     - samantha-voice
     - samantha-vision
+    - samantha-code
   entries:
     samantha-voice:
       allow_tool_override: false
@@ -219,6 +220,7 @@ platform_toolsets:
     - camaras
     - web
     - a2a
+    - codigo
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron

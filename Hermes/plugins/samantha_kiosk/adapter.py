@@ -40,6 +40,7 @@ from loguru import logger
 
 from .protocol import (
     ProtocolError,
+    console,
     decode_client,
     done,
     error,
@@ -510,6 +511,10 @@ class KioskAdapter(BasePlatformAdapter):
             logger.debug(f"samantha-kiosk: live frame not delivered — {exc}")
             return False
         return True
+
+    async def push_console(self, text: str) -> bool:
+        """Write lines into the strip's terminal. False when nothing took it."""
+        return await self._push(console(text))
 
     async def push_live_open(
         self, camera: str, epoch: int, extradata: bytes, width: int, height: int

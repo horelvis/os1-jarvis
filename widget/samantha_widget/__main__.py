@@ -529,6 +529,13 @@ class SamanthaApp(Gtk.Application):
         client.on_token = on_token
         client.on_done = on_done
         client.on_error = on_error
+
+        def on_console(text: str) -> None:
+            # Straight to the GTK thread, like a photo: it is not part
+            # of the turn and must appear whether or not one is running.
+            GLib.idle_add(window.write_console, text)
+
+        client.on_console = on_console
         client.on_photo = on_photo
         client.on_live_open = on_live_open
         client.on_live_frame = on_live_frame

@@ -83,6 +83,20 @@ def photo(path: str, camera: str) -> str:
     return json.dumps({"type": "photo", "path": path, "camera": camera})
 
 
+def console(text: str) -> str:
+    """Lines for the strip's terminal, server to client.
+
+    The third thing the band can hold, after the photo and the live
+    camera, and it exists for the same reason they do: what a coding
+    assistant writes is not part of what he SAYS. An answer goes
+    wherever the turn goes; this goes to the strip and stops there.
+
+    Added 2026-08-26 for the code bridge. `decode_client` is untouched —
+    the strip never sends one of these.
+    """
+    return json.dumps({"type": "console", "text": text})
+
+
 def error(message: str) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     return json.dumps({"type": "error", "error": message})
