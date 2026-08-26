@@ -790,6 +790,35 @@ CosyVoice runs in Docker from `tts-server/cosyvoice/` and listens on
 `/approve` through the strip. Restarting the gateway is NOT enough — see
 §7 and the warning there; this has cost an afternoon once already.
 
+### When he hears you and says nothing
+
+Measured 2026-08-26, and neither half is in the code: the strip printed
+`→ Jarvis, ¿qué tiempo…`, the gateway logged nothing at all, and no
+reply ever came. Two causes, both silent, both operational:
+
+- **A run is stuck.** Hermes was still inside an earlier turn — one
+  where the model called `tool_call` with `terminal` and got
+  `'terminal' is not a deferrable tool` — and iterations are unbounded
+  (`iteration 1/9223372036854775807`). Everything said afterwards is
+  folded into that run (`↪ Redirected current run`) instead of being
+  answered. **`/stop` clears it**, and the diagnosis is that any command
+  answers `⏳ Agent is running`.
+- **A new session eats its first turn.** With no home channel set, the
+  first turn of a session comes back as `📬 No home channel is set for
+  Samantha_Kiosk`, which the strip correctly discards as a system
+  message — so the question that triggered it is simply gone. Fixed for
+  good with `/sethome` (done 2026-08-26, `Home channel set to Kiosk`),
+  which must be re-applied on any new box or after `state.db` is lost.
+
+To tell "the gateway is stuck" from "the strip cannot reach it", stop
+the strip first — a second connection replaces the first, so a probe
+racing a running widget proves nothing:
+
+```bash
+systemctl --user stop samantha-widget.service
+cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python tools/probe_gateway.py "¿Qué hora es?"
+```
+
 ### Verifying anything visual
 
 ```bash
