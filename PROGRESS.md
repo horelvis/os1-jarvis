@@ -1,5 +1,71 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 — La cámara se mueve de verdad, y JARVIS responde a su nombre ✅
+
+La tarea 13 empezó como una verificación y acabó encontrando que **la
+vista en vivo nunca había funcionado**. Con ella cerrada, el usuario
+pidió cuatro cosas y las cuatro están hechas.
+
+**El fallo que la verificación existía para encontrar.** La banda se
+abría a 900×480, se quedaba vacía y no se cerraba nunca. Tres síntomas y
+una causa: `LiveSession.open` capturaba el bucle de eventos con
+`asyncio.get_running_loop()`, que es el bucle **del turno**, y ese bucle
+deja de correr cuando el turno acaba. Cada paquete que el hilo vigilante
+programaba después caía en un bucle muerto, en la única rama de
+`_schedule` que no dice nada. El tope de dos minutos tampoco saltaba:
+sólo se comprueba con un paquete que llega, y no llegaba ninguno. El
+adaptador del kiosko ahora recuerda el bucle de su propio websocket —el
+del gateway, que vive entre turnos— y la sesión lo pide.
+
+**Costó una medición y cuatro rondas de instrumentar**, porque entre el
+grifo y el píxel no había nada observable. Esas líneas se quedan: `tap
+installed`, `first packet`, `streaming`, `first frame landed` y el
+`running=` del bucle. Una por vista, ninguna por paquete.
+
+**Y los tests habían normalizado el fallo:** el propio docstring de
+`test_live.py` explicaba que «el bucle que `open()` capturó ya está
+cerrado» y lo sorteaba metiendo el escenario entero en un `asyncio.run`.
+Eso *es* el fallo de producción, escrito como si fuera una manía de los
+tests.
+
+**Medido contra la casa, con el arreglo:** ~1,2 s desde el reloj quemado
+en la imagen hasta la pantalla; 11,7% de CPU el widget y 38,5% el
+gateway; el tope cerrando a los 120,0 s exactos tras 1200 paquetes, y la
+tira de vuelta a 900×96 con `_NET_WM_STATE_ABOVE/STICKY/SKIP_*` intactos.
+Sin probar: la salida hablada («ya está») y el clic sobre la imagen —
+no hay `xdotool` y el micrófono falso no mete dos frases en una sesión.
+
+**Las cuatro peticiones del usuario, en orden:**
+
+1. **Enseñar una cámara es el directo, y en grande.** Pedir la entrada
+   llamaba a `mirar` y devolvía una foto de quince segundos. Se cambió la
+   frontera entre las dos herramientas y el `platform_hint`. De paso,
+   `ver_en_vivo` **reventaba** con el argumento que Hermes pasa de verdad
+   —el dict entero como primer parámetro, que `mirar` siempre supo y el
+   otro no— y decía en voz alta «la imagen en directo no me llega ahora
+   mismo», que suena a cámara rota y no lo era. Y una foto de una sola
+   cámara nace ya a 900×480.
+2. **Responde a su nombre.** «Jarvis» por defecto, con treinta segundos
+   de conversación abierta tras cada respuesta. Dos hallazgos: **Whisper
+   no oye «Jarvis»** —«Carbis», «Harvish», «Jervis», «Harvies» en una
+   mañana, así que el emparejamiento es por parecido y no por igualdad—
+   y **el nombre se tiraba antes de que Whisper lo viera**: el detector
+   limpiaba el buffer en cada fotograma por debajo del umbral, así que la
+   primera sílaba de un turno no sobrevivía. Ahora guarda medio segundo
+   de carrerilla; sin eso la palabra de activación no funciona.
+3. **Deja de ofrecerse.** Remataba casi cada respuesta con «¿quiere
+   que…?» o «si quiere, puedo…». Una regla nueva en la persona. Después:
+   «Ya la tiene delante, señor: la entrada, en directo.» Y nada más.
+4. **Dos interruptores en la tira**, sus oídos y su voz. Existen porque
+   la alternativa no existe: «deja de escucharme» hay que oírlo para
+   obedecerlo, y «cállate» hay que oírlo por encima de su propia voz. El
+   del micrófono tira los fotogramas en vez de cerrar el stream (cerrar
+   PortAudio desde su propio callback es el segfault de §2.8); el de la
+   voz corta lo que esté diciendo en el acto.
+
+**Pendiente:** volver a activar `allow_gateway_injection`, las reglas de
+alerta, y probar a mano las dos salidas que faltan del directo.
+
 ## 2026-08-25 — La cámara en vivo: doce tareas de trece, y una noche de hallazgos ✅⏸
 
 Se le puede pedir que enseñe una cámara **en movimiento** sobre la tira.
