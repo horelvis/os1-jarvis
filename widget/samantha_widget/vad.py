@@ -32,7 +32,20 @@ _THRESHOLD = 0.5
 _START_FRAMES = 3
 _SILENCE_SECONDS = 0.7
 _MIN_UTTERANCE_SECONDS = 0.4
+
+# How much of the quiet before a turn is kept in front of it. The first
+# syllable of a word routinely sits under the threshold, and before
+# 2026-08-26 everything under it was discarded — which cost nothing
+# while every utterance was for him. With a wake word the dropped
+# syllable is his NAME: "Jarvis, ¿qué día es hoy?" was transcribed as
+# "¿Qué día es hoy?" and the turn was thrown away for not being
+# addressed to him. Half a second is enough for a name and short enough
+# that a quiet room never accumulates.
+_PREROLL_SECONDS = 0.5
 _MAX_UTTERANCE_SECONDS = 30.0
+
+
+_PREROLL_BYTES = int(_PREROLL_SECONDS * INPUT_RATE) * 2
 
 
 class SpeechProbe(Protocol):
@@ -70,7 +83,10 @@ class UtteranceDetector:
             else:
                 self._speech_run = 0
                 self._speech_seconds = 0.0
-                self._buffer.clear()
+                # NOT `clear()`: keep the last half-second, so a turn
+                # that starts quietly still carries its own beginning.
+                # Bounded, so an hour of silence holds half a second.
+                del self._buffer[:-_PREROLL_BYTES]
             return None
 
         self._buffer += frame

@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import gi
@@ -23,6 +24,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
+from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
 if TYPE_CHECKING:
@@ -49,6 +51,12 @@ _SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
 # microphone calls. Everything after that is real — Silero, Whisper, the
 # WebSocket to Hermes, and her reply spoken back. Only the air is faked.
 _FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
+# His name, and how long a conversation stays open after he answers.
+_WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
+try:
+    _WAKE_WINDOW = float(os.environ.get("SAMANTHA_WIDGET_WAKE_WINDOW", ""))
+except ValueError:
+    _WAKE_WINDOW = WINDOW_SECONDS
 
 # Show these photos (comma-separated paths) a couple of seconds after
 # starting, exactly as if the gateway had pushed them. The only way to
@@ -199,6 +207,17 @@ class SamanthaApp(Gtk.Application):
         transcriber = Transcriber()
         client = GatewayClient()
 
+        # He answers to his name (user, 2026-08-26). An empty
+        # SAMANTHA_WIDGET_WAKE_WORD restores the "everything heard is for
+        # him" of every version before that.
+        wake = WakeWord(_WAKE_WORD, window=_WAKE_WINDOW)
+        if wake.word:
+            print(
+                f"palabra de activación: {wake.word} (ventana {wake.window:.0f}s)",
+                file=sys.stderr,
+                flush=True,
+            )
+
         # ── the only bridge into the UI ───────────────────────────────
         def set_state(state: WaveState) -> None:
             GLib.idle_add(wave.set_state, state)
@@ -234,7 +253,15 @@ class SamanthaApp(Gtk.Application):
                 machine.error("")
                 return
             print(f"→ {text}", file=sys.stderr, flush=True)
-            await client.send_chat(text)
+            spoken = wake.heard(text, time.monotonic())
+            if spoken is None:
+                # Somebody was talking in the room, not to him. Ending
+                # the turn the same way an empty transcription does: the
+                # wave goes back to listening and he never knew.
+                print("(no era para él)", file=sys.stderr, flush=True)
+                machine.error("")
+                return
+            await client.send_chat(spoken)
 
         # ── the gateway's replies ─────────────────────────────────────
         def on_token(token: str) -> None:
@@ -256,6 +283,9 @@ class SamanthaApp(Gtk.Application):
                 speaker.enqueue(clause)
 
         def on_done(_ms: int) -> None:
+            # He has answered, so the next sentence needs no name for a
+            # while: a conversation is not a sequence of commands.
+            wake.answered(time.monotonic())
             for clause in chunker.flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 speaker.enqueue(clause)

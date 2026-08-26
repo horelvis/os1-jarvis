@@ -48,7 +48,10 @@ def test_the_utterance_holds_roughly_the_speech() -> None:
     utterances = _run(_frames((0.0, 0.5), (0.9, 2.0), (0.0, 2.0)))
     seconds = len(utterances[0]) / 2 / 16000
 
-    assert 2.0 <= seconds <= 3.0
+    # 2 s of speech, the 0.7 s of silence that ends the turn, and since
+    # 2026-08-26 the 0.5 s of run-up kept in front of it — see
+    # `_PREROLL_SECONDS`, which exists so a wake word survives.
+    assert 2.0 <= seconds <= 3.5
 
 
 def test_a_single_loud_frame_does_not_start_a_turn() -> None:
@@ -102,3 +105,42 @@ def test_scattered_pre_roll_frames_do_not_count_towards_the_minimum() -> None:
     script += _frames((0.9, 0.2), (0.0, 2.0))
 
     assert _run(script) == []
+
+
+# ── the pre-roll ──────────────────────────────────────────────────────
+#
+# Measured 2026-08-26, the day he was given a wake word: "Jarvis, ¿qué
+# día es hoy?" was transcribed as "¿Qué día es hoy?" — his name gone,
+# and with it the whole turn, because the filter had nothing to match.
+# The first syllable of a word routinely sits under the threshold, and
+# the buffer was cleared on every frame that did, so it was thrown away
+# before the turn started. That cost nothing while everything heard was
+# for him; with a wake word, the syllable that gets dropped is the one
+# that decides whether he answers at all.
+
+
+def test_the_quiet_run_up_to_a_turn_is_kept() -> None:
+    # Ten quiet frames, then speech. Each frame is stamped with its own
+    # index so the emitted buffer says where it started.
+    quiet = 10
+    detector = UtteranceDetector(ScriptedProbe([0.0] * quiet + [1.0] * 100))
+    emitted = None
+    for i in range(200):
+        out = detector.push(bytes([i % 256, 0]) * FRAME_SAMPLES)
+        if out is not None:
+            emitted = out
+            break
+    assert emitted is not None
+    started_at = emitted[0]
+    # It must begin BEFORE the first frame of speech — that is the whole
+    # point — and not at the very beginning of the quiet either.
+    assert started_at < quiet, f"buffer starts at frame {started_at}, speech at {quiet}"
+    assert quiet - started_at >= 5  # ~0.16 s of run-up, at 32 ms a frame
+
+
+def test_the_run_up_never_grows_without_bound() -> None:
+    # A room that is quiet for an hour must not accumulate an hour.
+    detector = UtteranceDetector(ScriptedProbe([0.0] * 5000))
+    for _ in range(4000):
+        detector.push(FRAME)
+    assert len(detector._buffer) / 2 / 16000 <= 1.0
