@@ -108,3 +108,42 @@ def test_no_answer_ever_names_the_machinery():
         low = said.lower()
         for forbidden in ("cámara", "h264", "códec", "socket", "epoch", "sesión"):
             assert forbidden not in low
+
+
+# ── an argument that is not a name ────────────────────────────────────
+#
+# Measured on the live gateway, 2026-08-26: asked "enséñame la cámara de
+# la entrada", he called this tool with `camara` set to a DICT, and
+# `_resolve` met it with `.casefold()`. The handler that documents itself
+# as never raising raised, the turn came back as a tool error, and what
+# he said out loud was "la imagen en directo no me llega ahora mismo" —
+# which sounds like a camera problem and was not one.
+
+
+def test_a_wrapped_name_is_unwrapped_rather_than_dropped():
+    session = _Session()
+    handler = make_open_handler(session, _Fleet(), ["entrada", "fuera"])
+
+    said = asyncio.run(handler(camara={"camara": "entrada"}))
+
+    assert session.opened == ["entrada"]
+    assert "entrada" in said.lower()
+
+
+def test_an_argument_with_no_name_in_it_asks_instead_of_raising():
+    session = _Session()
+    handler = make_open_handler(session, _Fleet(), ["entrada", "fuera"])
+
+    said = asyncio.run(handler(camara={"type": "string"}))
+
+    assert session.opened == []
+    assert "entrada" in said and "fuera" in said
+
+
+def test_a_list_of_one_name_is_a_name():
+    session = _Session()
+    handler = make_open_handler(session, _Fleet(), ["entrada", "fuera"])
+
+    asyncio.run(handler(camara=["entrada"]))
+
+    assert session.opened == ["entrada"]

@@ -64,17 +64,31 @@ _FALLBACK_HINT = (
 # Extended 2026-08-25 for the second thing: a camera in motion, not just
 # a still. One clause, not a new paragraph — and no tool names in it,
 # because their descriptions already say what he needs to call them.
+#
+# Reordered 2026-08-26 by the user. The still came first here because it
+# was built first, and that order was itself an instruction: asked to
+# show the entrance, he showed a photo. Showing a camera is the moving
+# picture; the still is what somebody asks for by name.
+# The "no tienes que anunciarlo, ya está ahí" of the 2026-08-25 wording
+# said something true of the photo — it appears by itself, as a side
+# effect of looking — and something false of the live view, which only
+# appears if he opens it. Measured 2026-08-26, twice: asked to show the
+# entrance he answered "ya la tiene delante, señor" having called
+# nothing at all, and the band stayed empty. What he need not announce
+# is the MACHINERY; putting the camera up is still something he does.
 _SCREEN = (
-    "Hay una sola cosa que sí puedes enseñar. Cuando miras una cámara, la "
-    "foto aparece sola unos segundos en la tira, delante de la persona: no "
-    "tienes que pedirlo ni anunciarlo, ya está ahí, y basta con que hables "
-    "de lo que hay como si los dos lo estuvierais mirando. Es lo único que "
-    "se puede mostrar — no hay manera de enseñar texto, ficheros, enlaces "
-    "ni imágenes de ningún otro sitio — y tú esa foto no la ves: solo sabes "
-    "lo que la cámara te ha contado; también puedes dejar una cámara en "
-    "movimiento hasta que te pidan pararla, tampoco hace falta anunciarlo, "
-    "y esa imagen en directo tampoco la ves — sigues sabiendo solo lo que "
-    "la cámara te cuenta."
+    "Hay una sola cosa que sí puedes enseñar: una cámara de la casa. "
+    "Cuando la pones, la imagen aparece en la tira, delante de la "
+    "persona, y se queda en movimiento hasta que te pidan quitarla. No "
+    "hace falta que anuncies que vas a enseñarla ni que expliques cómo "
+    "lo haces: basta con que hables de lo que hay como si los dos lo "
+    "estuvierais mirando. Pero ponla de verdad — si no la pones, la "
+    "pantalla se queda vacía, y decir que ya está puesta sin haberla "
+    "puesto es mentirle a la persona. Si lo que te piden es una foto, "
+    "entonces lo que aparece es una imagen fija unos segundos. Es lo "
+    "único que se puede mostrar — no hay manera de enseñar texto, "
+    "ficheros, enlaces ni imágenes de ningún otro sitio — y tú no la "
+    "ves: solo sabes lo que la cámara te ha contado."
 )
 
 

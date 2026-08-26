@@ -65,7 +65,18 @@ NAME = "mirar"
 # reach `mirar` would have offered him that one too, which is precisely
 # what `check_fn` exists to prevent, one level up.
 TOOLSET = "camaras"
-DESCRIPTION = "Mira una cámara de la casa ahora mismo y di qué hay."
+# Narrowed 2026-08-26 by the user: showing a camera is the live view's
+# job now, and a still is for when a still is what was asked for. The
+# old wording ("Mira una cámara de la casa ahora mismo y di qué hay")
+# was measured taking "muéstrame la cámara de la entrada" — a request
+# to SEE — and answering it with a photo that was gone in fifteen
+# seconds.
+DESCRIPTION = (
+    "Mira una cámara y di qué hay, sin enseñar nada en movimiento. "
+    "Úsala solo si piden expresamente una foto o una imagen fija, o si "
+    "solo preguntan qué se ve o si hay alguien. Si piden ver una cámara "
+    "o que se la enseñes, usa ver_en_vivo."
+)
 EMOJI = "👁"
 SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -94,6 +105,40 @@ def _spoken_list(names: Sequence[str]) -> str:
     if len(names) == 1:
         return names[0]
     return ", ".join(names[:-1]) + " y " + names[-1]
+
+
+def camera_argument(value: Any) -> str | None:
+    """The camera name inside whatever the model actually sent.
+
+    Hermes hands a tool the whole argument dict as its first parameter,
+    which `mirar` has always known (it calls it `args`). `ver_en_vivo`
+    named that parameter `camara` and met it with `.casefold()`, so on
+    2026-08-26, asked "enséñame la cámara de la entrada", the tool that
+    documents itself as never raising raised — and what he said out loud
+    was "la imagen en directo no me llega ahora mismo", which sounds
+    like a camera fault and was not one.
+
+    Unwrapping rather than rejecting, because the name really is in
+    there. Anything with no name in it comes back None, which both
+    handlers already treat as "no camera was given" — asking is a worse
+    answer than opening the wrong room, and both beat an exception.
+    """
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            found = camera_argument(item)
+            if found:
+                return found
+        return None
+    if isinstance(value, dict):
+        for key in ("camara", "cámara", "camera", "nombre", "name", "value"):
+            if key in value:
+                found = camera_argument(value[key])
+                if found:
+                    return found
+        return None
+    return None
 
 
 def _resolve(wanted: str, names: Sequence[str]) -> str | None:
@@ -249,8 +294,7 @@ def make_handler(
     async def handler(args: Any = None, **_kwargs: Any) -> str:
         """`mirar`. Answers in one or more sentences, and never raises."""
         names = list(cameras)
-        wanted = args.get("camara") if isinstance(args, dict) else None
-        wanted = str(wanted).strip() if wanted is not None else ""
+        wanted = camera_argument(args) or ""
 
         if wanted:
             camera = _resolve(wanted, names)
