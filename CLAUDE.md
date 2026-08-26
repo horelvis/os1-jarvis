@@ -1074,6 +1074,68 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-26 — The tools were reachable; the clock was not
+
+**The user's complaint was that Hermes' tools do not get invoked, which
+is the whole reason for using Hermes.** The investigation found one
+cause underneath several symptoms, and it is a single line of Hermes'
+own system prompt (`agent/prompt_builder.py:499`):
+
+    - Current time, date, timezone → use terminal (e.g. date)
+
+This platform has no `terminal`, deliberately (§12, 2026-08-23: "she
+lives in a living room, and none of them can be used without narrating
+what she is doing"). So the prompt sends him to a tool that is not
+there, and everything else follows:
+
+- **The runaway runs and the heat.** `'terminal' is not a deferrable
+  tool`, met inside a loop with no iteration limit: 15,099 tokens in one
+  request, GPU at 93% and 391 W, twice today and at least once
+  yesterday.
+- **Reminders that never arrive.** Having failed to find the clock he
+  invents it. Asked at 14:23 for a reminder "in six minutes", he filed
+  it for 17:34 — he believed it was 17:28. The cron was created
+  correctly; it was simply three hours away.
+
+**Fix: `gateway.message_timestamps.enabled`,** which prefixes every user
+message with `[Wed 2026-08-26 14:34:47 CEST]`. Hermes defaults it OFF
+because it changes what every gateway user sees; here it is the
+difference between reminders working and not. Measured after: the time
+asked and answered correctly, a two-minute reminder filed for exactly
+two minutes later, fired, and spoken aloud by the strip.
+
+**Two things this corrected in our own understanding, both worth
+keeping:**
+
+- **Hermes' real log is `.hermes/home/logs/agent.log`, not the journal.**
+  `tool <name> completed` and `Turn ended: … tool_turns=N` live there.
+  Reading the journal alone produced the confident and wrong conclusion
+  that no tool was ever called — when `cronjob`, `todo`, `memory` and
+  `ver_en_vivo` all were.
+- **"He said he did it without doing it" was half wrong.** Asked to note
+  a preference he answered "ya lo tenía apuntado" with `tool_turns=0` —
+  and it WAS already in `memories/USER.md`, put there by the memory
+  provider rather than by a tool call. Check the store before calling it
+  a hallucination.
+
+**And his memory had gone stale in a way that shaped his behaviour.**
+`memories/MEMORY.md` still carried "El kiosko es solo voz: no hay
+pantalla ni herramienta de visión… Responder con descripción verbal y
+ofrecer a vigilar y avisar" — false since the band was built, and the
+source of both the refusals to show a camera and the "¿le aviso?"
+endings the user asked to remove the same morning. Corrected in place.
+A persona edit does not reach what the agent has written down about
+itself.
+
+**Also decided here:** the tool-search bridge is off for this platform
+(`tools.tool_search: false`). It activates as soon as a single
+deferrable tool exists — `mirar` guaranteed that — and its catalogue
+advertises tools this platform does not have, `terminal` included.
+
+**Still open, and it is the real backstop:** nothing bounds a Hermes run
+(`api_calls=1/9223372036854775807`). `--n-predict 2048` on llama-server
+caps one generation, not a loop of them.
+
 ### 2026-08-26 — He answers to his name, and the strip gains two switches
 
 **Decision (the user's):** he only wakes on a word, "Jarvis" by default,

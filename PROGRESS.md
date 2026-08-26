@@ -1,5 +1,52 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (tarde II) — Las herramientas sí estaban; lo que faltaba era el reloj ✅
+
+El usuario: «sigue con los problemas para invocar herramientas de Hermes,
+que es el principal motivo de usarlo». La causa resultó ser **una línea
+del propio prompt de Hermes**: «Current time, date, timezone → use
+terminal (e.g. date)». Esta plataforma no tiene `terminal` —excluida a
+propósito— así que le manda a una herramienta que no existe.
+
+De ahí salen los dos misterios del día: el error `'terminal' is not a
+deferrable tool` dentro de un bucle sin límite de iteraciones (15.099
+tokens, GPU al 93% y 391 W) y, al no encontrar el reloj, **se inventa la
+hora**: a las 14:23 pidió un aviso «en seis minutos» y lo programó para
+las 17:34. El cron se creaba bien; simplemente quedaba a tres horas.
+
+**Arreglo:** `gateway.message_timestamps.enabled`, que antepone
+`[Wed 2026-08-26 14:34:47 CEST]` a cada mensaje. Medido después:
+preguntada la hora a las 14:36 responde «casi las dos y media»; pedido a
+las 14:36:30 un aviso para dos minutos, queda a las 14:38:30, se dispara,
+y la tira lo dice en voz alta a las 14:38:51.
+
+**Dos correcciones a lo que creíamos:**
+- El registro de Hermes está en `.hermes/home/logs/agent.log`, no en el
+  journal. Mirando sólo el journal se concluye —con seguridad y mal— que
+  no se llama a ninguna herramienta; allí se ve que sí: `cronjob`,
+  `todo`, `memory`, `ver_en_vivo`.
+- «Dice que lo apunta y no lo apunta» era medio falso: la preferencia del
+  café **ya estaba** en `memories/USER.md`, puesta por el proveedor de
+  memoria y no por una llamada. Mirar el almacén antes de llamarlo
+  alucinación.
+
+**Y su memoria estaba envenenada:** `MEMORY.md` seguía diciendo «el
+kiosko es solo voz: no hay pantalla… responder con descripción verbal y
+ofrecer a vigilar y avisar». Falsa desde que existe la banda, y origen
+tanto de las negativas a enseñar cámaras como de las coletillas que el
+usuario pidió quitar por la mañana. Corregida. Editar la persona no
+alcanza a lo que el agente ha escrito sobre sí mismo.
+
+**Además:** el puente `tool_search` queda apagado para esta plataforma
+(ofrecía en su catálogo herramientas que aquí no existen, `terminal`
+entre ellas) y el hint deja de insistir en la cámara y pasa a exigir
+honestidad — antes, pedirle un aviso creaba el aviso **y** abría una
+cámara que nadie pidió; después, sólo el aviso.
+
+**Sigue abierto:** nada acota un run de Hermes
+(`api_calls=1/9223372036854775807`); `--n-predict 2048` limita una
+generación, no un bucle de ellas.
+
 ## 2026-08-26 (tarde) — El calor no eran las cámaras, y un botón para cerrarle ✅
 
 **El usuario preguntó por qué se calienta el PC, y la respuesta cambia un
