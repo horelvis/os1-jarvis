@@ -217,7 +217,7 @@ class SamanthaApp(Gtk.Application):
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 
-        self._start_voice_loop(wave, band)
+        self._start_voice_loop(wave, band, window)
 
     # ── the demo half ─────────────────────────────────────────────────
 
@@ -230,12 +230,17 @@ class SamanthaApp(Gtk.Application):
         }
 
         def on_key(_controller, keyval, _code, _state) -> bool:
+            if window.prompt_open():
+                # While the line is open the keyboard belongs to it. The
+                # demo keys would otherwise fire on "1" as you type, and
+                # Escape has a better job here than closing him.
+                if keyval == Gdk.KEY_Escape:
+                    window.set_prompt_open(False)
+                    return True
+                return False
             if keyval in keys:
                 wave.set_state(keys[keyval])
                 wave.model.set_level(0.7 if keys[keyval] in _LIVE else 0.0)
-                return True
-            if keyval == Gdk.KEY_Escape:
-                self.quit()
                 return True
             return False
 
@@ -245,7 +250,7 @@ class SamanthaApp(Gtk.Application):
 
     # ── the real half ─────────────────────────────────────────────────
 
-    def _start_voice_loop(self, wave, band) -> None:
+    def _start_voice_loop(self, wave, band, window) -> None:
         import numpy as np
 
         from .audio import Microphone, Player, describe_devices
@@ -292,6 +297,11 @@ class SamanthaApp(Gtk.Application):
                 # Whatever he was told before the switch went off is not
                 # a conversation any more.
                 wake.close()
+            if name == "text":
+                # Opens the line, or closes it if it was already open.
+                # Nothing else: what is typed goes out on `on_prompt`.
+                window.toggle_prompt()
+                return
             if name == "close":
                 # He is gone until somebody starts him again from a
                 # terminal — which is why it takes two presses (see
@@ -327,6 +337,32 @@ class SamanthaApp(Gtk.Application):
             speaker.enqueue(clause)
 
         wave.on_switch = on_switch
+
+        def on_typed(text: str) -> None:
+            """A line typed on the strip. Sent exactly as if it were said.
+
+            Two things the spoken path does are deliberately skipped: the
+            wake word (a button was pressed — he is being addressed) and
+            the echo filter (nothing was heard, so nothing can be his
+            own voice coming back).
+            """
+            print(f"⌨ {text}", file=sys.stderr, flush=True)
+            machine.typed()
+
+            async def _send() -> None:
+                # Wrapped so a failure is a line in the journal instead
+                # of an exception dying inside a task nobody awaits —
+                # which is exactly how the first version of this looked
+                # from outside: the line vanished and nothing said why.
+                try:
+                    await client.send_chat(text)
+                except Exception as exc:
+                    print(f"no se pudo enviar: {exc!r}", file=sys.stderr, flush=True)
+                    machine.error("")
+
+            loop.call_soon_threadsafe(lambda: self._spawn(_send()))
+
+        window.on_prompt = on_typed
         if "mic" in _SWITCHES_OFF:
             wave.switches.mic_on = False
         if "voice" in _SWITCHES_OFF:

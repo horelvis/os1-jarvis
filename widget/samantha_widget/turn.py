@@ -61,6 +61,17 @@ class TurnMachine:
         self._go(WaveState.THINKING)
         self._on_utterance(pcm)
 
+    def typed(self) -> None:
+        """A line was typed at him on the strip (user, 2026-08-26).
+
+        The sibling of `heard`, minus the audio: there is no utterance to
+        transcribe, so nothing is dispatched from here — the caller has
+        the text already and sends it. What this owns is the wave, which
+        must show he is thinking about it exactly as if it had been said.
+        """
+        self._heard_token = False
+        self._go(WaveState.THINKING)
+
     def token(self, text: str) -> None:
         """A real token — system frames are filtered before they get here."""
         del text

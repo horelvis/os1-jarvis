@@ -70,4 +70,45 @@ window decoration {{
   background-color: {BACKGROUND};
   border-radius: {CORNER_RADIUS}px;
 }}
+
+/* The line you type at him in. Terracotta text on the desktop showing
+   through, like everything else here: it is part of the strip, not a
+   dialog that landed on it. */
+/* Both the entry AND its inner `text` node: GTK4 paints the field on
+   the child, so styling only the widget leaves the theme's grey box
+   sitting on the desktop. Measured by looking at it, 2026-08-26. */
+.samantha-prompt,
+.samantha-prompt > text {{
+  /* Transparent, like everything else here. The theme paints a grey
+     field with an inset shadow otherwise, and a grey box on the desktop
+     is a dialog that landed on the strip rather than part of it. */
+  background: transparent;
+  background-image: none;
+  color: {TERRACOTTA};
+  caret-color: {TERRACOTTA};
+  border: none;
+  box-shadow: none;
+  outline: none;
+  min-height: 0;
+}}
+
+.samantha-prompt {{
+  font-size: 15px;
+  padding: 6px 2px;
+  margin: 0 16px 8px 16px;
+  /* One line under it: enough to say "type here" without drawing a box. */
+  border-bottom: 1px solid {LINE};
+}}
+
+.samantha-prompt > text > placeholder {{
+  color: {TERRACOTTA};
+  opacity: 0.45;
+}}
+
+.samantha-prompt:focus,
+.samantha-prompt:focus-within {{
+  outline: none;
+  box-shadow: none;
+  border: none;
+}}
 """

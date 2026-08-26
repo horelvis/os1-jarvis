@@ -34,7 +34,7 @@ from gi.repository import Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 from . import theme  # noqa: E402
 from .bars_model import BarsModel, WaveformModel  # noqa: E402
-from .switches import CLOSE, MIC, Switches  # noqa: E402
+from .switches import CLOSE, MIC, TEXT, Switches  # noqa: E402
 from .wave_model import WaveModel, WaveState  # noqa: E402
 
 _LINE_WIDTH = 2.0
@@ -250,6 +250,29 @@ class WaveArea(Gtk.Widget):
                         box.x + unit * 2, box.y + unit * 6.5, unit * 4, _SWITCH_STROKE
                     ),
                 )
+            elif box.name == TEXT:
+                # Two lines of text and a cursor: "write here". Drawn
+                # lit always — it is an action, not a sense with a state.
+                for row, (offset, length) in enumerate(((2.0, 4.5), (4.0, 3.0))):
+                    self._fill(
+                        snapshot,
+                        alpha,
+                        Graphene.Rect().init(
+                            box.x + unit * 1.5,
+                            box.y + unit * offset,
+                            unit * length,
+                            _SWITCH_STROKE,
+                        ),
+                    )
+                    del row
+                self._fill(
+                    snapshot,
+                    alpha,
+                    Graphene.Rect().init(
+                        box.x + unit * 6.2, box.y + unit * 1.5, _SWITCH_STROKE, unit * 5
+                    ),
+                )
+                continue
             elif box.name == CLOSE:
                 self._snapshot_cross(snapshot, box, alpha)
                 continue

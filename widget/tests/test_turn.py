@@ -140,3 +140,18 @@ def test_an_utterance_reaches_the_caller() -> None:
     machine.heard(b"\x01\x02" * 100)
 
     assert heard == [b"\x01\x02" * 100]
+
+
+def test_a_typed_line_shows_him_thinking() -> None:
+    # The sibling of `heard`, minus the audio: nothing is dispatched,
+    # because the caller already has the text (user, 2026-08-26).
+    states, utterances = [], []
+    m = TurnMachine(
+        on_state=states.append,
+        on_level=lambda _v: None,
+        on_utterance=utterances.append,
+        on_interrupt=lambda: None,
+    )
+    m.typed()
+    assert states[-1] is WaveState.THINKING
+    assert utterances == []

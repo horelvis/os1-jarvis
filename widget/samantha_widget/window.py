@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Callable
 
 import gi
 
@@ -15,6 +16,10 @@ from gi.repository import Gdk, GdkX11, GLib, Gtk  # noqa: E402
 from . import theme  # noqa: E402
 from .ewmh import Ewmh  # noqa: E402
 from .geometry import placement_is_wrong, strip_rect  # noqa: E402
+
+# How much taller the strip gets while the typed line is open. One line
+# of text with room to breathe — it is an entry, not a message box.
+PROMPT_HEIGHT = 44
 
 # How long to leave the window manager before checking it obeyed, and
 # how many times to insist. Three tries at 120 ms is a third of a
@@ -45,11 +50,28 @@ class StripWindow(Gtk.ApplicationWindow):
         # Vertical, because the band of photos sits ON TOP of the wave
         # and pushes the window's top edge up. Horizontal until
         # 2026-08-24, when there was only ever one child.
+        # Two things can make the strip taller now — the band and the
+        # typed line — so the window keeps both and adds them, rather
+        # than the last caller winning.
+        self._band_extra = 0
+        self._prompt_extra = 0
+
         self._frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._frame.add_css_class("samantha-strip")
         self._frame.set_hexpand(True)
         self._frame.set_vexpand(True)
         self.set_child(self._frame)
+
+        # The line you type at him in (user, 2026-08-26). Built here and
+        # kept hidden: it is the first child of this window that takes
+        # keyboard focus, and it takes it only while it is open.
+        self._prompt = Gtk.Entry()
+        self._prompt.add_css_class("samantha-prompt")
+        self._prompt.set_placeholder_text("Escribe a JARVIS…")
+        self._prompt.set_visible(False)
+        self._prompt.connect("activate", self._on_prompt_activate)
+        self._frame.prepend(self._prompt)
+        self.on_prompt: Callable[[str], None] = lambda _text: None
 
         self._content: Gtk.Widget | None = None
         self._band: Gtk.Widget | None = None
@@ -79,6 +101,32 @@ class StripWindow(Gtk.ApplicationWindow):
         widget.set_vexpand(False)
         self._frame.prepend(widget)
         self._band = widget
+
+    # ── the typed line ────────────────────────────────────────────────
+
+    def prompt_open(self) -> bool:
+        return self._prompt.get_visible()
+
+    def toggle_prompt(self) -> None:
+        """Open the line, or close it without sending."""
+        self.set_prompt_open(not self.prompt_open())
+
+    def set_prompt_open(self, open_: bool) -> None:
+        self._prompt.set_visible(open_)
+        self._prompt_extra = PROMPT_HEIGHT if open_ else 0
+        if open_:
+            self._prompt.grab_focus()
+        else:
+            self._prompt.set_text("")
+        self._resize()
+
+    def _on_prompt_activate(self, entry: Gtk.Entry) -> None:
+        text = entry.get_text().strip()
+        # Closed either way: an empty Enter is how you change your mind
+        # without reaching for Escape.
+        self.set_prompt_open(False)
+        if text:
+            self.on_prompt(text)
 
     def resize_to(self, extra_height: int) -> None:
         """Grow the strip upward by `extra_height`, or back to the strip.
@@ -121,10 +169,15 @@ class StripWindow(Gtk.ApplicationWindow):
         it was not obeyed, instead of leaving the strip mispositioned
         and silent until the next photo.
         """
+        self._band_extra = max(0, extra_height)
+        self._resize()
+
+    def _resize(self) -> None:
+        """Apply the height both callers together are asking for."""
         if self._ewmh is None or self._xid is None or self._rect is None:
             return
         x, y, w, h = self._rect
-        extra = max(0, extra_height)
+        extra = self._band_extra + self._prompt_extra
         wanted = (x, y - extra, w, h + extra)
         # What the strip is currently trying to be. A verify still in
         # flight for an older size must not fight a newer one.

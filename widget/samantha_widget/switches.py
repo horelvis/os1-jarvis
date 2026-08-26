@@ -1,4 +1,4 @@
-"""The three switches on the strip: his ears, his voice, and the door.
+"""The four switches on the strip: his ears, his voice, a way in, and the door.
 
 Pure state and pure geometry — no GTK — the way `photo.py` sits under
 `photo_area.py`. `wave.py` draws what this decides and asks it where a
@@ -6,7 +6,7 @@ press landed.
 
 Asked for by the user on 2026-08-26: two buttons over the strip, one to
 turn the microphone off and one to stop him speaking out loud, and later
-the same day a third to close him. Until
+the same day a third to close him, and a fourth to type at him. Until
 then the strip had nothing to press at all, which CLAUDE.md §1.5 states
 as a property ("no hay ventana que enfocar, ningún icono que pulsar").
 It survives that in the way the photo already does: they are part of the
@@ -38,6 +38,7 @@ MARGIN = 16.0
 
 MIC = "mic"
 VOICE = "voice"
+TEXT = "text"
 CLOSE = "close"
 
 # A press on the close switch arms it; a second press within this many
@@ -82,13 +83,14 @@ class Switches:
         narrow to hold them without covering the wave gets none — the
         wave is what the strip is for.
         """
-        if width < (SIZE + GAP) * 3 + MARGIN * 2:
+        if width < (SIZE + GAP) * 4 + MARGIN * 2:
             return []
         y = (height - SIZE) / 2.0
         right = width - MARGIN
         return [
-            Box(MIC, right - SIZE * 3 - GAP * 2, y, SIZE),
-            Box(VOICE, right - SIZE * 2 - GAP, y, SIZE),
+            Box(MIC, right - SIZE * 4 - GAP * 3, y, SIZE),
+            Box(VOICE, right - SIZE * 3 - GAP * 2, y, SIZE),
+            Box(TEXT, right - SIZE * 2 - GAP, y, SIZE),
             Box(CLOSE, right - SIZE, y, SIZE),
         ]
 
@@ -102,7 +104,13 @@ class Switches:
     # ── state ─────────────────────────────────────────────────────────
 
     def is_on(self, name: str) -> bool:
-        return self.mic_on if name == MIC else self.voice_on
+        if name == MIC:
+            return self.mic_on
+        if name == VOICE:
+            return self.voice_on
+        # The text line and the door are actions, not senses: they are
+        # always drawn lit, because there is no "off" state to show.
+        return True
 
     def armed(self, now: float) -> bool:
         """Is the close switch waiting for its second press?"""
@@ -135,6 +143,12 @@ class Switches:
             # mind, not a confirmation.
             self._armed_until = 0.0
             return None
+        if name == TEXT:
+            # An action with no state of its own — the widget opens the
+            # line and closes it again. Reported so `__main__` can, and
+            # disarms the door, like every other press that is not it.
+            self._armed_until = 0.0
+            return TEXT
         if name == CLOSE:
             if self.armed(now):
                 self._armed_until = 0.0
