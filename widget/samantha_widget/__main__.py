@@ -81,14 +81,22 @@ _TRACE_MIC = os.environ.get("SAMANTHA_WIDGET_TRACE_MIC") == "1"
 # voice coming back through the room cannot start a turn while somebody
 # talking near the microphone still can.
 #
-# Measured 2026-08-26: the user's voice sits at RMS 0.054-0.088 in the
-# dumped utterances. His echo is well below that with the speaker at a
-# sane volume — the number below is where they separate on THIS box, and
-# it is the one thing here worth re-measuring in another room.
+# Measured 2026-08-26, and the calibration is as much physical as it is
+# numeric. The user's voice sits at RMS 0.054-0.088 in the dumped
+# utterances. His own echo measured:
+#
+#   speaker beside the microphone, volume 0.54 → 0.178  (LOUDER than
+#       the person in the room: no threshold can separate that)
+#   the same, volume 0.25                      → 0.011-0.026
+#   speakers moved away from it, volume 0.50   → 0.027-0.035
+#
+# Moving them apart is what made this workable at a normal volume; the
+# user did that. 0.05 sits above the echo and below a person talking,
+# with the margin the 0.035 of the first attempt did not have.
 try:
-    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.035"))
+    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.05"))
 except ValueError:
-    _BARGE_RMS = 0.035
+    _BARGE_RMS = 0.05
 _trace = {"n": 0}
 try:
     _HOTWORD_SENSITIVITY = float(
