@@ -82,7 +82,7 @@ window decoration {{
   /* Transparent, like everything else here. The theme paints a grey
      field with an inset shadow otherwise, and a grey box on the desktop
      is a dialog that landed on the strip rather than part of it. */
-  background: transparent;
+  background: rgba(0, 0, 0, 0.30);
   background-image: none;
   color: {TERRACOTTA};
   caret-color: {TERRACOTTA};
@@ -94,10 +94,15 @@ window decoration {{
 
 .samantha-prompt {{
   font-size: 15px;
-  padding: 6px 2px;
+  padding: 7px 12px;
   margin: 0 16px 8px 16px;
-  /* One line under it: enough to say "type here" without drawing a box. */
-  border-bottom: 1px solid {LINE};
+  /* A box, not just a line. The first version drew only an underline
+     and the user could see nothing but the letters floating on the
+     desktop (2026-08-26). The border says where the field is; the fill
+     is barely there, enough to keep terracotta legible over a light
+     wallpaper without becoming a dialog. */
+  border: 1px solid {LINE};
+  border-radius: 8px;
 }}
 
 .samantha-prompt > text > placeholder {{

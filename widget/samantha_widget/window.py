@@ -114,10 +114,13 @@ class StripWindow(Gtk.ApplicationWindow):
     def set_prompt_open(self, open_: bool) -> None:
         self._prompt.set_visible(open_)
         self._prompt_extra = PROMPT_HEIGHT if open_ else 0
+        # Cleared both ways. Clearing only on close left whatever a
+        # previous open had collected — "manohola Jarvis", seen in a
+        # screenshot 2026-08-26 — and a line that opens with somebody
+        # else's half-sentence in it is worse than one that opens empty.
+        self._prompt.set_text("")
         if open_:
             self._prompt.grab_focus()
-        else:
-            self._prompt.set_text("")
         self._resize()
 
     def _on_prompt_activate(self, entry: Gtk.Entry) -> None:
