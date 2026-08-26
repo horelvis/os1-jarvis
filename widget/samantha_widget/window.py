@@ -8,18 +8,25 @@ from typing import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Pango", "1.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkX11", "4.0")
 
-from gi.repository import Gdk, GdkX11, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GdkX11, GLib, Gtk, Pango  # noqa: E402
 
 from . import theme  # noqa: E402
 from .ewmh import Ewmh  # noqa: E402
+from .console import Console  # noqa: E402
 from .geometry import placement_is_wrong, strip_rect  # noqa: E402
 
 # How much taller the strip gets while the typed line is open. One line
 # of text with room to breathe — it is an entry, not a message box.
 PROMPT_HEIGHT = 38
+
+# The scroller's own height. `console.HEIGHT` is what the WINDOW grows
+# by; this is that minus the frame's top and bottom margins, and the two
+# have to be kept in step or the lines are clipped.
+CONSOLE_INNER = 184
 
 # How long to leave the window manager before checking it obeyed, and
 # how many times to insist. Three tries at 120 ms is a third of a
@@ -27,6 +34,41 @@ PROMPT_HEIGHT = 38
 # geometry is reported rather than argued with forever.
 _VERIFY_MS = 120
 _VERIFY_TRIES = 3
+
+
+def _make_terminal():
+    """A `Vte.Terminal`, or None when the GTK4 VTE is not installed.
+
+    Returning None rather than raising: the strip predates this and
+    works without it. `sudo apt install gir1.2-vte-3.91
+    libvte-2.91-gtk4-0` is what turns the console into a real terminal.
+    """
+    try:
+        gi.require_version("Vte", "3.91")
+        from gi.repository import Vte
+
+        term = Vte.Terminal()
+        term.set_scrollback_lines(2000)
+        term.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
+        term.set_scroll_on_output(True)
+
+        # VTE paints its own background over anything CSS says, so the
+        # strip's colours have to be given to it directly or it lands on
+        # the desktop as a black rectangle — which is what it did the
+        # first time (user: "se ve igual de mal").
+        background = Gdk.RGBA()
+        background.parse(theme.CONSOLE_BACKGROUND)
+        foreground = Gdk.RGBA()
+        foreground.parse(theme.CONSOLE_FOREGROUND)
+        term.set_colors(foreground, background, None)
+        term.set_color_cursor(None)
+
+        font = Pango.FontDescription.from_string(theme.CONSOLE_FONT)
+        term.set_font(font)
+        return term
+    except Exception as exc:
+        print(f"sin terminal VTE ({exc}); consola en modo texto", file=sys.stderr)
+        return None
 
 
 class StripWindow(Gtk.ApplicationWindow):
@@ -55,6 +97,7 @@ class StripWindow(Gtk.ApplicationWindow):
         # than the last caller winning.
         self._band_extra = 0
         self._prompt_extra = 0
+        self._console_extra = 0
 
         self._frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._frame.add_css_class("samantha-strip")
@@ -81,6 +124,41 @@ class StripWindow(Gtk.ApplicationWindow):
         self._prompt.add_controller(focus)
         self._frame.prepend(self._prompt)
         self.on_prompt: Callable[[str], None] = lambda _text: None
+
+        # What something working is saying, shown on the strip rather
+        # than in a terminal (user, 2026-08-26). A label in a scroller:
+        # the band draws with GSK and has no text primitive, and this
+        # needs to be selectable and to wrap like text, which is what
+        # the widget is for.
+        self.console = Console()
+        # A real terminal when the system has one, a label when it does
+        # not. VTE is the widget GNOME Terminal is built on, so the
+        # assistant's output arrives with its colours and its cursor
+        # rather than as text somebody re-rendered — the user's point,
+        # 2026-08-26: use what exists instead of implementing it all.
+        # `gir1.2-vte-3.91`; the 2.91 typelib on this box is GTK3's and
+        # cannot live in a GTK4 process.
+        self._term = _make_terminal()
+        self._console_label = Gtk.Label()
+        self._console_label.set_xalign(0.0)
+        self._console_label.set_yalign(1.0)
+        self._console_label.set_wrap(False)
+        self._console_label.set_selectable(True)
+        self._console_label.add_css_class("samantha-console")
+        self._console = Gtk.ScrolledWindow()
+        self._console.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self._console.set_child(self._term or self._console_label)
+        self._console.add_css_class("samantha-console-frame")
+        # Pinned to the height the window grows by, minus its margins.
+        # Without this the scroller takes its natural height — the label
+        # asks for all its lines and gets a fraction of them, which is
+        # how it first showed two and a half lines of five in a strip
+        # that had grown by 190 (2026-08-26).
+        self._console.set_size_request(-1, -1)
+        self._console.set_vexpand(False)
+        self._console.set_propagate_natural_height(False)
+        self._console.set_visible(False)
+        self._frame.prepend(self._console)
 
         self._content: Gtk.Widget | None = None
         self._band: Gtk.Widget | None = None
@@ -110,6 +188,45 @@ class StripWindow(Gtk.ApplicationWindow):
         widget.set_vexpand(False)
         self._frame.prepend(widget)
         self._band = widget
+
+    # ── the lines something working is writing ────────────────────────
+
+    def write_console(self, text: str) -> None:
+        """Show these lines on the strip, keeping the last few."""
+        changed = self.console.write(text)
+        # The scroller follows the model's height, so three lines take
+        # the room of three lines.
+        self._console.set_size_request(-1, max(0, self.console.height - 6))
+        if self._term is not None:
+            # Straight through, escape codes and all — that is the point
+            # of a terminal. CRLF because a terminal takes a carriage
+            # return literally: without it every line starts where the
+            # last one ended.
+            self._term.feed(text.replace("\n", "\r\n").encode())
+        else:
+            self._console_label.set_text(self.console.text())
+        self._console.set_visible(self.console.visible)
+        if changed:
+            self._console_extra = self.console.height
+            self._resize()
+        # Newest at the bottom, like a terminal: the scroller is pinned
+        # to the end rather than left where the user last dragged it.
+        GLib.idle_add(self._console_to_end)
+
+    def _console_to_end(self) -> bool:
+        adjustment = self._console.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        return False  # GLib.SOURCE_REMOVE
+
+    def clear_console(self) -> None:
+        """Put the lines away."""
+        if self.console.clear():
+            self._console_extra = 0
+            self._resize()
+        if self._term is not None:
+            self._term.reset(True, True)
+        self._console_label.set_text("")
+        self._console.set_visible(False)
 
     # ── the typed line ────────────────────────────────────────────────
 
@@ -198,7 +315,7 @@ class StripWindow(Gtk.ApplicationWindow):
         if self._ewmh is None or self._xid is None or self._rect is None:
             return
         x, y, w, h = self._rect
-        extra = self._band_extra + self._prompt_extra
+        extra = self._band_extra + self._prompt_extra + self._console_extra
         wanted = (x, y - extra, w, h + extra)
         # What the strip is currently trying to be. A verify still in
         # flight for an older size must not fight a newer one.

@@ -136,6 +136,12 @@ _SHOW_ON_START = os.environ.get("SAMANTHA_WIDGET_PHOTO")
 # camera in the room.
 _LIVE_ON_START = os.environ.get("SAMANTHA_WIDGET_LIVE")
 
+# Write these lines into the strip's console a couple of seconds after
+# starting, as if something working had produced them. The counterpart
+# of SAMANTHA_WIDGET_PHOTO and _LIVE for the third thing the strip can
+# show — separate lines with "\n", or a path to a file to read.
+_CONSOLE_ON_START = os.environ.get("SAMANTHA_WIDGET_CONSOLE")
+
 # Write every utterance the VAD closes to this directory as a WAV.
 # Diagnostic only: when a transcription comes back as nonsense there is
 # no way to tell from the text whether the audio was bad or Whisper was.
@@ -209,6 +215,17 @@ class SamanthaApp(Gtk.Application):
                 return False  # GLib.SOURCE_REMOVE
 
             GLib.timeout_add(2000, _feed_it)
+
+        if _CONSOLE_ON_START:
+
+            def _write_them() -> bool:
+                text = _CONSOLE_ON_START
+                if os.path.isfile(text):
+                    text = open(text, encoding="utf-8", errors="replace").read()
+                window.write_console(text.replace("\\n", "\n"))
+                return False  # GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(2000, _write_them)
 
         if _DEMO_STATE:
             state = WaveState(_DEMO_STATE)
