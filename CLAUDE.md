@@ -1074,6 +1074,68 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-26 — The alert grows a picture, and the wake word does not
+
+**A sighting now shows the frame it was seen in** (user: "cuando captura
+algún movimiento debe mostrar esa captura, no solo decirlo"). This
+reverses the last paragraph of the 2026-08-25 entry below, which left
+the unprompted alert deliberately mute in pictures and said the
+mechanism was already there. It was: `write_jpeg` and `push_photo`
+existed for `mirar`, and `_report` already held the frame it had just
+run YOLO over. The words follow the picture, a failed photo never costs
+the sentence, and the push goes onto the GATEWAY's loop rather than the
+turn's — the distinction that cost this morning.
+
+**And a wake word that is heard rather than read was built, measured and
+switched off.** Hermes ships one (`tools/wake_word.py`, openWakeWord,
+on-device, `hey_jarvis` among its bundled models) and the user asked to
+use what exists rather than reinvent it. Its own module opens a second
+microphone stream — which it warns about — so the engine was fed the
+widget's frames instead. The numbers are why it is off:
+
+| | score |
+|---|---|
+| synthesised Spanish "Hey Jarvis" | 0.359 |
+| the user, real microphone, ×4 | 0.25, 0.25, 0.29, 0.29 |
+| threshold for a usable detector | 0.60 |
+
+There is no gap to put a threshold in: 0.25 fires on the television,
+which this strip demonstrably hears. And it cost ~6 CPU points on every
+frame to never fire — 18.3% → 14.1% when removed, measured while the
+user was reporting the machine was warm. `SAMANTHA_WIDGET_HOTWORD`
+defaults to empty; the code stays for a model trained on this voice, or
+for the sherpa engine, which takes an arbitrary phrase and would hear
+"Jarvis" without the "Hey".
+
+**Two facts about openWakeWord worth keeping:** 0.4.0 takes model PATHS
+(`wakeword_models=` is a later API and fails inside `AudioFeatures`),
+and it needs 1280-sample chunks — the same audio peaks at 0.052 on 512
+and 0.359 on 1280. It does not fail on short chunks; it just never
+scores.
+
+**The other two things measured today, both user-reported:**
+
+- **"Se cortan palabras cuando se habla."** `SAMANTHA_WIDGET_DUMP`
+  caught it: one sentence arriving as two turns two seconds apart, every
+  utterance ending in exactly 0.7 s of silence — the threshold — and the
+  second carrying speech from its first sample. A breath mid-sentence is
+  longer than 0.7 s. `_SILENCE_SECONDS` is 1.2 now.
+- **He had no internet, and it was one config line.** The comment above
+  `platform_toolsets` said web search "waits on tokens". It does not:
+  Hermes ships keyless providers, `check_web_api_key()` returns True
+  with nothing configured, and a direct call came back with real results
+  first try. The `browser` toolset — the alternative the user suggested,
+  reasonably, since Hermes Desktop has one — needs the `agent-browser`
+  CLI over npm, which §12 (2026-05-13) moved away from.
+
+**And the accent that could not be fixed here.** Asked for an Andalusian
+voice, `SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT` is the lever §2.6 names and
+it is only half of one: the accent comes from the REFERENCE CLIP, today
+a neutral-accent advert. Measured by the only instrument available — the
+user listening — the change was "un poco igual". A southern voice needs
+a southern clip, and choosing it is not something a model that cannot
+hear should do.
+
 ### 2026-08-26 — BarnDoor's rule back, and a ceiling on a turn
 
 **Two decisions, and the second is what makes the first affordable.**
