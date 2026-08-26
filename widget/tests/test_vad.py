@@ -48,10 +48,11 @@ def test_the_utterance_holds_roughly_the_speech() -> None:
     utterances = _run(_frames((0.0, 0.5), (0.9, 2.0), (0.0, 2.0)))
     seconds = len(utterances[0]) / 2 / 16000
 
-    # 2 s of speech, the 0.7 s of silence that ends the turn, and since
-    # 2026-08-26 the 0.5 s of run-up kept in front of it — see
-    # `_PREROLL_SECONDS`, which exists so a wake word survives.
-    assert 2.0 <= seconds <= 3.5
+    # 2 s of speech, the 1.2 s of silence that ends the turn, and the
+    # 0.5 s of run-up kept in front of it — see `_PREROLL_SECONDS`
+    # (so a wake word survives) and `_SILENCE_SECONDS` (so a breath
+    # mid-sentence does not end the turn).
+    assert 2.0 <= seconds <= 4.0
 
 
 def test_a_single_loud_frame_does_not_start_a_turn() -> None:
@@ -144,3 +145,44 @@ def test_the_run_up_never_grows_without_bound() -> None:
     for _ in range(4000):
         detector.push(FRAME)
     assert len(detector._buffer) / 2 / 16000 <= 1.0
+
+
+# ── the pause in the middle of a sentence ─────────────────────────────
+#
+# Reported by the user 2026-08-26: "se cortan palabras cuando se habla".
+# Captured with SAMANTHA_WIDGET_DUMP the same evening — one sentence
+# arrived as two turns, two seconds apart:
+#
+#   16:31:44  → Te lo puedes consultar.
+#   16:31:46  → Por el tiempo, por internet.
+#
+# Every dumped utterance ended with exactly 0.7 s of silence (the
+# threshold, to the tenth), and the second one had speech from its very
+# first sample — it was the rest of the sentence, not a new one. A
+# breath in the middle of a sentence is routinely longer than 0.7 s.
+
+
+def test_a_pause_in_the_middle_does_not_split_a_sentence() -> None:
+    # Speech, a one-second breath, more speech. One turn, not two.
+    detector = UtteranceDetector(
+        ScriptedProbe(_frames((0.9, 1.0), (0.0, 1.0), (0.9, 1.0), (0.0, 3.0)))
+    )
+    utterances = []
+    for _ in range(300):
+        out = detector.push(FRAME)
+        if out is not None:
+            utterances.append(out)
+    assert len(utterances) == 1, f"{len(utterances)} turns, expected 1"
+
+
+def test_a_real_gap_between_sentences_still_ends_the_turn() -> None:
+    # Two seconds of quiet is somebody who has finished talking.
+    detector = UtteranceDetector(
+        ScriptedProbe(_frames((0.9, 1.0), (0.0, 2.0), (0.9, 1.0), (0.0, 3.0)))
+    )
+    utterances = []
+    for _ in range(400):
+        out = detector.push(FRAME)
+        if out is not None:
+            utterances.append(out)
+    assert len(utterances) == 2, f"{len(utterances)} turns, expected 2"

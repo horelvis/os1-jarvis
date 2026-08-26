@@ -30,7 +30,23 @@ _CONTEXT_SAMPLES = 64
 
 _THRESHOLD = 0.5
 _START_FRAMES = 3
-_SILENCE_SECONDS = 0.7
+# How much quiet ends a turn.
+#
+# 0.7 until 2026-08-26, when the user reported "se cortan palabras
+# cuando se habla" and the dump showed what that meant: one sentence
+# arriving as two turns two seconds apart ("Te lo puedes consultar." /
+# "Por el tiempo, por internet."), with every dumped utterance ending in
+# exactly 0.7 s of silence and the second one carrying speech from its
+# very first sample. A breath in the middle of a sentence is routinely
+# longer than 0.7 s, so the detector was cutting people off mid-thought
+# and handing Hermes half a request.
+#
+# 1.2 s is roughly where commercial assistants sit, and the cost is
+# stated rather than hidden: he now waits half a second longer before
+# starting to answer. `SAMANTHA_WIDGET_SILENCE` moves it without a code
+# change, because the right value depends on how the person in the room
+# talks.
+_SILENCE_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_SILENCE", "1.2"))
 _MIN_UTTERANCE_SECONDS = 0.4
 
 # How much of the quiet before a turn is kept in front of it. The first

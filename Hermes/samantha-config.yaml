@@ -179,6 +179,19 @@ gateway:
 tools:
   tool_search: false
 
+# `web` was in the "waits on tokens" list above until 2026-08-26, and it
+# turned out not to: Hermes ships keyless search providers, and
+# `check_web_api_key()` returns True with nothing configured —
+# `web_search_tool("tiempo en Murcia mañana")` came back with real
+# results on the first try. The user asked for this twice ("sigue sin
+# acceso a herramientas ni internet"), and the alternative under
+# discussion — the `browser` toolset — needs the `agent-browser` CLI
+# installed through npm, which §12 (2026-05-13) moved this project away
+# from.
+#
+# The privacy line moves, and §1.1 already carries the shape of it: the
+# conversation stays on this box, but the TEXT OF A SEARCH leaves it.
+# Nothing else does — no history, no identity, no audio.
 platform_toolsets:
   samantha_kiosk:
     - memory
@@ -187,6 +200,7 @@ platform_toolsets:
     - todo
     - clarify
     - camaras
+    - web
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron
