@@ -1074,6 +1074,54 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-26 — He delegates coding, and `terminal` stops being forbidden
+
+**Decision (the user's):** JARVIS gets the `terminal` toolset, and
+coding is delegated through the skills Hermes already ships —
+`claude-code`, `opencode`, `codex`, installed in
+`.hermes/home/skills/autonomous-ai-agents/`. This reverses "deliberately
+absent: terminal, file, code_execution, browser" from the 2026-08-23
+entry below.
+
+**What forced it was not preference but a wall.** The design agreed
+earlier that evening built the connection ourselves — an A2A bridge
+(`Hermes/bridges/code-a2a/`) and a plugin to stream its output onto the
+strip. The bridge works and is verified end to end. The plugin does not,
+and the reason is in the model rather than the code: **it calls a tool
+of ours with no arguments at all** — `args={}`, and Hermes' own
+`user_task` arriving as the string `"None"`, measured across six calls.
+That is the failure §4 already records for `mirar` ("no camera 5 times
+out of 5, even when one was named"), and a wording that spelled it out
+changed nothing there either.
+
+It fills `terminal`'s arguments correctly, because it has been trained
+on it. And the official skills are written entirely in those terms:
+
+    terminal(command="claude -p '…'", workdir="/path", timeout=120)
+
+Without `terminal`, every one of them is inert. The user's own pointer
+is what found this — *"lo que se usa en otras implementaciones"* — after
+an evening of building the thing that already existed.
+
+**Verified the same night**, on a deliberately broken test: *"Hecho,
+señor. Claude Code lo tenía claro desde el principio: `suma()` estaba
+restando en vez de sumar. Corrigió la línea y el test pasa — uno de uno,
+sin más cambios. Lo he verificado yo mismo antes de decirle que sí."*
+The file was corrected, and he had checked it before saying so.
+
+**Cost, stated rather than discovered:** he can run ANY command on this
+box now, not only the assistant. What bounds it is `agent.max_turns: 25`,
+llama-server's `--n-predict`, and the fact that this is one machine
+belonging to the person talking to him. `file`, `code_execution` and
+`browser` stay out.
+
+**What the A2A work is still worth**, since it was not thrown away: the
+bridge is the interoperable path — an agent on another machine, or one
+that is not a CLI at all, reaches him without `terminal` and without a
+shell. `a2a_call` works today and was verified before this. It is the
+right answer for a peer; `terminal` is the right answer for a CLI
+sitting on the same disk.
+
 ### 2026-08-26 — The alert grows a picture, and the wake word does not
 
 **A sighting now shows the frame it was seen in** (user: "cuando captura

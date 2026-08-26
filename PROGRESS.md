@@ -1,5 +1,33 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (noche IV) — Delega en Claude Code, por el camino que ya existía ✅
+
+    tú:     «Jarvis, delega en Claude Code: en prueba-a2a el test falla.»
+    JARVIS: «Hecho, señor. Claude Code lo tenía claro desde el principio:
+             suma() estaba restando. Corrigió la línea y el test pasa.
+             Lo he verificado yo mismo antes de decirle que sí.»
+
+**La pista fue del usuario:** *"lo que se usa en otras implementaciones
+de Hermes + Claude Code"*. Y en efecto: Hermes trae skills instaladas
+para `claude-code`, `opencode` y `codex`, y todas están escritas sobre
+la herramienta `terminal`, que este proyecto había excluido a propósito.
+Sin ella son inertes.
+
+**Lo que nos llevó ahí fue un muro medido.** El plugin propio de esa
+misma noche no funcionaba: el modelo llama a una herramienta NUESTRA
+sin argumentos —`args={}`, `user_task="None"`, seis veces— que es
+exactamente el fallo que §4 ya tenía escrito sobre `mirar`. Con
+`terminal` sí los rellena, porque está entrenado en ella.
+
+**El trabajo de A2A no se tira.** El puente está verificado y sigue
+siendo el camino interoperable: un agente en otra máquina, o que no sea
+una CLI, llega sin shell. `terminal` es la respuesta para una CLI en el
+mismo disco; A2A lo es para un par.
+
+**Coste aceptado y escrito:** JARVIS puede ejecutar cualquier comando en
+esta máquina. Lo acotan `max_turns: 25`, el `--n-predict` de
+llama-server, y que la máquina es de quien le habla.
+
 ## 2026-08-26 (noche III) — JARVIS delega el trabajo, por A2A ✅
 
 De «vamos a conectar Hermes con Claude Code» salieron tres piezas; las

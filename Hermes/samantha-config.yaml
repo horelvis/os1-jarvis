@@ -124,9 +124,28 @@ agent:
 # toolsets that need no credentials; homeassistant, spotify, discord and
 # web search wait on tokens.
 #
-# Deliberately absent: terminal, file, code_execution, browser. She lives
-# in a living room, and none of them can be used without narrating what
-# she is doing.
+# `terminal` was deliberately absent until 2026-08-26, on the grounds
+# that he lives in a living room and nothing in it can be used without
+# narrating what he is doing. The user reversed that, knowingly, for one
+# reason: it is what the OFFICIAL integration uses. Hermes ships skills
+# for `claude-code`, `opencode` and `codex`, and every one of them is
+# written as
+#
+#   terminal(command="claude -p '…'", workdir="/path", timeout=120)
+#
+# Without `terminal` those skills are inert — and a plugin of ours that
+# tried to replace them hit a wall the same day: the model calls a tool
+# of ours with no arguments at all (`args={}`, `user_task="None"`,
+# measured six times), which is the failure §4 already records for
+# `mirar`. It fills `terminal`'s arguments correctly, because it has
+# been trained on it.
+#
+# The cost, stated rather than discovered: he can now run ANY command on
+# this machine, not only the assistant. What bounds it is `max_turns`,
+# `--n-predict`, and the fact that everything he does is on one box that
+# belongs to the person talking to him.
+#
+# Still absent: file, code_execution, browser.
 #
 # `camaras` carries `mirar` — he looks at a camera now and says what is
 # there. The name is ours and that is the whole point (Ruling 11): the
@@ -221,6 +240,7 @@ platform_toolsets:
     - web
     - a2a
     - codigo
+    - terminal
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron
