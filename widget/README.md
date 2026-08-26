@@ -68,7 +68,7 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_LIVE` | Feed the band this video file as if the gateway had pushed it. The counterpart of `SAMANTHA_WIDGET_PHOTO` for the half of him that moves — the decoder, the band and the input region, with no gateway and no camera. |
 | `SAMANTHA_WIDGET_WAKE_WORD` | The name he answers to. `jarvis` by default; **empty turns the wake word off entirely**, which is how he behaved before 2026-08-26 — everything heard is for him. Matching is deliberately loose: Whisper renders it as "Carbis", "Harvish", "Jervis" and "Harvies", all measured, and an exact match would ignore four of five. |
 | `SAMANTHA_WIDGET_WAKE_WINDOW` | Seconds after he answers during which the next sentence needs no name (default 30). Each answer pushes it out; sentences inside it do not. |
-| `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. The only way to photograph the struck-through glyphs, since there is no way to send this window a click. |
+| `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
 
 ### The models it needs
 
@@ -172,3 +172,22 @@ fichero, el `platform_hint` o la memoria no toca una sesión que ya
 existe, y reiniciar el gateway tampoco: la sesión vive en `state.db` y
 se reanuda tal cual. Hermes Desktop parece obedecer al instante sólo
 porque abre una sesión propia.
+
+### The three switches
+
+At the right end of the strip, in the wave's own colour: his ears, his
+voice, and the door.
+
+| Glyph | Press |
+|---|---|
+| microphone | Stops listening. Frames are dropped rather than the stream closed — closing PortAudio from its own callback is the segfault §2.8 is written around. Press again to hear. |
+| speaker | Stops him talking, at once, mid-sentence. He still listens. Clauses are dropped rather than queued, so unmuting never says a minute-old answer out loud. |
+| cross | Closes him. **Two presses within three seconds** — the first arms it and the cross lights up. He comes back only with `systemctl --user start samantha-widget`. |
+
+To press one from a script — the strip has no keyboard shortcut and
+`xdotool` is not installed here, but `libXtst` is:
+
+```bash
+DISPLAY=:1 xwininfo -name "Samantha" | grep -E "Absolute|Width"
+DISPLAY=:1 .venv/bin/python tools/click.py 1309 1032   # the microphone, at 900x96 centred
+```

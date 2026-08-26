@@ -833,6 +833,17 @@ xwininfo -name "Samantha"          # did you photograph the strip, or the lock s
 Nothing about his appearance is provable from a test, and a screenshot of
 a locked session is a convincing picture of the wrong thing.
 
+**A press CAN be sent, since 2026-08-26.** `widget/tools/click.py` drives
+the pointer through XTEST by ctypes, the way `ewmh.py` reaches libX11 —
+`libXtst` is installed even though `xdotool` is not. Anywhere this file
+says a keystroke or a click cannot be delivered to the strip (§2.3, the
+`SAMANTHA_WIDGET_STATE` note above), that is now only true of the
+keyboard.
+
+```bash
+DISPLAY=:1 widget/.venv/bin/python widget/tools/click.py 1309 1032
+```
+
 ### Legacy: backend and frontend
 
 Neither runs (§2.4, §2.10). `backend/` still holds `samantha.tts`, which
