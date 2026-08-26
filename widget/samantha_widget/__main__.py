@@ -25,6 +25,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
 from .hotword import SENSITIVITY as HOTWORD_SENSITIVITY  # noqa: E402
+from .echo import EchoFilter  # noqa: E402
 from .hotword import Hotword  # noqa: E402
 from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
@@ -288,6 +289,9 @@ class SamanthaApp(Gtk.Application):
 
         def say(clause: str) -> None:
             """Speak a clause, unless his voice is switched off."""
+            # Remembered even when muted: `interrupt()` can leave a
+            # clause half-played, and half of one still comes back.
+            echo.spoke(clause, time.monotonic())
             if not wave.switches.voice_on:
                 # Dropped rather than queued: a queue that fills up
                 # while he is muted would empty itself the moment he
@@ -306,6 +310,10 @@ class SamanthaApp(Gtk.Application):
         # him" of every version before that.
         wake = WakeWord(_WAKE_WORD, window=_WAKE_WINDOW)
         hotword = Hotword(_HOTWORD_MODEL, sensitivity=_HOTWORD_SENSITIVITY)
+        # His own voice, coming back through the room. See `echo.py`:
+        # the canceller helps and does not clear, and the microphone has
+        # to stay open or he cannot be interrupted.
+        echo = EchoFilter()
         if wake.word:
             print(
                 f"palabra de activación: {wake.word} (ventana {wake.window:.0f}s)",
@@ -348,6 +356,12 @@ class SamanthaApp(Gtk.Application):
                 machine.error("")
                 return
             print(f"→ {text}", file=sys.stderr, flush=True)
+            text = echo.clean(text, time.monotonic())
+            if not text.strip():
+                # All of it was him. Not a turn, and not an error.
+                print("(era su propio eco)", file=sys.stderr, flush=True)
+                machine.error("")
+                return
             spoken = wake.heard(text, time.monotonic())
             if spoken is None:
                 # Somebody was talking in the room, not to him. Ending
