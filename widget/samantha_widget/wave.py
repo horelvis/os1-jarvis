@@ -20,6 +20,7 @@ clock, so the animation cannot drift out of step with the screen.
 
 from __future__ import annotations
 
+import time
 from typing import Callable
 
 import gi
@@ -33,7 +34,7 @@ from gi.repository import Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 from . import theme  # noqa: E402
 from .bars_model import BarsModel, WaveformModel  # noqa: E402
-from .switches import MIC, Switches  # noqa: E402
+from .switches import CLOSE, MIC, Switches  # noqa: E402
 from .wave_model import WaveModel, WaveState  # noqa: E402
 
 _LINE_WIDTH = 2.0
@@ -249,6 +250,9 @@ class WaveArea(Gtk.Widget):
                         box.x + unit * 2, box.y + unit * 6.5, unit * 4, _SWITCH_STROKE
                     ),
                 )
+            elif box.name == CLOSE:
+                self._snapshot_cross(snapshot, box, alpha)
+                continue
             else:
                 # The speaker: a small block, and a taller one beside it.
                 self._fill(
@@ -303,16 +307,49 @@ class WaveArea(Gtk.Widget):
                     ),
                 )
 
+    def _snapshot_cross(self, snapshot: Gtk.Snapshot, box, alpha: float) -> None:
+        """The close switch: two bars crossed, brighter once armed.
+
+        Rotated, which nothing else on the strip is: `append_color` only
+        takes axis-aligned rectangles, and a cross that is not rotated
+        reads as a plus sign — "add", the opposite of what it does.
+        `save`/`restore` around it so the rotation cannot leak into
+        whatever is drawn next.
+        """
+        armed = self.switches.armed(time.monotonic())
+        unit = box.size / 8.0
+        length = box.size - unit * 3
+        for angle in (45.0, -45.0):
+            snapshot.save()
+            snapshot.translate(
+                Graphene.Point().init(box.x + box.size / 2, box.y + box.size / 2)
+            )
+            snapshot.rotate(angle)
+            self._fill(
+                snapshot,
+                _SWITCH_ON if armed else alpha,
+                Graphene.Rect().init(
+                    -length / 2, -_SWITCH_STROKE / 2, length, _SWITCH_STROKE
+                ),
+            )
+            snapshot.restore()
+
     def _on_pressed(
         self, _gesture: Gtk.GestureClick, _n: int, x: float, y: float
     ) -> None:
-        name = self.switches.hit(
-            x, y, float(self.get_width()), float(self.get_height())
+        action = self.switches.press(
+            x,
+            y,
+            float(self.get_width()),
+            float(self.get_height()),
+            time.monotonic(),
         )
-        if name is None:
+        # Always redraw: a first press on close changes nothing but the
+        # picture, and that picture is the whole confirmation.
+        self.queue_draw()
+        if action is None:
             # The rest of the strip is not a button, and must not behave
             # like one. CLAUDE.md §1.5.
             return
-        on = self.switches.toggle(name)
-        self.queue_draw()
-        self.on_switch(name, on)
+        on = True if action == CLOSE else self.switches.is_on(action)
+        self.on_switch(action, on)

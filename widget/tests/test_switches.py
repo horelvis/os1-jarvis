@@ -1,6 +1,6 @@
-"""The two switches, as pure state and geometry. No GTK in here."""
+"""The three switches, as pure state and geometry. No GTK in here."""
 
-from samantha_widget.switches import GAP, MARGIN, MIC, SIZE, VOICE, Switches
+from samantha_widget.switches import CLOSE, GAP, MARGIN, MIC, SIZE, VOICE, Switches
 
 STRIP = (900.0, 96.0)
 
@@ -10,11 +10,11 @@ def test_both_senses_start_on():
     assert s.mic_on and s.voice_on
 
 
-def test_there_are_two_of_them_and_they_sit_at_the_right_edge():
+def test_they_sit_in_a_row_at_the_right_edge():
     s = Switches()
     boxes = s.boxes(*STRIP)
 
-    assert [b.name for b in boxes] == [MIC, VOICE]
+    assert [b.name for b in boxes] == [MIC, VOICE, CLOSE]
     assert boxes[-1].x + SIZE == 900.0 - MARGIN
     assert boxes[1].x - (boxes[0].x + SIZE) == GAP
 
@@ -27,7 +27,7 @@ def test_they_are_vertically_centred_on_the_strip():
 
 def test_a_press_on_one_of_them_is_named():
     s = Switches()
-    mic, voice = s.boxes(*STRIP)
+    mic, voice, _close = s.boxes(*STRIP)
 
     assert s.hit(mic.x + 2, mic.y + 2, *STRIP) == MIC
     assert s.hit(voice.x + 2, voice.y + 2, *STRIP) == VOICE
@@ -65,3 +65,51 @@ def test_a_strip_too_narrow_shows_none_rather_than_covering_the_wave():
     s = Switches()
     assert s.boxes(80.0, 96.0) == []
     assert s.hit(10.0, 10.0, 80.0, 96.0) is None
+
+
+# ── the third one: closing him ────────────────────────────────────────
+
+
+def test_there_are_three_of_them_now():
+    s = Switches()
+    assert [b.name for b in s.boxes(*STRIP)] == [MIC, VOICE, CLOSE]
+
+
+def test_one_press_on_close_only_arms_it():
+    s = Switches()
+    box = s.boxes(*STRIP)[2]
+    assert s.press(box.x + 2, box.y + 2, *STRIP, now=0.0) is None
+    assert s.armed(now=0.5)
+
+
+def test_a_second_press_closes_him():
+    s = Switches()
+    box = s.boxes(*STRIP)[2]
+    s.press(box.x + 2, box.y + 2, *STRIP, now=0.0)
+    assert s.press(box.x + 2, box.y + 2, *STRIP, now=1.0) == CLOSE
+
+
+def test_waiting_too_long_disarms_it():
+    s = Switches()
+    box = s.boxes(*STRIP)[2]
+    s.press(box.x + 2, box.y + 2, *STRIP, now=0.0)
+    assert not s.armed(now=4.0)
+    # And the press after that is a first press again, not a second.
+    assert s.press(box.x + 2, box.y + 2, *STRIP, now=4.0) is None
+
+
+def test_pressing_elsewhere_is_a_change_of_mind():
+    s = Switches()
+    close = s.boxes(*STRIP)[2]
+    s.press(close.x + 2, close.y + 2, *STRIP, now=0.0)
+    s.press(400.0, 48.0, *STRIP, now=0.5)  # the wave
+    assert not s.armed(now=0.6)
+
+
+def test_the_other_two_still_toggle_through_press():
+    s = Switches()
+    mic, voice, _close = s.boxes(*STRIP)
+    assert s.press(mic.x + 2, mic.y + 2, *STRIP, now=0.0) == MIC
+    assert s.mic_on is False
+    assert s.press(voice.x + 2, voice.y + 2, *STRIP, now=0.0) == VOICE
+    assert s.voice_on is False

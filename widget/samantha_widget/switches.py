@@ -1,11 +1,12 @@
-"""The two switches on the strip: his ears, and his voice.
+"""The three switches on the strip: his ears, his voice, and the door.
 
 Pure state and pure geometry — no GTK — the way `photo.py` sits under
 `photo_area.py`. `wave.py` draws what this decides and asks it where a
 press landed.
 
 Asked for by the user on 2026-08-26: two buttons over the strip, one to
-turn the microphone off and one to stop him speaking out loud. Until
+turn the microphone off and one to stop him speaking out loud, and later
+the same day a third to close him. Until
 then the strip had nothing to press at all, which CLAUDE.md §1.5 states
 as a property ("no hay ventana que enfocar, ningún icono que pulsar").
 It survives that in the way the photo already does: they are part of the
@@ -37,6 +38,17 @@ MARGIN = 16.0
 
 MIC = "mic"
 VOICE = "voice"
+CLOSE = "close"
+
+# A press on the close switch arms it; a second press within this many
+# seconds shuts him down, and after it the first press is forgotten.
+#
+# Two presses rather than one because this is the only control on the
+# strip that cannot be undone from the strip: the microphone and the
+# voice come back with another press, and he comes back only from a
+# terminal (`systemctl --user start samantha-widget`). A brush against
+# the wrong pixel must not cost that.
+ARM_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -53,29 +65,31 @@ class Box:
 
 
 class Switches:
-    """Which senses are on, and where the two boxes are drawn."""
+    """Which senses are on, and where the three boxes are drawn."""
 
     def __init__(self) -> None:
         self.mic_on = True
         self.voice_on = True
+        self._armed_until = 0.0
 
     # ── geometry ──────────────────────────────────────────────────────
 
     def boxes(self, width: float, height: float) -> list[Box]:
-        """The two boxes, right-aligned and vertically centred.
+        """The three boxes, right-aligned and vertically centred.
 
         Right rather than left: the wave is drawn from the left and the
         eye follows it, so the switches sit where it ends. A strip too
         narrow to hold them without covering the wave gets none — the
         wave is what the strip is for.
         """
-        if width < (SIZE + GAP) * 2 + MARGIN * 2:
+        if width < (SIZE + GAP) * 3 + MARGIN * 2:
             return []
         y = (height - SIZE) / 2.0
         right = width - MARGIN
         return [
-            Box(MIC, right - SIZE * 2 - GAP, y, SIZE),
-            Box(VOICE, right - SIZE, y, SIZE),
+            Box(MIC, right - SIZE * 3 - GAP * 2, y, SIZE),
+            Box(VOICE, right - SIZE * 2 - GAP, y, SIZE),
+            Box(CLOSE, right - SIZE, y, SIZE),
         ]
 
     def hit(self, px: float, py: float, width: float, height: float) -> str | None:
@@ -90,6 +104,10 @@ class Switches:
     def is_on(self, name: str) -> bool:
         return self.mic_on if name == MIC else self.voice_on
 
+    def armed(self, now: float) -> bool:
+        """Is the close switch waiting for its second press?"""
+        return now < self._armed_until
+
     def toggle(self, name: str) -> bool:
         """Flip one switch and return its new state."""
         if name == MIC:
@@ -99,3 +117,30 @@ class Switches:
             self.voice_on = not self.voice_on
             return self.voice_on
         return True
+
+    def press(
+        self, px: float, py: float, width: float, height: float, now: float
+    ) -> str | None:
+        """What a press at (px, py) means, and do it.
+
+        Returns the switch that changed — `MIC` or `VOICE` — or `CLOSE`
+        when the close switch has now been pressed twice and he really
+        is to shut down. A first press on close returns None: it arms,
+        and the drawing says so.
+        """
+        name = self.hit(px, py, width, height)
+        if name is None:
+            # Anything that is not one of the three arms nothing and
+            # cancels what was armed: a press elsewhere is a change of
+            # mind, not a confirmation.
+            self._armed_until = 0.0
+            return None
+        if name == CLOSE:
+            if self.armed(now):
+                self._armed_until = 0.0
+                return CLOSE
+            self._armed_until = now + ARM_SECONDS
+            return None
+        self._armed_until = 0.0
+        self.toggle(name)
+        return name

@@ -236,6 +236,27 @@ class SamanthaApp(Gtk.Application):
                 # Whatever he was told before the switch went off is not
                 # a conversation any more.
                 wake.close()
+            if name == "close":
+                # He is gone until somebody starts him again from a
+                # terminal — which is why it takes two presses (see
+                # `switches.ARM_SECONDS`).
+                #
+                # `os._exit` rather than `Gtk.Application.quit`, and the
+                # difference is not style: quitting properly unwinds
+                # PortAudio, onnxruntime and CUDA from the GTK thread,
+                # and measured 2026-08-26 that segfaults —
+                # `code=dumped, status=11/SEGV`. Which would be tidy but
+                # for `Restart=on-failure`: systemd read the crash as a
+                # failure and started him again, so the close button
+                # restarted him instead of closing him. `os._exit(0)`
+                # tears nothing down, which is exactly what is wanted by
+                # a process on its way out, and exits 0 so the unit
+                # stays stopped. There is no state here to flush: the
+                # memory that matters lives in the gateway.
+                print("cerrando, señor.", file=sys.stderr, flush=True)
+                speaker.interrupt()
+                sys.stderr.flush()
+                os._exit(0)
 
         def say(clause: str) -> None:
             """Speak a clause, unless his voice is switched off."""
