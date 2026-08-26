@@ -70,6 +70,15 @@ class StripWindow(Gtk.ApplicationWindow):
         self._prompt.set_placeholder_text("Escribe a JARVIS…")
         self._prompt.set_visible(False)
         self._prompt.connect("activate", self._on_prompt_activate)
+        # Closed the moment it stops being the focused thing. The strip
+        # is always on top, so an open line keeps the keyboard: measured
+        # 2026-08-26, the user typing in his own terminal had "colo"
+        # land in it and go out with the next sentence — "se inyecta el
+        # último texto". Furniture does not get to hold the keyboard
+        # after you have looked away.
+        focus = Gtk.EventControllerFocus()
+        focus.connect("leave", lambda _c: self.set_prompt_open(False))
+        self._prompt.add_controller(focus)
         self._frame.prepend(self._prompt)
         self.on_prompt: Callable[[str], None] = lambda _text: None
 
@@ -124,12 +133,21 @@ class StripWindow(Gtk.ApplicationWindow):
         self._resize()
 
     def _on_prompt_activate(self, entry: Gtk.Entry) -> None:
+        """Enter: send and stay open, or close if there was nothing.
+
+        Sending used to close the line, and the user asked for the other
+        thing (2026-08-26): "enviar un texto solo debe limpiar la caja
+        no cerrarla". Talking to him is usually more than one sentence,
+        and reopening between each is a gesture nobody wants. An empty
+        Enter closes it, so there is still a way out from the keyboard —
+        and looking away closes it too (see the focus controller).
+        """
         text = entry.get_text().strip()
-        # Closed either way: an empty Enter is how you change your mind
-        # without reaching for Escape.
-        self.set_prompt_open(False)
-        if text:
-            self.on_prompt(text)
+        if not text:
+            self.set_prompt_open(False)
+            return
+        entry.set_text("")
+        self.on_prompt(text)
 
     def resize_to(self, extra_height: int) -> None:
         """Grow the strip upward by `extra_height`, or back to the strip.
