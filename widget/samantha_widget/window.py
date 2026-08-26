@@ -63,8 +63,29 @@ def _make_terminal():
         term.set_colors(foreground, background, None)
         term.set_color_cursor(None)
 
-        font = Pango.FontDescription.from_string(theme.CONSOLE_FONT)
+        # The desktop's own monospace font, the way GNOME Console does
+        # it, falling back to the theme's string when the setting is not
+        # readable. A terminal that uses a different font from every
+        # other terminal on the machine looks wrong before you can say
+        # why.
+        name = theme.CONSOLE_FONT
+        try:
+            from gi.repository import Gio
+
+            settings = Gio.Settings.new("org.gnome.desktop.interface")
+            chosen = settings.get_string("monospace-font-name")
+            if chosen:
+                name = chosen
+        except Exception:
+            pass
+        font = Pango.FontDescription.from_string(name)
+        font.set_size(int(theme.CONSOLE_FONT_POINTS * Pango.SCALE))
         term.set_font(font)
+
+        # Room to breathe, and lines that are not glued together. Both
+        # are what separates a terminal you can read from a wall of
+        # characters — kgx does the same.
+        term.set_cell_height_scale(theme.CONSOLE_LINE_SCALE)
         return term
     except Exception as exc:
         print(f"sin terminal VTE ({exc}); consola en modo texto", file=sys.stderr)
@@ -195,7 +216,17 @@ class StripWindow(Gtk.ApplicationWindow):
         """Show these lines on the strip, keeping the last few."""
         changed = self.console.write(text)
         # The scroller follows the model's height, so three lines take
-        # the room of three lines.
+        # the room of three lines — and the terminal is asked how tall
+        # a line actually IS rather than guessed at. Guessing 15 px for
+        # a line that measured 20 cut the top off every time
+        # (2026-08-26).
+        if self._term is not None:
+            try:
+                per_line = int(self._term.get_char_height())
+                if per_line > 0:
+                    self.console.line_height = per_line
+            except Exception:
+                pass
         self._console.set_size_request(-1, max(0, self.console.height - 6))
         if self._term is not None:
             # Straight through, escape codes and all — that is the point

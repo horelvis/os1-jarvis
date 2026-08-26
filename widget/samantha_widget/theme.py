@@ -82,6 +82,17 @@ window decoration {{
    "¿no puedes usar un input box real?" */
 /* The lines something working is writing. Monospaced, dim, and dark —
    it is a thing to glance at, not to read. */
+/* Padding inside the terminal and rounded corners that actually clip
+   it: VTE draws its own background, so without `overflow: hidden` the
+   frame's radius is a rounded border over a square black block. */
+.samantha-console-frame {{
+  overflow: hidden;
+}}
+
+.samantha-console-frame vte-terminal {{
+  padding: 10px 12px;
+}}
+
 .samantha-console-frame {{
   background-color: rgba(20, 12, 14, 0.92);
   margin: 0 16px 6px 16px;
@@ -135,3 +146,6 @@ window decoration {{
 CONSOLE_BACKGROUND = "#170f11"
 CONSOLE_FOREGROUND = "#d8ccc6"
 CONSOLE_FONT = "monospace 10"
+# Point size and line spacing, applied over whatever font is chosen.
+CONSOLE_FONT_POINTS = 10.5
+CONSOLE_LINE_SCALE = 1.15

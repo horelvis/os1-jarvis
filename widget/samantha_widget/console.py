@@ -31,7 +31,10 @@ MAX_LINES = 10
 # to MAX_LINES, rather than by a fixed block: three lines in a box sized
 # for ten is mostly empty box, and it showed (2026-08-26).
 LINE_HEIGHT = 15
-PADDING = 22
+# The frame around the lines: 10 px of terminal padding top and bottom
+# (theme.CSS), its border, and the margin under it. Measured by counting
+# the lines that fit — 22 was one line short.
+PADDING = 34
 HEIGHT = LINE_HEIGHT * MAX_LINES + PADDING
 
 # Longer than this and a line is cut: a single 4,000-character blob from
@@ -46,6 +49,10 @@ class Console:
     def __init__(self, max_lines: int = MAX_LINES) -> None:
         self.max_lines = max_lines
         self.lines: list[str] = []
+        # Overwritten with the terminal's real character height once
+        # there is one to ask (see `window.write_console`). The constant
+        # is only the guess used before the widget exists.
+        self.line_height = LINE_HEIGHT
 
     @property
     def visible(self) -> bool:
@@ -61,7 +68,7 @@ class Console:
         """
         if not self.lines:
             return 0
-        return min(len(self.lines), self.max_lines) * LINE_HEIGHT + PADDING
+        return min(len(self.lines), self.max_lines) * self.line_height + PADDING
 
     def write(self, text: str) -> bool:
         """Add lines. True when the strip has to change size.
