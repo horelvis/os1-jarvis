@@ -1,5 +1,54 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-26 (noche III) — JARVIS delega el trabajo, por A2A ✅
+
+De «vamos a conectar Hermes con Claude Code» salieron tres piezas; las
+tres están hechas. La tercera es la que cierra el circuito:
+
+    tú:     «Jarvis, en prueba-a2a el test de calc.py falla.
+             Que lo arregle el asistente de código.»
+    JARVIS: «Arreglado: suma hacía una resta; ahora suma y el test pasa.
+             El asistente no tocó nada más, solo esa línea.»
+
+Y el fichero, comprobado aparte, decía `return a + b` con el test en
+verde.
+
+**La decisión de fondo fue del usuario y fue la más cara:** A2A en vez de
+lanzar `claude` desde un plugin, *«por el futuro uso de opencode»*. El
+trabajo no desaparece —el puente hace por dentro lo que habría hecho el
+plugin— pero **Hermes no necesita una línea de código nuevo**: su
+toolset `a2a` ya trae `a2a_call`, `a2a_discover` y `a2a_orchestrate`, y
+el puente es sólo un agente al que llamar. Otro asistente mañana es otro
+servidor, y esta configuración no cambia.
+
+**Lo que costó medir, y no se habría acertado leyendo manuales:**
+
+- **Los nombres de los métodos no coinciden.** La especificación v1.0
+  los llama `SendMessage` / `SendStreamingMessage`; el cliente de Hermes
+  envía `message/send` / `message/stream`. El puente acepta los dos, o
+  dos implementaciones correctas no se encontrarían.
+- **Los permisos paran el trabajo en modo no interactivo.** Grabada una
+  tarea real con `acceptEdits`: dos comandos y la edición fueron
+  denegados y el asistente acabó describiendo un arreglo que no pudo
+  aplicar. Con el alcance completo que el usuario eligió, corre sin esa
+  barrera.
+- **`jarvis` y `jarvis-os` están a 0,14** cuando el nombre llega
+  destrozado por el reconocimiento de voz, así que el margen de
+  ambigüedad es 0,15 y una duda se pregunta. Sesgo contrario al de la
+  palabra de activación, y por el motivo contrario: preguntar dos veces
+  cuesta una frase, acertar mal escribe ficheros en el repositorio
+  equivocado.
+
+**Las otras dos piezas, antes:** el cuarto interruptor abre una línea de
+texto en la tira para escribirle (y es lo que sostiene todo lo demás), y
+la banda muestra una terminal de verdad —`Vte.Terminal`, la de GNOME
+Console— en lugar de una etiqueta que yo hubiera pintado.
+
+**Lo que falta:** que la salida del asistente llegue a esa terminal
+mientras trabaja. El puente ya la emite por `message/stream` (SSE) y la
+tira ya sabe mostrarla; falta el tramo del medio, que es un frame en el
+protocolo del kiosko.
+
 ## 2026-08-26 (noche II) — Se le puede escribir ✅
 
 Primera pieza del diseño de

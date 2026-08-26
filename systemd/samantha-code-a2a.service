@@ -1,0 +1,28 @@
+[Unit]
+Description=Samantha code bridge (A2A) — the coding assistant, callable
+# Not PartOf=graphical-session: this has nothing to do with the strip and
+# should be reachable whether or not anybody has logged in.
+After=network.target
+
+[Service]
+Type=simple
+# Stdlib only, so any Python 3.11+ does. The widget's venv is used
+# because it is the one this repo keeps current, not for its packages.
+ExecStart=%h/git/os1-samantha/widget/.venv/bin/python %h/git/os1-samantha/Hermes/bridges/code-a2a/server.py --port 9910 --root %h/git
+WorkingDirectory=%h/git/os1-samantha/Hermes/bridges/code-a2a
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONNOUSERSITE=1
+
+# The assistant it drives needs the user's own credentials and config —
+# it is the user's assistant, run as the user. That is the whole design
+# and also why the port is bound to localhost by default.
+Environment=HOME=%h
+
+Restart=on-failure
+RestartSec=5
+# It spawns a coding assistant that can take minutes; do not kill the
+# tree on a slow stop.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

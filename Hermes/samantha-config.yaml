@@ -192,6 +192,23 @@ tools:
 # The privacy line moves, and §1.1 already carries the shape of it: the
 # conversation stays on this box, but the TEXT OF A SEARCH leaves it.
 # Nothing else does — no history, no identity, no audio.
+# ── The coding assistant, as a peer rather than a plugin ──────────────
+#
+# `Hermes/bridges/code-a2a/` serves an A2A agent card on :9910 and runs
+# the assistant in whichever project the request names, under ~/git.
+# Nothing is written on this side: `a2a_call` and friends ship with
+# Hermes, and the bridge is just an agent they can call. The user chose
+# it that way on 2026-08-26 "por el futuro uso de opencode" — another
+# assistant is another server, and this file does not change.
+#
+# The timeout is what a coding task actually takes. The default (120 s)
+# ends the call while the assistant is still reading the repository.
+a2a_agents:
+  codigo:
+    url: "http://127.0.0.1:9910"
+    timeout: 900
+    capabilities: [code, development, tests]
+
 platform_toolsets:
   samantha_kiosk:
     - memory
@@ -201,6 +218,7 @@ platform_toolsets:
     - clarify
     - camaras
     - web
+    - a2a
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron
