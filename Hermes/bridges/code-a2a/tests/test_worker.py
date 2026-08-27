@@ -103,6 +103,66 @@ def test_only_one_task_at_a_time():
     assert b.active() is None
 
 
+# ── a failed run is not a completed task ──────────────────────────────
+
+
+def test_a_run_that_failed_ends_the_task_failed():
+    """The engine's ordinary failure does not raise: it yields a closing
+    VOICE event with failed=True (sdk_runner._pump). The checkpoint must
+    not turn that into a COMPLETED task."""
+    b = _bridge([
+        Event(VOICE, "No he podido ponerlo a trabajar.", final=True, failed=True),
+    ])
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "haz", FakeProject())
+    job.start()
+    _drain_until(listener, "ask")
+    job.answer("sí")
+    end = _drain_until(listener, "end")[-1]
+    assert end["failed"] is True
+    _wait(lambda: task.state == tasks.FAILED)
+
+
+def test_a_failed_run_nobody_closes_still_ends_failed():
+    b = _bridge([Event(VOICE, "No he podido.", final=True, failed=True)])
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "haz", FakeProject())
+    job.checkpoint_timeout = 0.05
+    job.start()
+    _drain_until(listener, "ask")
+    _drain_until(listener, "end")
+    _wait(lambda: task.state == tasks.FAILED)
+
+
+def test_the_checkpoint_can_be_answered_the_instant_it_is_announced():
+    """The window between announcing the checkpoint and waiting on it.
+
+    Widened deliberately: `emit` sleeps on the `ask` payload, so the
+    answer lands exactly there. A Job that announces before it can
+    listen tells the user nobody was waiting for the question it had
+    just asked.
+    """
+    b = _bridge([Event(VOICE, "Hecho.", final=True)])
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "haz", FakeProject())
+    plain = b.emit
+
+    def slow(payload):
+        plain(payload)
+        if payload.get("event") == "ask":
+            time.sleep(0.2)
+
+    b.emit = slow  # type: ignore
+    job.start()
+    _drain_until(listener, "ask")
+    assert job.answer("vale") is True
+    _drain_until(listener, "end")
+    _wait(lambda: task.state == tasks.COMPLETED)
+
+
 # ── the question the run itself holds ─────────────────────────────────
 
 

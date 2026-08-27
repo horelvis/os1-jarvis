@@ -43,7 +43,11 @@ class Job:
         self.fresh = fresh
         self.checkpoint_timeout = CHECKPOINT_TIMEOUT
         self._checkpoint: queue.Queue = queue.Queue()
+        # Whether an answer has anywhere to go, and the lock that makes
+        # opening and shutting that window atomic against `answer()`,
+        # which is called from the HTTP thread.
         self._at_checkpoint = False
+        self._lock = threading.Lock()
 
     # ── the three things the outside does to it ───────────────────────
 
@@ -62,10 +66,11 @@ class Job:
         run = self.bridge.runs.get(self.task.id)
         if run is not None and run.pending is not None:
             return run.answer(text)
-        if self._at_checkpoint:
+        with self._lock:
+            if not self._at_checkpoint:
+                return False
             self._checkpoint.put(text)
             return True
-        return False
 
     def cancel(self) -> None:
         """Wake a checkpoint wait so a cancelled task's thread can end.
@@ -97,13 +102,25 @@ class Job:
                     )
                     return
                 self.task.advance(tasks.INPUT_REQUIRED, summary)
+                # Listening BEFORE asking. The other order tells the user
+                # nobody was waiting for the question he has just heard —
+                # the answer arrives in the gap and finds the window shut.
+                with self._lock:
+                    self._at_checkpoint = True
                 self._emit({"event": "ask", "qkind": "checkpoint", "text": summary})
-                self._at_checkpoint = True
                 try:
                     reply = self._checkpoint.get(timeout=self.checkpoint_timeout)
                 except queue.Empty:
                     reply = None
-                finally:
+                with self._lock:
+                    if reply is None:
+                        # The window shuts here, and shuts atomically: an
+                        # answer accepted at the buzzer is taken rather
+                        # than left in a queue nobody reads again.
+                        try:
+                            reply = self._checkpoint.get_nowait()
+                        except queue.Empty:
+                            pass
                     self._at_checkpoint = False
                 self._emit({"event": "resolved"})
                 if self.task.state == tasks.CANCELED or reply is _CANCELED:
@@ -115,14 +132,20 @@ class Job:
                         }
                     )
                     return
+                # The engine's ordinary failure does not raise: it
+                # yields a closing event with `failed` set, so the
+                # `except` below never sees it and only this carries it
+                # into the task's state. Reporting COMPLETED for work
+                # that failed is what `server._ending` exists to prevent.
+                closing = tasks.FAILED if failed else tasks.COMPLETED
                 if reply is None:
-                    self.task.advance(tasks.COMPLETED, summary)
+                    self.task.advance(closing, summary)
                     self._emit(
                         {"event": "end", "failed": failed, "summary": _CLOSED_ALONE}
                     )
                     return
                 if assent(str(reply)):
-                    self.task.advance(tasks.COMPLETED, summary)
+                    self.task.advance(closing, summary)
                     self._emit({"event": "end", "failed": failed, "summary": summary})
                     return
                 # Anything else is the next instruction of the same
