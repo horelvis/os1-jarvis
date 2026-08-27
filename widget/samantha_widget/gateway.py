@@ -23,6 +23,7 @@ import json
 from typing import Any, Callable
 
 import websockets
+from loguru import logger
 
 DEFAULT_URI = "ws://127.0.0.1:7777/ws"
 DEFAULT_USER_ID = "primary"
@@ -81,11 +82,40 @@ def decode_server(raw: str) -> dict[str, Any]:
     return msg
 
 
+# What `websockets.connect` is asked for, and it is one keyword against
+# a defect measured on the live machine on 2026-08-27.
+#
+# **`permessage-deflate` must be off.** With it negotiated, aiohttp —
+# which is what the kiosk adapter is — refuses the FIRST compressed data
+# frame of a connection when a control frame reached it first, and
+# answers `CLOSE 1002 (protocol error)`. `websockets` sends a keepalive
+# ping every 20 s by default, so any connection idle for 20 seconds has
+# had its control frame: the next thing the user says is destroyed on
+# the wire, the socket dies with it, and the strip reconnects into
+# exactly the same state. Not a race — deterministic, and the strip is
+# idle between turns by its nature.
+#
+# What it cost before it was found: the owner watched JARVIS not answer
+# three times in nine minutes, and the only evidence on the box was an
+# aiohttp access line closing the socket at the second of the send.
+# Reproduced in milliseconds against a plain aiohttp server with no
+# Hermes in it: ping-then-text fails with deflate at gaps of 0 s, 50 ms
+# and 500 ms, passes with `compression=None`, and passes with deflate
+# when a data frame went first. See `tests/test_gateway_deflate.py`.
+#
+# Nothing is lost by turning it off: these are small JSON frames over
+# loopback. The keepalive stays — the ping is not what is broken.
+CONNECT_OPTIONS: dict[str, Any] = {"compression": None}
+
+
 class GatewayClient:
     def __init__(self, uri: str = DEFAULT_URI, user_id: str = DEFAULT_USER_ID) -> None:
         self.uri = uri
         self.user_id = user_id
         self.retry_seconds = 2.0
+        # Per instance so a test can force the keepalive to fire in
+        # milliseconds instead of the default twenty seconds.
+        self.connect_options: dict[str, Any] = dict(CONNECT_OPTIONS)
         self.on_token: Callable[[str], None] = lambda _t: None
         self.on_done: Callable[[int], None] = lambda _ms: None
         self.on_error: Callable[[str], None] = lambda _m: None
@@ -121,31 +151,86 @@ class GatewayClient:
         await asyncio.wait_for(self._connected.wait(), timeout=timeout)
 
     async def send_chat(self, text: str, *, wake: bool = False) -> None:
-        if self._ws is None:
+        """Send one turn. Never raises: a lost send is a spoken failure.
+
+        The socket can die between the last frame read and this write —
+        that is what the deflate defect above did every time — and an
+        exception here escapes into the task `__main__` spawned for the
+        turn, which dies with no log and leaves the wave in `thinking`
+        for as long as the strip is up. `on_error` settles the turn and
+        says something out loud, which is the whole difference between a
+        failure and a disappearance.
+        """
+        ws = self._ws
+        if ws is None:
             self.on_error(_NO_GATEWAY)
             return
-        await self._ws.send(encode_chat(text, self.user_id, wake=wake))
+        try:
+            await ws.send(encode_chat(text, self.user_id, wake=wake))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"pasarela: la frase no ha salido — {exc}")
+            self.on_error(_NO_GATEWAY)
 
     async def run(self) -> None:
-        """Connect, read, and reconnect forever. Cancel to stop."""
+        """Connect, read, and reconnect forever. Cancel to stop.
+
+        **Retrying forever is right; doing it in silence was not.** Every
+        failure here — gateway down, gateway restarting, the socket
+        dropped mid-turn, an exception raised out of `_dispatch` — has
+        the same answer: wait and try again, because a strip that gives
+        up is a strip somebody has to restart by hand. What is not the
+        same is whether anybody is ever told, and until 2026-08-27 this
+        was `except Exception: pass` with no log at any level.
+
+        What that cost, measured on the live machine: the owner's
+        sentence vanished three times in nine minutes, the widget
+        journal showed `→ <the sentence>` and nothing after it, and the
+        only evidence anywhere on the box was an aiohttp access line in
+        the gateway's own log closing the socket at the same second. He
+        watched JARVIS not answer, three times, with no way to know why.
+
+        So: the first failure of a run of them is a `warning` naming the
+        reason, every drop of a connection that HAD been established is
+        a `warning`, and the reconnect says so — a reader can see
+        "dropped at 11:25:18, back at 11:25:20". The attempts in between
+        stay at `debug`, because a gateway that is simply down would
+        otherwise write a line every `retry_seconds` for as long as it
+        is down.
+        """
+        connected = False
+        complained = False
         while True:
+            why = ""
             try:
-                async with websockets.connect(self.uri) as ws:
+                async with websockets.connect(self.uri, **self.connect_options) as ws:
                     self._ws = ws
                     self._connected.set()
+                    connected, complained = True, False
+                    logger.info(f"pasarela: conectado a {self.uri}")
                     async for raw in ws:
                         self._dispatch(raw)
+                # The `async for` ended without raising: the gateway
+                # closed the socket on us. It is a drop like any other
+                # and has to be reported like one — this is the branch
+                # an `except` alone never sees.
+                why = "la pasarela ha cerrado el socket"
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                # Every failure mode here — gateway down, gateway
-                # restarting, socket dropped mid-turn — has the same
-                # answer: wait and try again. A strip that gives up is
-                # a strip that has to be restarted by hand.
-                pass
+            except Exception as exc:
+                why = f"{type(exc).__name__}: {exc}"
             finally:
                 self._ws = None
                 self._connected.clear()
+            if connected:
+                connected = False
+                logger.warning(f"pasarela: conexión perdida — {why}")
+            elif not complained:
+                complained = True
+                logger.warning(f"pasarela: no puedo conectar con {self.uri} — {why}")
+            else:
+                logger.debug(f"pasarela: sigo sin conectar — {why}")
             await asyncio.sleep(self.retry_seconds)
 
     def _dispatch(self, raw: str | bytes) -> None:

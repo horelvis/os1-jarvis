@@ -339,3 +339,91 @@ def test_an_asking_frame_is_never_spoken() -> None:
     client._dispatch(json.dumps({"type": "asking", "open": True}))
 
     assert said == []
+
+
+# ── The reconnect says so. It used to be `except Exception: pass`. ────
+
+
+@pytest.fixture
+def captured_logs():
+    """Everything loguru writes during one test."""
+    import io
+
+    from loguru import logger
+
+    sink = io.StringIO()
+    handler = logger.add(sink, level="DEBUG")
+    try:
+        yield sink
+    finally:
+        logger.remove(handler)
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_that_is_down_says_so_once_not_once_per_retry(
+    captured_logs,
+) -> None:
+    # Until 2026-08-27 every failure here was swallowed with no log at
+    # any level. The owner watched JARVIS not answer three times in nine
+    # minutes with nothing anywhere on the machine to read.
+    #
+    # Once, though, not once per attempt: a gateway that is simply down
+    # would otherwise write a line every `retry_seconds` for as long as
+    # it is down.
+    client = GatewayClient("ws://127.0.0.1:1/ws")
+    client.retry_seconds = 0.02
+    task = asyncio.create_task(client.run())
+    await asyncio.sleep(0.3)  # bounded: ~10 attempts at 0.02 s
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    logged = captured_logs.getvalue()
+    assert logged.count("no puedo conectar") == 1
+    assert "WARNING" in logged
+    # The rest are there, quietly, for whoever turns the level down.
+    assert "sigo sin conectar" in logged
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_connection_is_a_warning_and_the_reconnect_is_logged(
+    captured_logs,
+) -> None:
+    # "dropped at 11:25:18, back at 11:25:20" — the two lines a reader
+    # needs, and neither existed.
+    async def handler(ws):
+        await ws.close()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        client = GatewayClient(f"ws://127.0.0.1:{port}/ws")
+        client.retry_seconds = 0.05
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    logged = captured_logs.getvalue()
+    assert "conexión perdida" in logged
+    assert logged.count("conectado a") >= 2  # it came back, and said so
+
+
+@pytest.mark.asyncio
+async def test_a_send_on_a_dead_socket_settles_the_turn_instead_of_raising() -> None:
+    # The other half of a silent loss: an exception out of `send_chat`
+    # escapes into the task `__main__` spawned for the turn, which dies
+    # with no log and leaves the wave in `thinking` for as long as the
+    # strip is up.
+    class _Dead:
+        async def send(self, _payload):
+            raise ConnectionResetError("socket ya cerrado")
+
+    client = GatewayClient()
+    said: list[str] = []
+    client.on_error = said.append
+    client._ws = _Dead()
+
+    await client.send_chat("¿me oyes?")  # must not raise
+
+    assert said and said[0]  # he says something rather than going quiet
