@@ -65,6 +65,17 @@ plugins:
       #
       # Which cameras exist, which stream, and how to write the URL:
       # Hermes/plugins/samantha_vision/README.md.
+    samantha-code:
+      allow_tool_override: false
+      # Same permission, and the same failure when it is missing: this is
+      # the switch that lets him ASK. Without it the coding assistant's
+      # question, the gate before something irreversible and the closing
+      # checkpoint all reach `ctx.inject_message()`, get denied, retry
+      # three times and end as one line — «el aviso no llegó a la sesión
+      # de la tira» — while the run itself carries on perfectly. Measured
+      # 2026-08-27 on the first live end-to-end: the work was done and
+      # verified, and he never said a word about it.
+      allow_gateway_injection: true
 
 # ── TTS ───────────────────────────────────────────────────────────────
 # Hermes' default provider is `edge` — Microsoft's cloud. Measured
