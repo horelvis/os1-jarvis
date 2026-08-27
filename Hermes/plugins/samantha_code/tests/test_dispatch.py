@@ -57,32 +57,40 @@ def test_a_new_task_forgets_what_the_last_one_said(monkeypatch, wiring):
 def test_a_question_shows_on_the_band_arms_the_divert_and_asks_out_loud(
     monkeypatch, wiring
 ):
-    _run(
-        monkeypatch,
-        wiring,
-        [{"event": "ask", "qkind": "question", "text": "¿A o B?", "taskId": "t1"}],
-    )
+    # `armed` is read INSIDE the firehose: the loop disarms on its way
+    # out, so after it there is deliberately nothing left armed.
+    armed = []
+
+    def events():
+        yield {"event": "ask", "qkind": "question", "text": "¿A o B?", "taskId": "t1"}
+        armed.append(wiring.adapter.divert_chat is not None)
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
     assert _lines(wiring) == ["? ¿A o B?\n"]
-    assert wiring.adapter.divert_chat is not None
+    assert armed == [True]
     assert len(wiring.ctx.injected) == 1
     assert "«¿A o B?»" in wiring.ctx.injected[0]
 
 
 def test_a_checkpoint_is_spoken_and_stays_off_the_band(monkeypatch, wiring):
-    _run(
-        monkeypatch,
-        wiring,
-        [
-            {
-                "event": "ask",
-                "qkind": "checkpoint",
-                "text": "1 test pasa",
-                "taskId": "t1",
-            }
-        ],
-    )
+    armed = []
+
+    def events():
+        yield {
+            "event": "ask",
+            "qkind": "checkpoint",
+            "text": "1 test pasa",
+            "taskId": "t1",
+        }
+        armed.append(wiring.adapter.divert_chat is not None)
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
     assert _lines(wiring) == []
-    assert wiring.adapter.divert_chat is not None
+    assert armed == [True]
     assert "«1 test pasa»" in wiring.ctx.injected[0]
 
 
@@ -272,12 +280,21 @@ def test_a_question_tells_the_strip_to_keep_listening(monkeypatch, wiring):
     # question, which opens a 30-second no-name window, and a gate waits
     # 300 s. Past 30 s there is no spoken sentence that can answer at
     # all — saying his name sets `wake`, which is never diverted.
-    _run(
-        monkeypatch,
-        wiring,
-        [{"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"}],
-    )
-    assert wiring.asked[-1] is True
+    #
+    # Recorded INSIDE the firehose, not after it: the loop shuts the
+    # window on its way out (see `test_the_loop_ending_disarms...`), so
+    # the last value is always False and the only place the open one
+    # exists is while the question stands.
+    held = []
+
+    def events():
+        yield {"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"}
+        held.append(wiring.asked[-1])
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
+    assert held == [True]
 
 
 def test_the_window_shuts_again_when_the_question_resolves(monkeypatch, wiring):
@@ -418,3 +435,38 @@ def test_a_run_that_was_stopped_does_not_claim_it_finished(monkeypatch, wiring):
         ],
     )
     assert _lines(wiring) == ["— parado\n"]
+
+
+# ── The loop's own way out. ──────────────────────────────────────────
+
+
+def test_the_loop_ending_disarms_the_divert_and_shuts_the_window(
+    monkeypatch, wiring
+):
+    # The one route out that did not go through `_set_divert`: the loop
+    # stops with a question outstanding — `stop` set on unload, or the
+    # outer `except`. The strip recovers on its own at the wake hold's
+    # 900 s cap; the ADAPTER never does. `divert_chat` would stay armed
+    # against a dispatcher that has stopped, waiting to eat the next
+    # unnamed sentence inside an answered window.
+    _run(
+        monkeypatch,
+        wiring,
+        [{"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"}],
+    )
+    assert wiring.adapter.divert_chat is None
+    assert wiring.asked[-1] is False
+
+
+def test_a_follower_that_blows_up_still_disarms_the_divert(monkeypatch, wiring):
+    # The same guarantee down the failing path, which is the one that
+    # leaves a stale hook without anybody noticing.
+    def events():
+        yield {"event": "ask", "qkind": "question", "text": "¿A o B?", "taskId": "t1"}
+        raise RuntimeError("el puente se ha ido")
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
+    assert wiring.adapter.divert_chat is None
+    assert wiring.asked[-1] is False

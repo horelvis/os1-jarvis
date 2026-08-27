@@ -62,14 +62,26 @@ def test_the_plugin_acts_on_every_payload_the_bridge_emits(kind, monkeypatch, wi
         assert lines == [f"Editando {payload['detail']}\n"]
     elif kind == "ask":
         assert lines == [f"? Quiere: {payload['text']}\n"]
-        assert wiring.asked[-1] is True
+        # Opened by the question, and shut again by the loop ending —
+        # which is what a finite firehose is.
+        assert wiring.asked == [True, False]
         assert f"«{payload['text']}»" in wiring.ctx.injected[0]
     elif kind == "resolved":
         assert wiring.asked[-1] is False
         assert lines == []
     elif kind == "end":
+        # `stopped` is read as a VALUE, not only as a key: the fixture
+        # pins False, so `— terminado` is what proves it was read at all
+        # — and the sibling assertion below flips it to prove the plugin
+        # would say something else. Without that pair a plugin which had
+        # stopped reading `stopped` entirely would keep this green, and
+        # only the bridge half of the contract would be doing any work.
         assert lines == ["— terminado\n"]
         assert wiring.pushed[-1] == ("", {"done": True, "reset": False})
+        assert mod._ending_line({**payload, "stopped": True}) == "— parado"
+        assert mod._ending_line({**payload, "failed": True}) == (
+            "— terminado con errores"
+        )
     else:  # pragma: no cover - a new event kind with nobody rendering it
         raise AssertionError(f"the fixture grew {kind!r} and nothing handles it")
 

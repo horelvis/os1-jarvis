@@ -198,3 +198,50 @@ def test_losing_a_live_stream_is_a_warning_every_time(monkeypatch, capture_logs)
         assert capture_logs.getvalue().count("se ha cortado el puente") == 2
     finally:
         server.shutdown()
+
+
+class _AcceptsAndSaysNothing(BaseHTTPRequestHandler):
+    """Opens `/events` with the right headers and closes without a line.
+
+    Nothing raises: `urlopen` succeeds, the response iterator finishes
+    empty, the `with` falls out. That branch used to log at no level at
+    all and retry forever — the silent-at-three-in-the-morning case
+    surviving in the one place nobody looked. The real bridge sends
+    `: keepalive` within 15 s, so reaching this needs a foreign or
+    half-dead listener on :9910, which is precisely when somebody wants
+    to be told.
+    """
+
+    def log_message(self, *a):  # noqa: A003
+        pass
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+
+
+def test_a_listener_that_says_nothing_is_still_a_warning(monkeypatch, capture_logs):
+    monkeypatch.setattr(client, "_BACKOFF_START", 0.01)
+    monkeypatch.setattr(client, "_BACKOFF_CEILING", 0.01)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _AcceptsAndSaysNothing)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 6
+
+    try:
+        assert list(follow_events(url, stop)) == []
+        logged = capture_logs.getvalue()
+        # Said once, not once per attempt: the same rule the refused
+        # connection follows.
+        assert logged.count("el puente no responde") == 1
+        assert "WARNING" in logged
+        # And never `lost`: nothing was ever being followed, so there
+        # was no sight of the work to lose.
+        assert "se ha cortado el puente" not in logged
+    finally:
+        server.shutdown()

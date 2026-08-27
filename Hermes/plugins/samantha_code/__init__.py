@@ -348,3 +348,18 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
         logger.opt(exception=True).warning(
             f"samantha-code: el modo puente se detuvo — {exc}"
         )
+    finally:
+        # Whatever ended this loop — `stop` set on unload, or the
+        # exception above — nothing is waiting for an answer any more,
+        # because nothing is left to deliver one to.
+        #
+        # This is the one route out that did not go through
+        # `_set_divert`, and it is the worst one to miss: the strip
+        # recovers on its own at the wake hold's 900 s cap, and the
+        # ADAPTER does not recover at all. `divert_chat` would stay
+        # armed against a dispatcher that has stopped, and the next
+        # unnamed sentence inside an answered window would be eaten by
+        # it — the same failure `lost` and `task` already guard, by the
+        # only door with no guard on it.
+        state.clear()
+        _set_divert(None)

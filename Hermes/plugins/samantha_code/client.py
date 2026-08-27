@@ -83,19 +83,23 @@ def follow_events(url: str, stop: Callable[[], bool]) -> Iterator[dict]:
             why = "el puente ha cerrado el hilo"
         except Exception as exc:
             why = str(exc)
-            if not connected and not complained:
-                complained = True
-                logger.warning(f"samantha-code: el puente no responde — {why}")
-            elif not connected:
-                logger.debug(f"samantha-code: el puente sigue sin responder — {why}")
+        # Everything said about the attempt is said HERE, out of both
+        # branches, because neither of them owns the whole story: a
+        # clean end of stream raises nothing at all, and a listener that
+        # accepts the connection and closes it without sending a line
+        # raises nothing either — that one left `connected` False and
+        # logged at no level whatsoever, which is the silent-at-three-
+        # in-the-morning case this is written against, surviving in the
+        # one branch nobody looked at.
         if connected:
-            # A clean end of stream comes through here too, with no
-            # exception: the `with` simply falls out of the loop, which
-            # is why the transition is logged HERE and not in the
-            # `except` — half of them never raise anything.
             connected = False
             logger.warning(f"samantha-code: se ha cortado el puente — {why}")
             yield dict(LOST)
+        elif not complained:
+            complained = True
+            logger.warning(f"samantha-code: el puente no responde — {why}")
+        else:
+            logger.debug(f"samantha-code: el puente sigue sin responder — {why}")
         if stop():
             return
         time.sleep(backoff)

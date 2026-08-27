@@ -45,7 +45,7 @@ que no se convirtiera en un panel, y lo que daba era un terminal
 demasiado corto para leer la salida de una herramienta.
 `SAMANTHA_WIDGET_CONSOLE_LINES` lo hace configurable.
 
-**La ronda de revisión de la rama entera, 2026-08-27.** Seis hallazgos,
+**La ronda de revisión de la rama entera, 2026-08-27.** Siete hallazgos,
 todos con prueba antes del arreglo:
 
 - **Una respuesta hablada de más de treinta segundos no llegaba al
@@ -75,14 +75,40 @@ todos con prueba antes del arreglo:
   suites** (`tests/fixtures/firehose.json`). Antes cada lado escribía a
   mano su copia de las claves y un renombrado rompía sólo una mitad.
   Comprobado rompiéndolo por los dos lados.
-- La salida de consola se adjunta como artefacto al terminar, que es lo
-  que le queda a un cliente A2A que no sea la tira.
-- Y el README del puente dice ahora lo que cuesta de verdad el turno
-  único: una tarea espera hasta 600 s en su cierre y `active()` la
-  cuenta, así que cualquier otro llamante se lleva un «Ya hay una tarea
-  en marcha» durante esos diez minutos.
+- **Un comentario que explicaba justo lo que no era.** El docstring de
+  `_push` decía que ninguno de sus llamantes está en el hilo del bucle
+  del gateway, y el camino de la respuesta sí lo está
+  (`_ws_handler` → `_should_divert` → `divert` → `_push`). Inofensivo
+  —nadie llama a `.result()`, que es la llamada que bloquearía— pero es
+  el comentario que explica el fallo de la cámara en vivo.
+- **Un número medido que estaba mal.** «116 pruebas» eran 117, en el
+  documento cuyo sentido entero son los números medidos.
+- **Y dos cosas de documentación:** el README del puente dice ahora lo
+  que cuesta de verdad el turno único —una tarea espera hasta 600 s en
+  su cierre y `active()` la cuenta, así que cualquier otro llamante se
+  lleva un «Ya hay una tarea en marcha» durante esos diez minutos— y
+  §4 de CLAUDE.md recoge que delegar código va por el puente por
+  defecto. La salida de consola se adjunta además como artefacto al
+  acabar, que es lo que le queda a un cliente A2A que no sea la tira.
 
-140 pruebas en `samantha_kiosk` + `samantha_code`, 99 en el puente, 247
+**Y la re-revisión encontró cuatro cosas más, dos de ellas con
+consecuencia:**
+
+- **El bucle de despacho no desarmaba el desvío al salir.** Centralizar
+  armar y desarmar en `_set_divert` y no usarlo en la propia salida del
+  bucle: si termina con una pregunta en pie —`stop` al descargar el
+  plugin, o la excepción de fuera— la tira se recupera sola a los 900 s
+  y **el adaptador no se recupera nunca**. Un `finally` lo cierra.
+- **A `follow_events` le quedaba una rama muda:** un servidor que acepta
+  `/events` y cierra sin mandar una línea no lanza nada, así que no se
+  registraba a ningún nivel y se reintentaba para siempre — el caso
+  «callado a las tres de la mañana» sobreviviendo en el único sitio que
+  nadie miró.
+- Dos deslices de prosa nuestros: el artefacto se adjunta *después* del
+  estado terminal (en el `finally`), no con él, y este párrafo decía
+  seis hallazgos.
+
+143 pruebas en `samantha_kiosk` + `samantha_code`, 99 en el puente, 247
 en el widget.
 
 ## 2026-08-26 (noche V) — El puente usa el SDK: se le puede parar, y recuerda ✅

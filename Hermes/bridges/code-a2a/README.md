@@ -176,8 +176,16 @@ away. Everything it holds belonged to that stream.
   answer the checkpoint (a `message/send` carrying the `taskId`, with a
   yes) rather than wait it out; a client that only wants the result
   should poll `tasks/get`, where the summary is in `status.message` and
-  the console lines are attached as the `salida` artifact from the
-  moment the task turns terminal.
+  the console lines are attached as the `salida` artifact.
+
+  **The artifact lands just AFTER the terminal state, not with it.**
+  `task.advance(COMPLETED|FAILED, …)` runs inside `Job._run`; the
+  artifact is written in that method's `finally`, so a client that
+  polls at exactly the transition can legitimately read
+  `artifacts: []` and has to poll once more. Deliberate: the `finally`
+  is what gives every ending an artifact — closed, failed, cancelled,
+  or the exception path — and buying atomicity would mean writing it at
+  each of those four places instead.
 - **Not the CLI's story.** Everything about accepting at once, questions
   and the checkpoint is the SDK path. With OpenCode, or without the SDK
   installed, `message/send` still runs to completion inside the request
