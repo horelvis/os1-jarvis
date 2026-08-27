@@ -1,5 +1,52 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-27 — El asistente de código habla en hitos, y JARVIS puede preguntar ✅
+
+Cierra el diseño de
+`docs/superpowers/specs/2026-08-27-samantha-code-v2-design.md`: el
+puente ya no bloquea un turno de voz por la duración de una obra —
+acepta el encargo al momento, contesta `working`, y trabaja en un hilo
+propio mientras emite eventos semánticos por un firehose SSE
+(`GET /events`) en loopback.
+
+**La consola deja de enseñar líneas en bruto y enseña hitos:** «Leyendo
+el proyecto…», «Editando vad.py», «Tests: 12 pasan, 2 fallan». Y hay
+tres momentos que sí llegan por voz — la propia `AskUserQuestion` del
+asistente, una puerta antes de algo irreversible, y un cierre que pide
+el visto bueno. La respuesta hablada del usuario no pasa por el
+modelo: mientras hay una pregunta pendiente, el adaptador de la tira
+desvía la siguiente frase directa al puente — el modelo rellena sus
+propias herramientas con `args={}`, medido seis veces, y es el mismo
+fallo. Un indicador nuevo (`wake`) evita que esa frase se coma la
+primera palabra cuando empieza con su nombre.
+
+**Tres plazos, todos medidos, no adivinados:** una puerta sin
+respuesta se niega a los 300 s; un cierre sin respuesta se cierra solo
+a los 600 s y lo dice; una pregunta sostenida no tiene plazo — está
+exenta del reloj de silencio de 900 s del propio run, porque que el
+usuario esté pensando no es que el run se haya quedado callado.
+
+**La sonda que faltaba, resuelta antes de escribir código:**
+`docs/superpowers/specs/2026-08-27-askuserquestion-probe.md` midió
+cómo vuelve una respuesta a una `AskUserQuestion` sostenida —
+`can_use_tool` sólo reescribe la entrada de una herramienta, nunca un
+resultado, así que lo que gobierna es un `PreToolUse` que deniega con
+las palabras del usuario como motivo.
+
+**La puerta de seguridad se acota, a petición del usuario.** Lo
+decidido el 2026-08-26 —«puede ejecutar cualquier comando»— se
+revierte en parte: `git push`, `rm -r`, `rm -f` y `sudo` piden permiso
+ahora; `SAMANTHA_CODE_GATES` es la política entera si se fija.
+
+**Y algo que no estaba en el plan:** la consola de la tira pasa de diez
+líneas a veinte, a petición del usuario — diez se había elegido para
+que no se convirtiera en un panel, y lo que daba era un terminal
+demasiado corto para leer la salida de una herramienta.
+`SAMANTHA_WIDGET_CONSOLE_LINES` lo hace configurable.
+
+116 pruebas en `samantha_kiosk` + `samantha_code`, 93 en el puente, 237
+en el widget.
+
 ## 2026-08-26 (noche V) — El puente usa el SDK: se le puede parar, y recuerda ✅
 
 Pedido: *"integra el SDK: interrupt y sesión persistente"*, tras el spike

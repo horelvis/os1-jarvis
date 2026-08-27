@@ -40,10 +40,11 @@ author: Horelvis Castillo
 #    the live camera a day (§12, 2026-08-26). If `adapter.loop` ever
 #    stops being set, this goes quiet with nothing in the log.
 #
-# 4. A TASK LONGER THAN THE CEILING. The stream is read on a worker
-#    thread with a 30-minute timeout. Past it the reader gives up while
-#    the assistant keeps working: the repository still changes, and
-#    nobody is told what happened.
+# 4. THE BRIDGE IS NEVER INSTALLED ON THIS BOX. `follow_events` backs
+#    off from 1 s to a 30 s ceiling and reconnects forever — it never
+#    gives up on its own. `settings.bridge: ""` is the way out: it
+#    selects the legacy tee-file follower (v1) instead of an indefinite
+#    retry loop nobody asked for.
 
 python_dependencies:
   - "loguru>=0.7,<1"

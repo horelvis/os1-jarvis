@@ -6,6 +6,10 @@ After=network.target
 
 [Service]
 Type=simple
+# The gate: Bash commands matching any of these ask the user first.
+# Set, the variable IS the whole policy — add "git commit" here to gate
+# commits too. Default in code: git push, rm -r, rm -f, sudo.
+#Environment=SAMANTHA_CODE_GATES=git push, rm -r, rm -f, sudo
 # Its own venv since 2026-08-26: the bridge needs `claude-agent-sdk`
 # (~386 MB with the CLI it bundles) to stop a run and to continue a
 # conversation. It is kept out of the widget's environment on purpose —

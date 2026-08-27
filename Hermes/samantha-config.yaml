@@ -229,6 +229,10 @@ a2a_agents:
     timeout: 900
     capabilities: [code, development, tests]
 
+# plugins.entries.samantha-code.settings.bridge:
+#   The code bridge's URL (default http://127.0.0.1:9910). Empty string
+#   selects the legacy tee-file follower (a box without the bridge).
+
 platform_toolsets:
   samantha_kiosk:
     - memory

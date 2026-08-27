@@ -1074,6 +1074,50 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-27 — The console gets milestones, and JARVIS can be asked
+
+**Decision:** the A2A bridge becomes the default way he delegates
+coding on this box. `samantha_code` follows the bridge's SSE firehose
+and turns it into two things: milestones on the strip's console
+(«Leyendo el proyecto…», «Editando vad.py», «Tests: 12 pasan, 2
+fallan») instead of raw stream lines, and three moments that leave the
+loop and reach the user by voice — the assistant's own
+`AskUserQuestion`, a gate before anything irreversible, and a closing
+checkpoint. `terminal` and the skills it drives (§12, 2026-08-26,
+"terminal stops being forbidden") stay as the fallback for a box with
+no bridge on it —
+`plugins.entries.samantha-code.settings.bridge: ""` is the switch.
+
+**The gate partially reverses "he can run ANY command on this box"**
+(§12, 2026-08-26, same entry), at the user's request.
+`SAMANTHA_CODE_GATES` defaults to `git push, rm -r, rm -f, sudo`;
+nothing else asks. A gate nobody answers **denies after 300 s**; a
+checkpoint nobody answers **closes after 600 s** and says so; a held
+question has **no timeout at all** — it is exempted from the run's own
+900 s silence watchdog, because the user thinking is not the run going
+quiet.
+
+**The answer bypasses the model, deliberately.** The probe of
+2026-08-27 (`docs/superpowers/specs/2026-08-27-askuserquestion-probe.md`)
+found there is no result-injection path — `can_use_tool` only rewrites
+a tool's *input*, and an answer is necessarily a *result* — so what
+steers a held `AskUserQuestion` is a `PreToolUse` deny carrying the
+user's words as its reason. The kiosk adapter therefore diverts the
+next spoken sentence straight to the bridge while a question is
+pending, never through the model: the local model fills its own tools
+with `args={}`, measured six times against the plugin this design
+replaces (§12, 2026-08-26, "terminal stops being forbidden").
+
+Full design: `docs/superpowers/specs/2026-08-27-samantha-code-v2-design.md`.
+
+**Cost, stated plainly:** a strip that routes an answer back has
+nothing to say about it — `error("")` settles the wave silently, using
+a guard (`if message:`) that has existed since the first turn
+implementation, rather than a new frame an older strip would not know.
+And a box without `samantha-code-a2a.service` now reconnects to the
+firehose forever at debug level instead of failing loudly, where v1's
+tee-file follower would have simply stopped.
+
 ### 2026-08-26 — The bridge drives the SDK, so a task can be stopped
 
 **Decision (the user's):** integrate `claude-agent-sdk` into the code
