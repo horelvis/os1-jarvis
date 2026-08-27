@@ -108,3 +108,15 @@ def test_with_no_wake_word_nothing_counts_as_named():
     w = WakeWord("")
     assert w.heard("hola", now=0.0) == "hola"
     assert w.named is False
+
+
+def test_named_resets_even_when_nothing_was_heard():
+    # A call that returns None must not leave `named` holding whatever
+    # the PREVIOUS call set — it has to describe THIS call, and this
+    # call heard nothing at all.
+    w = WakeWord("jarvis")
+    assert w.heard("jarvis, hola", now=0.0) == "hola"
+    assert w.named is True
+
+    assert w.heard("", now=1.0) is None
+    assert w.named is False

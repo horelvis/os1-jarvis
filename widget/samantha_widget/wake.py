@@ -98,10 +98,13 @@ class WakeWord:
 
     def heard(self, text: str, now: float) -> str | None:
         """The sentence to send on, or None to stay quiet."""
+        # Reset before the empty-text early return, not after: `named`
+        # must reflect THIS call, never a stale True left over from the
+        # last one that actually matched his name.
+        self.named = False
         text = text.strip()
         if not text:
             return None
-        self.named = False
         if not self.word:
             return text
 

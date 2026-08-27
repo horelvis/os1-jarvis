@@ -162,19 +162,25 @@ _DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
 _MIC_GATE = os.environ.get("SAMANTHA_WIDGET_MIC_GATE") == "1"
 
 
-def _settles_a_held_question(message: str) -> bool:
-    """Whether an `error` frame is the adapter's `silence()`, not a fault.
+def _apply_error_to_wake_window(wake: WakeWord, message: str, now: float) -> None:
+    """Extend the wake window when `message` is the adapter's `silence()`.
 
     The gateway only ever sends an EMPTY `error` when the user's own
     sentence was diverted to the code assistant as the answer to a held
     question or gate (`adapter.py`'s `_should_divert` + `silence()`).
     Every other `error` — a lost turn, a bad frame — carries Spanish
-    text. JARVIS did not speak, but the user just did and is plainly
-    still in the conversation, so this counts as an answer for the wake
-    window: needing his name again for the very next sentence would be
-    exactly the friction the window exists to remove.
+    text and is a real fault, not an answer.
+
+    JARVIS did not speak, but the user just did and is plainly still in
+    the conversation, so an empty `error` counts as an answer for the
+    wake window: needing his name again for the very next sentence
+    would be exactly the friction the window exists to remove. Takes
+    `wake` and `now` rather than reading them from a closure so the
+    whole decision — predicate and the `answered()` call together — can
+    be driven from a test with a real `WakeWord` and no GTK app.
     """
-    return not message
+    if not message:
+        wake.answered(now)
 
 
 class SamanthaApp(Gtk.Application):
@@ -498,8 +504,7 @@ class SamanthaApp(Gtk.Application):
         def on_error(message: str) -> None:
             if message:
                 say(message)
-            if _settles_a_held_question(message):
-                wake.answered(time.monotonic())
+            _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
 
         def on_photo(path: str, camera: str) -> None:
