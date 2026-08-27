@@ -155,3 +155,23 @@ def test_a_typed_line_shows_him_thinking() -> None:
     m.typed()
     assert states[-1] is WaveState.THINKING
     assert utterances == []
+
+
+def test_an_empty_error_settles_the_line_with_nothing_said() -> None:
+    """The frame a diverted turn ends on, pinned here because the
+    gateway now depends on it.
+
+    When the user answers the code assistant, the kiosk adapter opens no
+    turn and pushes `protocol.silence()` — an `error` frame with an
+    empty message. Two halves make that work and both are already here:
+    `error` always settles (unlike `done`, which needs a token), and
+    `__main__.on_error` only speaks when the message is non-blank. The
+    same idiom the widget already uses itself for an empty
+    transcription, his own echo, and a sentence not addressed to him.
+    """
+    machine, states = _machine()
+    _up_to_thinking(machine)
+    machine.error("")
+
+    assert machine.state is WaveState.IDLE
+    assert states[-1] is WaveState.IDLE

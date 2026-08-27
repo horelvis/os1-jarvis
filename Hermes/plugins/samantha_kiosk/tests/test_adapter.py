@@ -845,11 +845,84 @@ def test_a_diverted_frame_never_becomes_a_turn(tmp_path, monkeypatch):
                             }
                         )
                     )
-                    got = json.loads((await ws.receive(timeout=5)).data)
-                    assert got["type"] == "token"
+                    frames = [
+                        json.loads((await ws.receive(timeout=5)).data) for _ in range(2)
+                    ]
+                    return frames
         finally:
             await a.disconnect()
 
-    asyncio.run(go())
+    frames = asyncio.run(go())
+    # The diverted frame settles the wave silently; the named one is a
+    # turn like any other.
+    assert frames[0] == {"type": "error", "error": ""}
+    assert frames[1]["type"] == "token"
     assert taken == ["sí"]
     assert [e.text for e in seen] == ["qué hora es"]
+
+
+def test_a_diverted_frame_settles_the_wave_without_a_word(tmp_path, monkeypatch):
+    # The turn guarantee: every accepted chat frame ends in exactly one
+    # `done` or one `error`. A divert opens no turn, so nothing arms the
+    # watchdog — without this frame the strip sits in `thinking` for as
+    # long as the build runs.
+    import Hermes.plugins.samantha_kiosk.adapter as mod
+
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+
+    monkeypatch.setattr(
+        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.KioskAdapter(_cfg(tmp_path))
+        a.divert_chat = lambda text: True
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "sí", "user_id": "primary"}
+                        )
+                    )
+                    return json.loads((await ws.receive(timeout=5)).data)
+        finally:
+            await a.disconnect()
+
+    got = asyncio.run(go())
+    assert got == {"type": "error", "error": ""}
+    assert seen == []
+
+
+def test_a_declined_divert_still_opens_an_ordinary_turn(tmp_path, monkeypatch):
+    # The silence must belong to the divert, not to every chat frame.
+    import Hermes.plugins.samantha_kiosk.adapter as mod
+
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, "vale")
+
+    monkeypatch.setattr(
+        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.KioskAdapter(_cfg(tmp_path))
+        a.divert_chat = lambda text: False
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    return json.loads((await ws.receive(timeout=5)).data)
+        finally:
+            await a.disconnect()
+
+    assert asyncio.run(go())["type"] == "token"

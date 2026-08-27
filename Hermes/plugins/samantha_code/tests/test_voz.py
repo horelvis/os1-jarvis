@@ -50,3 +50,13 @@ def test_an_injection_that_raises_costs_the_prompt_and_nothing_else(_no_waiting)
         raise RuntimeError("gateway going down")
 
     assert voz.deliver(inject, "hola") is False
+
+
+def test_an_injection_that_raises_keeps_its_traceback(_no_waiting, capture_logs):
+    def inject(text, **kwargs):
+        raise TypeError("inject_message() got an unexpected keyword")
+
+    voz.deliver(inject, "hola")
+    logged = capture_logs.getvalue()
+    assert "la inyección falló" in logged
+    assert "Traceback (most recent call last)" in logged

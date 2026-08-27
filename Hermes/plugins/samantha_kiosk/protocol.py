@@ -130,6 +130,33 @@ def error(message: str) -> str:
     return json.dumps({"type": "error", "error": message})
 
 
+def silence() -> str:
+    """End a turn with nothing to say.
+
+    The adapter's guarantee is that every accepted `chat` frame ends in
+    exactly one `done` or one `error` — nothing downstream provides it.
+    A diverted frame (the user answering the code assistant, see
+    `_should_divert`) opens no turn at all, so no watchdog is armed and
+    no reply is ever coming: without a frame the strip sits in
+    `thinking` for as long as the build runs.
+
+    `done` cannot be that frame. The widget refuses to settle on one it
+    heard no token for (`widget/samantha_widget/turn.py`), deliberately,
+    because Hermes emits a `done` after each of its own system messages.
+    An `error` always settles, and an EMPTY error settles silently — the
+    widget already says nothing when the message is blank, and already
+    uses that idiom itself three times for "not a turn, and not an
+    error" (an empty transcription, his own echo, a sentence not
+    addressed to him).
+
+    So the wire shape is what matters here, not the helper: every strip
+    already built understands it, and this needs no widget change to
+    work. It is named rather than written as `error("")` at the call
+    site so the intent survives the next reader.
+    """
+    return error("")
+
+
 # One access unit of H.264. A substream keyframe from these cameras is a
 # few tens of KB; 4 MB is aiohttp's own default and generous enough that
 # a real frame can never hit it. Bytes carry no path to validate, so this

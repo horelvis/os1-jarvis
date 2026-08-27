@@ -63,8 +63,12 @@ def _adapter():
 def _push(text: str, *, done: bool = False, reset: bool = False) -> None:
     """Put one line on the strip, from a thread that is not the loop's.
 
-    Scheduled onto the GATEWAY's loop, never the caller's: this thread
-    outlives every turn, and the loop a turn brings with it stops the
+    Two threads call this and neither is the gateway's: v1's tee-file
+    follower (`watch`) and v2's firehose dispatcher
+    (`_run_bridge_mode`), plus the answer path inside the latter.
+
+    Scheduled onto the GATEWAY's loop, never the caller's: those threads
+    outlive every turn, and the loop a turn brings with it stops the
     moment that turn ends — the bug that cost the live camera a day
     (§12, 2026-08-26).
     """
@@ -191,6 +195,18 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                 if what == "task":
                     # A new run: an empty console, and a dedup that has
                     # forgotten the last run's final line.
+                    #
+                    # And no question outstanding. If the bridge
+                    # restarted while one was, `follow_events` simply
+                    # reconnects and the hook is still armed against a
+                    # taskId nothing is waiting on — the user's next
+                    # unnamed sentence would be echoed to the band,
+                    # POSTed into «Nadie esperaba una respuesta.» and
+                    # never become a turn. Exactly one sentence, lost
+                    # silently, which is the failure this whole path
+                    # exists to stop.
+                    state.clear()
+                    _set_divert(None)
                     dedup = hitos.Dedup()
                     _push("", reset=True)
                 elif what == "ask":
@@ -205,6 +221,10 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     # and the band already says «— terminado» at `end`.
                     voz.deliver(ctx.inject_message, voz.prompt_for(qkind, text))
                 elif what == "resolved":
+                    # Whatever was waiting is no longer. The taskId is
+                    # not checked because the bridge is single-task:
+                    # there is only ever one question outstanding, so a
+                    # `resolved` can only be about it.
                     state.clear()
                     _set_divert(None)
                 elif what == "end":
@@ -230,6 +250,13 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     if line:
                         _push(line + "\n")
             except Exception as exc:  # noqa: BLE001 — one event, not the run
-                logger.warning(f"samantha-code: evento descartado — {exc}")
+                # With the stack: this loop runs for the gateway's whole
+                # life, and a TypeError from a renamed key would
+                # otherwise be one warning line with nowhere to look.
+                logger.opt(exception=True).warning(
+                    f"samantha-code: evento descartado — {exc}"
+                )
     except Exception as exc:  # noqa: BLE001 — the follower owns its failure
-        logger.warning(f"samantha-code: el modo puente se detuvo — {exc}")
+        logger.opt(exception=True).warning(
+            f"samantha-code: el modo puente se detuvo — {exc}"
+        )

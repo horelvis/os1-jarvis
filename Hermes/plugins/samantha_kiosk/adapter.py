@@ -48,6 +48,7 @@ from .protocol import (
     live_end,
     live_frame,
     photo,
+    silence,
     token,
 )
 
@@ -680,6 +681,12 @@ class KioskAdapter(BasePlatformAdapter):
                     continue
                 if decoded["type"] == "chat":
                     if self._should_divert(decoded):
+                        # The words went to the code assistant, so no
+                        # turn was opened and nothing will answer them.
+                        # The strip is already showing him thinking:
+                        # settle it, and say nothing — JARVIS did not
+                        # hear this and must not reply to it.
+                        await self._push(silence())
                         continue
                     await self._handle_chat(decoded["message"], decoded["user_id"])
         finally:

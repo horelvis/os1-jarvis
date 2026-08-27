@@ -60,7 +60,11 @@ def deliver(inject: Callable[..., bool], text: str) -> bool:
         try:
             accepted = inject(text, role="user", session_key=KIOSK_SESSION_KEY)
         except Exception as exc:  # noqa: BLE001 — the follower must survive it
-            logger.warning(f"samantha-code: la inyección falló — {exc}")
+            # With the stack. This is swallowed so the dispatch loop
+            # survives, which is also what makes it invisible otherwise.
+            logger.opt(exception=True).warning(
+                f"samantha-code: la inyección falló — {exc}"
+            )
             return False
         if accepted:
             return True

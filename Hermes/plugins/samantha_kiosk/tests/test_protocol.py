@@ -14,6 +14,7 @@ from Hermes.plugins.samantha_kiosk.protocol import (
     live_end,
     live_frame,
     photo,
+    silence,
     token,
 )
 
@@ -193,3 +194,10 @@ def test_an_older_strip_that_sends_no_wake_is_still_understood():
     # would stop talking to every strip built before this frame existed.
     msg = decode_client(json.dumps({"type": "chat", "message": "hola", "user_id": "u"}))
     assert "wake" not in msg
+
+
+def test_silence_is_an_error_frame_with_nothing_to_say():
+    # The wire shape matters more than the helper: every strip already
+    # built settles on an empty `error` and says nothing, so this frame
+    # needs no widget change to work.
+    assert json.loads(silence()) == {"type": "error", "error": ""}

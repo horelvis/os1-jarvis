@@ -276,3 +276,37 @@ def test_the_end_is_written_on_the_band_before_the_console_closes(monkeypatch, w
 def test_a_run_that_failed_says_so(monkeypatch, wiring):
     _run(monkeypatch, wiring, [{"event": "end", "taskId": "t1", "failed": True}])
     assert _lines(wiring) == ["— terminado con errores\n"]
+
+
+def test_a_new_task_forgets_a_question_the_old_one_left_open(monkeypatch, wiring):
+    # The bridge restarted mid-question: `follow_events` reconnects and a
+    # `task` arrives with the hook still armed against a dead taskId.
+    # Without this, exactly one utterance is echoed to the band, POSTed
+    # into «Nadie esperaba una respuesta.», and never becomes a turn.
+    took = []
+
+    def events():
+        yield {"event": "ask", "qkind": "gate", "text": "borrar x", "taskId": "t1"}
+        yield {"event": "task", "taskId": "t2"}
+        took.append(wiring.adapter.divert_chat)
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
+    assert took == [None]
+    assert wiring.answers == []
+
+
+def test_a_swallowed_event_keeps_its_traceback(monkeypatch, wiring, capture_logs):
+    # One warning line with no stack, in the loop that runs for the
+    # gateway's whole life, is how a renamed key stays invisible.
+    def boom(event):
+        raise TypeError("render() got an unexpected keyword")
+
+    monkeypatch.setattr(mod.hitos, "render", boom)
+    _run(monkeypatch, wiring, [{"event": "milestone", "kind": "read", "taskId": "t1"}])
+
+    logged = capture_logs.getvalue()
+    assert "evento descartado" in logged
+    assert "Traceback (most recent call last)" in logged
+    assert "TypeError" in logged
