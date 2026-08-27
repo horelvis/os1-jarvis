@@ -17,8 +17,9 @@ el visto bueno. La respuesta hablada del usuario no pasa por el
 modelo: mientras hay una pregunta pendiente, el adaptador de la tira
 desvía la siguiente frase directa al puente — el modelo rellena sus
 propias herramientas con `args={}`, medido seis veces, y es el mismo
-fallo. Un indicador nuevo (`wake`) evita que esa frase se coma la
-primera palabra cuando empieza con su nombre.
+fallo. Un indicador nuevo (`wake`) marca la frase dirigida por su
+nombre, y esa nunca se desvía: llega a JARVIS aunque haya una
+pregunta pendiente, en vez de tomarse por la respuesta a ella.
 
 **Tres plazos, todos medidos, no adivinados:** una puerta sin
 respuesta se niega a los 300 s; un cierre sin respuesta se cierra solo

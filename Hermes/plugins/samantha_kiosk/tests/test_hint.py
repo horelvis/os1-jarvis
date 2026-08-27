@@ -56,3 +56,15 @@ def test_a_missing_persona_file_still_yields_a_hint(monkeypatch):
 def test_the_hint_says_he_can_show_something_that_moves():
     hint = _platform_hint().lower()
     assert "movimiento" in hint or "directo" in hint
+
+
+def test_the_hint_says_how_to_delegate_coding():
+    # Model-facing text, so naming the tool and the agent is correct
+    # here even though the persona never says either out loud. Assert
+    # on what is load-bearing — the agent named and the rule against
+    # answering in its place — not the paragraph verbatim, so a
+    # rewording does not break this for no reason.
+    hint = _platform_hint().lower()
+    assert "a2a_call" in hint
+    assert "'codigo'" in hint
+    assert "no respondas tú en su lugar" in hint
