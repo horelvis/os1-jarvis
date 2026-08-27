@@ -369,3 +369,69 @@ def test_answering_shuts_the_window_with_the_divert(monkeypatch, wiring):
     assert wiring.landed.wait(5) is True
     assert wiring.asked[-1] is False
     assert wiring.adapter.divert_chat is None
+
+
+# ── Losing the stream. The task runs on; our sight of it does not. ───
+
+
+def test_losing_the_stream_says_so_on_the_band_and_disarms_the_divert(
+    monkeypatch, wiring
+):
+    # The spec's requirement, which existed only in the spec: "stream
+    # drops → the plugin retries with backoff and the band says «he
+    # perdido de vista el trabajo» while the task runs on". And the half
+    # it does not mention: a divert armed before the break clears only on
+    # the next `task` event, which may never come — a bridge stopped and
+    # not restarted left it armed indefinitely, waiting to eat exactly
+    # one sentence.
+    took = []
+
+    def events():
+        yield {"event": "task", "taskId": "t1"}
+        yield {"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"}
+        yield {"event": "lost"}
+        took.append(wiring.adapter.divert_chat)
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
+    assert took == [None]
+    assert wiring.asked[-1] is False
+    assert "— he perdido de vista el trabajo\n" in _lines(wiring)
+    assert wiring.answers == []
+
+
+def test_losing_a_stream_with_no_run_on_it_says_nothing(monkeypatch, wiring):
+    # Bridge mode is the default, so a box with no bridge on it
+    # reconnects forever. A console opening by itself every 30 seconds to
+    # report that it lost sight of nothing is the noise this branch
+    # exists to remove.
+    _run(monkeypatch, wiring, [{"event": "lost"}])
+    assert _lines(wiring) == []
+
+
+def test_a_flapping_stream_does_not_repeat_the_line(monkeypatch, wiring):
+    # The branch's own hard rule: never the same line twice in a row.
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "task", "taskId": "t1"},
+            {"event": "lost"},
+            {"event": "lost"},
+        ],
+    )
+    assert _lines(wiring) == ["— he perdido de vista el trabajo\n"]
+
+
+def test_the_run_ending_stops_it_being_worth_a_line(monkeypatch, wiring):
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "task", "taskId": "t1"},
+            {"event": "end", "taskId": "t1", "failed": False},
+            {"event": "lost"},
+        ],
+    )
+    assert "— he perdido de vista el trabajo\n" not in _lines(wiring)

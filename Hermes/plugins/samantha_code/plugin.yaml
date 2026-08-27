@@ -44,7 +44,18 @@ author: Horelvis Castillo
 #    off from 1 s to a 30 s ceiling and reconnects forever — it never
 #    gives up on its own. `settings.bridge: ""` is the way out: it
 #    selects the legacy tee-file follower (v1) instead of an indefinite
-#    retry loop nobody asked for.
+#    retry loop nobody asked for. It is not SILENT any more: the first
+#    failure of a run is a warning naming the bridge, and so is every
+#    later transition from connected to disconnected. The attempts in
+#    between stay at `debug`, or the journal fills at two lines a
+#    minute forever.
+#
+# 5. THE STREAM DROPS MID-RUN. `follow_events` yields `{"event":
+#    "lost"}` and reconnects. The dispatcher clears what belonged to
+#    the dead stream — the pending question and the adapter's divert —
+#    and the band says «he perdido de vista el trabajo». Without that,
+#    a divert armed before the break stayed armed until the next `task`
+#    event, which may never come, waiting to eat exactly one sentence.
 
 python_dependencies:
   - "loguru>=0.7,<1"

@@ -26,15 +26,49 @@ _BACKOFF_CEILING = 30.0
 _ANSWER_TIMEOUT = 10.0
 
 
+# Yielded to the consumer when a stream that WAS running went away.
+# Not a bridge payload — the bridge never sends this — and named
+# `event` so it arrives through the same door every other payload does.
+# It exists because the reconnect used to be invisible: `follow_events`
+# swallowed it, so the dispatcher never learned the stream broke and a
+# divert armed before the break stayed armed, waiting to eat exactly one
+# sentence from a task nobody was running any more.
+LOST = {"event": "lost"}
+
+
 def follow_events(url: str, stop: Callable[[], bool]) -> Iterator[dict]:
-    """Yield each firehose payload. Reconnects; never raises out."""
+    """Yield each firehose payload. Reconnects; never raises out.
+
+    Between connections it yields `LOST` — once per drop, and only for a
+    stream that had actually been carrying something. The consumer needs
+    it: what it has on screen and what it has armed both belong to a
+    stream that is gone.
+
+    Logging is deliberately not all at `debug`. A box with no
+    `samantha-code-a2a.service` on it gets bridge mode by default and
+    retries forever at a 30 s ceiling; every attempt failing in silence
+    is a plugin that does nothing and says nothing at three in the
+    morning. So the FIRST failure of a run of them is a warning, and so
+    is every transition from connected to disconnected. The rest stay at
+    `debug`, because a warning per attempt would be the same journal
+    flood by the other route.
+    """
     backoff = _BACKOFF_START
+    connected = False
+    complained = False
     while not stop():
         try:
             with urllib.request.urlopen(f"{url}/events", timeout=60) as response:
-                logger.info(f"samantha-code: siguiendo {url}/events")
-                backoff = _BACKOFF_START
                 for raw in response:
+                    if not connected:
+                        # On the first LINE, not on the open: a server
+                        # that accepts and hangs up immediately would
+                        # otherwise reset the backoff and flap, one
+                        # `LOST` per second. A live stream sends
+                        # keepalives, so any line proves it.
+                        connected, complained = True, False
+                        backoff = _BACKOFF_START
+                        logger.info(f"samantha-code: siguiendo {url}/events")
                     if stop():
                         return
                     line = raw.decode("utf-8", errors="replace").strip()
@@ -46,8 +80,22 @@ def follow_events(url: str, stop: Callable[[], bool]) -> Iterator[dict]:
                         continue
                     if isinstance(payload, dict):
                         yield payload
+            why = "el puente ha cerrado el hilo"
         except Exception as exc:
-            logger.debug(f"samantha-code: el puente no responde — {exc}")
+            why = str(exc)
+            if not connected and not complained:
+                complained = True
+                logger.warning(f"samantha-code: el puente no responde — {why}")
+            elif not connected:
+                logger.debug(f"samantha-code: el puente sigue sin responder — {why}")
+        if connected:
+            # A clean end of stream comes through here too, with no
+            # exception: the `with` simply falls out of the loop, which
+            # is why the transition is logged HERE and not in the
+            # `except` — half of them never raise anything.
+            connected = False
+            logger.warning(f"samantha-code: se ha cortado el puente — {why}")
+            yield dict(LOST)
         if stop():
             return
         time.sleep(backoff)

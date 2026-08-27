@@ -98,12 +98,16 @@ def test_follow_reconnects_once_the_stream_ends_and_yields_the_next_event(monkey
         seen = []
         # No early break: the first connection's stream must be allowed
         # to reach EOF on its own for the reconnect path to run at all.
-        for payload in follow_events(url, stop=lambda: len(seen) >= 2):
+        for payload in follow_events(url, stop=lambda: len(seen) >= 3):
             seen.append(payload)
-            if len(seen) >= 2:
+            if len(seen) >= 3:
                 break
+        # `lost` between them: the stream that carried the first event
+        # is not the one that carried the second, and the consumer has
+        # to know (see `test_a_dropped_stream_tells_the_consumer...`).
         assert seen == [
             {"event": "task", "taskId": "t1"},
+            {"event": "lost"},
             {"event": "task", "taskId": "t2"},
         ]
         assert _DropOnce.hits >= 2  # the second event came from a second connection
@@ -148,3 +152,49 @@ def test_send_answer_posts_a_message_send_with_the_task_id():
 
 def test_send_answer_is_false_when_nobody_listens():
     assert send_answer("http://127.0.0.1:9", "t1", "sí") is False
+
+
+def test_a_bridge_that_never_answers_is_a_warning_the_first_time(
+    monkeypatch, capture_logs
+):
+    # Bridge mode is the default, so a box with no
+    # `samantha-code-a2a.service` on it retries forever. Every attempt
+    # at `debug` is a plugin that does nothing and says nothing at three
+    # in the morning; a warning per attempt is the same journal flood by
+    # the other route. So: the first one, then quiet.
+    monkeypatch.setattr(client, "_BACKOFF_START", 0.01)
+    monkeypatch.setattr(client, "_BACKOFF_CEILING", 0.01)
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 6
+
+    assert list(follow_events("http://127.0.0.1:9", stop)) == []
+
+    logged = capture_logs.getvalue()
+    assert logged.count("el puente no responde") == 1
+    assert "WARNING" in logged
+
+
+def test_losing_a_live_stream_is_a_warning_every_time(monkeypatch, capture_logs):
+    # The other half: a transition from connected to disconnected always
+    # says so, however many times it happens. A clean end of stream —
+    # what `_DropOnce` does — raises nothing at all, which is why the
+    # log line cannot live in the `except`.
+    monkeypatch.setattr(client, "_BACKOFF_START", 0.01)
+    monkeypatch.setattr(client, "_BACKOFF_CEILING", 0.01)
+    _DropOnce.hits = 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DropOnce)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        lost = []
+        for payload in follow_events(url, stop=lambda: len(lost) >= 2):
+            if payload.get("event") == "lost":
+                lost.append(payload)
+                if len(lost) >= 2:
+                    break
+        assert capture_logs.getvalue().count("se ha cortado el puente") == 2
+    finally:
+        server.shutdown()

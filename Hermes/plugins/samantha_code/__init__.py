@@ -46,6 +46,12 @@ from .live import DEFAULT_LIVE, follow, summarise
 # (§12, 2026-08-25).
 KIOSK_PLATFORM = "samantha_kiosk"
 
+# What the band says when the firehose went away mid-run. The design's
+# own wording (v2, "Safety and errors"): the plugin retries with backoff
+# and the task runs on, so this is about OUR sight of it and not about
+# the work stopping.
+_LOST_SIGHT = "— he perdido de vista el trabajo"
+
 def _adapter():
     """The strip's adapter, or None."""
     try:
@@ -192,6 +198,12 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
     """The dispatch loop: firehose in; console, voice and divert out."""
     state = pending.Pending()
     dedup = hitos.Dedup()
+    # Whether a run is in flight, as far as this process knows. Only used
+    # to decide whether losing the stream is worth a line on the band: a
+    # bridge that is simply not installed reconnects forever, and a
+    # console opening by itself to say it lost sight of nothing would be
+    # the noise this whole branch removed.
+    running = {"now": False}
 
     def _set_divert(hook) -> None:
         """Arm or disarm the adapter's divert, and the strip's window with
@@ -243,6 +255,7 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     state.clear()
                     _set_divert(None)
                     dedup = hitos.Dedup()
+                    running["now"] = True
                     _push("", reset=True)
                 elif what == "ask":
                     text = str(event.get("text") or "")
@@ -255,6 +268,20 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     # A checkpoint renders no line — it is the voice's,
                     # and the band already says «— terminado» at `end`.
                     voz.deliver(ctx.inject_message, voz.prompt_for(qkind, text))
+                elif what == "lost":
+                    # The stream went away and came back. Everything the
+                    # dispatcher holds belonged to it: a divert armed
+                    # before the break would sit there waiting to eat
+                    # exactly one sentence for a task that may never
+                    # send another event. The work itself carries on —
+                    # it is the bridge's, not ours — which is what the
+                    # line says (design v2, "Safety and errors").
+                    state.clear()
+                    _set_divert(None)
+                    if running["now"]:
+                        line = dedup.feed(_LOST_SIGHT)
+                        if line:
+                            _push(line + "\n")
                 elif what == "resolved":
                     # Whatever was waiting is no longer. The taskId is
                     # not checked because the bridge is single-task:
@@ -265,6 +292,7 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                 elif what == "end":
                     state.clear()
                     _set_divert(None)
+                    running["now"] = False
                     # The closing line is written HERE, not by
                     # `hitos.render`, which returns None for `end`. The
                     # band needs it: it is what a checkpoint leaves
