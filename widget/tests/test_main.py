@@ -1,15 +1,18 @@
 """The one piece of wiring in `__main__.py` worth pinning on its own.
 
 `__main__.py` is glue — GTK, threads, a websocket — and nothing else in
-this suite imports it. `_apply_error_to_wake_window` is the exception:
-it is the whole wake-window decision `on_error` makes (the predicate
-AND the `wake.answered(...)` call), pulled out as a pure function that
-takes a real `WakeWord` so the effect on the window — not just the
-predicate that decides it — can be driven and asserted without a strip,
-a socket or a display.
+this suite imports it. The two `_apply_*_to_wake*` functions are the
+exception: each is a whole wake-window decision a gateway callback
+makes (the predicate AND the call on `WakeWord`), pulled out as a pure
+function that takes a real `WakeWord` so the effect on the window — not
+just the predicate that decides it — can be driven and asserted without
+a strip, a socket or a display.
 """
 
-from samantha_widget.__main__ import _apply_error_to_wake_window
+from samantha_widget.__main__ import (
+    _apply_asking_to_wake,
+    _apply_error_to_wake_window,
+)
 from samantha_widget.wake import WakeWord
 
 
@@ -34,3 +37,21 @@ def test_a_real_error_does_not_extend_the_window():
     _apply_error_to_wake_window(w, "Algo se ha quedado a medias.", now=10.0)
 
     assert w.heard("y mañana", now=15.0) is None
+
+
+def test_a_question_opening_holds_the_window_past_thirty_seconds():
+    # The gateway's `asking` frame. Without it the answer to a gate the
+    # user thought about for forty seconds is dropped by the strip and
+    # never reaches `_should_divert` — see the function's docstring.
+    w = WakeWord("jarvis")
+    _apply_asking_to_wake(w, True, now=0.0)
+
+    assert w.heard("sí, adelante", now=45.0) == "sí, adelante"
+
+
+def test_the_question_resolving_shuts_it_again():
+    w = WakeWord("jarvis")
+    _apply_asking_to_wake(w, True, now=0.0)
+    _apply_asking_to_wake(w, False, now=50.0)
+
+    assert w.heard("y otra cosa", now=51.0) is None

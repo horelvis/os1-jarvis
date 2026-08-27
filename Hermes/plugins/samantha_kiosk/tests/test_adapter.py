@@ -926,3 +926,24 @@ def test_a_declined_divert_still_opens_an_ordinary_turn(tmp_path, monkeypatch):
             await a.disconnect()
 
     assert asyncio.run(go())["type"] == "token"
+
+
+def test_push_asking_goes_out_as_text(adapter):
+    # The frame that keeps the strip's wake window open while the code
+    # assistant waits. Without it a spoken answer that took more than 30
+    # seconds is dropped by the strip and never reaches `_should_divert`.
+    sock = _Socket()
+    adapter._ws = sock
+
+    assert asyncio.run(adapter.push_asking(True)) is True
+    assert asyncio.run(adapter.push_asking(False)) is True
+    assert sock.blobs == []
+    assert [json.loads(t) for t in sock.texts] == [
+        {"type": "asking", "open": True},
+        {"type": "asking", "open": False},
+    ]
+
+
+def test_push_asking_with_no_strip_connected_is_false_not_an_error(adapter):
+    adapter._ws = None
+    assert asyncio.run(adapter.push_asking(True)) is False

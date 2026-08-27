@@ -6,6 +6,7 @@ import pytest
 from Hermes.plugins.samantha_kiosk.protocol import (
     MAX_LIVE_FRAME_BYTES,
     ProtocolError,
+    asking,
     console,
     decode_client,
     done,
@@ -201,3 +202,16 @@ def test_silence_is_an_error_frame_with_nothing_to_say():
     # built settles on an empty `error` and says nothing, so this frame
     # needs no widget change to work.
     assert json.loads(silence()) == {"type": "error", "error": ""}
+
+
+def test_asking_says_whether_somebody_waits_for_an_answer():
+    assert json.loads(asking(True)) == {"type": "asking", "open": True}
+    assert json.loads(asking(False)) == {"type": "asking", "open": False}
+
+
+def test_asking_is_server_to_client_only():
+    # `decode_client` is the strip's half of the contract and has not
+    # changed since 2026-08-22 but for the optional `wake`. The strip
+    # never sends one of these.
+    with pytest.raises(ProtocolError):
+        decode_client(json.dumps({"type": "asking", "open": True}))

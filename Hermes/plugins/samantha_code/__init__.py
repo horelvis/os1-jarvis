@@ -87,6 +87,35 @@ def _push(text: str, *, done: bool = False, reset: bool = False) -> None:
         pass
 
 
+def _push_asking(open_: bool) -> None:
+    """Tell the strip whether something is waiting for the user's answer.
+
+    Scheduled the same way and for the same reason as `_push`. It is a
+    frame of its own rather than a console line because it changes what
+    the strip DOES rather than what it shows: while it is open, an
+    unnamed sentence is still sent on instead of being dropped as "not
+    for him". The v2 design assumed the 30-second wake window covered
+    this and it does not — 300 s for a gate, 600 s for a checkpoint, and
+    no clock at all on a held question.
+
+    A strip too old to know the frame drops it and behaves exactly as
+    before: a quick answer still works through the window.
+    """
+    import asyncio
+
+    adapter = _adapter()
+    if adapter is None:
+        return
+    loop = getattr(adapter, "loop", None)
+    push = getattr(adapter, "push_asking", None)
+    if loop is None or push is None or loop.is_closed():
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(push(open_), loop)
+    except RuntimeError:
+        pass
+
+
 def watch(path: Path, stop: threading.Event) -> None:
     """Follow the file and put what appears on the strip."""
     logger.info(f"samantha-code: mirando {path}")
@@ -165,9 +194,15 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
     dedup = hitos.Dedup()
 
     def _set_divert(hook) -> None:
+        """Arm or disarm the adapter's divert, and the strip's window with
+        it. One function, because a divert armed with the strip dropping
+        unnamed sentences is a question nobody can answer out loud, and a
+        window held open with nothing to divert to is him answering the
+        room."""
         adapter = _adapter()
         if adapter is not None:
             adapter.divert_chat = hook
+        _push_asking(hook is not None)
 
     def divert(text: str) -> bool:
         """The user's next unnamed words, when something is waiting."""

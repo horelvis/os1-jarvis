@@ -125,6 +125,27 @@ def console(text: str, *, done: bool = False, reset: bool = False) -> str:
     return json.dumps(frame)
 
 
+def asking(open_: bool) -> str:
+    """Whether something is waiting for the user's answer, server to client.
+
+    The fourth server-only frame, and the smallest. It exists because of
+    a false premise in the v2 design: "no widget change is needed for
+    voice — JARVIS just spoke the question aloud, so the 30-second
+    no-name window is already open". The window is 30 seconds; a person
+    deciding whether to allow a `git push` takes longer, and the
+    sentence that answers is then dropped by the strip before it ever
+    reaches `_should_divert`. There is no spoken sentence left that can
+    answer: saying his name sets `wake`, which is deliberately never
+    diverted.
+
+    So the strip is told when a question opens and when it stops
+    waiting, and holds its wake window open in between. An older strip
+    drops the frame and behaves exactly as it did before — `wake`, and
+    the 30 seconds, still work for a quick answer.
+    """
+    return json.dumps({"type": "asking", "open": bool(open_)})
+
+
 def error(message: str) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     return json.dumps({"type": "error", "error": message})

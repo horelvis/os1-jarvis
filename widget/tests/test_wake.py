@@ -120,3 +120,69 @@ def test_named_resets_even_when_nothing_was_heard():
 
     assert w.heard("", now=1.0) is None
     assert w.named is False
+
+
+# ── The hold: while the code assistant waits, an unnamed sentence is
+#    still worth sending on, however long the user took to decide. ────
+
+
+def test_a_hold_outlasts_the_window():
+    # The failure this fixes: the user hears a gate question, thinks for
+    # forty seconds, says «sí» — and the strip drops it as "not for him"
+    # before the gateway ever sees it. Saying «Jarvis, sí» instead marks
+    # the turn as named, which is deliberately never diverted, so there
+    # was no spoken sentence left that could answer at all.
+    w = WakeWord()
+    w.heard("Jarvis, arregla el log en barndoor", now=0.0)
+    w.answered(now=5.0)
+    w.hold(now=6.0)
+
+    assert w.heard("sí, adelante", now=46.0) == "sí, adelante"
+    assert w.named is False
+
+
+def test_releasing_the_hold_needs_his_name_again():
+    w = WakeWord()
+    w.hold(now=0.0)
+    assert w.heard("sí", now=100.0) == "sí"
+    w.release()
+    assert w.heard("sí", now=101.0) is None
+
+
+def test_a_hold_nobody_ever_closes_still_shuts_on_its_own():
+    # A gateway killed mid-question never sends the frame that releases
+    # it. A window left open forever is a worse bug than the one the
+    # hold fixes: he would answer the room.
+    w = WakeWord()
+    w.hold(now=0.0)
+
+    assert w.heard("sí", now=w.max_hold - 1.0) == "sí"
+    assert w.heard("sí", now=w.max_hold + 1.0) is None
+
+
+def test_a_hold_covers_every_clock_the_bridge_has():
+    # 300 s for a gate, 600 s for the closing checkpoint, and no clock at
+    # all on a held question. The cap must be past the longest of them
+    # with room, or it becomes the bug it replaced.
+    assert WakeWord().max_hold > 600.0
+
+
+def test_the_microphone_switch_does_not_release_a_hold():
+    # `wake.close()` is the mic switch going off — "this conversation is
+    # over". The code assistant did not stop waiting because somebody
+    # muted the room, and it will still be waiting when the switch comes
+    # back on.
+    w = WakeWord()
+    w.hold(now=0.0)
+    w.close()
+    assert w.heard("sí", now=100.0) == "sí"
+
+
+def test_a_held_sentence_that_says_his_name_is_still_named():
+    # The hold must not weaken what `wake` means: a sentence addressed by
+    # name reaches JARVIS, never the code assistant. `_should_divert`
+    # routes on exactly this flag.
+    w = WakeWord()
+    w.hold(now=0.0)
+    assert w.heard("Jarvis, ¿qué hora es?", now=100.0) == "¿qué hora es?"
+    assert w.named is True

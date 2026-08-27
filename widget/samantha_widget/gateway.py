@@ -36,6 +36,7 @@ _SERVER_TYPES = {
     "live",
     "live_end",
     "console",
+    "asking",
 }
 
 # Said out loud when the gateway is unreachable. Silence would leave the
@@ -109,6 +110,10 @@ class GatewayClient:
         # A new run starts: empty it first, so its first line is at the
         # top of an empty box rather than under the last run's.
         self.on_console_reset: Callable[[], None] = lambda: None
+        # Whether the code assistant is waiting for the user's answer.
+        # Not part of a turn and not shown: it only decides whether an
+        # unnamed sentence is still worth sending on. See `wake.hold`.
+        self.on_asking: Callable[[bool], None] = lambda _open: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -174,6 +179,8 @@ class GatewayClient:
                 self.on_console(text)
             if msg.get("done"):
                 self.on_console_done()
+        elif kind == "asking":
+            self.on_asking(bool(msg.get("open")))
         elif kind == "photo":
             path = msg.get("path", "")
             if isinstance(path, str) and path:

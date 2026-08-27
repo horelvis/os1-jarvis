@@ -183,6 +183,31 @@ def _apply_error_to_wake_window(wake: WakeWord, message: str, now: float) -> Non
         wake.answered(now)
 
 
+def _apply_asking_to_wake(wake: WakeWord, open_: bool, now: float) -> None:
+    """Hold the wake window open while something waits for an answer.
+
+    The gateway sends an `asking` frame when the code assistant's own
+    question, a gate or the closing checkpoint starts waiting, and
+    another when it stops. In between, an unnamed sentence must still
+    reach the gateway: the v2 design assumed the 30-second no-name
+    window covered this, and it does not — a gate waits 300 s, a
+    checkpoint 600 s, and a held question has no clock at all. Past 30 s
+    the answer was dropped by `wake.heard` before `_should_divert` ever
+    saw it, and saying his name instead sets `wake=True`, which is
+    deliberately never diverted. There was then no spoken sentence that
+    could answer at all.
+
+    Takes `wake` and `now` rather than reading them from a closure for
+    the reason `_apply_error_to_wake_window` does: the whole decision,
+    not only its predicate, can then be driven from a test with a real
+    `WakeWord` and no GTK app.
+    """
+    if open_:
+        wake.hold(now)
+    else:
+        wake.release()
+
+
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.samantha.widget")
@@ -570,6 +595,21 @@ class SamanthaApp(Gtk.Application):
             GLib.idle_add(window.clear_console)
 
         client.on_console_reset = on_console_reset
+
+        def on_asking(open_: bool) -> None:
+            # Not a turn and nothing drawn: it only decides whether an
+            # unnamed sentence is still worth sending on. The gateway
+            # holds the answer to the code assistant's question, and 30
+            # seconds is not how long somebody takes to decide whether a
+            # `git push` may run.
+            print(
+                "esperan respuesta" if open_ else "ya no esperan respuesta",
+                file=sys.stderr,
+                flush=True,
+            )
+            _apply_asking_to_wake(wake, open_, time.monotonic())
+
+        client.on_asking = on_asking
         client.on_photo = on_photo
         client.on_live_open = on_live_open
         client.on_live_frame = on_live_frame

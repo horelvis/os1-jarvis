@@ -315,3 +315,27 @@ def test_send_chat_marks_named_turns_and_only_those():
     first, second = (json.loads(s) for s in sent)
     assert "wake" not in first
     assert second["wake"] is True
+
+
+def test_a_question_waiting_reaches_the_asking_handler() -> None:
+    client = GatewayClient()
+    seen: list[bool] = []
+    client.on_asking = seen.append
+
+    client._dispatch(json.dumps({"type": "asking", "open": True}))
+    client._dispatch(json.dumps({"type": "asking", "open": False}))
+
+    assert seen == [True, False]
+
+
+def test_an_asking_frame_is_never_spoken() -> None:
+    # It changes what the strip DOES, not what he says. A frame that
+    # leaked into the voice would have him read "asking true" aloud.
+    client = GatewayClient()
+    said: list[str] = []
+    client.on_token = said.append
+    client.on_error = said.append
+
+    client._dispatch(json.dumps({"type": "asking", "open": True}))
+
+    assert said == []

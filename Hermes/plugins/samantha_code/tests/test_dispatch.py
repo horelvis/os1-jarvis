@@ -43,7 +43,10 @@ def wiring(monkeypatch):
         landed.set()
         return True
 
+    asked: list[bool] = []
+
     monkeypatch.setattr(mod, "_push", fake_push)
+    monkeypatch.setattr(mod, "_push_asking", asked.append)
     monkeypatch.setattr(mod, "_adapter", lambda: adapter)
     monkeypatch.setattr(mod.client, "send_answer", fake_send_answer)
 
@@ -56,6 +59,7 @@ def wiring(monkeypatch):
     w.answers = answers
     w.landed = landed
     w.ctx = _FakeCtx()
+    w.asked = asked
     return w
 
 
@@ -310,3 +314,58 @@ def test_a_swallowed_event_keeps_its_traceback(monkeypatch, wiring, capture_logs
     assert "evento descartado" in logged
     assert "Traceback (most recent call last)" in logged
     assert "TypeError" in logged
+
+
+# ── The strip's wake window, held while somebody waits. ──────────────
+
+
+def test_a_question_tells_the_strip_to_keep_listening(monkeypatch, wiring):
+    # Without this the answer is dropped by the strip: JARVIS spoke the
+    # question, which opens a 30-second no-name window, and a gate waits
+    # 300 s. Past 30 s there is no spoken sentence that can answer at
+    # all — saying his name sets `wake`, which is never diverted.
+    _run(
+        monkeypatch,
+        wiring,
+        [{"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"}],
+    )
+    assert wiring.asked[-1] is True
+
+
+def test_the_window_shuts_again_when_the_question_resolves(monkeypatch, wiring):
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t1"},
+            {"event": "resolved", "taskId": "t1"},
+        ],
+    )
+    assert wiring.asked[-1] is False
+
+
+def test_the_window_shuts_when_the_run_ends(monkeypatch, wiring):
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "ask", "qkind": "checkpoint", "text": "listo", "taskId": "t1"},
+            {"event": "end", "taskId": "t1", "failed": False},
+        ],
+    )
+    assert wiring.asked[-1] is False
+
+
+def test_answering_shuts_the_window_with_the_divert(monkeypatch, wiring):
+    # The two must never disagree: a window held open with nothing to
+    # divert to is him answering the room.
+    def events():
+        yield {"event": "ask", "qkind": "gate", "text": "git push", "taskId": "t7"}
+        wiring.adapter.divert_chat("sí")
+
+    monkeypatch.setattr(mod.client, "follow_events", lambda url, stop: events())
+    mod._run_bridge_mode(wiring.ctx, "http://bridge", threading.Event())
+
+    assert wiring.landed.wait(5) is True
+    assert wiring.asked[-1] is False
+    assert wiring.adapter.divert_chat is None

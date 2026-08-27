@@ -39,6 +39,18 @@ THRESHOLD = 0.6
 # a guess.
 WINDOW_SECONDS = 30.0
 
+# How long a hold may last with nothing arriving to close it. A hold is
+# opened by the gateway when something is waiting for the user's answer
+# (the code assistant's own question, a gate, the closing checkpoint) and
+# shut by the frame that says it stopped waiting — so this is only the
+# backstop for a frame that never comes: a gateway killed mid-question, a
+# plugin that lost the stream. It is longer than every clock on the other
+# side (300 s for a gate, 600 s for a checkpoint) by a wide margin,
+# because a held question has no clock at all and a person thinking is
+# not a fault. Ours, and a bound rather than a measurement: an open
+# window that never shuts is a worse bug than the one it fixes.
+MAX_HOLD_SECONDS = 900.0
+
 # How far into a sentence his name may be. "Oye, Jarvis, apaga la luz"
 # is how people talk; a name in the sixth word is somebody talking ABOUT
 # him, not to him.
@@ -81,6 +93,14 @@ class WakeWord:
     `named` says HOW the last accepted sentence got in — by name, or
     through the window; the adapter routes on it while the code
     assistant waits for an answer.
+
+    `hold()` and `release()` are the second way in, and they are the
+    gateway's rather than the room's. While the code assistant waits for
+    an answer, an unnamed sentence must reach the gateway however long
+    the user took to think — the 30-second window is not that, and the
+    spec's claim that it was is the premise this fixes (design v2,
+    "Answers are routed by the adapter"). A hold outlives the window and
+    is shut by the frame that says nobody is waiting any more.
     """
 
     def __init__(
@@ -88,12 +108,15 @@ class WakeWord:
         word: str = "jarvis",
         *,
         window: float = WINDOW_SECONDS,
+        max_hold: float = MAX_HOLD_SECONDS,
     ) -> None:
         # An empty word disables the whole mechanism: everything heard is
         # for him, which is how he behaved before 2026-08-26.
         self.word = _fold(word)
         self.window = window
+        self.max_hold = max_hold
         self._open_until = 0.0
+        self._held_until = 0.0
         self.named = False
 
     def heard(self, text: str, now: float) -> str | None:
@@ -121,7 +144,12 @@ class WakeWord:
         # Inside the window a sentence needs no name — but it does not
         # extend the window on its own. Only an answer does, so a room
         # that keeps talking near him does not hold the door open.
-        if now < self._open_until:
+        #
+        # A hold counts the same way and for longer: somebody is waiting
+        # for an answer, and refusing the sentence that carries it would
+        # leave the user certain he answered and the run certain he did
+        # not.
+        if now < self._open_until or now < self._held_until:
             return text
         return None
 
@@ -129,6 +157,24 @@ class WakeWord:
         """He has finished replying. Keep listening for a while."""
         self._open_until = now + self.window
 
+    def hold(self, now: float) -> None:
+        """Something is waiting for an answer: keep listening, unnamed.
+
+        Capped at `max_hold` so a `release()` that never arrives — a
+        gateway killed mid-question — cannot leave him answering the
+        room forever.
+        """
+        self._held_until = now + self.max_hold
+
+    def release(self) -> None:
+        """Nobody is waiting any more."""
+        self._held_until = 0.0
+
     def close(self) -> None:
-        """Shut the window now. The conversation is over."""
+        """Shut the window now. The conversation is over.
+
+        Deliberately not the hold: the microphone going off does not
+        mean the code assistant stopped waiting, and it will still be
+        waiting when the switch comes back on.
+        """
         self._open_until = 0.0

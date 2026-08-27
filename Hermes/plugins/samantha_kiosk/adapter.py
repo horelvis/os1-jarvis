@@ -40,6 +40,7 @@ from loguru import logger
 
 from .protocol import (
     ProtocolError,
+    asking,
     console,
     decode_client,
     done,
@@ -526,6 +527,15 @@ class KioskAdapter(BasePlatformAdapter):
     ) -> bool:
         """Write lines into the strip's terminal. False when nothing took it."""
         return await self._push(console(text, done=done, reset=reset))
+
+    async def push_asking(self, open_: bool) -> bool:
+        """Tell the strip whether something waits for the user's answer.
+
+        False when nothing took it, which is not a failure worth acting
+        on: a strip that is not connected cannot be holding a window
+        open either.
+        """
+        return await self._push(asking(open_))
 
     async def push_live_open(
         self, camera: str, epoch: int, extradata: bytes, width: int, height: int
