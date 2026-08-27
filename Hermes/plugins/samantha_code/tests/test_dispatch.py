@@ -435,3 +435,38 @@ def test_the_run_ending_stops_it_being_worth_a_line(monkeypatch, wiring):
         ],
     )
     assert "— he perdido de vista el trabajo\n" not in _lines(wiring)
+
+
+# ── The closing line, written once. ──────────────────────────────────
+
+
+def test_the_end_line_is_not_written_twice(monkeypatch, wiring):
+    # `sdk_runner._closing` puts «— terminado» on the run's queue as a
+    # CONSOLE event with `kind=""`; `worker._one_run` has no case for it
+    # and forwards it as a milestone, whose `text` this renders. Then
+    # `end` writes the same line again. With a checkpoint that timed out
+    # the two are adjacent — the hard rule this branch exists to enforce,
+    # broken by the branch.
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "milestone", "kind": "", "detail": "", "text": "— terminado"},
+            {"event": "ask", "qkind": "checkpoint", "text": "listo", "taskId": "t1"},
+            {"event": "end", "taskId": "t1", "failed": False, "stopped": False},
+        ],
+    )
+    assert _lines(wiring) == ["— terminado\n"]
+    assert wiring.pushed[-1] == ("", {"done": True, "reset": False})
+
+
+def test_a_run_that_was_stopped_does_not_claim_it_finished(monkeypatch, wiring):
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {"event": "milestone", "kind": "", "detail": "", "text": "— parado"},
+            {"event": "end", "taskId": "t1", "failed": False, "stopped": True},
+        ],
+    )
+    assert _lines(wiring) == ["— parado\n"]

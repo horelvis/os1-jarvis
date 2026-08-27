@@ -86,6 +86,12 @@ class Job:
     def _emit(self, payload: dict) -> None:
         self.bridge.emit({"taskId": self.task.id, **payload})
 
+    # Every `end` carries `stopped` as well as `failed`, always both, so
+    # the payload has one shape whatever happened. There are three
+    # endings and not two: a run that was told to stop did not finish,
+    # and saying «terminado» about an obeyed instruction is the wrong
+    # answer `sdk_runner._closing` already refuses to give.
+
     def _run(self) -> None:
         self._emit({"event": "task", "project": self.project.name})
         prompt, fresh = self.prompt, self.fresh
@@ -97,6 +103,7 @@ class Job:
                         {
                             "event": "end",
                             "failed": False,
+                            "stopped": True,
                             "summary": _stopped(self.task),
                         }
                     )
@@ -128,6 +135,7 @@ class Job:
                         {
                             "event": "end",
                             "failed": False,
+                            "stopped": True,
                             "summary": _stopped(self.task),
                         }
                     )
@@ -141,12 +149,24 @@ class Job:
                 if reply is None:
                     self.task.advance(closing, summary)
                     self._emit(
-                        {"event": "end", "failed": failed, "summary": _CLOSED_ALONE}
+                        {
+                            "event": "end",
+                            "failed": failed,
+                            "stopped": False,
+                            "summary": _CLOSED_ALONE,
+                        }
                     )
                     return
                 if assent(str(reply)):
                     self.task.advance(closing, summary)
-                    self._emit({"event": "end", "failed": failed, "summary": summary})
+                    self._emit(
+                        {
+                            "event": "end",
+                            "failed": failed,
+                            "stopped": False,
+                            "summary": summary,
+                        }
+                    )
                     return
                 # Anything else is the next instruction of the same
                 # session — the SDK resumes it via sessions.py.
@@ -154,7 +174,14 @@ class Job:
                 self.task.advance(tasks.WORKING, "Sigo con ello.")
         except Exception as exc:  # noqa: BLE001 — a job must not die silent
             self.task.advance(tasks.FAILED, "No he podido con ello.")
-            self._emit({"event": "end", "failed": True, "summary": f"falló: {exc}"})
+            self._emit(
+                {
+                    "event": "end",
+                    "failed": True,
+                    "stopped": False,
+                    "summary": f"falló: {exc}",
+                }
+            )
         finally:
             self.bridge.jobs.pop(self.task.id, None)
 

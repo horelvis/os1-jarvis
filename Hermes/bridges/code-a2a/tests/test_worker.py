@@ -413,3 +413,58 @@ def _wait(cond, timeout=2.0):
             return
         time.sleep(0.02)
     raise AssertionError("condition never held")
+
+
+# ── What a run's own closing line does to the firehose ────────────────
+
+
+def test_the_runs_closing_console_line_goes_out_as_it_is_written():
+    """`sdk_runner._closing` puts «— terminado» on the queue itself.
+
+    Every other test in this file drives a synthetic event list that
+    omits it, which is how the duplicate on the band survived a review:
+    the plugin writes the same line again at `end`, and when the
+    checkpoint times out the two are adjacent. Pinned here so the
+    plugin's own test has something real to be a copy of.
+    """
+    b = _bridge([
+        Event(CONSOLE, "Editando a.py", kind="edit", detail="a.py"),
+        Event(CONSOLE, "— terminado"),
+        Event(VOICE, "He arreglado a.py.", final=True),
+    ])
+    listener = b.subscribe()
+    job = worker.Job(b, tasks.Task(), "arregla a", FakeProject())
+    job.start()
+    seen = _drain_until(listener, "ask")
+
+    closing = [p for p in seen if p.get("text") == "— terminado"]
+    assert closing, f"the closing line never reached the firehose: {seen}"
+    assert closing[0]["event"] == "milestone"
+    assert closing[0]["kind"] == ""
+
+
+def test_a_stopped_run_says_stopped_rather_than_finished():
+    b = _bridge([Event(VOICE, "Hecho.", final=True)])
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "haz", FakeProject())
+    job.start()
+    _drain_until(listener, "ask")
+    task.advance(tasks.CANCELED, "Lo dejo.")
+    job.cancel()
+    end = _drain_until(listener, "end")[-1]
+
+    assert end["stopped"] is True
+    assert end["failed"] is False
+
+
+def test_an_ordinary_ending_is_not_a_stop():
+    b = _bridge([Event(VOICE, "Hecho.", final=True)])
+    listener = b.subscribe()
+    job = worker.Job(b, tasks.Task(), "haz", FakeProject())
+    job.checkpoint_timeout = 0.05
+    job.start()
+    _drain_until(listener, "ask")
+    end = _drain_until(listener, "end")[-1]
+
+    assert end["stopped"] is False

@@ -185,6 +185,19 @@ def register(ctx):
     threading.Thread(target=run, name="samantha-code-live", daemon=True).start()
 
 
+def _ending_line(event: dict) -> str:
+    """What the band says a run came to.
+
+    Three endings, not two: a run that was STOPPED did not finish, and
+    «— terminado» about an obeyed instruction is the kind of wrong
+    answer that makes somebody stop trusting the rest — the same
+    reasoning `sdk_runner._closing` already applies to `failed`.
+    """
+    if event.get("stopped"):
+        return "— parado"
+    return "— terminado con errores" if event.get("failed") else "— terminado"
+
+
 def _setting(ctx, name: str, default: str) -> str:
     """One plugin setting, with the default when the gateway has none."""
     try:
@@ -300,11 +313,18 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     # voice's and shows nothing. Same wording as v1's
                     # `live.summarise`, deliberately — one console, one
                     # vocabulary, whichever mode fed it.
-                    _push(
-                        "— terminado con errores\n"
-                        if event.get("failed")
-                        else "— terminado\n"
-                    )
+                    #
+                    # Through the dedup, and that is not belt and
+                    # braces. `sdk_runner._closing` puts the SAME line
+                    # on the run's queue as a CONSOLE event, which
+                    # `worker._one_run` has no case for and forwards as
+                    # a milestone — so the band wrote it once for the
+                    # run and once for the task, adjacent whenever the
+                    # checkpoint timed out. That is the branch's own
+                    # hard rule broken by the branch.
+                    line = dedup.feed(_ending_line(event))
+                    if line:
+                        _push(line + "\n")
                     _push("", done=True)
                 else:
                     line = hitos.render(event)
