@@ -8,59 +8,7 @@ thread it does start (the answer POST) is waited on with a bounded
 
 import threading
 
-import pytest
-
 import Hermes.plugins.samantha_code as mod
-
-
-class _FakeAdapter:
-    def __init__(self) -> None:
-        self.divert_chat = None
-
-
-class _FakeCtx:
-    def __init__(self) -> None:
-        self.injected: list[str] = []
-
-    def inject_message(self, text, **kwargs):
-        self.injected.append(text)
-        return True
-
-
-@pytest.fixture
-def wiring(monkeypatch):
-    """A gateway made of lists: pushes, injections and one fake adapter."""
-    pushed: list[tuple[str, dict]] = []
-    adapter = _FakeAdapter()
-    answers: list[tuple[str, str, str]] = []
-    landed = threading.Event()
-
-    def fake_push(text, *, done=False, reset=False):
-        pushed.append((text, {"done": done, "reset": reset}))
-
-    def fake_send_answer(url, task_id, text):
-        answers.append((url, task_id, text))
-        landed.set()
-        return True
-
-    asked: list[bool] = []
-
-    monkeypatch.setattr(mod, "_push", fake_push)
-    monkeypatch.setattr(mod, "_push_asking", asked.append)
-    monkeypatch.setattr(mod, "_adapter", lambda: adapter)
-    monkeypatch.setattr(mod.client, "send_answer", fake_send_answer)
-
-    class Wiring:
-        pass
-
-    w = Wiring()
-    w.pushed = pushed
-    w.adapter = adapter
-    w.answers = answers
-    w.landed = landed
-    w.ctx = _FakeCtx()
-    w.asked = asked
-    return w
 
 
 def _run(monkeypatch, wiring, events):

@@ -133,12 +133,28 @@ The firehose payloads, one JSON object per `data:` line:
 {"event": "milestone", "taskId": …, "kind": …, "detail": …, "text": …}
 {"event": "ask",       "taskId": …, "qkind": …, "text": …}
 {"event": "resolved",  "taskId": …}
-{"event": "end",       "taskId": …, "failed": …, "summary": …}
+{"event": "end",       "taskId": …, "failed": …, "stopped": …, "summary": …}
 ```
+
+`stopped` is separate from `failed` because there are three endings and
+not two: a run that was told to stop did not finish, and «terminado»
+about an obeyed instruction is a wrong answer rather than a clumsy one.
+
+**The shapes live in `tests/fixtures/firehose.json`, and both sides read
+it.** This is the one seam where the bridge and the plugin that renders
+these could drift with both suites green — no import crosses it, by
+design. `tests/test_contract.py` here asserts the bridge still emits
+those keys; the plugin's `tests/test_contract.py` asserts it still acts
+on those payloads. A rename has to pass through the fixture, and
+changing the fixture fails the other side.
 
 It is not A2A and does not pretend to be: loopback, one direction, and
 `: keepalive` every 15 quiet seconds. A2A carries the task; this carries
 what the strip shows while the task happens.
+
+The plugin's follower adds one payload of its own that never comes over
+the wire — `{"event": "lost"}`, when the stream it was reading went
+away. Everything it holds belonged to that stream.
 
 ## What it is not
 
