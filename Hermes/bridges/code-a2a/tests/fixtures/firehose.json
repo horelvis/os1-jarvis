@@ -36,6 +36,7 @@
     "taskId": "t1",
     "failed": false,
     "stopped": false,
+    "chained": false,
     "summary": "He arreglado a.py."
   }
 }

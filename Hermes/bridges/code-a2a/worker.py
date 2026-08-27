@@ -101,6 +101,9 @@ class Job:
     def _run(self) -> None:
         self._emit({"event": "task", "project": self.project.name})
         prompt, fresh = self.prompt, self.fresh
+        # Whether this run was born from a checkpoint answer. It bounds
+        # the chain — see the block below, and D4 in the fix report.
+        chained = False
         try:
             while True:
                 summary, failed = self._one_run(prompt, fresh)
@@ -110,7 +113,60 @@ class Job:
                             "event": "end",
                             "failed": False,
                             "stopped": True,
+                            "chained": False,
                             "summary": _stopped(self.task),
+                        }
+                    )
+                    return
+                # The engine's ordinary failure does not raise: it
+                # yields a closing event with `failed` set, so the
+                # `except` below never sees it and only this carries it
+                # into the task's state. Reporting COMPLETED for work
+                # that failed is what `server._ending` exists to prevent.
+                closing = tasks.FAILED if failed else tasks.COMPLETED
+                if chained:
+                    # **A run born from a checkpoint answer does not open
+                    # another checkpoint.** This bounds the chain, and it
+                    # is a deliberate departure from the README's
+                    # "parked at its own checkpoint afterwards" — §12
+                    # records it.
+                    #
+                    # Measured live 2026-08-27: the user said «¿Me
+                    # oyes?» while a checkpoint stood. It is not assent,
+                    # so it became the next instruction; the assistant
+                    # answered it; the task ended and opened ANOTHER
+                    # checkpoint, armed again. Every further sentence
+                    # was eaten the same way and JARVIS never answered
+                    # him again. There is an escape — a sentence with
+                    # his name is never diverted — but nothing tells the
+                    # user that, and the natural thing to say to a
+                    # machine that has stopped answering is another
+                    # unnamed sentence, which feeds the loop.
+                    #
+                    # A conversational sentence and an instruction are
+                    # indistinguishable here, and telling them apart
+                    # would mean asking the model, which is the one
+                    # thing this path refuses to do. So the chain is
+                    # bounded instead: one follow-up per task by voice,
+                    # and the next sentence reaches JARVIS. A second
+                    # follow-up costs one word — «Jarvis, sigue con lo
+                    # de antes y…» starts a new task on the same
+                    # session, which `sessions.py` resumes by project
+                    # path.
+                    #
+                    # `chained` on the payload is what lets the plugin
+                    # say the result out loud: without a checkpoint
+                    # there is no question, and without a question
+                    # nothing would ever be spoken about work the user
+                    # explicitly asked for.
+                    self.task.advance(closing, summary)
+                    self._emit(
+                        {
+                            "event": "end",
+                            "failed": failed,
+                            "stopped": False,
+                            "chained": True,
+                            "summary": summary,
                         }
                     )
                     return
@@ -142,16 +198,11 @@ class Job:
                             "event": "end",
                             "failed": False,
                             "stopped": True,
+                            "chained": False,
                             "summary": _stopped(self.task),
                         }
                     )
                     return
-                # The engine's ordinary failure does not raise: it
-                # yields a closing event with `failed` set, so the
-                # `except` below never sees it and only this carries it
-                # into the task's state. Reporting COMPLETED for work
-                # that failed is what `server._ending` exists to prevent.
-                closing = tasks.FAILED if failed else tasks.COMPLETED
                 if reply is None:
                     self.task.advance(closing, summary)
                     self._emit(
@@ -159,6 +210,7 @@ class Job:
                             "event": "end",
                             "failed": failed,
                             "stopped": False,
+                            "chained": False,
                             "summary": _CLOSED_ALONE,
                         }
                     )
@@ -170,13 +222,16 @@ class Job:
                             "event": "end",
                             "failed": failed,
                             "stopped": False,
+                            "chained": False,
                             "summary": summary,
                         }
                     )
                     return
                 # Anything else is the next instruction of the same
-                # session — the SDK resumes it via sessions.py.
-                prompt, fresh = str(reply), False
+                # session — the SDK resumes it via sessions.py. Once,
+                # though: `chained` closes the next pass instead of
+                # parking it at a checkpoint of its own.
+                prompt, fresh, chained = str(reply), False, True
                 self.task.advance(tasks.WORKING, "Sigo con ello.")
         except Exception as exc:  # noqa: BLE001 — a job must not die silent
             self.task.advance(tasks.FAILED, "No he podido con ello.")
@@ -185,6 +240,7 @@ class Job:
                     "event": "end",
                     "failed": True,
                     "stopped": False,
+                    "chained": False,
                     "summary": f"falló: {exc}",
                 }
             )

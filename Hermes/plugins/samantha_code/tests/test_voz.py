@@ -60,3 +60,16 @@ def test_an_injection_that_raises_keeps_its_traceback(_no_waiting, capture_logs)
     logged = capture_logs.getvalue()
     assert "la inyección falló" in logged
     assert "Traceback (most recent call last)" in logged
+
+
+def test_the_closing_statement_asks_for_nothing():
+    """The bounded chain's ending is told, not asked.
+
+    A prompt that ended in a question would have JARVIS reopen a
+    conversation the bridge has already closed, and the user's answer
+    would reach nobody — the divert is not armed for it.
+    """
+    said = voz.prompt_for("closed", "Quitados los prints.")
+    assert "«Quitados los prints.»" in said
+    assert "no le preguntes nada" in said
+    assert said != voz.prompt_for("checkpoint", "Quitados los prints.")

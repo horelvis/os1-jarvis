@@ -122,9 +122,28 @@ of its own, and three moments come back as questions on the firehose:
 
 Answering is another `message/send` carrying the task's `taskId` (or the
 `contextId` of the task waiting). At the checkpoint, a yes closes the
-task; **anything else is the next instruction**, run in the same session
-and parked at its own checkpoint afterwards. Nobody answering for 600 s
-closes it too, saying so.
+task; **anything else is the next instruction**, run in the same
+session. Nobody answering for 600 s closes it too, saying so.
+
+**That follow-up does NOT park at a checkpoint of its own — the chain is
+bounded at one.** It used to, and the cost was measured on 2026-08-27:
+the user said «¿Me oyes?» while a checkpoint stood, which is not assent,
+so it became the next instruction; the assistant answered it; the task
+ended and opened another checkpoint, armed again. Every further sentence
+was eaten the same way and JARVIS never answered him again. A sentence
+carrying his name escapes — it is never diverted — but nothing tells the
+user that, and the natural thing to say to a machine that has stopped
+answering is another unnamed sentence, which feeds the loop.
+
+A conversational sentence and an instruction are indistinguishable here,
+and telling them apart would mean asking the model, which is the one
+thing this path refuses to do. So the chain is bounded instead. A second
+follow-up costs one word: *"Jarvis, sigue con lo de antes y…"* starts a
+new task on the same session. The `end` of a bounded follow-up carries
+`chained: true` and its summary, which is what lets the strip's plugin
+say the result out loud — without a checkpoint there is no question, and
+without a question nothing would be spoken about work that was asked
+for.
 
 The firehose payloads, one JSON object per `data:` line:
 
@@ -133,11 +152,12 @@ The firehose payloads, one JSON object per `data:` line:
 {"event": "milestone", "taskId": …, "kind": …, "detail": …, "text": …}
 {"event": "ask",       "taskId": …, "qkind": …, "text": …}
 {"event": "resolved",  "taskId": …}
-{"event": "end",       "taskId": …, "failed": …, "stopped": …, "summary": …}
+{"event": "end",       "taskId": …, "failed": …, "stopped": …, "chained": …, "summary": …}
 ```
 
-`stopped` is separate from `failed` because there are three endings and
-not two: a run that was told to stop did not finish, and «terminado»
+`chained` says the task closed because its follow-up chain was bounded
+at one, and is what the strip speaks. `stopped` is separate from
+`failed` because there are three endings and not two: a run that was told to stop did not finish, and «terminado»
 about an obeyed instruction is a wrong answer rather than a clumsy one.
 
 **The shapes live in `tests/fixtures/firehose.json`, and both sides read

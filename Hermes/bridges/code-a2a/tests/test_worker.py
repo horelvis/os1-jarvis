@@ -88,10 +88,14 @@ def test_anything_but_yes_becomes_the_next_run():
     job.start()
     _drain_until(listener, "ask")
     job.answer("ahora quita los prints")
-    _drain_until(listener, "ask")  # the follow-up parks at its own checkpoint
+    # The follow-up runs — and CLOSES, rather than parking at a
+    # checkpoint of its own. See `test_the_chain_is_bounded...`: an
+    # unbounded chain captured the conversation and JARVIS stopped
+    # answering the user altogether.
+    end = _drain_until(listener, "end")[-1]
     assert calls == ["haz A", "ahora quita los prints"]
-    job.answer("sí")
-    _drain_until(listener, "end")
+    assert end["chained"] is True
+    assert end["summary"] == "Hecho: ahora quita los prints."
 
 
 def test_only_one_task_at_a_time():
@@ -490,3 +494,73 @@ def test_the_console_is_attached_as_an_artifact_when_the_task_ends():
     parts = task.artifacts[0]["parts"]
     assert parts[0]["text"] == "Editando a.py\nTests: 1 passed"
     assert task.as_dict()["artifacts"] == task.artifacts
+
+
+# ── The chain, bounded. ───────────────────────────────────────────────
+
+
+def test_the_chain_is_bounded_so_the_conversation_is_not_captured():
+    """A second non-assent answer must not be possible to give.
+
+    Measured live 2026-08-27: «¿Me oyes?» during a checkpoint is not
+    assent, so it became the next instruction; the assistant answered
+    it; the task ended and opened ANOTHER checkpoint, armed again. Every
+    further sentence was eaten the same way and JARVIS never answered
+    the user again.
+    """
+    runs = []
+
+    def fake_events(task, prompt, project, fresh=False):
+        runs.append(prompt)
+        yield Event(VOICE, f"Hecho: {prompt}.", final=True)
+
+    b = server.Bridge(Path("/tmp"), "claude", "http://t")
+    b.events_for = fake_events  # type: ignore
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "arregla a", FakeProject())
+    job.checkpoint_timeout = 5.0
+    job.start()
+
+    _drain_until(listener, "ask")
+    assert job.answer("¿me oyes?") is True     # not assent: the follow-up
+    end = _drain_until(listener, "end")[-1]
+
+    # Exactly two runs, and no second checkpoint to arm the divert with.
+    assert runs == ["arregla a", "¿me oyes?"]
+    assert end["chained"] is True
+    _wait(lambda: task.state == tasks.COMPLETED)
+    # And nothing is waiting any more, so the next thing said is a turn.
+    assert job.answer("y otra cosa") is False
+
+
+def test_a_bounded_ending_still_carries_what_it_did():
+    """Without a checkpoint there is no question, and without a question
+    nothing would ever be SPOKEN about work the user explicitly asked
+    for. `chained` plus `summary` is what the plugin says out loud."""
+    def fake_events(task, prompt, project, fresh=False):
+        yield Event(VOICE, f"Listo: {prompt}.", final=True)
+
+    b = server.Bridge(Path("/tmp"), "claude", "http://t")
+    b.events_for = fake_events  # type: ignore
+    listener = b.subscribe()
+    job = worker.Job(b, tasks.Task(), "haz A", FakeProject())
+    job.start()
+    _drain_until(listener, "ask")
+    job.answer("ahora quita los prints")
+    end = _drain_until(listener, "end")[-1]
+
+    assert end["chained"] is True
+    assert end["summary"] == "Listo: ahora quita los prints."
+
+
+def test_a_first_checkpoint_answered_with_yes_never_chains():
+    b = _bridge([Event(VOICE, "Hecho.", final=True)])
+    listener = b.subscribe()
+    job = worker.Job(b, tasks.Task(), "haz", FakeProject())
+    job.start()
+    _drain_until(listener, "ask")
+    job.answer("sí, lo doy por bueno")
+    end = _drain_until(listener, "end")[-1]
+
+    assert end["chained"] is False

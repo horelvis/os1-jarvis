@@ -331,6 +331,19 @@ def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
                     if line:
                         _push(line + "\n")
                     _push("", done=True)
+                    if event.get("chained"):
+                        # A follow-up that closed instead of parking at
+                        # a checkpoint of its own (the bound on the
+                        # chain — `worker.py`, D4). There is no question
+                        # to relay and nothing is waiting, but the user
+                        # asked for this work out loud and would
+                        # otherwise never hear that it was done.
+                        summary = str(event.get("summary") or "")
+                        if summary:
+                            voz.deliver(
+                                ctx.inject_message,
+                                voz.prompt_for("closed", summary),
+                            )
                 else:
                     line = hitos.render(event)
                     if line:

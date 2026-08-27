@@ -1092,6 +1092,59 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-08-27 — Two things the suites could not see, and a chain bounded
+
+**The strip lost turns on the wire, and said nothing about it.** Task 11
+took the branch to the live machine and found the owner's sentences
+vanishing — three in nine minutes, with `→ <la frase>` in the widget
+journal and nothing after it. Two defects, and the first hid the second.
+
+`GatewayClient.run()` was `except Exception: pass` with no log at any
+level. Retrying forever is right; being silent about it meant the only
+evidence anywhere on the box was an aiohttp access line closing the
+socket at the second of the send. With a `warning` on the first failure
+and on every drop, the cause named itself in one run: **`CLOSE 1002
+(protocol error)`, from the server.**
+
+**The cause is `permessage-deflate`, and the trigger is being idle.**
+With deflate negotiated, aiohttp — which is what the kiosk adapter is —
+refuses the FIRST compressed data frame of a connection when a control
+frame reached it first. `websockets` sends a keepalive ping every 20 s.
+So any connection idle for twenty seconds has had its control frame, and
+the next thing the user says is destroyed on the wire, taking the socket
+with it; the strip reconnects into exactly the same state. Not a race —
+deterministic, and a strip is idle between turns by its nature.
+Reproduced in milliseconds against a plain aiohttp server with no Hermes
+in it: ping-then-text fails at gaps of 0 s, 50 ms and 500 ms, passes
+with `compression=None`, and passes with deflate when a data frame went
+first. `CONNECT_OPTIONS = {"compression": None}` is the fix; these are
+small JSON frames on loopback and lose nothing by it. The keepalive
+stays, because the ping is not what is broken.
+
+**And the checkpoint's chain is bounded at one follow-up.** This is a
+deliberate departure from what the bridge's README said a checkpoint
+does, recorded here because §12 is where that belongs. Measured the same
+day: the user said «¿Me oyes?» while a checkpoint stood. It is not
+assent, so the spec's rule made it the next instruction; the assistant
+answered it; the task ended and opened ANOTHER checkpoint, armed again.
+Every further sentence was eaten the same way and **JARVIS never
+answered him again**. There is an escape — a sentence carrying his name
+is never diverted — but nothing tells the user that, and the natural
+thing to say to a machine that has stopped answering is another unnamed
+sentence, which feeds the loop.
+
+A conversational sentence and an instruction are indistinguishable at
+that point, and telling them apart would mean asking the model, which is
+the one thing this path refuses to do (§12, 2026-08-26: `args={}`). So
+the chain is bounded instead: a run born from a checkpoint answer closes
+rather than parking at a checkpoint of its own. **Cost, stated:** only
+one follow-up per task by voice. A second costs one word — «Jarvis,
+sigue con lo de antes y…» opens a new task on the same session, which
+`sessions.py` resumes by project path. And because a bounded ending has
+no question to relay, its `end` carries `chained` and its summary so the
+strip can still say what came of work the user asked for out loud —
+a statement, not a question, so nothing is left waiting.
+
 ### 2026-08-27 — The console gets milestones, and JARVIS can be asked
 
 **Decision:** the A2A bridge becomes the default way he delegates

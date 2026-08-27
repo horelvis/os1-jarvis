@@ -470,3 +470,55 @@ def test_a_follower_that_blows_up_still_disarms_the_divert(monkeypatch, wiring):
 
     assert wiring.adapter.divert_chat is None
     assert wiring.asked[-1] is False
+
+
+# ── The bounded chain, said out loud. ────────────────────────────────
+
+
+def test_a_bounded_follow_up_is_spoken_and_leaves_nothing_waiting(
+    monkeypatch, wiring
+):
+    # A run born from a checkpoint answer closes instead of parking at a
+    # checkpoint of its own (`worker.py`, D4). There is no question to
+    # relay — so without this the user asks for work out loud and never
+    # hears that it was done.
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {
+                "event": "end",
+                "taskId": "t1",
+                "failed": False,
+                "stopped": False,
+                "chained": True,
+                "summary": "Quitados los prints.",
+            }
+        ],
+    )
+    assert len(wiring.ctx.injected) == 1
+    assert "«Quitados los prints.»" in wiring.ctx.injected[0]
+    # A statement, not a question: nothing is waiting for an answer, so
+    # nothing may be armed and the strip's window stays shut.
+    assert wiring.adapter.divert_chat is None
+    assert True not in wiring.asked
+
+
+def test_an_ordinary_ending_is_not_spoken(monkeypatch, wiring):
+    # The closing line on the band is the whole of what an ordinary end
+    # says. The checkpoint already had the voice.
+    _run(
+        monkeypatch,
+        wiring,
+        [
+            {
+                "event": "end",
+                "taskId": "t1",
+                "failed": False,
+                "stopped": False,
+                "chained": False,
+                "summary": "Hecho.",
+            }
+        ],
+    )
+    assert wiring.ctx.injected == []

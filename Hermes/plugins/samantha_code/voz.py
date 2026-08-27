@@ -41,6 +41,18 @@ _PROMPTS = {
         "«{text}». Cuéntaselo al usuario en tus palabras, breve, y "
         "pregúntale si lo da por bueno."
     ),
+    # A statement, not a question — the only one here, and the reason it
+    # exists is the bound on the chain (`worker.py`, D4). A run born
+    # from a checkpoint answer closes instead of parking at a checkpoint
+    # of its own, so there is no question to relay; without this, work
+    # the user explicitly asked for would finish in silence and he would
+    # think he had been ignored. It asks him for nothing, so nothing is
+    # left waiting and no divert is armed.
+    "closed": (
+        "El asistente de código ha terminado lo que el usuario le pidió "
+        "después. Resultado: «{text}». Cuéntaselo en tus palabras, "
+        "breve, y no le preguntes nada."
+    ),
 }
 
 

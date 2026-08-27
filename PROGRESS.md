@@ -108,7 +108,39 @@ consecuencia:**
   estado terminal (en el `finally`), no con él, y este párrafo decía
   seis hallazgos.
 
-143 pruebas en `samantha_kiosk` + `samantha_code`, 99 en el puente, 247
+**Y la tarea 11 lo llevó a la máquina de verdad, que encontró dos
+defectos que ninguna suite podía ver:**
+
+- **La tira perdía turnos en el cable, sin decir nada.** Tres frases del
+  usuario desaparecieron en nueve minutos: en el diario del widget
+  `→ <la frase>` y nada después. `GatewayClient.run()` era
+  `except Exception: pass` sin registro a ningún nivel — reintentar para
+  siempre está bien, callarlo no. Con un `warning` en el primer fallo y
+  en cada caída, la causa se nombró sola en una ejecución:
+  `CLOSE 1002 (protocol error)`, del servidor.
+- **La causa es `permessage-deflate`, y el disparador es estar
+  callado.** Con deflate negociado, aiohttp —que es lo que es el
+  adaptador del kiosko— rechaza el PRIMER marco de datos comprimido de
+  una conexión si antes le llegó un marco de control. `websockets` manda
+  un ping de mantenimiento cada 20 s: cualquier conexión ociosa veinte
+  segundos ya tiene su marco de control, así que lo siguiente que dice
+  el usuario se destruye en el cable y se lleva el socket por delante.
+  No es una carrera, es determinista, y una tira está ociosa entre
+  turnos por naturaleza. Reproducido en milisegundos contra un servidor
+  aiohttp pelado, sin Hermes: ping-y-luego-texto falla con huecos de
+  0 s, 50 ms y 500 ms; pasa con `compression=None`; y pasa con deflate
+  si fue primero un marco de datos.
+- **Y la cadena del cierre se acota a un encargo.** Medido el mismo día:
+  dijo «¿Me oyes?» con un cierre abierto; no es un sí, así que se tomó
+  como el siguiente encargo, el asistente lo contestó, la tarea terminó
+  y **abrió otro cierre**, armado otra vez. Cada frase siguiente se
+  comía igual y JARVIS no volvió a contestarle. Ahora una ejecución
+  nacida de una respuesta al cierre se cierra en vez de aparcar en un
+  cierre propio, y su `end` lleva `chained` y el resumen para que la
+  tira lo diga en voz alta — una afirmación, no una pregunta. Se aparta
+  de lo que decía el README del puente, y §12 lo recoge.
+
+146 pruebas en `samantha_kiosk` + `samantha_code`, 102 en el puente, 253
 en el widget.
 
 ## 2026-08-26 (noche V) — El puente usa el SDK: se le puede parar, y recuerda ✅
