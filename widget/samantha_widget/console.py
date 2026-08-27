@@ -23,15 +23,18 @@ from __future__ import annotations
 
 import os
 
-# How many lines are kept. Ten is about what fits in the height below
-# without the strip becoming a panel, and about as far back as a glance
-# is worth.
-MAX_LINES = 10
+# How many lines are kept, and so how tall the strip can get: the height
+# below is this times a line. Twenty since 2026-08-27, at the user's
+# asking — ten was chosen so the strip would not become a panel, and
+# what it actually produced was a terminal you could not read a tool's
+# output in. Twenty lines at the measured ~20 px is about 430 px of
+# strip, which is the live camera's 480 and no more.
+MAX_LINES = int(os.environ.get("SAMANTHA_WIDGET_CONSOLE_LINES") or 20)
 
 # One line, in pixels, at the console font size — and the room the
 # frame takes around them. The strip grows by what the CONTENT needs up
 # to MAX_LINES, rather than by a fixed block: three lines in a box sized
-# for ten is mostly empty box, and it showed (2026-08-26).
+# for twenty is mostly empty box, and it showed (2026-08-26).
 LINE_HEIGHT = 15
 # The frame around the lines: 10 px of terminal padding top and bottom
 # (theme.CSS), its border, and the margin under it. Measured by counting
@@ -103,7 +106,7 @@ class Console:
             line = raw.rstrip()
             if not line.strip():
                 # Blank lines are most of a tool's output and none of
-                # its meaning. Kept out so ten lines are ten of content.
+                # its meaning. Kept out so the lines kept are content.
                 continue
             self.lines.append(line[:MAX_LINE_CHARS])
         del self.lines[: -self.max_lines]

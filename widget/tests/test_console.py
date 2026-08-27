@@ -21,7 +21,7 @@ def test_writing_makes_it_appear_and_asks_for_the_resize():
 
 
 def test_it_grows_with_the_content_up_to_the_ceiling():
-    # Three lines take the room of three lines, not of ten.
+    # Three lines take the room of three lines, not of the ceiling.
     c = Console()
     c.write("una\ndos\ntres")
     assert c.height == LINE_HEIGHT * 3 + PADDING
@@ -42,8 +42,8 @@ def test_a_blob_with_newlines_is_split():
 
 
 def test_blank_lines_are_dropped():
-    # Most of a tool's output and none of its meaning: ten lines kept
-    # should be ten lines of content.
+    # Most of a tool's output and none of its meaning: the lines kept
+    # should be lines of content.
     c = Console()
     c.write("una\n\n   \ndos")
     assert c.lines == ["una", "dos"]

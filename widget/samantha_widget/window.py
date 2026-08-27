@@ -25,11 +25,6 @@ from .geometry import placement_is_wrong, strip_rect  # noqa: E402
 # of text with room to breathe — it is an entry, not a message box.
 PROMPT_HEIGHT = 38
 
-# The scroller's own height. `console.HEIGHT` is what the WINDOW grows
-# by; this is that minus the frame's top and bottom margins, and the two
-# have to be kept in step or the lines are clipped.
-CONSOLE_INNER = 184
-
 # How long to leave the window manager before checking it obeyed, and
 # how many times to insist. Three tries at 120 ms is a third of a
 # second: under a blink, and bounded so a WM that simply refuses the
