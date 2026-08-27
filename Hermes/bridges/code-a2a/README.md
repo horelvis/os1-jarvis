@@ -65,7 +65,8 @@ and what comes back is one line for him to say.
 | method | what happens |
 |---|---|
 | `GET /.well-known/agent-card.json` | the card; `/.well-known/agent.json` answers too, for pre-1.0 clients |
-| `message/send` · `SendMessage` | run to completion, answer with the finished Task |
+| `message/send` · `SendMessage` | accept the work and answer at once, with the Task WORKING; the same method carrying a `taskId` is an ANSWER to what that task is asking |
+| `GET /events` | the firehose: SSE, one JSON object per line, everything that happens to every task |
 | `message/stream` · `SendStreamingMessage` | SSE: the Task, then a status update per line, then the terminal state |
 | `tasks/get` · `GetTask` | look a task up |
 | `tasks/cancel` · `CancelTask` | mark one cancelled |
@@ -107,13 +108,51 @@ Two consequences worth knowing, because both surprise people:
 An interrupted run keeps its session: stopping something is not a
 reason to forget what it was doing.
 
+## Being asked, and the checkpoint
+
+A task now has a conversation rather than an ending. `message/send`
+returns the moment the work is accepted, `worker.py` runs it on a thread
+of its own, and three moments come back as questions on the firehose:
+
+| `qkind` | when |
+|---|---|
+| `question` | the assistant called `AskUserQuestion` — the run is held until it is answered, with no clock on it |
+| `gate` | it is about to do something `gates.py` holds back; 300 s unanswered is a no |
+| `checkpoint` | the work is done and the task waits in INPUT_REQUIRED: *«¿lo doy por bueno?»* |
+
+Answering is another `message/send` carrying the task's `taskId` (or the
+`contextId` of the task waiting). At the checkpoint, a yes closes the
+task; **anything else is the next instruction**, run in the same session
+and parked at its own checkpoint afterwards. Nobody answering for 600 s
+closes it too, saying so.
+
+The firehose payloads, one JSON object per `data:` line:
+
+```
+{"event": "task",      "taskId": …, "project": …}
+{"event": "milestone", "taskId": …, "kind": …, "detail": …, "text": …}
+{"event": "ask",       "taskId": …, "qkind": …, "text": …}
+{"event": "resolved",  "taskId": …}
+{"event": "end",       "taskId": …, "failed": …, "summary": …}
+```
+
+It is not A2A and does not pretend to be: loopback, one direction, and
+`: keepalive` every 15 quiet seconds. A2A carries the task; this carries
+what the strip shows while the task happens.
+
 ## What it is not
 
 - **Not authenticated.** It binds to localhost and runs the user's own
   assistant with the user's own credentials. Do not put it on a
   network.
-- **Not multi-turn.** One request, one answer. When the assistant needs
-  a decision it comes back as text; the reply is the next task.
+- **Not concurrent.** One task at a time. A second `message/send`
+  arriving while one runs is refused — *«Ya hay una tarea en marcha»* —
+  because the user has one voice and could not tell two apart. Nor can
+  two questions be held at once.
+- **Not the CLI's story.** Everything about accepting at once, questions
+  and the checkpoint is the SDK path. With OpenCode, or without the SDK
+  installed, `message/send` still runs to completion inside the request
+  the way v1 did: that engine cannot be asked anything anyway.
 - **Not sandboxed.** The assistant runs with `--dangerously-skip-permissions`
   — the user's decision of 2026-08-26, taken with the risk stated, and
   the recorded alternative does not work unattended: under `acceptEdits`

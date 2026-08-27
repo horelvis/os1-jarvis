@@ -13,17 +13,25 @@ satisfy today — sends `message/send` and `message/stream`. Publishing
 one and not the other is how two correct implementations fail to meet,
 so both are answered.
 
+**A task is answered at once and worked on afterwards** (SDK path
+only — the CLI engine keeps v1's blocking send). `message/send` returns
+with the task WORKING, `worker.Job` runs it on a thread of its own, and
+what happens meanwhile goes out on `GET /events` — one loopback SSE
+firehose, JSON per line, for the Hermes plugin to follow. An answer is
+another `message/send` carrying the task's id: it reaches the question
+the run is holding, or the checkpoint it parked at.
+
 What it does NOT do, deliberately: authentication (it binds to
-localhost), push notifications, and multi-turn input. A task is one
-request and one answer; when the assistant needs a decision, that comes
-back as text for JARVIS to say out loud, and the user's reply arrives as
-the next task.
+localhost) and push notifications. There is one task at a time; a second
+one arriving while one runs is refused rather than queued, because the
+user has one voice and could not tell two apart.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import queue
 import sys
 import threading
 import time
@@ -36,6 +44,7 @@ import runner
 import sdk_runner
 import sessions
 import tasks
+import worker
 from assistants import pick
 from stream import CONSOLE, VOICE
 
@@ -57,6 +66,11 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INTERNAL_ERROR = -32603
 
+# How long the firehose stays quiet before saying something anyway. A
+# proxy or a dead peer is only discovered by writing, and a comment line
+# is what SSE has instead of a ping.
+KEEPALIVE = 15.0
+
 
 class Bridge:
     """The state a running bridge has: its config and its tasks."""
@@ -71,6 +85,11 @@ class Bridge:
         # a finished run left here would answer "stopped" about work
         # that had already ended.
         self.runs: dict[str, sdk_runner.SdkRun] = {}
+        # The task being worked on, off the request thread, by task id.
+        self.jobs: dict[str, worker.Job] = {}
+        # Everyone listening to `GET /events`. A queue each, so a slow
+        # reader delays nobody — least of all the job doing the work.
+        self.listeners: list[queue.Queue] = []
         self.sessions = sessions.Sessions()
         self.lock = threading.Lock()
 
@@ -129,6 +148,35 @@ class Bridge:
         with self.lock:
             run = self.runs.get(task_id)
         return bool(run is not None and run.interrupt())
+
+    # ── the firehose ──────────────────────────────────────────────────
+
+    def emit(self, payload: dict) -> None:
+        """Tell everyone listening. Never blocks: the queues are
+        unbounded, and a job is not made to wait on a browser."""
+        with self.lock:
+            listeners = list(self.listeners)
+        for channel in listeners:
+            channel.put(payload)
+
+    def subscribe(self) -> queue.Queue:
+        channel: queue.Queue = queue.Queue()
+        with self.lock:
+            self.listeners.append(channel)
+        return channel
+
+    def unsubscribe(self, channel: queue.Queue) -> None:
+        with self.lock:
+            if channel in self.listeners:
+                self.listeners.remove(channel)
+
+    def active(self) -> tasks.Task | None:
+        """The task in flight, if there is one. There is at most one."""
+        with self.lock:
+            for task in self.tasks.values():
+                if not task.terminal:
+                    return task
+        return None
 
 
 def _fresh(params: dict) -> bool:
@@ -189,8 +237,41 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/.well-known/agent-card.json", "/.well-known/agent.json"):
             self._send_json(self.bridge.card())
             return
+        if self.path == "/events":
+            self._events()
+            return
         self.send_response(404)
         self.end_headers()
+
+    def _events(self) -> None:
+        """Everything that happens, to whoever is listening.
+
+        One JSON object per `data:` line — a task starting, a milestone,
+        a question, its resolution, an ending — so the plugin renders its
+        own words instead of parsing ours. It is not the A2A protocol and
+        does not pretend to be: it is loopback, one direction, and the
+        strip's console is what it is for.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        channel = self.bridge.subscribe()
+        try:
+            while True:
+                try:
+                    payload = channel.get(timeout=KEEPALIVE)
+                except queue.Empty:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+                    continue
+                line = json.dumps(payload, ensure_ascii=False)
+                self.wfile.write(f"data: {line}\n\n".encode())
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # the listener went away; that is how it unsubscribes
+        finally:
+            self.bridge.unsubscribe(channel)
 
     # ── the one endpoint ──────────────────────────────────────────────
 
@@ -239,6 +320,106 @@ class Handler(BaseHTTPRequestHandler):
         return task.as_dict()
 
     def _send(self, request_id, params: dict) -> None:
+        """Take the work, or take an answer to work already going.
+
+        Whichever it is, this returns immediately. The one thing an HTTP
+        handler must never do here is wait on a run: the caller is
+        JARVIS, mid-turn, with a user listening.
+        """
+        message = params.get("message") or {}
+        job = self._job_for(message)
+        if job is not None:
+            self._answer(request_id, job, tasks.text_of(message))
+            return
+        if not self.bridge.stoppable:
+            # OpenCode has no questions to answer and no way to be
+            # stopped, so v1's synchronous send is still the whole of
+            # what it can do.
+            self._send_blocking(request_id, params)
+            return
+        self._accept(request_id, params)
+
+    def _job_for(self, message: dict) -> worker.Job | None:
+        """The job this message is answering, if it is answering one.
+
+        By task id, which is what the plugin sends back; or by the
+        context of the task waiting in INPUT_REQUIRED, which is how an
+        A2A client that only knows the conversation reaches it.
+        """
+        job = self.bridge.jobs.get(str(message.get("taskId") or ""))
+        if job is not None:
+            return job
+        context = str(message.get("contextId") or "")
+        active = self.bridge.active()
+        if (
+            context
+            and active is not None
+            and active.state == tasks.INPUT_REQUIRED
+            and context == active.context_id
+        ):
+            return self.bridge.jobs.get(active.id)
+        return None
+
+    def _answer(self, request_id, job: worker.Job, text: str) -> None:
+        payload = job.task.as_dict()
+        if not text or not job.answer(text):
+            # The moment passed — said out loud rather than swallowed,
+            # or the user repeats himself into a silence.
+            payload["status"]["message"] = tasks.message(
+                "Nadie esperaba una respuesta."
+            )
+        self._send_json({"jsonrpc": "2.0", "id": request_id, "result": payload})
+
+    def _accept(self, request_id, params: dict) -> None:
+        task, text, _context = self._task_for(params)
+        if not text:
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": self._refuse(task, "No he entendido qué hay que hacer."),
+                }
+            )
+            return
+        if self.bridge.active() not in (None, task):
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": self._refuse(
+                        task,
+                        "Ya hay una tarea en marcha. "
+                        "Dígame si es una respuesta o si la dejo.",
+                    ),
+                }
+            )
+            return
+        project, prompt = self.bridge.prepare(text)
+        if project is None:
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": self._refuse(
+                        task,
+                        "No sé en qué proyecto trabajar. Dígame el nombre y lo retomo.",
+                    ),
+                }
+            )
+            return
+        task.advance(tasks.WORKING, f"Trabajando en {project.name}.")
+        job = worker.Job(self.bridge, task, prompt, project, fresh=_fresh(params))
+        self.bridge.jobs[task.id] = job
+        # The answer is what the caller asked for — the task, WORKING —
+        # taken BEFORE the job starts. `as_dict()` reads live state, and
+        # a run that finishes while this is being serialised would
+        # otherwise report a state the caller never asked about.
+        accepted = task.as_dict()
+        job.start()
+        self._send_json({"jsonrpc": "2.0", "id": request_id, "result": accepted})
+
+    def _send_blocking(self, request_id, params: dict) -> None:
+        """v1: do the work inside the request. The CLI engine's path."""
         task, text, _context = self._task_for(params)
         if not text:
             self._send_json(
@@ -365,10 +546,17 @@ class Handler(BaseHTTPRequestHandler):
         # Actually stop it. Until 2026-08-26 this only moved the task to
         # CANCELED while the assistant carried on working to the end —
         # the protocol saying one thing and the machine doing another.
+        job = self.bridge.jobs.get(task.id)
         stopped = self.bridge.stop(task.id)
         task.advance(
-            tasks.CANCELED, "Lo dejo." if stopped else "No había nada trabajando."
+            tasks.CANCELED,
+            "Lo dejo." if stopped or job is not None else "No había nada trabajando.",
         )
+        # A job parked at its checkpoint has no run to interrupt: it is
+        # waiting on a queue, and would hold the single slot for the
+        # whole 600 s of a task that is already CANCELED.
+        if job is not None:
+            job.cancel()
         self._send_json({"jsonrpc": "2.0", "id": request_id, "result": task.as_dict()})
 
 
