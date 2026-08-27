@@ -165,6 +165,19 @@ away. Everything it holds belonged to that stream.
   arriving while one runs is refused — *«Ya hay una tarea en marcha»* —
   because the user has one voice and could not tell two apart. Nor can
   two questions be held at once.
+
+  **What that costs another A2A client is larger than it looks, and is
+  the reason to poll `tasks/get`.** A task no longer turns terminal when
+  the work finishes: it parks in `INPUT_REQUIRED` at its checkpoint and
+  waits **up to 600 s** for somebody to say whether it is good. `active()`
+  counts it as in flight for all of that, so every other caller is
+  refused for those ten minutes — on a server that publishes an agent
+  card and looks available. A client that wants the task closed should
+  answer the checkpoint (a `message/send` carrying the `taskId`, with a
+  yes) rather than wait it out; a client that only wants the result
+  should poll `tasks/get`, where the summary is in `status.message` and
+  the console lines are attached as the `salida` artifact from the
+  moment the task turns terminal.
 - **Not the CLI's story.** Everything about accepting at once, questions
   and the checkpoint is the SDK path. With OpenCode, or without the SDK
   installed, `message/send` still runs to completion inside the request

@@ -67,13 +67,18 @@ def _adapter():
 
 
 def _push(text: str, *, done: bool = False, reset: bool = False) -> None:
-    """Put one line on the strip, from a thread that is not the loop's.
+    """Put one line on the strip, from wherever the caller happens to be.
 
-    Two threads call this and neither is the gateway's: v1's tee-file
-    follower (`watch`) and v2's firehose dispatcher
-    (`_run_bridge_mode`), plus the answer path inside the latter.
+    Two of the three callers are plugin THREADS, and that is what the
+    scheduling is for: v1's tee-file follower (`watch`) and v2's
+    firehose dispatcher (`_run_bridge_mode`). The third is not — the
+    answer path runs on the gateway's own loop thread
+    (`adapter._ws_handler` → `_should_divert` → `divert` → here), which
+    is legal because `run_coroutine_threadsafe` from inside the loop's
+    own thread only schedules; nothing here calls `.result()`, and that
+    is the call that would deadlock.
 
-    Scheduled onto the GATEWAY's loop, never the caller's: those threads
+    Scheduled onto the GATEWAY's loop, never the caller's: the threads
     outlive every turn, and the loop a turn brings with it stops the
     moment that turn ends — the bug that cost the live camera a day
     (§12, 2026-08-26).

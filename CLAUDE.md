@@ -666,6 +666,20 @@ named cameras, from inside the gateway — two configured, one of them
 currently off; the persona; reminders that reach him unprompted;
 the LLM local on this box at 57 tok/s.
 
+**Delegating code runs through the BRIDGE by default, since 2026-08-27.**
+§12 records the decision; this is the section that says what runs.
+`samantha_code` follows the A2A bridge's firehose on :9910 unless
+`plugins.entries.samantha-code.settings.bridge` is emptied, which selects
+the v1 tee-file follower instead. What bridge mode buys is the console
+showing milestones rather than raw lines, and three moments reaching the
+user by voice — the assistant's own `AskUserQuestion`, a gate before
+anything irreversible, and a closing checkpoint. The answer is routed by
+the kiosk adapter straight to the bridge and never through the local
+model, which fills its own tools with `args={}`. **So a box with no
+`samantha-code-a2a.service` on it is in bridge mode too**: it reconnects
+forever, at a 30 s ceiling, and says so in the journal the first time and
+on every drop after.
+
 **Not working / not done:**
 - ~~**He has never heard a human voice.**~~ **He has, since 2026-08-25.**
   A USB microphone (`UACDemoV1.0`, `hw:2,0`) is plugged in, PipeWire's
@@ -732,6 +746,10 @@ by the widget — the LLM, TTS and Hermes work carried straight over.
   plugin, cameras plural and named ✅
 - **2026-08-25** — the photo on demand: `mirar`, and a band above the
   strip that grows for it ✅ (the detections table: plan 2)
+- **2026-08-26** — he delegates coding: the A2A bridge, the SDK behind
+  it, and `terminal` as the fallback path ✅
+- **2026-08-27** — the console shows milestones, and he asks: the three
+  moments, and the answer routed by the adapter ✅
 
 ---
 

@@ -468,3 +468,25 @@ def test_an_ordinary_ending_is_not_a_stop():
     end = _drain_until(listener, "end")[-1]
 
     assert end["stopped"] is False
+
+
+def test_the_console_is_attached_as_an_artifact_when_the_task_ends():
+    # Parity with `_send_blocking`, the CLI path, which has always
+    # attached one. An A2A caller that is not the strip has no firehose:
+    # without this it gets the closing sentence and nothing else.
+    b = _bridge([
+        Event(CONSOLE, "Editando a.py", kind="edit", detail="a.py"),
+        Event(CONSOLE, "Tests: 1 passed", kind="tests_out", detail="1 passed"),
+        Event(VOICE, "He arreglado a.py.", final=True),
+    ])
+    listener = b.subscribe()
+    task = tasks.Task()
+    job = worker.Job(b, task, "arregla a", FakeProject())
+    job.checkpoint_timeout = 0.05
+    job.start()
+    _drain_until(listener, "end")
+    _wait(lambda: bool(task.artifacts))
+
+    parts = task.artifacts[0]["parts"]
+    assert parts[0]["text"] == "Editando a.py\nTests: 1 passed"
+    assert task.as_dict()["artifacts"] == task.artifacts

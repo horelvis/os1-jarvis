@@ -18,7 +18,7 @@ import threading
 
 import tasks
 from answers import assent
-from stream import VOICE
+from stream import CONSOLE, VOICE
 
 # An unanswered checkpoint closes itself — the work is done either way,
 # and a task that waits forever pins the single-task slot (spec: 600 s).
@@ -48,6 +48,12 @@ class Job:
         # which is called from the HTTP thread.
         self._at_checkpoint = False
         self._lock = threading.Lock()
+        # Every console line the run wrote, for the artifact attached
+        # when the task turns terminal. `_send_blocking` — the CLI path
+        # — has always attached one, and an A2A caller that is not the
+        # strip has no firehose and would otherwise get the closing
+        # sentence and nothing else.
+        self._console: list[str] = []
 
     # ── the three things the outside does to it ───────────────────────
 
@@ -183,6 +189,20 @@ class Job:
                 }
             )
         finally:
+            # In the `finally` so every ending gets one: closed, failed,
+            # cancelled, or the exception above. `as_dict()` reads this
+            # live, so a `tasks/get` after the task turned terminal
+            # shows it.
+            if self._console:
+                self.task.artifacts = [
+                    {
+                        "artifactId": tasks.new_id(),
+                        "name": "salida",
+                        "parts": [
+                            {"kind": "text", "text": "\n".join(self._console)}
+                        ],
+                    }
+                ]
             self.bridge.jobs.pop(self.task.id, None)
 
     def _one_run(self, prompt: str, fresh: bool) -> tuple[str, bool]:
@@ -195,6 +215,10 @@ class Job:
         for event in self.bridge.events_for(
             self.task, prompt, self.project, fresh=fresh
         ):
+            if event.destination == CONSOLE and event.text:
+                # Kept for the artifact, which is what an A2A caller
+                # that is not the strip gets instead of the firehose.
+                self._console.append(event.text)
             if event.kind in ("question", "gate"):
                 self._emit({"event": "ask", "qkind": event.kind, "text": event.detail})
             elif event.kind == "resolved":

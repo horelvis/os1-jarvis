@@ -45,7 +45,44 @@ que no se convirtiera en un panel, y lo que daba era un terminal
 demasiado corto para leer la salida de una herramienta.
 `SAMANTHA_WIDGET_CONSOLE_LINES` lo hace configurable.
 
-116 pruebas en `samantha_kiosk` + `samantha_code`, 93 en el puente, 237
+**La ronda de revisión de la rama entera, 2026-08-27.** Seis hallazgos,
+todos con prueba antes del arreglo:
+
+- **Una respuesta hablada de más de treinta segundos no llegaba al
+  puente.** El diseño afirmaba que no hacía falta tocar el widget «la
+  ventana de treinta segundos ya está abierta» — y una puerta espera
+  300 s, un cierre 600 s y una pregunta sostenida no tiene reloj. Pasado
+  ese medio minuto la tira descartaba la frase antes de que el adaptador
+  la viera, y decir su nombre marca `wake`, que nunca se desvía: no
+  quedaba ninguna frase hablada capaz de responder. Ahora la pasarela
+  avisa por un marco `asking` en los dos bordes y `WakeWord` sostiene la
+  ventana entre ellos, con tope de 900 s por si el marco de cierre no
+  llega nunca.
+- **La banda no decía que se había perdido el hilo**, y un puente
+  reiniciado dejaba el desvío armado indefinidamente, esperando comerse
+  exactamente una frase. `follow_events` devuelve ahora `{"event":
+  "lost"}` a quien lo consume; el despachador limpia lo que era del hilo
+  muerto y escribe «he perdido de vista el trabajo». Y como el modo
+  puente es el que se usa por defecto, el primer fallo de conexión es un
+  `warning` y no un `debug`: una caja sin el servicio reintentaba para
+  siempre en silencio.
+- **«— terminado» se escribía dos veces**, adyacentes cuando el cierre
+  vencía sin respuesta — la regla dura que esta rama existe para
+  imponer, rota por la rama. Ninguna de las dos suites lo veía. Y con la
+  línea deduplicada, un run parado habría dicho «terminado»: `end` lleva
+  ahora `stopped` además de `failed`, y son tres finales, no dos.
+- **El contrato del firehose vive en un fichero que leen las dos
+  suites** (`tests/fixtures/firehose.json`). Antes cada lado escribía a
+  mano su copia de las claves y un renombrado rompía sólo una mitad.
+  Comprobado rompiéndolo por los dos lados.
+- La salida de consola se adjunta como artefacto al terminar, que es lo
+  que le queda a un cliente A2A que no sea la tira.
+- Y el README del puente dice ahora lo que cuesta de verdad el turno
+  único: una tarea espera hasta 600 s en su cierre y `active()` la
+  cuenta, así que cualquier otro llamante se lleva un «Ya hay una tarea
+  en marcha» durante esos diez minutos.
+
+140 pruebas en `samantha_kiosk` + `samantha_code`, 99 en el puente, 247
 en el widget.
 
 ## 2026-08-26 (noche V) — El puente usa el SDK: se le puede parar, y recuerda ✅
