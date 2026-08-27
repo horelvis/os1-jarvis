@@ -61,6 +61,16 @@ GATE_TIMEOUT = 300.0
 # Put on the queue when the run is over; nothing else uses it.
 _DONE = object()
 
+# Put on the answer channel when the run is stopped while it is asking.
+# A held question has no timeout, so an interrupt is the only thing that
+# can end that wait — without this the hook thread blocks forever and
+# the run never finishes shutting down.
+_ABORTED = object()
+
+# What the model is told when the run is stopped mid-question. It reads
+# this back, so it is Spanish like every other deny reason.
+_STOPPED = "El usuario ha parado la ejecución. No lo hagas y para aquí."
+
 
 def available() -> bool:
     """Whether the SDK is installed here. False falls back to the CLI."""
@@ -89,7 +99,13 @@ class SdkRun:
         self.gate_timeout = GATE_TIMEOUT
         self.pending: str | None = None
         self.pending_text: str = ""
-        self._answers: queue.Queue = queue.Queue()
+        # One channel per question, created when it is asked and dropped
+        # when it is resolved: an answer given to a question that is
+        # already over has nowhere to wait, so it cannot be handed to the
+        # next one. `_lock` is what makes that atomic across the HTTP
+        # thread (`answer`, `interrupt`) and the hook's own.
+        self._answers: queue.Queue | None = None
+        self._lock = threading.Lock()
         self._milestones = Milestones()
 
     # ── what the caller does to it ────────────────────────────────────
@@ -101,6 +117,11 @@ class SdkRun:
         one. False means there was nothing running to stop — a run that
         already finished, or one whose loop never started.
         """
+        # First of all, let go of whatever is being asked. The hook is
+        # blocked on an answer nobody is going to give now, and the CLI
+        # is blocked on the hook — so `client.interrupt()` would sit out
+        # its own ten seconds before anything moved.
+        self._abandon()
         loop, client = self._loop, self._client
         if loop is None or client is None or loop.is_closed():
             return False
@@ -144,30 +165,72 @@ class SdkRun:
 
     def answer(self, text: str) -> bool:
         """Resolve the held question or gate. Thread-safe; False when
-        nothing waits — the caller then knows the moment has passed."""
-        if self.pending is None:
-            return False
-        self._answers.put(text)
-        return True
+        nothing waits — the caller then knows the moment has passed.
 
-    async def _await_answer(self, timeout: float | None) -> str | None:
-        """Block the hook (never the loop) until the user answers."""
+        The answer goes to the question that is open at this instant and
+        to no other: once that one is resolved its channel is dropped, so
+        anything left in it is dropped with it rather than being handed
+        to whatever is asked next.
+        """
+        with self._lock:
+            if self.pending is None or self._answers is None:
+                return False
+            self._answers.put(text)
+            return True
 
-        def take() -> str | None:
+    def _abandon(self) -> None:
+        """Let go of whatever is being asked, without an answer.
+
+        Called by `interrupt()` from the HTTP thread, so it touches only
+        what the lock guards and then wakes the waiter from outside it.
+        """
+        with self._lock:
+            channel, self._answers = self._answers, None
+            self.pending, self.pending_text = None, ""
+        if channel is not None:
+            channel.put(_ABORTED)
+
+    async def _await_answer(
+        self, channel: queue.Queue, timeout: float | None
+    ) -> object:
+        """Block the hook (never the loop) until the user answers.
+
+        Returns what was said, `None` when the wait ran out, `_ABORTED`
+        when the run was stopped while it was asking.
+        """
+
+        def take() -> object:
             try:
-                return self._answers.get(timeout=timeout)
+                return channel.get(timeout=timeout)
             except queue.Empty:
-                return None
+                pass
+            # The window shuts here, and shuts atomically: a "sí" that
+            # arrives one instant later is refused rather than kept.
+            with self._lock:
+                if self._answers is not channel:
+                    return None  # already abandoned or resolved elsewhere
+                try:
+                    return channel.get_nowait()  # answered at the buzzer
+                except queue.Empty:
+                    self._answers = None
+                    return None
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, take)
 
-    def _ask(self, qkind: str, text: str) -> None:
-        self.pending, self.pending_text = qkind, text
+    def _ask(self, qkind: str, text: str) -> queue.Queue:
+        """Put the question up, and hand back the channel it answers on."""
+        channel: queue.Queue = queue.Queue()
+        with self._lock:
+            self.pending, self.pending_text = qkind, text
+            self._answers = channel
         self._queue.put(Event(CONSOLE, f"? {text}", kind=qkind, detail=text))
+        return channel
 
     def _resolve(self) -> None:
-        self.pending, self.pending_text = None, ""
+        with self._lock:
+            self.pending, self.pending_text = None, ""
+            self._answers = None
         self._queue.put(Event(CONSOLE, "", kind="resolved"))
 
     @staticmethod
@@ -187,9 +250,14 @@ class SdkRun:
 
         if name == "AskUserQuestion":
             question = _question_text(args)
-            self._ask("question", question)
-            reply = await self._await_answer(None)
+            channel = self._ask("question", question)
+            # No timeout: nobody answers a question under a clock, and
+            # the silence guard in `events()` knows to wait. Only an
+            # interrupt ends this wait unanswered.
+            reply = await self._await_answer(channel, None)
             self._resolve()
+            if reply is _ABORTED:
+                return self._deny(_STOPPED)
             # P2 per the probe of 2026-08-27 (docs/superpowers/specs/
             # 2026-08-27-askuserquestion-probe.md): a PreToolUse deny
             # whose reason carries the answer steers the model — there
@@ -201,16 +269,19 @@ class SdkRun:
 
         risky = gates.dangerous(name, args, self.patterns)
         if risky:
-            self._ask("gate", risky)
-            reply = await self._await_answer(self.gate_timeout)
+            channel = self._ask("gate", risky)
+            reply = await self._await_answer(channel, self.gate_timeout)
             self._resolve()
+            if reply is _ABORTED:
+                return self._deny(_STOPPED)
             if reply is None:
                 return self._deny(
                     "El usuario no está. No lo hagas; sigue sin ello y dilo al final."
                 )
-            if assent(reply):
+            said = str(reply)  # past the two sentinels it is what was said
+            if assent(said):
                 return {}
-            return self._deny(f"El usuario no lo autoriza: {reply}. Sigue sin ello.")
+            return self._deny(f"El usuario no lo autoriza: {said}. Sigue sin ello.")
 
         return {}
 
