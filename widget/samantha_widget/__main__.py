@@ -162,6 +162,21 @@ _DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
 _MIC_GATE = os.environ.get("SAMANTHA_WIDGET_MIC_GATE") == "1"
 
 
+def _settles_a_held_question(message: str) -> bool:
+    """Whether an `error` frame is the adapter's `silence()`, not a fault.
+
+    The gateway only ever sends an EMPTY `error` when the user's own
+    sentence was diverted to the code assistant as the answer to a held
+    question or gate (`adapter.py`'s `_should_divert` + `silence()`).
+    Every other `error` — a lost turn, a bad frame — carries Spanish
+    text. JARVIS did not speak, but the user just did and is plainly
+    still in the conversation, so this counts as an answer for the wake
+    window: needing his name again for the very next sentence would be
+    exactly the friction the window exists to remove.
+    """
+    return not message
+
+
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.samantha.widget")
@@ -450,7 +465,7 @@ class SamanthaApp(Gtk.Application):
                 print("(no era para él)", file=sys.stderr, flush=True)
                 machine.error("")
                 return
-            await client.send_chat(spoken)
+            await client.send_chat(spoken, wake=wake.named)
 
         # ── the gateway's replies ─────────────────────────────────────
         def on_token(token: str) -> None:
@@ -483,6 +498,8 @@ class SamanthaApp(Gtk.Application):
         def on_error(message: str) -> None:
             if message:
                 say(message)
+            if _settles_a_held_question(message):
+                wake.answered(time.monotonic())
             machine.error(message)
 
         def on_photo(path: str, camera: str) -> None:

@@ -294,3 +294,24 @@ def test_a_reset_can_carry_its_first_line() -> None:
     gw.on_console = lambda t: order.append(f"line:{t}")
     gw._dispatch(json.dumps({"type": "console", "text": "arrancando", "reset": True}))
     assert order == ["reset", "line:arrancando"]
+
+
+class _FakeWs:
+    """Stands in for the `websockets` connection `send_chat` writes to."""
+
+    def __init__(self, sent: list[str]) -> None:
+        self._sent = sent
+
+    async def send(self, raw: str) -> None:
+        self._sent.append(raw)
+
+
+def test_send_chat_marks_named_turns_and_only_those():
+    sent: list[str] = []
+    gw = GatewayClient()
+    gw._ws = _FakeWs(sent)
+    asyncio.run(gw.send_chat("hola"))
+    asyncio.run(gw.send_chat("hola", wake=True))
+    first, second = (json.loads(s) for s in sent)
+    assert "wake" not in first
+    assert second["wake"] is True

@@ -93,3 +93,18 @@ def test_nothing_heard_is_never_a_turn():
     w = WakeWord()
     assert w.heard("", now=0.0) is None
     assert w.heard("   ", now=0.0) is None
+
+
+def test_heard_remembers_whether_the_name_was_said():
+    w = WakeWord("jarvis")
+    assert w.heard("jarvis, qué hora es", now=0.0) == "qué hora es"
+    assert w.named is True
+    w.answered(now=1.0)
+    assert w.heard("y mañana", now=2.0) == "y mañana"
+    assert w.named is False
+
+
+def test_with_no_wake_word_nothing_counts_as_named():
+    w = WakeWord("")
+    assert w.heard("hola", now=0.0) == "hola"
+    assert w.named is False

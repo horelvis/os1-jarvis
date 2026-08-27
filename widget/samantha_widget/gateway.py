@@ -54,8 +54,15 @@ def decode_live_frame(raw: bytes) -> tuple[int, bytes]:
     return int.from_bytes(raw[:4], "big"), bytes(raw[4:])
 
 
-def encode_chat(text: str, user_id: str = DEFAULT_USER_ID) -> str:
-    return json.dumps({"type": "chat", "message": text, "user_id": user_id})
+def encode_chat(
+    text: str, user_id: str = DEFAULT_USER_ID, *, wake: bool = False
+) -> str:
+    frame: dict[str, Any] = {"type": "chat", "message": text, "user_id": user_id}
+    if wake:
+        # Addressed by name: the gateway must never divert this one to
+        # the code assistant, whatever gate or question is pending.
+        frame["wake"] = True
+    return json.dumps(frame)
 
 
 def decode_server(raw: str) -> dict[str, Any]:
@@ -108,11 +115,11 @@ class GatewayClient:
     async def wait_connected(self, timeout: float = 10.0) -> None:
         await asyncio.wait_for(self._connected.wait(), timeout=timeout)
 
-    async def send_chat(self, text: str) -> None:
+    async def send_chat(self, text: str, *, wake: bool = False) -> None:
         if self._ws is None:
             self.on_error(_NO_GATEWAY)
             return
-        await self._ws.send(encode_chat(text, self.user_id))
+        await self._ws.send(encode_chat(text, self.user_id, wake=wake))
 
     async def run(self) -> None:
         """Connect, read, and reconnect forever. Cancel to stop."""

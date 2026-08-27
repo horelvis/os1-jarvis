@@ -77,6 +77,10 @@ class WakeWord:
     `heard()` returns the sentence with his name taken off the front, or
     None when the sentence was not for him. `answered()` opens the
     window during which the next sentence needs no name.
+
+    `named` says HOW the last accepted sentence got in — by name, or
+    through the window; the adapter routes on it while the code
+    assistant waits for an answer.
     """
 
     def __init__(
@@ -90,12 +94,14 @@ class WakeWord:
         self.word = _fold(word)
         self.window = window
         self._open_until = 0.0
+        self.named = False
 
     def heard(self, text: str, now: float) -> str | None:
         """The sentence to send on, or None to stay quiet."""
         text = text.strip()
         if not text:
             return None
+        self.named = False
         if not self.word:
             return text
 
@@ -103,6 +109,7 @@ class WakeWord:
         for lead in range(min(MAX_LEAD_WORDS, len(words))):
             if _is_the_name(words[lead], self.word):
                 rest = " ".join(words[lead + 1 :]).lstrip(_SEPARATORS).strip()
+                self.named = True
                 # His name and nothing else is somebody getting his
                 # attention, and he should answer that rather than
                 # receive an empty turn.
