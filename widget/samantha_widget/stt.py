@@ -15,9 +15,45 @@ progress bar.
 
 from __future__ import annotations
 
+import os
 import re
 
 DEFAULT_MODEL = "large-v3-turbo"
+
+# The words this box says that Whisper does not expect a living room to
+# say. Handed to the decoder as part of its `initial_prompt`, which is
+# the same mechanism that fixed his name on 2026-08-26 — and the file
+# already argues for it: the fix belongs where the word is decoded, not
+# where it is compared.
+#
+# Measured 2026-08-27, delegating a coding task out loud: "git" came
+# back as "JIT", "JIP" and "Jeep", and "Claude Code" as "Cloud Code" and
+# "CloudCoder". Two of the three attempts died there, and the third
+# created a folder called `Jeep`.
+#
+# It is a SENTENCE and not a word list on purpose: `initial_prompt` is
+# read as preceding speech, so prose biases the decoder the way a word
+# salad does not. Keep it short — it is decoded before every utterance.
+VOCABULARY = (
+    "Hablamos de git, GitHub, Claude Code, commits, ramas, "
+    "repositorios, tests con pytest y carpetas de proyecto."
+)
+
+
+def build_hint(wake_word: str = "") -> str:
+    """What Whisper is told it has just heard, to bias what it hears next.
+
+    His name first, because being ignored is the one failure a wake word
+    cannot afford; then the vocabulary. `SAMANTHA_WIDGET_STT_HINT`
+    replaces the whole thing — a different house says different words,
+    and an empty value turns the bias off entirely.
+    """
+    override = os.environ.get("SAMANTHA_WIDGET_STT_HINT")
+    if override is not None:
+        return override.strip()
+    name = f"Hola {wake_word.capitalize()}. " if wake_word else ""
+    return f"{name}{VOCABULARY}"
+
 
 # Whisper fills silence with the politeness it was trained on: video
 # outros, subtitle credits, "gracias". A strip that listens all day

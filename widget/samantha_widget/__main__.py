@@ -324,7 +324,7 @@ class SamanthaApp(Gtk.Application):
             is_system_message,
             unwrap_delivery,
         )
-        from .stt import Transcriber
+        from .stt import Transcriber, build_hint
         from .turn import TurnMachine
         from .vad import SileroDetector, UtteranceDetector
 
@@ -337,12 +337,10 @@ class SamanthaApp(Gtk.Application):
         player.start()
         speaker = Speaker(player)
         chunker = ClauseChunker()
-        # The hint carries his name so Whisper stops inventing spellings
-        # of it — see `Transcriber.hint`. A house where the wake word is
-        # off has nothing to bias towards.
-        transcriber = Transcriber(
-            hint=f"Hola {_WAKE_WORD.capitalize()}." if _WAKE_WORD else ""
-        )
+        # The hint carries his name and the words this box actually
+        # says, so Whisper stops inventing spellings of both — see
+        # `stt.build_hint`.
+        transcriber = Transcriber(hint=build_hint(_WAKE_WORD))
         client = GatewayClient()
 
         def on_switch(name: str, on: bool) -> None:
