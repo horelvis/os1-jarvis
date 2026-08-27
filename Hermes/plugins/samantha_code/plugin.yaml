@@ -13,6 +13,14 @@ description: >
 author: Horelvis Castillo
 
 # ─────────────────────────────────────────────────────────────────────
+# The one setting, under `plugins.entries.samantha-code.settings`:
+#
+#   bridge: "http://127.0.0.1:9910"   # the default; where the A2A
+#                                     # bridge serves /events
+#   bridge: ""                        # v1: follow the tee file instead
+#                                     # (a box with no bridge on it)
+#
+# ─────────────────────────────────────────────────────────────────────
 # How this plugin fails, and how it fails SILENTLY.
 #
 # 1. THE BRIDGE IS NOT RUNNING. `samantha-code-a2a.service` serves

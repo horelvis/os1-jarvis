@@ -32,7 +32,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
@@ -271,6 +271,14 @@ class KioskAdapter(BasePlatformAdapter):
         # and a second `chat` frame supersedes the first rather than queueing.
         # One slot, one task — nothing here grows with uptime.
         self._turn: Optional[_Turn] = None
+
+        # While the code assistant waits for an answer, samantha_code
+        # sets this; the next unnamed input is the answer and goes to
+        # the bridge instead of opening a turn. Deterministic on
+        # purpose: the model that fills tool args with {} (§12,
+        # 2026-08-26) never touches the reply. A frame with
+        # "wake": true was addressed by name and always reaches JARVIS.
+        self.divert_chat: Optional[Callable[[str], bool]] = None
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
         del is_reconnect
@@ -671,6 +679,8 @@ class KioskAdapter(BasePlatformAdapter):
                     await self._push(error(_BAD_FRAME))
                     continue
                 if decoded["type"] == "chat":
+                    if self._should_divert(decoded):
+                        continue
                     await self._handle_chat(decoded["message"], decoded["user_id"])
         finally:
             # In a finally because an exception in the loop body would
@@ -680,6 +690,23 @@ class KioskAdapter(BasePlatformAdapter):
             if self._ws is ws:
                 self._ws = None
         return ws
+
+    def _should_divert(self, decoded: Dict[str, Any]) -> bool:
+        """Whether this chat frame is an answer for the code assistant.
+
+        Synchronous and total: it never awaits and never raises, because
+        it sits directly in the read loop of the one socket the strip
+        has. A hook that blew up here would take the socket with it and
+        the strip would go mute for reasons nothing explains.
+        """
+        divert = self.divert_chat
+        if divert is None or decoded.get("wake"):
+            return False
+        try:
+            return bool(divert(decoded["message"]))
+        except Exception as exc:  # noqa: BLE001 — the turn outranks the hook
+            logger.warning(f"samantha-kiosk: divert failed — {exc}")
+            return False
 
     async def _handle_chat(self, message: str, user_id: str) -> None:
         source = self.build_source(

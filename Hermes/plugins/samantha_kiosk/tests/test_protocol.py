@@ -170,3 +170,26 @@ def test_the_end_of_the_work_is_a_flag_and_needs_no_text():
 def test_a_run_starting_resets_the_console():
     frame = json.loads(console("", reset=True))
     assert frame == {"type": "console", "text": "", "reset": True}
+
+
+def test_a_chat_frame_may_say_it_was_addressed_by_name():
+    msg = decode_client(
+        json.dumps({"type": "chat", "message": "hola", "user_id": "u", "wake": True})
+    )
+    assert msg["wake"] is True
+
+
+def test_wake_must_be_a_boolean_if_present():
+    with pytest.raises(ProtocolError):
+        decode_client(
+            json.dumps(
+                {"type": "chat", "message": "hola", "user_id": "u", "wake": "yes"}
+            )
+        )
+
+
+def test_an_older_strip_that_sends_no_wake_is_still_understood():
+    # The widget is versioned separately: a gateway that requires `wake`
+    # would stop talking to every strip built before this frame existed.
+    msg = decode_client(json.dumps({"type": "chat", "message": "hola", "user_id": "u"}))
+    assert "wake" not in msg

@@ -61,6 +61,15 @@ def decode_client(raw: str) -> Dict[str, Any]:
             # user_id flows into Hermes' build_source(), so validation is critical.
             raise ProtocolError("chat needs a non-blank user_id")
 
+        # Optional, and it must stay optional: the widget is versioned
+        # separately from the gateway, and a strip built before this
+        # field existed sends chat frames without it. True means the
+        # user said his name — see `_should_divert` in the adapter, the
+        # one place it is read.
+        wake = msg.get("wake")
+        if wake is not None and not isinstance(wake, bool):
+            raise ProtocolError("wake must be a boolean when present")
+
     return msg
 
 

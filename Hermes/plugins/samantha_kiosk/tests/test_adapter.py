@@ -749,3 +749,107 @@ def test_nothing_connected_is_false_not_an_exception(adapter):
     adapter._ws = None
     assert asyncio.run(adapter.push_live_frame(7, b"abc")) is False
     assert asyncio.run(adapter.push_live_close(7, "asked")) is False
+
+
+# ── The divert: while the code assistant waits, the next unnamed word
+#    is its answer and never opens a turn. ────────────────────────────
+
+
+def test_divert_consumes_unnamed_input_when_someone_waits(adapter):
+    taken = []
+    adapter.divert_chat = lambda text: taken.append(text) or True
+    assert (
+        adapter._should_divert({"type": "chat", "message": "sí", "user_id": "u"})
+        is True
+    )
+    assert taken == ["sí"]
+
+
+def test_named_input_always_reaches_jarvis(adapter):
+    adapter.divert_chat = lambda text: True
+    assert (
+        adapter._should_divert(
+            {"type": "chat", "message": "qué hora es", "user_id": "u", "wake": True}
+        )
+        is False
+    )
+
+
+def test_no_divert_hook_means_nothing_changes(adapter):
+    assert (
+        adapter._should_divert({"type": "chat", "message": "hola", "user_id": "u"})
+        is False
+    )
+
+
+def test_a_divert_that_declines_leaves_the_turn_alone(adapter):
+    # Nothing is waiting any more: the hook says so and the words are a
+    # turn like any other.
+    adapter.divert_chat = lambda text: False
+    assert (
+        adapter._should_divert({"type": "chat", "message": "hola", "user_id": "u"})
+        is False
+    )
+
+
+def test_a_divert_that_raises_does_not_eat_the_turn(adapter):
+    def boom(text):
+        raise RuntimeError("x")
+
+    adapter.divert_chat = boom
+    assert (
+        adapter._should_divert({"type": "chat", "message": "hola", "user_id": "u"})
+        is False
+    )
+
+
+def test_a_diverted_frame_never_becomes_a_turn(tmp_path, monkeypatch):
+    # The seam that matters, through a real socket: the answer goes to
+    # the bridge and Hermes is never asked to think about it.
+    import Hermes.plugins.samantha_kiosk.adapter as mod
+
+    seen = []
+    taken = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+        # Answer, so the test can wait on something instead of sleeping.
+        await self.send(event.source.chat_id, "vale")
+
+    monkeypatch.setattr(
+        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.KioskAdapter(_cfg(tmp_path))
+        a.divert_chat = lambda text: taken.append(text) or True
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "sí", "user_id": "primary"}
+                        )
+                    )
+                    # Then a named one, which must get through — and its
+                    # arrival is what proves the first was consumed
+                    # rather than merely slow.
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "qué hora es",
+                                "user_id": "primary",
+                                "wake": True,
+                            }
+                        )
+                    )
+                    got = json.loads((await ws.receive(timeout=5)).data)
+                    assert got["type"] == "token"
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert taken == ["sí"]
+    assert [e.text for e in seen] == ["qué hora es"]

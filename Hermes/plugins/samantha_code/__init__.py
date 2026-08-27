@@ -9,15 +9,24 @@ which are written on `terminal`, and the model fills THOSE arguments
 correctly.
 
 So this plugin does the one thing those skills cannot: show the work
-while it happens. `terminal` returns when the command ends, so a task
-that takes four minutes is four minutes of nothing on screen. The
-wrapper on the gateway's PATH (`Hermes/bin/claude`) tees a
-non-interactive run into a file; this follows that file and pushes each
-line into the strip's terminal.
+while it happens, and bring the user back into it when his judgement is
+needed. `terminal` returns when the command ends, so a task that takes
+four minutes is four minutes of nothing on screen.
 
-Nothing here sits in the path of a turn. If the file never appears the
-thread sleeps; if the strip is not connected the lines are dropped. The
-assistant works either way — what is lost is watching it.
+What it follows is the bridge's firehose (`bridges/code-a2a`, on
+:9910): one loopback SSE stream carrying semantic events rather than
+raw output. Milestones become one Spanish line each on the strip's
+console; the three moments that need a person — the assistant's own
+question, anything irreversible, and the closing checkpoint — become a
+prompt injected into the strip's session, so the user is ASKED, out
+loud, in his voice.
+
+With `settings.bridge` emptied it falls back to v1: the tee-file
+follower below, for a box running the CLI path with no bridge on it.
+
+Nothing here sits in the path of a turn. If the bridge is not up the
+follower reconnects forever; if the strip is not connected the lines are
+dropped. The assistant works either way — what is lost is watching it.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from . import client, hitos, pending, voz
 from .live import DEFAULT_LIVE, follow, summarise
 
 # The kiosk platform, hard-coded for the reason `samantha_vision`
@@ -98,18 +108,34 @@ def watch(path: Path, stop: threading.Event) -> None:
 
 
 def register(ctx):
-    """Start the follower. Pure: nothing here touches the network.
+    """Start the bridge follower — or, with no bridge configured, the
+    legacy tee-file follower (a box running the CLI path keeps v1).
 
-    The thread is a daemon and owns its own failure, like the camera
-    threads: a plugin that took the gateway down because a log file went
-    away would be a poor trade for a convenience.
+    Pure: nothing here touches the network. The thread is a daemon and
+    owns its own failure, like the camera threads — a plugin that took
+    the gateway down because a socket went away would be a poor trade
+    for a convenience. It is a daemon rather than something joined on
+    unload because `client.follow_events` sleeps up to 30 s between
+    reconnect attempts and does not check `stop` while it sleeps:
+    waiting for it would look exactly like a hang.
     """
-    path = Path(os.environ.get("SAMANTHA_CODE_LIVE", "") or DEFAULT_LIVE).expanduser()
     stop = threading.Event()
     try:
         ctx.on_unload(stop.set)
     except Exception:
         pass
+
+    bridge = _setting(ctx, "bridge", client.DEFAULT_BRIDGE)
+    if bridge:
+        threading.Thread(
+            target=_run_bridge_mode,
+            args=(ctx, bridge, stop),
+            name="samantha-code-bridge",
+            daemon=True,
+        ).start()
+        return
+
+    path = Path(os.environ.get("SAMANTHA_CODE_LIVE", "") or DEFAULT_LIVE).expanduser()
 
     def run() -> None:
         try:
@@ -118,3 +144,92 @@ def register(ctx):
             logger.warning(f"samantha-code: el seguidor se detuvo — {exc}")
 
     threading.Thread(target=run, name="samantha-code-live", daemon=True).start()
+
+
+def _setting(ctx, name: str, default: str) -> str:
+    """One plugin setting, with the default when the gateway has none."""
+    try:
+        value = ctx.get_config(name)
+    except Exception:
+        return default
+    return default if value is None else str(value)
+
+
+def _run_bridge_mode(ctx, bridge: str, stop: threading.Event) -> None:
+    """The dispatch loop: firehose in; console, voice and divert out."""
+    state = pending.Pending()
+    dedup = hitos.Dedup()
+
+    def _set_divert(hook) -> None:
+        adapter = _adapter()
+        if adapter is not None:
+            adapter.divert_chat = hook
+
+    def divert(text: str) -> bool:
+        """The user's next unnamed words, when something is waiting."""
+        waiting = state.get()
+        if waiting is None:
+            return False
+        task_id, _kind = waiting
+        # Cleared BEFORE the POST leaves, on purpose: a second utterance
+        # while the first is in flight is a turn, not a second answer.
+        state.clear()
+        _set_divert(None)
+        _push(f"→ {text}\n")
+        threading.Thread(
+            target=client.send_answer,
+            args=(bridge, task_id, text),
+            name="samantha-code-answer",
+            daemon=True,
+        ).start()
+        return True
+
+    try:
+        for event in client.follow_events(bridge, stop.is_set):
+            try:
+                what = event.get("event")
+                if what == "task":
+                    # A new run: an empty console, and a dedup that has
+                    # forgotten the last run's final line.
+                    dedup = hitos.Dedup()
+                    _push("", reset=True)
+                elif what == "ask":
+                    text = str(event.get("text") or "")
+                    qkind = str(event.get("qkind") or "")
+                    state.set(str(event.get("taskId") or ""), qkind)
+                    _set_divert(divert)
+                    line = hitos.render(event)
+                    if line:
+                        _push(line + "\n")
+                    # A checkpoint renders no line — it is the voice's,
+                    # and the band already says «— terminado» at `end`.
+                    voz.deliver(ctx.inject_message, voz.prompt_for(qkind, text))
+                elif what == "resolved":
+                    state.clear()
+                    _set_divert(None)
+                elif what == "end":
+                    state.clear()
+                    _set_divert(None)
+                    # The closing line is written HERE, not by
+                    # `hitos.render`, which returns None for `end`. The
+                    # band needs it: it is what a checkpoint leaves
+                    # behind, since the checkpoint itself is the
+                    # voice's and shows nothing. Same wording as v1's
+                    # `live.summarise`, deliberately — one console, one
+                    # vocabulary, whichever mode fed it.
+                    _push(
+                        "— terminado con errores\n"
+                        if event.get("failed")
+                        else "— terminado\n"
+                    )
+                    _push("", done=True)
+                else:
+                    line = hitos.render(event)
+                    if line:
+                        line = dedup.feed(line)
+                    if line:
+                        _push(line + "\n")
+            except Exception as exc:  # noqa: BLE001 — one event, not the run
+                logger.warning(f"samantha-code: evento descartado — {exc}")
+    except Exception as exc:  # noqa: BLE001 — the follower owns its failure
+        logger.warning(f"samantha-code: el modo puente se detuvo — {exc}")
