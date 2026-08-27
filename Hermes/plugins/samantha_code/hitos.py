@@ -26,7 +26,15 @@ def render(event: dict) -> str | None:
         if kind == "run":
             return f"Ejecutando: {detail}"
         if kind == "tests_out":
-            spanish = detail.replace("passed", "pasan").replace("failed", "fallan")
+            # "errors" before "error": the plural contains the singular
+            # as a substring, and the singular is already valid Spanish
+            # (no translation needed) — replacing it first would leave
+            # a stray "s" on the plural.
+            spanish = (
+                detail.replace("passed", "pasan")
+                .replace("failed", "fallan")
+                .replace("errors", "errores")
+            )
             return f"Tests: {spanish}"
         if kind == "note":
             return detail or None

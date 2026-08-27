@@ -16,6 +16,13 @@ def test_test_outcomes_speak_spanish():
     assert line == "Tests: 12 pasan, 2 fallan"
 
 
+def test_test_outcomes_translate_errors_plural_and_leave_singular_alone():
+    plural = render({"event": "milestone", "kind": "tests_out", "detail": "3 passed, 1 errors", "text": ""})
+    assert plural == "Tests: 3 pasan, 1 errores"
+    singular = render({"event": "milestone", "kind": "tests_out", "detail": "1 error", "text": ""})
+    assert singular == "Tests: 1 error"
+
+
 def test_unknown_kinds_fall_back_to_the_text():
     assert render({"event": "milestone", "kind": "novel", "detail": "", "text": "algo"}) == "algo"
     assert render({"event": "milestone", "kind": "novel", "detail": "", "text": ""}) is None

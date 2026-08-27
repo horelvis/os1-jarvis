@@ -2,8 +2,10 @@
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from Hermes.plugins.samantha_code import client
 from Hermes.plugins.samantha_code.client import follow_events, send_answer
 
 
@@ -45,6 +47,27 @@ def _server():
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 
+class _DropOnce(BaseHTTPRequestHandler):
+    """Serves one event per connection, then closes it (HTTP/1.0's
+    default) — simulating a stream that ends and must be reconnected
+    to, with a different event on the second connection so a test can
+    tell the two apart."""
+
+    hits = 0
+
+    def log_message(self, *a):  # noqa: A003
+        pass
+
+    def do_GET(self):
+        _DropOnce.hits += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        task_id = "t1" if _DropOnce.hits == 1 else "t2"
+        self.wfile.write(f'data: {{"event": "task", "taskId": "{task_id}"}}\n\n'.encode())
+        self.wfile.flush()
+
+
 def test_follow_yields_json_payloads_and_skips_the_rest():
     server, url = _server()
     try:
@@ -59,6 +82,54 @@ def test_follow_yields_json_payloads_and_skips_the_rest():
         ]
     finally:
         server.shutdown()
+
+
+def test_follow_reconnects_once_the_stream_ends_and_yields_the_next_event(monkeypatch):
+    # A short, fixed backoff — this test lets the generator run past the
+    # end of one connection's stream into a real reconnect, and it must
+    # stay bounded regardless of the module's real 1s/30s constants.
+    monkeypatch.setattr(client, "_BACKOFF_START", 0.02)
+    monkeypatch.setattr(client, "_BACKOFF_CEILING", 0.02)
+    _DropOnce.hits = 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DropOnce)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        seen = []
+        # No early break: the first connection's stream must be allowed
+        # to reach EOF on its own for the reconnect path to run at all.
+        for payload in follow_events(url, stop=lambda: len(seen) >= 2):
+            seen.append(payload)
+            if len(seen) >= 2:
+                break
+        assert seen == [
+            {"event": "task", "taskId": "t1"},
+            {"event": "task", "taskId": "t2"},
+        ]
+        assert _DropOnce.hits >= 2  # the second event came from a second connection
+    finally:
+        server.shutdown()
+
+
+def test_follow_does_not_hang_against_an_unreachable_bridge_and_stops_promptly(monkeypatch):
+    # No real server at all: every connection attempt fails immediately
+    # (refused). A short, fixed backoff plus a stop() that flips after a
+    # couple of failed attempts bounds the whole test to a few tens of
+    # milliseconds — nowhere near the module's real 30s ceiling.
+    monkeypatch.setattr(client, "_BACKOFF_START", 0.02)
+    monkeypatch.setattr(client, "_BACKOFF_CEILING", 0.02)
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 3
+
+    started = time.monotonic()
+    seen = list(follow_events("http://127.0.0.1:9", stop))
+    elapsed = time.monotonic() - started
+
+    assert seen == []
+    assert elapsed < 5.0  # bounded — it must not hang
 
 
 def test_send_answer_posts_a_message_send_with_the_task_id():
