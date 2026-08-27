@@ -150,6 +150,7 @@ The firehose payloads, one JSON object per `data:` line:
 ```
 {"event": "task",      "taskId": …, "project": …}
 {"event": "milestone", "taskId": …, "kind": …, "detail": …, "text": …}
+                        # kind "raw": `text` is printed verbatim
 {"event": "ask",       "taskId": …, "qkind": …, "text": …}
 {"event": "resolved",  "taskId": …}
 {"event": "end",       "taskId": …, "failed": …, "stopped": …, "chained": …, "summary": …}
@@ -215,6 +216,38 @@ away. Everything it holds belonged to that stream.
   the recorded alternative does not work unattended: under `acceptEdits`
   two commands and the edit itself were refused, and the assistant ended
   up describing a fix it could not apply.
+
+## What the console shows
+
+**The lines, not a summary of them.** The user, 2026-08-27: *«deja de
+filtrar»*. `sdk_runner` emits one console line per block the assistant
+produces — `• Bash(pytest -q)`, `  └ 3 passed`, and what it says in its
+own words — and the plugin prints them verbatim. `milestones.py` still
+classifies, but only for `plain()` (the artifact and the v1 tee'd file);
+it no longer decides what is seen.
+
+**The voice is untouched by that.** The three moments come from
+`gates.py` and the `PreToolUse` hook and never passed through the
+classifier, so showing everything costs them nothing.
+
+Four things the first live capture of the strip taught, all in
+`milestones.py`:
+
+- **The glyphs have to exist in the console's font.** Claude Code's `⏺`
+  (U+23FA) and `⎿` (U+23BF) are in neither `Ubuntu Sans Mono` — the
+  desktop's monospace, which the strip reads from GNOME — nor DejaVu
+  Sans Mono. `fc-list :charset=23fa` finds two fonts on this box and
+  neither is monospaced. A missing glyph is substituted at another
+  width and the column stops lining up. `•` (U+2022) and `└` (U+2514)
+  are in it.
+- **A result is indented under its call**, and collapsing whitespace
+  over the whole line ate that indent once.
+- **Markdown is stripped** — bold and headings, which a plain-text
+  console cannot draw and which showed as literal `**RED**`. Backticks
+  are kept: they are all that marks a fragment as code.
+- **A multi-line command keeps its first line** and says how many it
+  hid. A heredoc otherwise arrives as one unreadable run of collapsed
+  newlines filling the width.
 
 ## The recording
 

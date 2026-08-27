@@ -93,3 +93,86 @@ def test_the_recorded_run_produces_no_consecutive_duplicates():
                 lines.append(out)
     assert lines, "the fixture should produce something"
     assert all(a != b for a, b in zip(lines, lines[1:]))
+
+# ── Raw, the way Claude Code shows it. «Deja de filtrar» ─────────────
+
+from milestones import (  # noqa: E402
+    BULLET,
+    CORNER,
+    MAX_LINE,
+    result_line,
+    text_line,
+    tool_line,
+)
+
+
+def test_the_glyphs_are_ones_the_console_font_actually_has():
+    """Claude Code's own `⏺` and `⎿` are in neither Ubuntu Sans Mono nor
+    DejaVu Sans Mono on this box — `fc-list :charset=23fa` finds two
+    fonts and neither is monospaced. A missing glyph is substituted from
+    another font at another width, which is what the first capture of
+    the strip showed. These two are in it, measured the same way.
+    """
+    assert (BULLET, CORNER) == ("•", "└")
+
+
+def test_a_tool_call_shows_its_salient_argument():
+    assert tool_line("Bash", {"command": "pytest -q"}) == f"{BULLET} Bash(pytest -q)"
+    # A path is its basename: the console is 900 px wide and the
+    # directory is the same one every time.
+    assert tool_line("Read", {"file_path": "/home/x/p/calc.py"}) == (
+        f"{BULLET} Read(calc.py)"
+    )
+    assert tool_line("Grep", {"pattern": "def suma"}) == f"{BULLET} Grep(def suma)"
+
+
+def test_a_tool_call_with_nothing_worth_showing_is_just_its_name():
+    assert tool_line("Skill", {}) == f"{BULLET} Skill"
+    assert tool_line("Skill", "no soy un dict") == f"{BULLET} Skill"
+
+
+def test_a_heredoc_keeps_its_first_line_instead_of_collapsing():
+    # Measured on the strip: a multi-line command arrived as one
+    # unreadable run of collapsed newlines filling the whole width.
+    line = tool_line("Bash", {"command": "cd /p && python3 - <<'EOF'\nx = 1\nEOF"})
+    assert line == f"{BULLET} Bash(cd /p && python3 - <<'EOF' (+2 líneas))"
+
+
+def test_what_the_assistant_says_is_not_cut_to_its_first_sentence():
+    # This is the filtering that stopped: `note()` kept the first
+    # sentence and dropped the rest.
+    said = text_line("Voy a mirar calc.py. Luego escribo el test.")
+    assert said == f"{BULLET} Voy a mirar calc.py. Luego escribo el test."
+
+
+def test_markdown_a_plain_console_cannot_draw_is_stripped():
+    assert text_line("**RED** — escribo el test") == f"{BULLET} RED — escribo el test"
+    assert text_line("__negrita__") == f"{BULLET} negrita"
+    assert text_line("### Cambios") == f"{BULLET} Cambios"
+
+
+def test_backticks_are_kept_because_they_are_all_that_marks_code():
+    said = text_line("falla por `ImportError: cannot import name 'multiplica'`")
+    assert "`ImportError: cannot import name 'multiplica'`" in said
+
+
+def test_a_long_line_is_cut_rather_than_wrapped():
+    assert len(text_line("x" * 500)) <= MAX_LINE
+    assert text_line("x" * 500).endswith("…")
+    assert len(tool_line("Bash", {"command": "y" * 500})) <= MAX_LINE
+    assert len(result_line("z" * 500)) <= MAX_LINE
+
+
+def test_a_result_is_indented_under_the_call_it_belongs_to():
+    # The indent is the only thing tying a result to its call, and
+    # collapsing whitespace over the whole line ate it once already.
+    assert result_line("3 passed") == f"  {CORNER} 3 passed"
+    assert result_line("primera\nsegunda\ntercera") == (
+        f"  {CORNER} primera (+2 líneas)"
+    )
+
+
+def test_a_result_of_nothing_writes_nothing():
+    assert result_line("") == ""
+    assert result_line("   ") == ""
+    assert text_line("   ") == ""

@@ -18,6 +18,11 @@ def render(event: dict) -> str | None:
     what = event.get("event")
     if what == "milestone":
         kind = event.get("kind") or ""
+        if kind == "raw":
+            # The user, 2026-08-27: «deja de filtrar». A raw line is
+            # already the assistant's own words — printing a wording of
+            # ours over the top of it is the filtering he asked to stop.
+            return str(event.get("text") or "") or None
         detail = str(event.get("detail") or "")
         if kind in _LINES:
             return _LINES[kind]

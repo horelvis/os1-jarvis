@@ -45,3 +45,15 @@ def test_dedup_drops_only_consecutive_repeats():
     assert d.feed("a") is None
     assert d.feed("b") == "b"
     assert d.feed("a") == "a"
+
+
+def test_a_raw_line_is_printed_exactly_as_it_arrived():
+    # The user, 2026-08-27: «deja de filtrar». A raw line is already the
+    # assistant's own words; putting a wording of ours over the top of
+    # it is the filtering he asked to stop.
+    line = "• Bash(pytest -q)"
+    assert render({"event": "milestone", "kind": "raw", "text": line}) == line
+
+
+def test_a_raw_line_with_no_text_is_dropped():
+    assert render({"event": "milestone", "kind": "raw", "text": ""}) is None

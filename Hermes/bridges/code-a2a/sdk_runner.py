@@ -37,7 +37,7 @@ from pathlib import Path
 
 import gates
 from answers import assent
-from milestones import Milestones, plain
+from milestones import result_line, text_line, tool_line
 from runner import END, START, Run, _tee
 from stream import CONSOLE, VOICE, Event
 
@@ -106,7 +106,6 @@ class SdkRun:
         # thread (`answer`, `interrupt`) and the hook's own.
         self._answers: queue.Queue | None = None
         self._lock = threading.Lock()
-        self._milestones = Milestones()
 
     # ── what the caller does to it ────────────────────────────────────
 
@@ -335,21 +334,9 @@ class SdkRun:
                     for block in msg.content:
                         if isinstance(block, TextBlock) and block.text.strip():
                             spoken = block.text.strip()
-                            m = self._milestones.note(block.text)
-                            if m is not None:
-                                self._queue.put(
-                                    Event(
-                                        CONSOLE, plain(m), kind=m.kind, detail=m.detail
-                                    )
-                                )
+                            self._raw(text_line(block.text))
                         elif isinstance(block, ToolUseBlock):
-                            m = self._milestones.feed(block.name, block.input or {})
-                            if m is not None:
-                                self._queue.put(
-                                    Event(
-                                        CONSOLE, plain(m), kind=m.kind, detail=m.detail
-                                    )
-                                )
+                            self._raw(tool_line(block.name, block.input or {}))
                 elif isinstance(msg, UserMessage):
                     content = msg.content
                     if isinstance(content, list):
@@ -362,16 +349,7 @@ class SdkRun:
                                         for c in text
                                         if isinstance(c, dict)
                                     )
-                                m = self._milestones.result(str(text or ""))
-                                if m is not None:
-                                    self._queue.put(
-                                        Event(
-                                            CONSOLE,
-                                            plain(m),
-                                            kind=m.kind,
-                                            detail=m.detail,
-                                        )
-                                    )
+                                self._raw(result_line(str(text or "")))
                 elif isinstance(msg, ResultMessage):
                     self.session_id = getattr(msg, "session_id", None) or None
                     self.failed = bool(getattr(msg, "is_error", False))
@@ -381,6 +359,18 @@ class SdkRun:
         # The stream ended without a result: interrupted, or the child
         # died. Either way the caller is owed a last word.
         self._queue.put(self._closing(""))
+
+    def _raw(self, line: str) -> None:
+        """One console line, verbatim. The user, 2026-08-27: «deja de filtrar».
+
+        `kind="raw"` is what tells the plugin to print it as it stands
+        instead of looking up a wording of its own — the strip's console
+        shows the work now, not a summary of it. The three moments that
+        reach the voice are untouched: they come from `gates.py` and the
+        `PreToolUse` hook and never passed through here.
+        """
+        if line:
+            self._queue.put(Event(CONSOLE, line, kind="raw"))
 
     def _closing(self, text: str) -> Event:
         if self.interrupted:
