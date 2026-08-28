@@ -186,17 +186,19 @@ concluding the plugin is broken.
 
 ## 8. The kiosk-era interface route (retired)
 
-With the gateway running (see `running-real-mode.md`):
+This step is retired. There was a static frontend served from `/` on
+`:7777`; there is no longer one to check. The strip (`widget/`) is a native
+GTK4 window, not a page a browser loads, and the `jarvis` platform serves
+exactly one route — `/ws` — and nothing else, by design
+(`Hermes/plugins/jarvis/adapter.py`).
 
-```bash
-curl -sS -o /dev/null -w '/        %{http_code}\n' http://localhost:7777/
-curl -sS    http://localhost:7777/ | grep -o '/assets/[^"]*' | head -1
+Check instead that the gateway logged, on startup:
+
+```
+jarvis: serving /ws on :7777
 ```
 
-Then fetch the asset path that command printed and confirm it is 200 as well.
-
-**A 200 on `/` with a 404 on the asset is a blank screen** — the most easily
-missed failure here, because the page "loads".
+If that line is missing, the platform did not come up — see §5.
 
 ## 9. She answers, and a refresh does not lock you out
 
