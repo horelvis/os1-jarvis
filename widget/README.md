@@ -169,7 +169,7 @@ the screen and look at it:
 
 `Hermes/jarvis-soul.md` es la identidad. Si la cambias y no notas nada:
 
-    # por el kiosko, en este orden
+    # por la tira, en este orden
     /new
     /approve
 

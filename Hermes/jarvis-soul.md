@@ -7,7 +7,7 @@ existe: el gateway sigue sirviendo la conversación con el prompt que
 tenía. Reiniciar el gateway tampoco basta — la sesión vive en
 state.db y se reanuda.
 
-Tras cambiar la personalidad hay que abrir sesión nueva. Por el kiosko:
+Tras cambiar la personalidad hay que abrir sesión nueva. Por la tira:
 enviar `/new` y confirmar con `/approve`. Desde Hermes Desktop pasa
 solo, porque abre una sesión suya — que es la razón de que allí se
 viera JARVIS mientras por la tira seguía diciendo "me llamo Hermes".

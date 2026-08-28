@@ -1,7 +1,7 @@
 """The wire format, and the client's behaviour against a real socket.
 
 The frame shapes are not ours to choose: they are pinned in
-Hermes/plugins/samantha_kiosk/protocol.py, which in turn pins what the
+Hermes/plugins/jarvis/protocol.py, which in turn pins what the
 old frontend spoke. A change on either side has to fail here rather
 than on the strip.
 """

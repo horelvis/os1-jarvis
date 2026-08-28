@@ -91,7 +91,7 @@ def register(ctx):
         push_live_open,
         push_live_frame,
         push_live_close,
-        loop_provider=_kiosk_loop,
+        loop_provider=_jarvis_loop,
     )
 
     ctx.register_tool(
@@ -144,7 +144,7 @@ def _supervise(ctx, fleet: CameraFleet, names: list[str] | None = None) -> None:
 async def push_photo(path: str, camera: str) -> bool:
     """Show a photo on the strip, and nowhere else. Never raises.
 
-    The kiosk adapter validates the path against the snapshot directory
+    The jarvis adapter validates the path against the snapshot directory
     before it puts it on the wire, so this is not the trust boundary —
     it is the wiring, and it lives here rather than in `tool.py` for the
     same reason `alert.py` holds the gateway call: the tool must run in
@@ -201,14 +201,14 @@ def _show_sighting(frame: Any, camera: str) -> None:
     from .snapshot import write_jpeg
 
     path = write_jpeg(frame, camera, now=time.time())
-    loop = _kiosk_loop()
+    loop = _jarvis_loop()
     if loop is None or loop.is_closed():
         logger.debug(f"samantha-vision: {camera} photo not shown — no loop")
         return
     asyncio.run_coroutine_threadsafe(push_photo(str(path), camera), loop)
 
 
-def _kiosk_loop():
+def _jarvis_loop():
     """The loop the strip's websocket lives on, or None.
 
     Synchronous on purpose: `LiveSession.open` needs it while deciding

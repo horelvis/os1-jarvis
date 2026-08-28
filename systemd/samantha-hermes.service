@@ -21,12 +21,15 @@ After=network.target
 [Service]
 Type=simple
 
-# systemd starts the process in %h, and samantha-kiosk's default static
-# root is the RELATIVE path "frontend/dist" — which then resolves to
-# ~/frontend/dist and the gateway refuses to start with
-# "no frontend at /home/<user>/frontend/dist". Every relative default in
-# every plugin has the same problem, so the fix is the working directory
-# rather than one more Environment= line per path.
+# systemd starts the process in %h. Originally needed because
+# samantha-kiosk's default static root was the RELATIVE path
+# "frontend/dist" — which then resolved to ~/frontend/dist and the
+# gateway refused to start with "no frontend at
+# /home/<user>/frontend/dist". jarvis (the renamed plugin) serves no
+# static root at all any more — the widget replaced the frontend it used
+# to serve (CLAUDE.md §12, 2026-08-22) — but the working directory stays,
+# rather than risk another plugin's relative default breaking the
+# same way.
 WorkingDirectory=%h/git/os1-samantha
 
 # API Server configuration. Environment variables override the config.yaml and

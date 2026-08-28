@@ -179,7 +179,7 @@ an empty `cameras:` list is not offered something that can only fail.
 **The answer is words. The picture is a side effect.** The return value
 carries no `MEDIA:` tag and no filesystem path — a tool result travels
 wherever the turn travels, and CosyVoice reads the answer out loud. The
-photo goes to the strip alone, through the kiosk adapter, and whether
+photo goes to the strip alone, through the jarvis adapter, and whether
 that succeeded never changes what he says. CLAUDE.md §12, 2026-08-25, has
 the argument.
 
@@ -320,7 +320,7 @@ journalctl --user -u samantha-hermes.service -f | grep samantha-vision
   `DEBUG` when the answer was simply that nothing was listening; a
   WARNING when something went wrong. `no gateway, photo dropped` and
   `no strip platform, photo dropped` are the two ordinary cases, and
-  `samantha-kiosk: refusing photo outside the spool: …` is the adapter
+  `jarvis: refusing photo outside the spool: …` is the adapter
   declining a path that does not live in the snapshot directory.
 - `no live gateway, sighting dropped after 4 attempts` — every attempt
   came back `False`. Two causes, and neither of them is a missing

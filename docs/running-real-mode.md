@@ -1,5 +1,13 @@
 # Running Samantha in real mode
 
+> **Superseded 2026-08-23, kept for the history.** This describes the
+> kiosk era: the OS1 frontend served over HTTP by the Hermes plugin then
+> called `samantha_kiosk` (renamed `jarvis` on 2026-08-28). The widget
+> replaced that served frontend entirely (CLAUDE.md §2.3, §12) — there
+> is no longer a `pnpm build` step, no `SAMANTHA_KIOSK_STATIC_ROOT`, and
+> nothing at `:7777` to point a browser at. This document was never
+> rewritten for what runs now; see CLAUDE.md §0 and §5 instead.
+
 > **Status: verified 2026-08-07** on the dev Mac against a separate GPU box;
 > re-verified 2026-08-22 with everything — backend, GPU, container and Hermes
 > — on a single machine, which is how it runs now. This describes how startup

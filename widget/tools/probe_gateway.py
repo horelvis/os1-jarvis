@@ -1,10 +1,10 @@
-"""Ask the kiosk socket one question and print everything it says back.
+"""Ask the jarvis socket one question and print everything it says back.
 
 Not a test — a thing you run by hand, once, to find out what the
 gateway actually does with a turn before writing code that assumes it.
 
 The question it exists to answer: does anything OTHER than the widget
-produce audio for a kiosk turn? If the gateway's auto-TTS fires too,
+produce audio for a jarvis turn? If the gateway's auto-TTS fires too,
 Samantha says everything twice, and that is a confusing bug to meet for
 the first time with six other new modules in the room (spec §5.1).
 """

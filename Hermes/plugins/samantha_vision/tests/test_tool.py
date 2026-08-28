@@ -46,7 +46,7 @@ class _Fleet:
 
 
 class _Spy:
-    """Stands in for KioskAdapter.push_photo. Records, never fails."""
+    """Stands in for JarvisAdapter.push_photo. Records, never fails."""
 
     def __init__(self, result: bool = True) -> None:
         self.calls: list[tuple[str, str]] = []

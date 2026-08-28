@@ -40,7 +40,7 @@ from loguru import logger
 from . import client, hitos, pending, voz
 from .live import DEFAULT_LIVE, follow, summarise
 
-# The kiosk platform, hard-coded for the reason `samantha_vision`
+# The jarvis platform, hard-coded for the reason `samantha_vision`
 # hard-codes it: a setting naming the platform would let the contents of
 # somebody's repository be routed elsewhere by a config change
 # (§12, 2026-08-25).

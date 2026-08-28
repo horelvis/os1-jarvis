@@ -1,8 +1,8 @@
-"""The kiosk WebSocket wire format.
+"""The jarvis WebSocket wire format.
 
 This is NOT a new protocol. It is the one the OS1 frontend already speaks,
 defined in `frontend/src/core/types.ts:37-45`, pinned here so that a change
-on either side fails a test instead of the kiosk. Field names are part of
+on either side fails a test instead of the strip. Field names are part of
 the contract: the frontend reads `msg.token`, `msg.thinking_ms`, `msg.error`.
 
 Binary WebSocket frames arrive alongside these text ones: audio frames in
@@ -28,7 +28,7 @@ _MAX_MESSAGE_CHARS = 4000
 
 
 class ProtocolError(ValueError):
-    """Raised for anything the kiosk should not have sent."""
+    """Raised for anything the strip should not have sent."""
 
 
 def decode_client(raw: str) -> Dict[str, Any]:

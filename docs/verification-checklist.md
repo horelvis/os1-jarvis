@@ -62,11 +62,11 @@ somewhere else.
 
 ```bash
 Hermes/run-gateway.sh --version
-Hermes/run-gateway.sh plugins list | grep -i samantha
+Hermes/run-gateway.sh plugins list | grep -iE 'samantha|jarvis'
 ```
 
 Expect `v0.20.5 (2026.8.19)`, an install directory inside the repo, and both
-`samantha-voice` and `samantha-kiosk` reading `enabled`. If the version is
+`samantha-voice` and `jarvis` reading `enabled`. If the version is
 older, or the install directory is under `$HOME`, you are talking to a
 different Hermes — re-run `Hermes/setup-runtime.sh`.
 
@@ -83,7 +83,7 @@ Measured 2026-08-22; the two commands take different names and always have.
 
 ```bash
 Hermes/run-gateway.sh plugins doctor samantha_voice
-Hermes/run-gateway.sh plugins doctor samantha_kiosk
+Hermes/run-gateway.sh plugins doctor jarvis
 ```
 
 Expect discovery, manifest parsing, import and registration all passing.
@@ -103,17 +103,17 @@ Re-running `Hermes/setup-runtime.sh` does this for you; it is idempotent.
 warning, carries on, and every reply comes out of Edge TTS in a stranger's
 voice.
 
-## 5. The kiosk platform is enabled
+## 5. The jarvis platform is enabled
 
 ```bash
-Hermes/run-gateway.sh plugins list | grep samantha-kiosk
+Hermes/run-gateway.sh plugins list | grep jarvis
 ```
 
 `kind: platform` plugins are opt-in. `setup-runtime.sh` enables both for you,
 so this should already read `enabled`. If it does not:
 
 ```bash
-Hermes/run-gateway.sh plugins enable samantha-kiosk --no-allow-tool-override
+Hermes/run-gateway.sh plugins enable jarvis --no-allow-tool-override
 ```
 
 Note the **hyphenated manifest name**, not the underscored directory name
@@ -184,7 +184,7 @@ Expect `cosyvoice`, a couple of hundred kilobytes, and a few seconds.
 **A port that answers proves nothing about the model.** Check this before
 concluding the plugin is broken.
 
-## 8. The kiosk serves the interface
+## 8. The kiosk-era interface route (retired)
 
 With the gateway running (see `running-real-mode.md`):
 
@@ -231,7 +231,7 @@ Then reconnect twice and send again. It must still answer.
 
 ```bash
 cd "$REPO" && backend/.venv/bin/python -m pytest \
-  Hermes/plugins/samantha_voice/tests Hermes/plugins/samantha_kiosk/tests -q
+  Hermes/plugins/samantha_voice/tests Hermes/plugins/jarvis/tests -q
 ```
 
 Expect all green — 34 and 38 respectively as of 2026-08-22.
@@ -250,6 +250,6 @@ So you do not spend time debugging things that are known:
 - **She answers with Hermes' personality, not hers.** `SOUL.md` is unwired.
   A reply saying "Soy Hermes, tu asistente" is the current expected state,
   not a fault.
-- **No audio in the kiosk.** Text only until plan 3b.
+- **No audio in the strip.** Text only until plan 3b.
 - **Clause-by-clause speech sounds flatter** than whole-utterance synthesis.
   Known, measured, and a deliberate trade for latency.

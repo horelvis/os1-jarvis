@@ -52,7 +52,7 @@ and enable the toolset for the strip:
 
 ```yaml
 platform_toolsets:
-  samantha_kiosk:
+  jarvis:
     - a2a          # a2a_call, a2a_discover, …
 ```
 

@@ -115,7 +115,7 @@ class LiveSession:
         # 900x480 and stays empty forever looks like from the outside
         # (measured 2026-08-26; the ceiling never fires either, because
         # it is only checked on a packet that arrives). The gateway's
-        # own loop, the one the kiosk's websocket handler runs on, keeps
+        # own loop, the one the jarvis websocket handler runs on, keeps
         # running between turns. The running loop is the fallback for a
         # gateway that has not accepted a strip connection yet.
         self._loop = self._loop_provider() or asyncio.get_running_loop()

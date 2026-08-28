@@ -9,7 +9,7 @@ turn, and again. Not a race — every turn that follows an idle gap of
 twenty seconds or more.
 
 The cause is `permessage-deflate`: with it negotiated, aiohttp — which
-is what the kiosk adapter is — refuses the FIRST compressed data frame
+is what the jarvis adapter is — refuses the FIRST compressed data frame
 of a connection when a control frame reached it first. Reproduced with
 no Hermes in it at all, which is what this file is.
 

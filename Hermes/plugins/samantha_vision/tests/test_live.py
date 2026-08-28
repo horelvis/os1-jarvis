@@ -267,7 +267,7 @@ def test_a_raising_open_is_swallowed_not_propagated():
 # `delivering on loop 7498a1292050 (running=False)`.
 #
 # The fix is that the session asks for the gateway's own loop, the one
-# the kiosk's websocket handler runs on, and falls back to the running
+# the jarvis websocket handler runs on, and falls back to the running
 # one only when there is nobody to ask.
 
 

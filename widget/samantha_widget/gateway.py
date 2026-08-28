@@ -1,6 +1,6 @@
-"""The client half of the kiosk WebSocket.
+"""The client half of the jarvis WebSocket.
 
-The server half is Hermes/plugins/samantha_kiosk/adapter.py, and the
+The server half is Hermes/plugins/jarvis/adapter.py, and the
 frame format is pinned in its protocol.py — `chat` up, `token` /
 `done` / `error` down. Nothing here invents a protocol; the whole point
 of talking to the existing adapter is that there is nothing to invent.
@@ -86,7 +86,7 @@ def decode_server(raw: str) -> dict[str, Any]:
 # a defect measured on the live machine on 2026-08-27.
 #
 # **`permessage-deflate` must be off.** With it negotiated, aiohttp —
-# which is what the kiosk adapter is — refuses the FIRST compressed data
+# which is what the jarvis adapter is — refuses the FIRST compressed data
 # frame of a connection when a control frame reached it first, and
 # answers `CLOSE 1002 (protocol error)`. `websockets` sends a keepalive
 # ping every 20 s by default, so any connection idle for 20 seconds has

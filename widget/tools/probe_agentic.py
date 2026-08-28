@@ -16,7 +16,7 @@ model says about what it did is not evidence that it did it.
 
     python tools/probe_agentic.py
 
-Stop the widget first: the kiosk adapter holds ONE socket, and whoever
+Stop the widget first: the jarvis adapter holds ONE socket, and whoever
 connected last wins.
 """
 

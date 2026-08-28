@@ -161,7 +161,7 @@ def test_an_empty_error_settles_the_line_with_nothing_said() -> None:
     """The frame a diverted turn ends on, pinned here because the
     gateway now depends on it.
 
-    When the user answers the code assistant, the kiosk adapter opens no
+    When the user answers the code assistant, the jarvis adapter opens no
     turn and pushes `protocol.silence()` — an `error` frame with an
     empty message. Two halves make that work and both are already here:
     `error` always settles (unlike `done`, which needs a token), and
