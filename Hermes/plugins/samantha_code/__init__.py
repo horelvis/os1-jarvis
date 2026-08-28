@@ -44,7 +44,7 @@ from .live import DEFAULT_LIVE, follow, summarise
 # hard-codes it: a setting naming the platform would let the contents of
 # somebody's repository be routed elsewhere by a config change
 # (§12, 2026-08-25).
-KIOSK_PLATFORM = "samantha_kiosk"
+JARVIS_PLATFORM = "jarvis"
 
 # What the band says when the firehose went away mid-run. The design's
 # own wording (v2, "Safety and errors"): the plugin retries with backoff
@@ -61,7 +61,7 @@ def _adapter():
         runner = _gateway_runner_ref()
         if runner is None:
             return None
-        return getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+        return getattr(runner, "adapters", {}).get(Platform(JARVIS_PLATFORM))
     except Exception:
         return None
 

@@ -31,7 +31,7 @@ def test_deliver_retries_on_false_and_stops_on_true(_no_waiting):
 
     assert voz.deliver(inject, "hola") is True
     assert len(calls) == 2
-    assert calls[0] == voz.KIOSK_SESSION_KEY
+    assert calls[0] == voz.JARVIS_SESSION_KEY
 
 
 def test_deliver_gives_up_after_the_last_delay(_no_waiting):
@@ -73,3 +73,14 @@ def test_the_closing_statement_asks_for_nothing():
     assert "«Quitados los prints.»" in said
     assert "no le preguntes nada" in said
     assert said != voz.prompt_for("checkpoint", "Quitados los prints.")
+
+
+def test_the_voice_path_targets_the_jarvis_session():
+    """The other hand-written copy of the session key.
+
+    samantha_vision/alert.py has had a test since it was written;
+    voz.py has not, and it injects on exactly the same key.
+    """
+    from Hermes.plugins.samantha_code.voz import JARVIS_SESSION_KEY
+
+    assert JARVIS_SESSION_KEY == "agent:main:jarvis:dm:jarvis"

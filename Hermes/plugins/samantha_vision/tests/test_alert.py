@@ -59,7 +59,7 @@ def test_delivery_goes_to_the_strips_session_as_a_user_turn():
     content, role, session_key = ctx.calls[0]
     assert content == "hola"
     assert role == "user"
-    assert session_key == "agent:main:samantha_kiosk:dm:kiosk"
+    assert session_key == "agent:main:jarvis:dm:jarvis"
 
 
 def test_a_gateway_that_is_not_ready_yet_is_retried():

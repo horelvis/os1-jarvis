@@ -8,7 +8,7 @@ would leave the box on any turn routed elsewhere (spec §3).
 
 The handler is `async` (Ruling 1): `push_photo` is a coroutine and
 `grab` blocks for up to two seconds. The tests drive it with
-`asyncio.run`, which is the convention `samantha_kiosk`'s own async
+`asyncio.run`, which is the convention `jarvis`'s own async
 tests already use in this repo — no pytest-asyncio, no ini file to
 configure anywhere in `Hermes/`.
 """

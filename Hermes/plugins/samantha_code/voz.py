@@ -21,7 +21,7 @@ from collections.abc import Callable
 
 from loguru import logger
 
-KIOSK_SESSION_KEY = "agent:main:samantha_kiosk:dm:kiosk"
+JARVIS_SESSION_KEY = "agent:main:jarvis:dm:jarvis"
 
 RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 5.0)
 
@@ -70,7 +70,7 @@ def deliver(inject: Callable[..., bool], text: str) -> bool:
     """
     for delay in RETRY_DELAYS:
         try:
-            accepted = inject(text, role="user", session_key=KIOSK_SESSION_KEY)
+            accepted = inject(text, role="user", session_key=JARVIS_SESSION_KEY)
         except Exception as exc:  # noqa: BLE001 — the follower must survive it
             # With the stack. This is swallowed so the dispatch loop
             # survives, which is also what makes it invisible otherwise.

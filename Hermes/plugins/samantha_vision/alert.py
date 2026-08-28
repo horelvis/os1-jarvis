@@ -27,12 +27,13 @@ from loguru import logger
 from .cameras import redact
 from .vision import Watcher, describe
 
-# Where the strip's conversation lives. Measured in Task 1 against
-# `gateway/session.py::build_session_key` and every `samantha_kiosk` row
-# in `state.db`: the kiosk adapter always opens its source with
-# chat_id="kiosk", chat_type="dm", so the key is a constant. A `/new`
-# mints a fresh session_id under the SAME key, so it stays correct.
-KIOSK_SESSION_KEY = "agent:main:samantha_kiosk:dm:kiosk"
+# Where the strip's conversation lives. Measured against
+# `gateway/session.py::build_session_key` and every `jarvis` row in
+# `state.db` after the 2026-08-28 migration: the adapter always opens
+# its source with chat_id="jarvis", chat_type="dm", so the key is a
+# constant. A `/new` mints a fresh session_id under the SAME key, so it
+# stays correct.
+JARVIS_SESSION_KEY = "agent:main:jarvis:dm:jarvis"
 
 # What `False` from `inject_message` actually means — corrected
 # 2026-08-24, having been stated the other way round in four places.
@@ -128,7 +129,7 @@ def deliver(
             sleep(delay)
         try:
             accepted = ctx.inject_message(
-                prompt, role="user", session_key=KIOSK_SESSION_KEY
+                prompt, role="user", session_key=JARVIS_SESSION_KEY
             )
         except Exception as exc:
             # A gateway that is going down mid-injection must not take a

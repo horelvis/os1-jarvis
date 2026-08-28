@@ -31,7 +31,7 @@ from .tool import make_handler as make_mirar
 # There was a `check_requirements()` here until 2026-08-24. It was dead
 # code: nothing in `hermes_cli/plugins.py` looks for it. It is a `kind:
 # platform` convention — a plugin passes it as `check_fn=` to
-# `register_platform(...)`, the way `samantha_kiosk` does — and this
+# `register_platform(...)`, the way `jarvis` does — and this
 # plugin is `kind: standalone`, so it had the shape and none of the
 # wiring. Worse, the README cited it as the thing that refuses to load
 # the plugin without `av` and `onnxruntime`, which it never did.
@@ -46,7 +46,7 @@ from .tool import make_handler as make_mirar
 # config key on purpose: `MEDIA:` was rejected precisely because it let
 # any adapter render an image, and a configurable destination would put
 # that decision back (spec §3).
-KIOSK_PLATFORM = "samantha_kiosk"
+JARVIS_PLATFORM = "jarvis"
 
 
 def register(ctx):
@@ -162,7 +162,7 @@ async def push_photo(path: str, camera: str) -> bool:
         if runner is None:
             logger.debug("samantha-vision: no gateway, photo dropped")
             return False
-        adapter = getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+        adapter = getattr(runner, "adapters", {}).get(Platform(JARVIS_PLATFORM))
         if adapter is None:
             logger.debug("samantha-vision: no strip platform, photo dropped")
             return False
@@ -182,7 +182,7 @@ async def _adapter():
     runner = _gateway_runner_ref()
     if runner is None:
         return None
-    return getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+    return getattr(runner, "adapters", {}).get(Platform(JARVIS_PLATFORM))
 
 
 def _show_sighting(frame: Any, camera: str) -> None:
@@ -222,7 +222,7 @@ def _kiosk_loop():
         runner = _gateway_runner_ref()
         if runner is None:
             return None
-        adapter = getattr(runner, "adapters", {}).get(Platform(KIOSK_PLATFORM))
+        adapter = getattr(runner, "adapters", {}).get(Platform(JARVIS_PLATFORM))
         return getattr(adapter, "loop", None)
     except Exception:
         # A missing loop costs a live view; raising here would cost the
