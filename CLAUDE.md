@@ -5,10 +5,12 @@
 > doubt about scope, architecture, or style, this document overrides your
 > defaults. Update `PROGRESS.md` after completing each phase.
 >
-> **He is called JARVIS.** Until 2026-08-23 he was Samantha, and the
+> **He is called JARVIS.** Until 2026-08-23 he was Samantha, and most
 > package names, environment variables and systemd units still carry that
-> name — `samantha_widget`, `samantha_kiosk`, `SAMANTHA_*`. Renaming them
-> is not worth the churn. In prose he is JARVIS; in code, samantha.
+> name — `samantha_widget`, `samantha_vision`, `SAMANTHA_*`. Renaming them
+> is not worth the churn. In prose he is JARVIS; in code, mostly samantha
+> — except the platform he speaks through, `jarvis` since 2026-08-28
+> (§10, §12).
 >
 > **This is v4.** v1 was Tauri + Rust, v2 Ubuntu Frame + WPE WebKit +
 > snap, v3 Chromium in kiosk mode. v4 has no browser at all: a GTK4
@@ -40,8 +42,8 @@ can act on it. Not a window you open. Something that is there.
 - **OS:** Ubuntu with GNOME on X11 (`DISPLAY=:1`). Wayland out of scope.
 - **Surface:** `widget/` — a GTK4 strip, no browser, no webview.
   Transparent, borderless, always above, drawn with GSK.
-- **Brain:** Hermes Agent gateway on `:7777` (plugin `samantha_kiosk`),
-  which gives JARVIS tools: memory, reminders, session recall.
+- **Brain:** Hermes Agent gateway on `:7777` (plugin `jarvis`), which
+  gives JARVIS tools: memory, reminders, session recall.
 - **LLM:** local `llama-server` with Qwen3.8-27B (GGUF), or X.AI's Grok
   API — a config switch. §2.5 and §12 carry the trade.
 - **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process.
@@ -74,7 +76,7 @@ can act on it. Not a window you open. Something that is there.
                 │                         │
 ┌───────────────▼──────────────┐  ┌───────▼────────────────┐
 │  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
-│   + samantha_kiosk (surface) │  └────────────────────────┘
+│   + jarvis (surface)         │  └────────────────────────┘
 │   + samantha_voice (TTS)     │
 │   + samantha_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
@@ -626,7 +628,7 @@ os1-samantha/
 │   ├── samantha-config.yaml← model, provider, TTS. NOT the secrets.
 │   ├── apply-config.sh
 │   └── plugins/
-│       ├── samantha_kiosk/  ← the surface he speaks through
+│       ├── jarvis/          ← the surface he speaks through
 │       ├── samantha_voice/  ← CosyVoice, from inside the gateway
 │       └── samantha_vision/ ← the cameras: YOLO, the quiet rules, the
 │                              alert, and `mirar`. Its own README.
@@ -823,10 +825,12 @@ reply ever came. Two causes, both silent, both operational:
   answers `⏳ Agent is running`.
 - **A new session eats its first turn.** With no home channel set, the
   first turn of a session comes back as `📬 No home channel is set for
-  Samantha_Kiosk`, which the strip correctly discards as a system
-  message — so the question that triggered it is simply gone. Fixed for
-  good with `/sethome` (done 2026-08-26, `Home channel set to Kiosk`),
-  which must be re-applied on any new box or after `state.db` is lost.
+  Jarvis` (title-cased from the platform name; it read `Samantha_Kiosk`
+  before the 2026-08-28 rename, §12), which the strip correctly discards
+  as a system message — so the question that triggered it is simply
+  gone. Fixed for good with `/sethome` (`Home channel set to JARVIS`,
+  was `Kiosk`), which must be re-applied on any new box or after
+  `state.db` is lost — see the migration cost in §12.
 
 To tell "the gateway is stuck" from "the strip cannot reach it", stop
 the strip first — a second connection replaces the first, so a probe
@@ -841,11 +845,12 @@ cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python tools/probe_gateway.py "¿Qu�
 
 ```bash
 ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
-xwininfo -name "Samantha"          # did you photograph the strip, or the lock screen?
-# The title is "Samantha" — window.py:36 sets it, and no code anywhere
-# calls the window "samantha-widget"; that is only the unit's name. This
-# line asked for the wrong one, so it answered "No window with name ...
-# exists!" with the strip on screen and running (2026-08-25).
+xwininfo -name "JARVIS"            # did you photograph the strip, or the lock screen?
+# The title is "JARVIS" — window.py:101 sets it (it was "Samantha"
+# until 2026-08-28), and no code anywhere calls the window
+# "samantha-widget"; that is only the unit's name. Asking for the wrong
+# one answers "No window with name ... exists!" with the strip on screen
+# and running (2026-08-25).
 ```
 
 Nothing about his appearance is provable from a test, and a screenshot of
@@ -1031,14 +1036,14 @@ If you encounter:
 | The link to the brain | `widget/samantha_widget/gateway.py` |
 | Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
 | Being asked to look, and the JPEG it leaves | `Hermes/plugins/samantha_vision/{tool,snapshot}.py` |
-| The `photo` frame, and the path it refuses | `Hermes/plugins/samantha_kiosk/{protocol,adapter}.py` |
+| The `photo` frame, and the path it refuses | `Hermes/plugins/jarvis/{protocol,adapter}.py` |
 | A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
 | The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
 | Whether he was being spoken to | `widget/samantha_widget/wake.py` |
 | The two switches (drawing / pure model) | `widget/samantha_widget/{wave,switches}.py` |
 | The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/samantha_widget/live_decode.py` |
 | Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
-| The surface Hermes speaks through | `Hermes/plugins/samantha_kiosk/` |
+| The surface Hermes speaks through | `Hermes/plugins/jarvis/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
 | Model, provider, TTS provider | `Hermes/samantha-config.yaml` |
 | CosyVoice, and the voice prompt | `tts-server/cosyvoice/server.py`, `backend/samantha/tts.py` |
@@ -1058,6 +1063,7 @@ If you encounter:
 | **EWMH** | The X11 convention for telling a window manager to keep a window above others and put it at an exact pixel. GTK4 has no API for either (§2.2). |
 | **Chromium kiosk** | v3's display layer, replaced 2026-08-23 (§2.3, §12). Mentioned only in history. |
 | **openbox** | The minimal X11 window manager the kiosk used. Gone with it; the desktop is GNOME. |
+| **`samantha_kiosk`** | What the platform, the plugin and the chat were called until 2026-08-28. Every plan and spec under `docs/superpowers/` still says it, because they are the record of the day they were written. In the running system it is `jarvis` (§12). |
 | **OS1 / cinta** | The Three.js 3D ribbon loader from the film, attributed to Siyoung Park (MIT). In `frontend/`, unused. |
 | **The wave / línea** | The line that represents him on the strip, drawn in GSK. Four states: idle, listening, thinking, speaking. |
 | **The band / la banda** | The strip's second half, above the wave and zero pixels tall until a photo arrives. It grows the window rather than opening one. |
@@ -1091,6 +1097,42 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-08-28 — The kiosk stops being a kiosk
+
+**Decision (the user's):** the concept "kiosk" becomes JARVIS. The
+Hermes platform `samantha_kiosk` → `jarvis`, the plugin id, the chat
+(`kiosk`/"Kiosk" → `jarvis`/"JARVIS"), the session key, and the GTK
+window title. The package moves with them, `Hermes/plugins/jarvis/`.
+
+**This reverses the naming half of 2026-08-23** ("the name is only
+changed in prose"), and only that half: the persona, the voice and the
+repo name stand. That entry measured the cost of renaming the CODE and
+was right; what was renamed here is the CONCEPT, which lives in four
+identifiers Hermes reasons about rather than in every file.
+
+**The trap, and it is the reason the plan was written around it:**
+`samantha_vision/alert.py` and `samantha_code/voz.py` each held the
+session key written out by hand. `ctx.inject_message()` returns `True`
+against a session that does not exist (§12, 2026-08-24), so a missed
+rename there is cameras that go quiet with a strip that looks perfectly
+healthy and nothing in any log. Both are pinned by tests now; `voz.py`
+had none — and `Hermes/setup-runtime.sh` carried the same trap twice
+over, in a second loop (`plugins enable`) that also named the old
+plugin and had been missing `samantha_code` since August; both are
+fixed now.
+
+**What was not renamed, deliberately:** `samantha_widget`, the
+`SAMANTHA_WIDGET_*` variables, the systemd units, `~/.samantha/` and
+the repository. The code and the concept now disagree about "samantha"
+more sharply than before — two of the four plugins keep the old prefix
+— and `git grep samantha_kiosk` no longer finds this code. The glossary
+line is the whole mitigation.
+
+**Cost that lands on any other box:** the state migration
+(`Hermes/migrate-kiosk-to-jarvis.py`) must be run there too, or JARVIS
+starts with no session and no home channel — and a missing home channel
+eats the first turn in silence (§5).
 
 ### 2026-08-27 — Two things the suites could not see, and a chain bounded
 

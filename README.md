@@ -5,10 +5,11 @@ of the screen that listens all the time, speaks in a cloned voice,
 watches the house's cameras, and can act on it. Not a window you open —
 something that is there.
 
-He was called Samantha until 2026-08-23, after the film *Her*, and the
+He was called Samantha until 2026-08-23, after the film *Her*, and most
 package names, environment variables and systemd units still carry that
-name. The full specification is in **[CLAUDE.md](CLAUDE.md)**; this file
-is the short version.
+name — except the platform he speaks through, `jarvis` since 2026-08-28.
+The full specification is in **[CLAUDE.md](CLAUDE.md)**; this file is
+the short version.
 
 ## Architecture
 
@@ -22,7 +23,7 @@ is the short version.
                 │                         │
 ┌───────────────▼──────────────┐  ┌───────▼────────────────┐
 │  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
-│   + samantha_kiosk (surface) │  └────────────────────────┘
+│   + jarvis (surface)         │  └────────────────────────┘
 │   + samantha_voice (TTS)     │
 │   + samantha_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
@@ -32,9 +33,8 @@ is the short version.
 
 - **Surface:** `widget/` — a GTK4 strip on X11. No browser, no webview.
   Transparent, borderless, always above, drawn with GSK.
-- **Brain:** the Hermes Agent gateway on `:7777`, through the
-  `samantha_kiosk` plugin. It is what gives him memory, reminders and
-  session recall.
+- **Brain:** the Hermes Agent gateway on `:7777`, through the `jarvis`
+  plugin. It is what gives him memory, reminders and session recall.
 - **LLM:** `llama-server` with Qwen3.8-27B (GGUF), on the box.
 - **Ears:** Silero v5 VAD on the CPU decides when somebody is talking;
   faster-whisper `large-v3-turbo` transcribes on the GPU.
