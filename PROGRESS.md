@@ -1,5 +1,68 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-08-28 — El kiosko deja de serlo: la plataforma es JARVIS ✅
+
+Cierra `docs/superpowers/specs/2026-08-28-jarvis-platform-design.md`. La
+palabra «kiosko» era un fósil de la v3 — no hay Chromium, ni aparato, ni
+openbox: hay una tira y alguien que le habla. La decisión del 2026-08-23
+dejó el nombre cambiado sólo en la prosa porque renombrar el CÓDIGO no
+compraba nada; lo renombrado aquí es el CONCEPTO, que vive en cuatro
+identificadores que Hermes maneja: la plataforma (`samantha_kiosk` →
+`jarvis`), el id del plugin, el chat (`kiosk`/«Kiosk» → `jarvis`/«JARVIS»)
+y la clave de sesión. El paquete se movió con ellos, a
+`Hermes/plugins/jarvis/`.
+
+**Lo que podía romperse en silencio, y por eso el plan giraba alrededor de
+ello:** `samantha_vision/alert.py` y `samantha_code/voz.py` llevaban la
+clave de sesión escrita a mano. `inject_message()` devuelve `True` contra
+una sesión que no existe, así que un renombrado a medias son cámaras mudas
+con la tira aparentemente sana y ni una línea en ningún log. Las dos están
+fijadas por tests ahora; `voz.py` no tenía ninguno. Y **ningún test fijaba
+el nombre de la plataforma** antes de hoy — se podía cambiar en un sitio y
+dejarlo en otro con todo en verde.
+
+**Lo que estuvo a punto de corromper el historial.** La revisión final
+encontró que la migración no movía `sessions.source`: las 32 filas habrían
+quedado con la clave nueva y el `source` viejo, y la consulta de
+recuperación de Hermes (`hermes_state.py:5151`) filtra por los dos, así que
+habrían sido invisibles — y sin arreglo posible re-ejecutando, porque el
+script busca por la clave que esas filas ya no llevarían. La causa está en
+el propio plan: su fixture modelaba 5 de las 56 columnas reales de
+`sessions`, inventadas desde el spec en vez de leídas de `PRAGMA
+table_info`, y la que faltaba era justo la que decide si una sesión se
+recupera. La lección, escrita en el fixture: un fixture de migración
+inventado sólo prueba lo que su autor ya había pensado.
+
+**Otras dos trampas medidas por el camino:** el respaldo de las variables
+de entorno no llegaba a `authz_mixin.py`, que lee el nombre registrado con
+un `os.getenv` pelado — una caja con sólo `SAMANTHA_KIOSK_ALLOWED_USERS`
+habría perdido su allowlist en silencio; y `setup-runtime.sh` tenía un
+SEGUNDO bucle, el de `hermes plugins enable`, que el plan no vio: una caja
+limpia habría enlazado `jarvis` y habilitado un plugin inexistente. De paso
+se arregló que a ese bucle le faltaba `samantha_code` desde agosto.
+
+**Medido en el corte, sobre el sistema real:** la migración movió 32
+sesiones, 459 obligaciones y 1 fila de routing con `skipped: 0`, dejando
+`source=jarvis` en las 32, cero filas en el `source` viejo y los 1.750
+mensajes y las diez tablas FTS intactos. El gateway arrancó con `jarvis:
+serving /ws on :7777`, un turno hablado volvió («Sí, señor. Le oye
+perfectamente.») y la ventana de la tira responde a `xwininfo -name
+JARVIS`, 900 px, sin que quede ninguna llamada «Samantha». 14 commits, 39
+ficheros, 346 tests de plugins y 256 del widget en verde.
+
+**Sin verificar todavía, y no por el cambio:** la alerta de cámara, que es
+el camino que el fallo silencioso habría roto — las dos cámaras dan `No
+route to host` hoy. Y la unit del widget arranca con `DISPLAY=:1` mientras
+la sesión gráfica de la máquina es `:0`; la tira se verificó lanzándola a
+mano en `:0`, y la unit sigue como estaba.
+
+**No se ha renombrado, a propósito:** `samantha_widget`, las variables
+`SAMANTHA_WIDGET_*`, las units de systemd, `~/.samantha/` ni el
+repositorio. Los planes y specs de `docs/superpowers/` siguen diciendo
+«kiosk»: son el registro del día en que se escribieron, y el glosario
+explica la palabra a quien se la encuentre allí.
+
+
 ## 2026-08-27 — El asistente de código habla en hitos, y JARVIS puede preguntar ✅
 
 Cierra el diseño de
