@@ -97,8 +97,8 @@ class StripWindow(Gtk.ApplicationWindow):
         self.set_resizable(False)
         # Out of the alt-tab list and off the taskbar: this is furniture,
         # not an application the user switches to. The title is also what
-        # `xprop -name Samantha` looks for when verifying the states.
-        self.set_title("Samantha")
+        # `xprop -name JARVIS` looks for when verifying the states.
+        self.set_title("JARVIS")
 
         self._ewmh: Ewmh | None = None
         self._xid: int | None = None
@@ -368,7 +368,7 @@ class StripWindow(Gtk.ApplicationWindow):
         480-tall window at 984" — 384 px off the bottom of a 1080
         screen — so it was clamped to y=600 and the strip ended up
         floating in the middle of the desktop. Measured 2026-08-24 with
-        `xwininfo -name Samantha`.
+        `xwininfo -name JARVIS`.
 
         What the repeat buys is ORDERING ON THE X CONNECTION, not GTK
         layout. Both requests go down the one connection `ewmh.py`

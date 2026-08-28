@@ -195,7 +195,7 @@ To press one from a script — the strip has no keyboard shortcut and
 `xdotool` is not installed here, but `libXtst` is:
 
 ```bash
-DISPLAY=:1 xwininfo -name "Samantha" | grep -E "Absolute|Width"
+DISPLAY=:1 xwininfo -name "JARVIS" | grep -E "Absolute|Width"
 DISPLAY=:1 .venv/bin/python tools/click.py 1345 1032          # the typed line, at 900x96 centred
 DISPLAY=:1 .venv/bin/python tools/type.py "hola" --enter      # and type into it
 ```

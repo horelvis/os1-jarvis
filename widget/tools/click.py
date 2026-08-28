@@ -14,7 +14,7 @@ the point.
     DISPLAY=:1 python tools/click.py 1309 1032        # one click
     DISPLAY=:1 python tools/click.py 1381 1032 1381 1032   # two, in a row
 
-Coordinates are absolute screen pixels. `xwininfo -name "Samantha"`
+Coordinates are absolute screen pixels. `xwininfo -name "JARVIS"`
 gives the window's origin; the switches sit at its right end.
 """
 
