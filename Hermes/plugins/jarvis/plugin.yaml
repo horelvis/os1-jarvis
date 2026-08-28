@@ -51,24 +51,29 @@ python_dependencies:
 
 optional_env:
   - name: JARVIS_PORT
-    description: "Puerto donde se sirve el WebSocket de JARVIS (por defecto 7777)"
+    description: >
+      Puerto donde se sirve el WebSocket de JARVIS (por defecto 7777).
+      Nombre antiguo, todavía válido: SAMANTHA_KIOSK_PORT
     prompt: "Puerto de JARVIS"
     password: false
   - name: JARVIS_ALLOWED_USERS
     description: >
       Quién puede hablar con JARVIS (por defecto "primary", que es el
-      user_id que envía la interfaz)
+      user_id que envía la interfaz). Nombre antiguo, todavía válido:
+      SAMANTHA_KIOSK_ALLOWED_USERS
     prompt: "user_id autorizado"
     password: false
   - name: JARVIS_ALLOW_ALL_USERS
     description: >
       Deja pasar a cualquiera para hablar con JARVIS. No hace falta en un
-      aparato de una sola persona; existe para depurar
+      aparato de una sola persona; existe para depurar. Nombre antiguo,
+      todavía válido: SAMANTHA_KIOSK_ALLOW_ALL_USERS
     prompt: "¿Permitir a cualquiera? (true/false)"
     password: false
   - name: JARVIS_TURN_TIMEOUT
     description: >
       Segundos que espera antes de decir que algo se ha quedado a medias
-      (por defecto 90)
+      (por defecto 90). Nombre antiguo, todavía válido:
+      SAMANTHA_KIOSK_TURN_TIMEOUT
     prompt: "Segundos de espera por respuesta"
     password: false

@@ -52,6 +52,7 @@ JARVIS_PLATFORM = "jarvis"
 # the work stopping.
 _LOST_SIGHT = "— he perdido de vista el trabajo"
 
+
 def _adapter():
     """The strip's adapter, or None."""
     try:

@@ -73,6 +73,11 @@ def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
     assert len(seen) == 1
     assert seen[0].text == "hola"
     assert seen[0].message_type.value == "text"
+    # The session key vision and code target is built from these two
+    # fields, not from get_chat_info() — a regression here would silence
+    # both plugins without failing anywhere else (Finding 3, 2026-08-28).
+    assert seen[0].source.chat_id == "jarvis"
+    assert seen[0].source.chat_name == "JARVIS"
 
 
 def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):
@@ -257,9 +262,11 @@ def test_fatal_error_survives_disconnect(tmp_path):
 
 
 def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
-    # SAMANTHA_KIOSK_PORT (declared in the manifest) must win over whatever
-    # the config dict says — otherwise the documented env var is ignored and
-    # the kiosk silently serves on the wrong port.
+    # SAMANTHA_KIOSK_PORT is no longer what the manifest declares — that is
+    # JARVIS_PORT now (plugin.yaml). This test keeps SAMANTHA_KIOSK_PORT on
+    # purpose: it is the legacy fallback _env() still honours (adapter.py's
+    # _LEGACY_ENV) for a box nobody has re-exported the new name on yet, and
+    # it must still win over the config dict.
     del tmp_path
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "0")
 
@@ -554,6 +561,8 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
     # create_adapter's `except Exception`, which logs once and returns None —
     # the platform never comes up and the screen is blank with nothing on the
     # wire to explain it. Only the exported env vars were hiding this.
+    monkeypatch.delenv("JARVIS_PORT", raising=False)
+    monkeypatch.delenv("JARVIS_TURN_TIMEOUT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
 
@@ -569,6 +578,8 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
 
 
 def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
+    monkeypatch.delenv("JARVIS_PORT", raising=False)
+    monkeypatch.delenv("JARVIS_TURN_TIMEOUT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
     monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
 
