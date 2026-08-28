@@ -93,15 +93,16 @@ for plugin in samantha_voice jarvis samantha_vision samantha_code; do
 done
 
 say "5/6  Enable them"
-# All three are opt-in: `kind: standalone` and `kind: platform` stay dark
+# All four are opt-in: `kind: standalone` and `kind: platform` stay dark
 # until listed in HERMES_HOME/config.yaml's plugins.enabled, and `hermes
 # plugins list` reports "not enabled" until then. The manifest name is
-# kebab-case even though the directory is snake_case.
+# kebab-case even though the directory is snake_case — except `jarvis`,
+# where the two now agree.
 #
 # --no-allow-tool-override answers the capability prompt with "no", which is
-# what all three want (samantha_voice declares allow_tool_override: false)
+# what all four want (samantha_voice declares allow_tool_override: false)
 # and what makes this scriptable. None of them replaces a built-in tool.
-for plugin in samantha-voice samantha-kiosk samantha-vision; do
+for plugin in samantha-voice jarvis samantha-vision samantha-code; do
   HERMES_HOME="$HERMES_HOME" "$HERMES_SRC/.venv/bin/hermes" plugins enable \
     "$plugin" --no-allow-tool-override >/dev/null 2>&1 || true
   echo "    $plugin"
