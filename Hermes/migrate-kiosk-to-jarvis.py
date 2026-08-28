@@ -33,6 +33,11 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# CLAUDE.md §6 asks for loguru, not print() — deliberately not followed
+# here. This is a hand-run one-shot meant to work under a bare `python3`
+# with nothing installed (see the docstring above), and pulling loguru
+# into a database migration to print one warning would cost more than it
+# buys.
 OLD_KEY = "agent:main:samantha_kiosk:dm:kiosk"
 NEW_KEY = "agent:main:jarvis:dm:jarvis"
 OLD_PLATFORM, NEW_PLATFORM = "samantha_kiosk", "jarvis"
@@ -121,8 +126,8 @@ def migrate(db_path: Path | str) -> dict[str, int]:
                     continue
                 con.execute(
                     "UPDATE sessions SET session_key = ?, chat_id = ?, "
-                    "display_name = ?, origin_json = ? WHERE id = ?",
-                    (NEW_KEY, NEW_CHAT, NEW_NAME, new_origin, sid),
+                    "display_name = ?, origin_json = ?, source = ? WHERE id = ?",
+                    (NEW_KEY, NEW_CHAT, NEW_NAME, new_origin, NEW_PLATFORM, sid),
                 )
                 counts["sessions"] += 1
 

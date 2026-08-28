@@ -28,13 +28,21 @@ OLD = "agent:main:samantha_kiosk:dm:kiosk"
 NEW = "agent:main:jarvis:dm:jarvis"
 
 
+# The real `sessions` table has 56 columns; this fixture models only the
+# ones this migration reads or writes: session_key, chat_id, display_name,
+# origin_json, and source (source.value gates session recovery in
+# hermes_state.py's find_latest_gateway_session_for_peer — see the
+# migration script's own comment on the sessions UPDATE). Anything this
+# migration is ever taught to touch must be added here too, or a test can
+# pass while the real table silently keeps the old value — which is
+# exactly how the missing `source` column got past 346 green tests.
 def _db(tmp_path):
     path = tmp_path / "state.db"
     c = sqlite3.connect(path)
     c.executescript(
         """
         CREATE TABLE sessions (id INTEGER PRIMARY KEY, session_key TEXT,
-            chat_id TEXT, display_name TEXT, origin_json TEXT);
+            chat_id TEXT, display_name TEXT, origin_json TEXT, source TEXT);
         CREATE TABLE delivery_obligations (obligation_id TEXT PRIMARY KEY,
             session_key TEXT, platform TEXT, chat_id TEXT);
         CREATE TABLE gateway_routing (scope TEXT NOT NULL DEFAULT '',
@@ -53,8 +61,11 @@ def _db(tmp_path):
             "user_id": "primary",
         }
     )
-    c.execute("INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?)", (OLD, origin))
-    c.execute("INSERT INTO sessions VALUES (2, NULL, NULL, NULL, NULL)")
+    c.execute(
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?, 'samantha_kiosk')",
+        (OLD, origin),
+    )
+    c.execute("INSERT INTO sessions VALUES (2, NULL, NULL, NULL, NULL, NULL)")
     c.execute(
         "INSERT INTO delivery_obligations VALUES ('o1', ?, 'samantha_kiosk', 'kiosk')",
         (OLD,),
@@ -91,7 +102,7 @@ def _empty_db(tmp_path, name="edge.db"):
     c.executescript(
         """
         CREATE TABLE sessions (id INTEGER PRIMARY KEY, session_key TEXT,
-            chat_id TEXT, display_name TEXT, origin_json TEXT);
+            chat_id TEXT, display_name TEXT, origin_json TEXT, source TEXT);
         CREATE TABLE delivery_obligations (obligation_id TEXT PRIMARY KEY,
             session_key TEXT, platform TEXT, chat_id TEXT);
         CREATE TABLE gateway_routing (scope TEXT NOT NULL DEFAULT '',
@@ -116,7 +127,9 @@ def test_every_row_moves_to_the_new_key(tmp_path):
         "skipped": 0,
     }
     c = sqlite3.connect(path)
-    assert c.execute("SELECT session_key FROM sessions WHERE id=1").fetchone()[0] == NEW
+    assert c.execute(
+        "SELECT session_key, source FROM sessions WHERE id=1"
+    ).fetchone() == (NEW, "jarvis")
     assert c.execute(
         "SELECT session_key, platform FROM delivery_obligations"
     ).fetchone() == (NEW, "jarvis")
@@ -174,7 +187,7 @@ def test_unparseable_origin_json_leaves_the_whole_row_alone(tmp_path):
     path = _empty_db(tmp_path)
     c = sqlite3.connect(path)
     c.execute(
-        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?)",
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?, 'samantha_kiosk')",
         (OLD, "{not valid json"),
     )
     c.commit()
@@ -186,10 +199,12 @@ def test_unparseable_origin_json_leaves_the_whole_row_alone(tmp_path):
 
     c = sqlite3.connect(path)
     row = c.execute(
-        "SELECT session_key, chat_id, display_name, origin_json FROM sessions WHERE id=1"
+        "SELECT session_key, chat_id, display_name, origin_json, source "
+        "FROM sessions WHERE id=1"
     ).fetchone()
-    # Every column, not just the blob: the row must be untouched entirely.
-    assert row == (OLD, "kiosk", "Kiosk", "{not valid json")
+    # Every column, not just the blob: the row must be untouched entirely,
+    # source included.
+    assert row == (OLD, "kiosk", "Kiosk", "{not valid json", "samantha_kiosk")
 
     # And a second run does not magically find it either — it is keyed
     # on OLD_KEY, which this row still carries, so it will be retried
@@ -201,7 +216,10 @@ def test_unparseable_origin_json_leaves_the_whole_row_alone(tmp_path):
 def test_null_origin_json_is_skipped_not_touched(tmp_path):
     path = _empty_db(tmp_path)
     c = sqlite3.connect(path)
-    c.execute("INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', NULL)", (OLD,))
+    c.execute(
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', NULL, 'samantha_kiosk')",
+        (OLD,),
+    )
     c.commit()
     c.close()
 
@@ -211,15 +229,19 @@ def test_null_origin_json_is_skipped_not_touched(tmp_path):
 
     c = sqlite3.connect(path)
     row = c.execute(
-        "SELECT session_key, chat_id, display_name, origin_json FROM sessions WHERE id=1"
+        "SELECT session_key, chat_id, display_name, origin_json, source "
+        "FROM sessions WHERE id=1"
     ).fetchone()
-    assert row == (OLD, "kiosk", "Kiosk", None)
+    assert row == (OLD, "kiosk", "Kiosk", None, "samantha_kiosk")
 
 
 def test_empty_origin_json_is_skipped_not_touched(tmp_path):
     path = _empty_db(tmp_path)
     c = sqlite3.connect(path)
-    c.execute("INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', '')", (OLD,))
+    c.execute(
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', '', 'samantha_kiosk')",
+        (OLD,),
+    )
     c.commit()
     c.close()
 
@@ -229,9 +251,10 @@ def test_empty_origin_json_is_skipped_not_touched(tmp_path):
 
     c = sqlite3.connect(path)
     row = c.execute(
-        "SELECT session_key, chat_id, display_name, origin_json FROM sessions WHERE id=1"
+        "SELECT session_key, chat_id, display_name, origin_json, source "
+        "FROM sessions WHERE id=1"
     ).fetchone()
-    assert row == (OLD, "kiosk", "Kiosk", "")
+    assert row == (OLD, "kiosk", "Kiosk", "", "samantha_kiosk")
 
 
 def test_unrelated_fields_with_colliding_values_are_left_alone(tmp_path):
@@ -246,16 +269,18 @@ def test_unrelated_fields_with_colliding_values_are_left_alone(tmp_path):
         }
     )
     c = sqlite3.connect(path)
-    c.execute("INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?)", (OLD, origin))
+    c.execute(
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?, 'samantha_kiosk')",
+        (OLD, origin),
+    )
     c.commit()
     c.close()
 
     migrate(path)
 
     c = sqlite3.connect(path)
-    blob = json.loads(
-        c.execute("SELECT origin_json FROM sessions WHERE id=1").fetchone()[0]
-    )
+    row = c.execute("SELECT origin_json, source FROM sessions WHERE id=1").fetchone()
+    blob = json.loads(row[0])
     assert blob["platform"] == "jarvis"
     assert blob["chat_id"] == "jarvis"
     assert blob["chat_name"] == "JARVIS"
@@ -263,6 +288,7 @@ def test_unrelated_fields_with_colliding_values_are_left_alone(tmp_path):
     # field name does not, so they must survive untouched.
     assert blob["user_id"] == "kiosk"
     assert blob["last_message_preview"] == "Kiosk"
+    assert row[1] == "jarvis"
 
 
 def test_nested_origin_object_is_rewritten_at_any_depth(tmp_path):
@@ -280,18 +306,21 @@ def test_nested_origin_object_is_rewritten_at_any_depth(tmp_path):
         }
     )
     c = sqlite3.connect(path)
-    c.execute("INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?)", (OLD, origin))
+    c.execute(
+        "INSERT INTO sessions VALUES (1, ?, 'kiosk', 'Kiosk', ?, 'samantha_kiosk')",
+        (OLD, origin),
+    )
     c.commit()
     c.close()
 
     migrate(path)
 
     c = sqlite3.connect(path)
-    blob = json.loads(
-        c.execute("SELECT origin_json FROM sessions WHERE id=1").fetchone()[0]
-    )
+    row = c.execute("SELECT origin_json, source FROM sessions WHERE id=1").fetchone()
+    blob = json.loads(row[0])
     # A field-aware walk that stopped at the top level would leave
     # these nested copies on the old identity — guard against that.
     assert blob["origin"]["platform"] == "jarvis"
     assert blob["origin"]["chat_id"] == "jarvis"
     assert blob["origin"]["chat_name"] == "JARVIS"
+    assert row[1] == "jarvis"
