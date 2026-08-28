@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Move the strip's conversation from the kiosk key to the JARVIS one.
 
 Run ONCE, with the gateway stopped, after the rename lands:
@@ -13,8 +12,21 @@ What it does NOT touch, and why that is the whole reason it is small:
 triggers are not part of this. Only the key, the two JSON blobs that
 repeat it, and the obligations move.
 
-Idempotent: a second run reports zero rows and changes nothing.
+Idempotent: a second run reports zero rows changed and zero skipped.
+
+A row whose JSON blob cannot be parsed is left ENTIRELY alone — its
+outer columns are not updated either — and is counted under
+`skipped`, with a warning naming the table and the row. This matters
+because every WHERE in this script is keyed on the OLD identity: a row
+whose outer columns moved but whose blob did not would sit permanently
+split between the two identities, invisible to a second run. A skipped
+row must be fixed by hand before the migration can be called complete.
 """
+
+# ruff: noqa: N999
+# Hyphenated filename, deliberately: it sits beside apply-config.sh,
+# run-gateway.sh and setup-runtime.sh in this directory, and Task 8
+# invokes this script by that exact path.
 
 import json
 import sqlite3
@@ -27,39 +39,69 @@ OLD_PLATFORM, NEW_PLATFORM = "samantha_kiosk", "jarvis"
 OLD_CHAT, NEW_CHAT = "kiosk", "jarvis"
 OLD_NAME, NEW_NAME = "Kiosk", "JARVIS"
 
+# The only keys this migration may touch inside a JSON blob, and what
+# each moves from/to. Field-name-aware, not value-aware: a value that
+# happens to equal "kiosk" or "Kiosk" in some unrelated field (a
+# user_id, a message preview) must survive untouched.
+_IDENTITY_FIELDS = {
+    "platform": (OLD_PLATFORM, NEW_PLATFORM),
+    "chat_id": (OLD_CHAT, NEW_CHAT),
+    "chat_name": (OLD_NAME, NEW_NAME),
+    "display_name": (OLD_NAME, NEW_NAME),
+    "session_key": (OLD_KEY, NEW_KEY),
+}
 
-def _rewrite(blob: str | None) -> str | None:
-    """Rewrite one JSON blob's platform/chat/name fields, at any depth."""
-    if not blob:
-        return blob
 
-    def walk(node):
-        if isinstance(node, dict):
-            return {k: walk(v) for k, v in node.items()}
-        if isinstance(node, list):
-            return [walk(v) for v in node]
-        if node == OLD_KEY:
-            return NEW_KEY
-        if node == OLD_PLATFORM:
-            return NEW_PLATFORM
-        if node == OLD_CHAT:
-            return NEW_CHAT
-        if node == OLD_NAME:
-            return NEW_NAME
-        return node
+def _walk(node):
+    """Rewrite only the identity fields above, wherever they are nested."""
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if isinstance(v, (dict, list)):
+                out[k] = _walk(v)
+            elif k in _IDENTITY_FIELDS and v == _IDENTITY_FIELDS[k][0]:
+                out[k] = _IDENTITY_FIELDS[k][1]
+            else:
+                out[k] = v
+        return out
+    if isinstance(node, list):
+        return [_walk(v) for v in node]
+    return node
 
+
+def _rewrite(blob: str | None) -> tuple[bool, str | None]:
+    """Try to rewrite one JSON blob's identity fields.
+
+    Returns (ok, new_blob). ok is False when the blob is not valid
+    JSON — None and the empty string included, which json.loads
+    rejects exactly as it rejects any other malformed text. On
+    failure the original blob comes back byte-for-byte unchanged; the
+    caller must then leave the WHOLE row alone, not only the blob,
+    or the row ends up split between the two identities with no way
+    for a second run to find it again.
+    """
     try:
-        return json.dumps(walk(json.loads(blob)))
+        parsed = json.loads(blob)
     except (TypeError, ValueError):
-        # A blob we cannot parse is left exactly as it was. Losing the
-        # key is recoverable from the backup; corrupting a row is not.
-        return blob
+        return False, blob
+    return True, json.dumps(_walk(parsed))
 
 
 def migrate(db_path: Path | str) -> dict[str, int]:
-    """Move every row on the old key. Returns rows changed per table."""
+    """Move every row on the old key.
+
+    Returns rows changed per table, plus `skipped`: rows left
+    completely alone because their JSON blob would not parse. Normally
+    0 — if it is not, the caller must investigate before trusting the
+    migration is complete.
+    """
     con = sqlite3.connect(str(db_path))
-    counts = {"sessions": 0, "delivery_obligations": 0, "gateway_routing": 0}
+    counts = {
+        "sessions": 0,
+        "delivery_obligations": 0,
+        "gateway_routing": 0,
+        "skipped": 0,
+    }
     try:
         with con:
             rows = con.execute(
@@ -67,12 +109,22 @@ def migrate(db_path: Path | str) -> dict[str, int]:
                 (OLD_KEY,),
             ).fetchall()
             for sid, origin in rows:
+                ok, new_origin = _rewrite(origin)
+                if not ok:
+                    counts["skipped"] += 1
+                    print(
+                        f"  WARNING: sessions.id={sid} has an unparseable "
+                        "origin_json — row left completely untouched, "
+                        "fix it by hand",
+                        file=sys.stderr,
+                    )
+                    continue
                 con.execute(
                     "UPDATE sessions SET session_key = ?, chat_id = ?, "
                     "display_name = ?, origin_json = ? WHERE id = ?",
-                    (NEW_KEY, NEW_CHAT, NEW_NAME, _rewrite(origin), sid),
+                    (NEW_KEY, NEW_CHAT, NEW_NAME, new_origin, sid),
                 )
-            counts["sessions"] = len(rows)
+                counts["sessions"] += 1
 
             cur = con.execute(
                 "UPDATE delivery_obligations SET session_key = ?, platform = ?, "
@@ -90,12 +142,22 @@ def migrate(db_path: Path | str) -> dict[str, int]:
                 (OLD_KEY,),
             ).fetchall()
             for scope, entry in rows:
+                ok, new_entry = _rewrite(entry)
+                if not ok:
+                    counts["skipped"] += 1
+                    print(
+                        f"  WARNING: gateway_routing.scope={scope!r} has an "
+                        "unparseable entry_json — row left completely "
+                        "untouched, fix it by hand",
+                        file=sys.stderr,
+                    )
+                    continue
                 con.execute(
                     "UPDATE gateway_routing SET session_key = ?, entry_json = ? "
                     "WHERE scope = ? AND session_key = ?",
-                    (NEW_KEY, _rewrite(entry), scope, OLD_KEY),
+                    (NEW_KEY, new_entry, scope, OLD_KEY),
                 )
-            counts["gateway_routing"] = len(rows)
+                counts["gateway_routing"] += 1
     finally:
         con.close()
     return counts
@@ -108,5 +170,15 @@ if __name__ == "__main__":
     target = Path(sys.argv[1])
     if not target.exists():
         raise SystemExit(f"no such database: {target}")
-    for table, n in migrate(target).items():
-        print(f"  {table}: {n} rows")
+    result = migrate(target)
+    for table in ("sessions", "delivery_obligations", "gateway_routing"):
+        print(f"  {table}: {result[table]} rows")
+    if result["skipped"]:
+        print(
+            f"  SKIPPED: {result['skipped']} row(s) had a blob that would "
+            "not parse and were left completely untouched. See the "
+            "warnings above — each must be fixed by hand before this "
+            "migration can be considered complete."
+        )
+    else:
+        print("  skipped: 0")
