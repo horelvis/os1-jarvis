@@ -12,18 +12,18 @@
 
 # ── Plugins ───────────────────────────────────────────────────────────
 # `kind: platform` and `kind: standalone` plugins are opt-in. Without
-# samantha-kiosk the strip has nothing to talk to; without
+# jarvis the strip has nothing to talk to; without
 # samantha-voice, TTS falls through to Edge — Microsoft's cloud.
 plugins:
   enabled:
-    - samantha-kiosk
+    - jarvis
     - samantha-voice
     - samantha-vision
     - samantha-code
   entries:
     samantha-voice:
       allow_tool_override: false
-    samantha-kiosk:
+    jarvis:
       allow_tool_override: false
     samantha-vision:
       allow_tool_override: false
@@ -102,7 +102,7 @@ wake_word:
 
 agent:
   # The widget speaks. With the tts toolset available the agent answers
-  # BY VOICE instead: Hermes writes a WAV, the text-only kiosk adapter
+  # BY VOICE instead: Hermes writes a WAV, the text-only JARVIS adapter
   # cannot deliver it, and the widget receives no reply text at all —
   # so Samantha simply stays silent.
   disabled_toolsets:
@@ -115,7 +115,7 @@ agent:
   #
   # Measured 2026-08-26: a turn looping on a tool this platform does not
   # have ran until somebody noticed — 15,099 tokens in one generation,
-  # the GPU at 93% and 391 W, with the kiosk's 90 s watchdog having
+  # the GPU at 93% and 391 W, with JARVIS' 90 s watchdog having
   # closed that turn minutes earlier. Nobody was waiting for any of it.
   # The same shape is in the previous day's journal.
   #
@@ -245,7 +245,7 @@ a2a_agents:
 #   selects the legacy tee-file follower (a box without the bridge).
 
 platform_toolsets:
-  samantha_kiosk:
+  jarvis:
     - memory
     - session_search
     - cronjob
