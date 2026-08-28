@@ -181,8 +181,11 @@ it was.
 
 ## Order, and how to get back
 
-One commit for the code, config and docs; the state migration separate,
-after it, with its backup. If the platform fails to register, the way
+One commit per task — the package, the variables, the constants that
+point at it, the clean-box scripts, the window, the migration script,
+the docs — and the state migration itself last, after all of them, with
+its backup. Seven reviewable commits rather than one large one; the way
+back is a revert of the range plus the backup. If the platform fails to register, the way
 back is `git revert` plus restoring `state.db.bak-20260828` — which is
 why the migration is last and why the backup is taken with the gateway
 stopped rather than under it.
