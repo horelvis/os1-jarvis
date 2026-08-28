@@ -10,7 +10,7 @@ the strip able to draw and to change the hint in the same commit. These
 tests are what keeps the two from drifting apart again.
 """
 
-from Hermes.plugins.samantha_kiosk import (
+from Hermes.plugins.jarvis import (
     _FALLBACK_HINT,
     _PERSONA_FILE,
     _platform_hint,
@@ -47,10 +47,10 @@ def test_the_hint_carries_the_persona():
 def test_a_missing_persona_file_still_yields_a_hint(monkeypatch):
     # The fallback path does not carry the screen sentence, and that is
     # the safe direction: it under-claims rather than over-claims.
-    from Hermes.plugins import samantha_kiosk
+    from Hermes.plugins import jarvis
 
-    monkeypatch.setattr(samantha_kiosk, "_PERSONA_FILE", _PERSONA_FILE / "nope")
-    assert samantha_kiosk._platform_hint() == _FALLBACK_HINT
+    monkeypatch.setattr(jarvis, "_PERSONA_FILE", _PERSONA_FILE / "nope")
+    assert jarvis._platform_hint() == _FALLBACK_HINT
 
 
 def test_the_hint_says_he_can_show_something_that_moves():

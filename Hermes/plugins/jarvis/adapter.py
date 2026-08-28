@@ -1,8 +1,8 @@
-"""The OS1 kiosk as a Hermes platform adapter.
+"""JARVIS — the strip on the desktop — as a Hermes platform adapter.
 
 Unlike every other in-tree adapter except `api_server`, this one LISTENS: it
 starts an aiohttp server inside the gateway process and holds one WebSocket
-to it. There is exactly one kiosk, so a second connection replaces the first
+to it. There is exactly one strip, so a second connection replaces the first
 rather than being refused — a browser refresh must not lock the user out of
 their own house.
 
@@ -18,10 +18,10 @@ Two things a reader should know before changing anything here:
   `result.success` unguarded — an AttributeError on every single reply, for
   weeks, with a green suite. When you touch a method the base class also
   declares, read the base class.
-* **`Platform("samantha_kiosk")` only works inside a gateway.** `Platform` is
+* **`Platform("jarvis")` only works inside a gateway.** `Platform` is
   an Enum; the member is created by `platform_registry.register`, so
-  constructing a `KioskAdapter` in a bare REPL raises
-  `ValueError: 'samantha_kiosk' is not a valid Platform`.
+  constructing a `JarvisAdapter` in a bare REPL raises
+  `ValueError: 'jarvis' is not a valid Platform`.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ ENV_ALLOW_ALL_USERS = "SAMANTHA_KIOSK_ALLOW_ALL_USERS"
 # it or every turn is dropped by the authorization gate.
 DEFAULT_USER_ID = "primary"
 
-# How long a turn may stay open before the kiosk apologises for it.
+# How long a turn may stay open before the strip apologises for it.
 #
 # The gateway answers asynchronously: `handle_message()` returns as soon as it
 # has spawned the background task, and the reply comes back later through
@@ -217,8 +217,8 @@ class _Turn:
     timed_out: bool = False
 
 
-class KioskAdapter(BasePlatformAdapter):
-    name = "samantha_kiosk"
+class JarvisAdapter(BasePlatformAdapter):
+    name = "jarvis"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         del kwargs
@@ -226,7 +226,7 @@ class KioskAdapter(BasePlatformAdapter):
         # subclass builds its OWN Platform and passes it up, rather than
         # the registry doing it — build_source() below reads self.platform.
         # NOTE: this only resolves inside a gateway; see the module docstring.
-        platform = Platform("samantha_kiosk")
+        platform = Platform("jarvis")
         super().__init__(config=config, platform=platform)
 
         # `adapter_factory` is called with a PlatformConfig, NOT a dict
@@ -326,21 +326,20 @@ class KioskAdapter(BasePlatformAdapter):
                 # retry (api_server.py's own history, #52132/#38803).
                 # Non-retryable drops it from the reconnect queue; the
                 # operator recovers by freeing the port or setting
-                # SAMANTHA_KIOSK_PORT, then `/platform resume samantha_kiosk`.
+                # SAMANTHA_KIOSK_PORT, then `/platform resume jarvis`.
                 self._set_fatal_error(
-                    "samantha_kiosk_port_in_use",
+                    "jarvis_port_in_use",
                     f"Port {self._configured_port} already in use. Set "
                     f"SAMANTHA_KIOSK_PORT to a different value, then "
-                    f"`/platform resume samantha_kiosk`.",
+                    f"`/platform resume jarvis`.",
                     retryable=False,
                 )
             logger.error(
-                f"samantha-kiosk: could not bind 127.0.0.1:"
-                f"{self._configured_port}: {exc}"
+                f"jarvis: could not bind 127.0.0.1:{self._configured_port}: {exc}"
             )
             return False
         self.port = self._actual_port()
-        logger.info(f"samantha-kiosk: serving /ws on :{self.port}")
+        logger.info(f"jarvis: serving /ws on :{self.port}")
         return True
 
     def _actual_port(self) -> int:
@@ -374,9 +373,9 @@ class KioskAdapter(BasePlatformAdapter):
         # signal before it's read.
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
-        """The kiosk has exactly one chat — the screen it renders on."""
+        """The strip has exactly one chat — the screen it renders on."""
         del chat_id
-        return {"name": "Kiosk", "type": "dm"}
+        return {"name": "JARVIS", "type": "dm"}
 
     async def send(
         self,
@@ -409,7 +408,7 @@ class KioskAdapter(BasePlatformAdapter):
             # same stale reply.
             self._turn = None
             logger.warning(
-                f"samantha-kiosk: dropping a reply that arrived after the "
+                f"jarvis: dropping a reply that arrived after the "
                 f"{self.turn_timeout:.0f}s watchdog already closed the turn"
             )
             # The error string MUST read as a timeout to
@@ -427,7 +426,7 @@ class KioskAdapter(BasePlatformAdapter):
             return SendResult(
                 success=False,
                 error=(
-                    "kiosk turn timed out waiting for a reply; the watchdog "
+                    "the turn timed out waiting for a reply; the watchdog "
                     "already closed it"
                 ),
                 retryable=False,
@@ -443,7 +442,7 @@ class KioskAdapter(BasePlatformAdapter):
             # open on purpose so the watchdog still owns it.
             return SendResult(
                 success=False,
-                error="samantha-kiosk: no kiosk connected",
+                error="jarvis: no strip connected",
                 retryable=True,
             )
 
@@ -452,10 +451,10 @@ class KioskAdapter(BasePlatformAdapter):
         return SendResult(success=True, message_id=turn.turn_id if turn else None)
 
     async def _push(self, payload: str) -> bool:
-        """Write one frame to the kiosk. False means it did not get there."""
+        """Write one frame to the strip. False means it did not get there."""
         ws = self._ws
         if ws is None or ws.closed:
-            logger.warning("samantha-kiosk: nothing connected, dropping a frame")
+            logger.warning("jarvis: nothing connected, dropping a frame")
             return False
         try:
             await ws.send_str(payload)
@@ -465,7 +464,7 @@ class KioskAdapter(BasePlatformAdapter):
             # closing. Neither may propagate: _push is called from send()
             # (whose caller is Hermes) and from the watchdog (whose caller is
             # nobody), and an exception in either place is a silent turn.
-            logger.warning(f"samantha-kiosk: frame not delivered — {exc}")
+            logger.warning(f"jarvis: frame not delivered — {exc}")
             return False
         return True
 
@@ -475,7 +474,7 @@ class KioskAdapter(BasePlatformAdapter):
         The path is validated against the snapshot directory before it is
         sent: the strip opens whatever it is handed, and this socket is an
         unauthenticated local listener. The vision plugin is imported here,
-        lazily, rather than at module load: `samantha_kiosk` is the strip's
+        lazily, rather than at module load: `jarvis` is the strip's
         platform and must keep working on a box where `samantha_vision` is
         absent, broken, or simply not installed — a missing camera plugin
         must never be the reason the strip goes mute.
@@ -483,7 +482,7 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             from Hermes.plugins.samantha_vision.snapshot import snapshot_dir
         except ImportError as exc:
-            logger.warning(f"samantha-kiosk: samantha_vision unavailable — {exc}")
+            logger.warning(f"jarvis: samantha_vision unavailable — {exc}")
             return False
 
         try:
@@ -497,9 +496,7 @@ class KioskAdapter(BasePlatformAdapter):
             # OSError, on CPython) — reachable through our own bug in the
             # spool, not an attacker, but this method must never raise
             # regardless of cause.
-            logger.warning(
-                f"samantha-kiosk: refusing photo outside the spool: {path!r}"
-            )
+            logger.warning(f"jarvis: refusing photo outside the spool: {path!r}")
             return False
         return await self._push(photo(str(resolved), camera))
 
@@ -518,7 +515,7 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             await ws.send_bytes(payload)
         except (ConnectionResetError, RuntimeError) as exc:
-            logger.debug(f"samantha-kiosk: live frame not delivered — {exc}")
+            logger.debug(f"jarvis: live frame not delivered — {exc}")
             return False
         return True
 
@@ -548,7 +545,7 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             payload = live_frame(epoch, packet)
         except ProtocolError as exc:
-            logger.warning(f"samantha-kiosk: refusing a live frame — {exc}")
+            logger.warning(f"jarvis: refusing a live frame — {exc}")
             return False
         return await self._push_bytes(payload)
 
@@ -557,7 +554,7 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             payload = live_end(epoch, reason)
         except ProtocolError as exc:
-            logger.warning(f"samantha-kiosk: refusing a live_end — {exc}")
+            logger.warning(f"jarvis: refusing a live_end — {exc}")
             return False
         return await self._push(payload)
 
@@ -569,7 +566,7 @@ class KioskAdapter(BasePlatformAdapter):
     # which is the layer that knows a turn was accepted, provides it here.
 
     def _open_turn(self) -> _Turn:
-        # A new turn supersedes whatever was still open: one kiosk, one
+        # A new turn supersedes whatever was still open: one strip, one
         # screen, and the frontend only sends again once the previous turn
         # settled or the user reloaded.
         self._abandon_turn()
@@ -611,7 +608,7 @@ class KioskAdapter(BasePlatformAdapter):
         turn.timed_out = True
         self._settle(turn, keep_slot=True)
         logger.warning(
-            f"samantha-kiosk: no reply within {self.turn_timeout:.0f}s for turn "
+            f"jarvis: no reply within {self.turn_timeout:.0f}s for turn "
             f"{turn.turn_id} — telling the user instead of leaving the screen "
             f"stuck (check the gateway log for authorization, session-key or "
             f"dispatch warnings)"
@@ -620,14 +617,14 @@ class KioskAdapter(BasePlatformAdapter):
 
     # ── transport ─────────────────────────────────────────────────────────
 
-    def _origin_is_the_kiosk(self, origin: str) -> bool:
-        """Whether an `Origin` header may open the kiosk socket.
+    def _origin_is_the_strip(self, origin: str) -> bool:
+        """Whether an `Origin` header may open the strip's socket.
 
         WebSockets are not subject to the same-origin policy, so without this
         any page in any browser on this machine could open ws://127.0.0.1/ws,
         assert a `user_id`, and talk to an agent with tool access — and, worse
-        than the usual CSWSH, the one-kiosk swap below means the hostile page
-        EVICTS the real kiosk rather than merely eavesdropping.
+        than the usual CSWSH, the one-strip swap below means the hostile page
+        EVICTS the real strip rather than merely eavesdropping.
 
         An absent Origin is allowed: non-browser clients (the acceptance-test
         WebSocket client, curl, a future native shell) do not send one, and
@@ -646,10 +643,8 @@ class KioskAdapter(BasePlatformAdapter):
 
     async def _ws_handler(self, request: web.Request) -> web.WebSocketResponse:
         origin = request.headers.get("Origin", "")
-        if not self._origin_is_the_kiosk(origin):
-            logger.warning(
-                f"samantha-kiosk: refusing a WebSocket from origin {origin!r}"
-            )
+        if not self._origin_is_the_strip(origin):
+            logger.warning(f"jarvis: refusing a WebSocket from origin {origin!r}")
             raise web.HTTPForbidden()
 
         # heartbeat: a browser killed without a FIN (X restart, Chromium
@@ -686,7 +681,7 @@ class KioskAdapter(BasePlatformAdapter):
                 try:
                     decoded = decode_client(msg.data)
                 except ProtocolError as exc:
-                    logger.warning(f"samantha-kiosk: bad frame — {exc}")
+                    logger.warning(f"jarvis: bad frame — {exc}")
                     await self._push(error(_BAD_FRAME))
                     continue
                 if decoded["type"] == "chat":
@@ -722,13 +717,13 @@ class KioskAdapter(BasePlatformAdapter):
         try:
             return bool(divert(decoded["message"]))
         except Exception as exc:  # noqa: BLE001 — the turn outranks the hook
-            logger.warning(f"samantha-kiosk: divert failed — {exc}")
+            logger.warning(f"jarvis: divert failed — {exc}")
             return False
 
     async def _handle_chat(self, message: str, user_id: str) -> None:
         source = self.build_source(
-            chat_id="kiosk",
-            chat_name="Kiosk",
+            chat_id="jarvis",
+            chat_name="JARVIS",
             chat_type="dm",
             user_id=user_id,
             user_name=user_id,
@@ -746,7 +741,7 @@ class KioskAdapter(BasePlatformAdapter):
             # above is what makes "later" bounded.
             await self.handle_message(event)
         except Exception as exc:
-            logger.error(f"samantha-kiosk: dispatch failed — {exc}")
+            logger.error(f"jarvis: dispatch failed — {exc}")
             if not turn.settled:
                 self._settle(turn)
                 await self._push(error(_TURN_LOST))

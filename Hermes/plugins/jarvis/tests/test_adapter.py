@@ -6,7 +6,7 @@ import pytest
 
 aiohttp = pytest.importorskip("aiohttp")
 
-from Hermes.plugins.samantha_kiosk.adapter import KioskAdapter  # noqa: E402
+from Hermes.plugins.jarvis.adapter import JarvisAdapter  # noqa: E402
 
 
 def _cfg(tmp_path: Path) -> dict:
@@ -26,11 +26,11 @@ def test_websocket_round_trip(tmp_path, monkeypatch):
         await self.send(event.source.chat_id, f"echo: {event.text}")
 
     monkeypatch.setattr(
-        KioskAdapter, "handle_message", fake_handle_message, raising=False
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
     )
 
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -50,7 +50,7 @@ def test_websocket_round_trip(tmp_path, monkeypatch):
 
 def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
     # The adapter must hand Hermes a TEXT MessageEvent, not answer itself.
-    import Hermes.plugins.samantha_kiosk.adapter as mod
+    import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
 
@@ -58,11 +58,11 @@ def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
         seen.append(event)
 
     monkeypatch.setattr(
-        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
     )
 
     async def go():
-        a = mod.KioskAdapter(_cfg(tmp_path))
+        a = mod.JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             await a._handle_chat("hola", "primary")
@@ -77,7 +77,7 @@ def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
 
 def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -97,7 +97,7 @@ def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):
 def test_second_connection_replaces_the_first(tmp_path):
     # One kiosk. A reconnect after a browser refresh must not leave two.
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -152,7 +152,7 @@ def test_concurrent_reconnects_dont_clobber_the_newest_socket(tmp_path, monkeypa
     monkeypatch.setattr(aiohttp.web.WebSocketResponse, "close", slow_close)
 
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -187,12 +187,12 @@ def test_concurrent_reconnects_dont_clobber_the_newest_socket(tmp_path, monkeypa
 
 def test_disconnect_releases_the_port(tmp_path):
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         port = a.port
         await a.disconnect()
         # Binding the same port again must succeed.
-        b = KioskAdapter({"port": port})
+        b = JarvisAdapter({"port": port})
         assert await b.connect() is True
         await b.disconnect()
 
@@ -206,13 +206,13 @@ def test_port_conflict_is_a_fatal_non_retryable_error(tmp_path):
     # reconnect watcher would otherwise retry forever at the backoff cap
     # (api_server.py hit exactly this leak in production).
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
-        b = KioskAdapter({"port": a.port})
+        b = JarvisAdapter({"port": a.port})
         try:
             ok = await b.connect()
             assert ok is False
-            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+            assert b._fatal_error_code == "jarvis_port_in_use"
             assert b._fatal_error_retryable is False
             # No leaked runner/site from the failed attempt.
             assert b._runner is None
@@ -238,16 +238,16 @@ def test_fatal_error_survives_disconnect(tmp_path):
     # prevent. Clearing on disconnect() undoes the fix silently, because
     # no other test calls disconnect() after a fatal connect().
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
-            b = KioskAdapter({"port": a.port})
+            b = JarvisAdapter({"port": a.port})
             assert await b.connect() is False
-            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+            assert b._fatal_error_code == "jarvis_port_in_use"
 
             await b.disconnect()
 
-            assert b._fatal_error_code == "samantha_kiosk_port_in_use"
+            assert b._fatal_error_code == "jarvis_port_in_use"
             assert b._fatal_error_message is not None
             assert b._fatal_error_retryable is False
         finally:
@@ -263,7 +263,7 @@ def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
     del tmp_path
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "0")
 
-    a = KioskAdapter({"port": 9999})
+    a = JarvisAdapter({"port": 9999})
 
     assert a.port == 0
 
@@ -277,7 +277,7 @@ def test_send_returns_a_send_result_not_none(tmp_path):
     # This shipped once with a green suite because every test here runs
     # against the shim. Assert the contract, not the shim.
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -296,7 +296,7 @@ def test_send_with_nobody_connected_is_a_retryable_failure(tmp_path):
     # A browser mid-refresh must cost a retry, not the reply. Reporting
     # success=True here would tell Hermes a message landed that went nowhere.
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             result = await a.send("kiosk", "hola")
@@ -317,10 +317,10 @@ def test_a_turn_that_never_comes_back_gets_an_error_frame(tmp_path, monkeypatch)
     async def never_answers(self, event):
         return None
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", never_answers, raising=False)
 
     async def go():
-        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        a = JarvisAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -348,10 +348,10 @@ def test_a_reply_that_arrives_in_time_gets_no_watchdog_error(tmp_path, monkeypat
     async def answers(self, event):
         await self.send(event.source.chat_id, "aquí estoy")
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", answers, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", answers, raising=False)
 
     async def go():
-        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        a = JarvisAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -387,10 +387,10 @@ def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
     async def never_answers(self, event):
         return None
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", never_answers, raising=False)
 
     async def go():
-        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
+        a = JarvisAdapter({**_cfg(tmp_path), "turn_timeout": 0.2})
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -427,10 +427,10 @@ def test_the_watchdog_leaves_no_task_behind(tmp_path, monkeypatch):
     async def answers(self, event):
         await self.send(event.source.chat_id, "vale")
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", answers, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", answers, raising=False)
 
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -452,10 +452,10 @@ def test_disconnect_cancels_a_pending_watchdog(tmp_path, monkeypatch):
     async def never_answers(self, event):
         return None
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", never_answers, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", never_answers, raising=False)
 
     async def go():
-        a = KioskAdapter({**_cfg(tmp_path), "turn_timeout": 30})
+        a = JarvisAdapter({**_cfg(tmp_path), "turn_timeout": 30})
         await a.connect()
         async with aiohttp.ClientSession() as s:
             async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
@@ -477,10 +477,10 @@ def test_a_dispatch_failure_reaches_the_screen(tmp_path, monkeypatch):
     async def blows_up(self, event):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(KioskAdapter, "handle_message", blows_up, raising=False)
+    monkeypatch.setattr(JarvisAdapter, "handle_message", blows_up, raising=False)
 
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -506,7 +506,7 @@ def test_a_foreign_origin_cannot_open_the_socket(tmp_path):
     # agent with tool access — and, because the newest connection wins,
     # EVICT the real kiosk rather than merely eavesdrop.
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -532,7 +532,7 @@ def test_a_local_page_on_another_port_cannot_open_the_socket(tmp_path):
     # The dev box runs other things on loopback. "Local" is not enough —
     # the origin must be the kiosk's own.
     async def go():
-        a = KioskAdapter(_cfg(tmp_path))
+        a = JarvisAdapter(_cfg(tmp_path))
         await a.connect()
         try:
             async with aiohttp.ClientSession() as s:
@@ -563,7 +563,7 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
         enabled = True
         extra = {"port": 0, "turn_timeout": 12}
 
-    a = KioskAdapter(FakePlatformConfig())
+    a = JarvisAdapter(FakePlatformConfig())
     assert a.port == 0
     assert a.turn_timeout == 12
 
@@ -575,7 +575,7 @@ def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
     class Bare:
         enabled = True
 
-    a = KioskAdapter(Bare())
+    a = JarvisAdapter(Bare())
     assert a.port == 7777
     assert a.turn_timeout == 90.0
 
@@ -602,7 +602,7 @@ def adapter(tmp_path):
     whether or not the validation code exists. Use `connected_adapter`
     for anything that must prove the validation itself did the rejecting.
     """
-    a = KioskAdapter(_cfg(tmp_path))
+    a = JarvisAdapter(_cfg(tmp_path))
     a._ws = None
     return a
 
@@ -640,7 +640,7 @@ def connected_adapter(tmp_path):
     "open" (`closed = False`), so if validation ever let a bad path
     through, `_RecordingWs.sent` would show it.
     """
-    a = KioskAdapter(_cfg(tmp_path))
+    a = JarvisAdapter(_cfg(tmp_path))
     a._ws = _RecordingWs()
     return a
 
@@ -806,7 +806,7 @@ def test_a_divert_that_raises_does_not_eat_the_turn(adapter):
 def test_a_diverted_frame_never_becomes_a_turn(tmp_path, monkeypatch):
     # The seam that matters, through a real socket: the answer goes to
     # the bridge and Hermes is never asked to think about it.
-    import Hermes.plugins.samantha_kiosk.adapter as mod
+    import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
     taken = []
@@ -817,11 +817,11 @@ def test_a_diverted_frame_never_becomes_a_turn(tmp_path, monkeypatch):
         await self.send(event.source.chat_id, "vale")
 
     monkeypatch.setattr(
-        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
     )
 
     async def go():
-        a = mod.KioskAdapter(_cfg(tmp_path))
+        a = mod.JarvisAdapter(_cfg(tmp_path))
         a.divert_chat = lambda text: taken.append(text) or True
         await a.connect()
         try:
@@ -866,7 +866,7 @@ def test_a_diverted_frame_settles_the_wave_without_a_word(tmp_path, monkeypatch)
     # `done` or one `error`. A divert opens no turn, so nothing arms the
     # watchdog — without this frame the strip sits in `thinking` for as
     # long as the build runs.
-    import Hermes.plugins.samantha_kiosk.adapter as mod
+    import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
 
@@ -874,11 +874,11 @@ def test_a_diverted_frame_settles_the_wave_without_a_word(tmp_path, monkeypatch)
         seen.append(event)
 
     monkeypatch.setattr(
-        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
     )
 
     async def go():
-        a = mod.KioskAdapter(_cfg(tmp_path))
+        a = mod.JarvisAdapter(_cfg(tmp_path))
         a.divert_chat = lambda text: True
         await a.connect()
         try:
@@ -900,17 +900,17 @@ def test_a_diverted_frame_settles_the_wave_without_a_word(tmp_path, monkeypatch)
 
 def test_a_declined_divert_still_opens_an_ordinary_turn(tmp_path, monkeypatch):
     # The silence must belong to the divert, not to every chat frame.
-    import Hermes.plugins.samantha_kiosk.adapter as mod
+    import Hermes.plugins.jarvis.adapter as mod
 
     async def fake_handle_message(self, event):
         await self.send(event.source.chat_id, "vale")
 
     monkeypatch.setattr(
-        mod.KioskAdapter, "handle_message", fake_handle_message, raising=False
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
     )
 
     async def go():
-        a = mod.KioskAdapter(_cfg(tmp_path))
+        a = mod.JarvisAdapter(_cfg(tmp_path))
         a.divert_chat = lambda text: False
         await a.connect()
         try:
@@ -947,3 +947,23 @@ def test_push_asking_goes_out_as_text(adapter):
 def test_push_asking_with_no_strip_connected_is_false_not_an_error(adapter):
     adapter._ws = None
     assert asyncio.run(adapter.push_asking(True)) is False
+
+
+def test_the_platform_is_called_jarvis():
+    """The name the gateway registers, the session key, and the chat.
+
+    None of the three was pinned before 2026-08-28, which is why the
+    rename had to start here: `samantha_kiosk` could have been changed
+    in one of them and left in the other two with every test green.
+    """
+    adapter = JarvisAdapter(config={})
+    assert JarvisAdapter.name == "jarvis"
+    assert adapter.platform.value == "jarvis"
+
+
+def test_the_chat_is_called_jarvis():
+    import asyncio
+
+    adapter = JarvisAdapter(config={})
+    info = asyncio.run(adapter.get_chat_info("ignored"))
+    assert info == {"name": "JARVIS", "type": "dm"}

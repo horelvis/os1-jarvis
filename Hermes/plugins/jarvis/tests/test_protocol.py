@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from Hermes.plugins.samantha_kiosk.protocol import (
+from Hermes.plugins.jarvis.protocol import (
     MAX_LIVE_FRAME_BYTES,
     ProtocolError,
     asking,

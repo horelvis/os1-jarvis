@@ -1,11 +1,11 @@
 manifest_version: 2
 api_version: 1
-name: samantha-kiosk
-label: Samantha (kiosk)
+name: jarvis
+label: JARVIS
 kind: platform
 version: 1.0.0
 description: >
-  Holds the single WebSocket the kiosk talks over. Text only in this
+  Holds the single WebSocket the strip talks over. Text only in this
   version; audio arrives in plan 3b.
 author: Horelvis Castillo
 
@@ -18,7 +18,7 @@ author: Horelvis Castillo
 # the first file an operator opens.
 #
 # 1. AUTHORIZATION. Hermes default-denies a platform it has no allowlist
-#    for; a denied kiosk turn is a log warning and nothing on the screen.
+#    for; a denied JARVIS turn is a log warning and nothing on the screen.
 #    register() declares SAMANTHA_KIOSK_ALLOWED_USERS and defaults it to
 #    "primary" — the user id frontend/src/net/wsClient.ts:80 sends. Change
 #    one without the other and every turn is dropped. With NO allowlist at
@@ -29,12 +29,12 @@ author: Horelvis Castillo
 #    nothing downstream guarantees a reply. The adapter arms a watchdog per
 #    accepted `chat` frame (SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
 #    pushes an `error` frame if nothing closed the turn. Without it the
-#    frontend hangs forever — `busy` never clears, and because the STT
+#    strip hangs forever — `busy` never clears, and because the STT
 #    commit is gated on `busy`, VOICE input dies with it.
 #
-# 3. NOBODY LISTENING. If the browser is mid-refresh, send() reports
+# 3. NOBODY LISTENING. If the strip is mid-reconnect, send() reports
 #    success=False/retryable=True so Hermes retries rather than losing the
-#    reply. If the browser died without a FIN the socket looks alive in
+#    reply. If the strip died without a FIN the socket looks alive in
 #    Python; heartbeat=30 turns that into a normal close instead of a sink
 #    that swallows every reply with no log line.
 #
@@ -49,19 +49,19 @@ python_dependencies:
 
 optional_env:
   - name: SAMANTHA_KIOSK_PORT
-    description: "Puerto donde se sirve el WebSocket del kiosko (por defecto 7777)"
-    prompt: "Puerto del kiosko"
+    description: "Puerto donde se sirve el WebSocket de la tira (por defecto 7777)"
+    prompt: "Puerto de la tira"
     password: false
   - name: SAMANTHA_KIOSK_ALLOWED_USERS
     description: >
-      Quién puede hablar por el kiosko (por defecto "primary", que es el
+      Quién puede hablar con JARVIS (por defecto "primary", que es el
       user_id que envía la interfaz)
     prompt: "user_id autorizado"
     password: false
   - name: SAMANTHA_KIOSK_ALLOW_ALL_USERS
     description: >
-      Deja pasar a cualquiera por el kiosko. No hace falta en un aparato de
-      una sola persona; existe para depurar
+      Deja pasar a cualquiera para hablar con JARVIS. No hace falta en un
+      aparato de una sola persona; existe para depurar
     prompt: "¿Permitir a cualquiera? (true/false)"
     password: false
   - name: SAMANTHA_KIOSK_TURN_TIMEOUT

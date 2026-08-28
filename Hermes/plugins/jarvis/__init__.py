@@ -1,4 +1,4 @@
-"""samantha-kiosk — the OS1 interface as a Hermes platform."""
+"""jarvis — the strip on the desktop, as a Hermes platform."""
 
 import os
 from pathlib import Path
@@ -7,10 +7,10 @@ from .adapter import (
     DEFAULT_USER_ID,
     ENV_ALLOW_ALL_USERS,
     ENV_ALLOWED_USERS,
-    KioskAdapter,
+    JarvisAdapter,
 )
 
-__all__ = ["KioskAdapter", "register"]
+__all__ = ["JarvisAdapter", "register"]
 
 
 def check_requirements() -> bool:
@@ -130,12 +130,12 @@ def _platform_hint() -> str:
 
 
 def register(ctx):
-    """Register the kiosk platform.
+    """Register the JARVIS platform.
 
     What registration forgot the first time, and what it cost:
     **`allowed_users_env` / `allow_all_env` are not optional metadata.**
     Hermes' authorization gate default-denies any platform it has no
-    allowlist for, and a denied kiosk message is dropped with a log warning
+    allowlist for, and a denied JARVIS message is dropped with a log warning
     and NOTHING on the screen. Without these two kwargs the only way to make
     the appliance answer at all was to export the *global*
     `GATEWAY_ALLOWED_USERS` by hand — which authorizes that id on every
@@ -161,14 +161,14 @@ def register(ctx):
     os.environ.setdefault(ENV_ALLOWED_USERS, DEFAULT_USER_ID)
 
     ctx.register_platform(
-        name="samantha_kiosk",
-        label="Samantha (kiosk)",
-        adapter_factory=lambda cfg: KioskAdapter(cfg),
+        name="jarvis",
+        label="JARVIS",
+        adapter_factory=lambda cfg: JarvisAdapter(cfg),
         check_fn=check_requirements,
         required_env=[],
         install_hint="uv pip install --python ~/hermes-src/.venv/bin/python aiohttp",
         # Auth env vars for gateway/authz_mixin.py:_is_user_authorized().
-        # Read there through platform_registry.get("samantha_kiosk"), so they
+        # Read there through platform_registry.get("jarvis"), so they
         # only exist for the gateway if they are declared here.
         allowed_users_env=ENV_ALLOWED_USERS,
         allow_all_env=ENV_ALLOW_ALL_USERS,
