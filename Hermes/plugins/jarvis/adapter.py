@@ -190,7 +190,15 @@ _LEGACY_ENV = {
 
 
 def _env(name: str) -> str | None:
-    """The new variable, or the one it replaced. Never raises."""
+    """The new variable, or the one it replaced. Never raises.
+
+    Uses `or`, not presence: a variable explicitly set to `""` reads as
+    unset and falls through to the legacy name. Harmless for a port or a
+    timeout, where an empty string was never a valid value anyway — but
+    __init__.py's `register()` also drives authorization through this
+    function, so an operator who sets JARVIS_ALLOWED_USERS="" expecting to
+    blank it out gets the SAMANTHA_KIOSK_ALLOWED_USERS value instead.
+    """
     return os.getenv(name) or os.getenv(_LEGACY_ENV.get(name, ""), None)
 
 

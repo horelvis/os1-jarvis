@@ -148,6 +148,14 @@ def register(ctx):
     Declaring them scopes the allowlist to this platform. Defaulting
     `JARVIS_ALLOWED_USERS` below is what makes a fresh install work
     with no environment at all, which is the point of an appliance.
+
+    Both env vars are read by authz_mixin.py through a bare `os.getenv` on
+    the exact name given to `allowed_users_env=`/`allow_all_env=` below —
+    it never calls `_env()`, so a value that only exists under the OLD
+    `SAMANTHA_KIOSK_*` name is invisible to it. This function is therefore
+    where the legacy value is copied onto the new name in the process
+    environment, once, before `register_platform` hands the new name to
+    Hermes.
     """
     # A single-user appliance in the owner's home, on a socket bound to
     # 127.0.0.1 with an Origin check in front of it. There is exactly one
@@ -157,13 +165,28 @@ def register(ctx):
     # would silently stay open if a second identity ever reached this
     # platform; a one-entry allowlist keeps the gate a gate.
     #
-    # setdefault, not assignment: an operator who sets either variable — a
-    # different id, or JARVIS_ALLOW_ALL_USERS=true — still wins. Checked
-    # through _env() rather than a bare setdefault so a box that still
-    # carries the old SAMANTHA_KIOSK_ALLOWED_USERS is not overridden by
-    # this default under the new name.
-    if not _env(ENV_ALLOWED_USERS):
-        os.environ.setdefault(ENV_ALLOWED_USERS, DEFAULT_USER_ID)
+    # `_env()` only reaches code that calls it. authz_mixin.py does not —
+    # it reads os.environ[ENV_ALLOWED_USERS] / os.environ[ENV_ALLOW_ALL_USERS]
+    # by the literal new name via `register_platform`'s own bare os.getenv
+    # (`allowed_users_env=`/`allow_all_env=` below), so the legacy value
+    # must be COPIED onto the new name here, in process environment, or a
+    # box that still carries SAMANTHA_KIOSK_ALLOWED_USERS/_ALLOW_ALL_USERS
+    # goes unauthorized the instant this file is renamed — the "eyes open"
+    # failure the manifest warns about (plugin.yaml, "AUTHORIZATION").
+    #
+    # setdefault, not assignment: an operator who sets the NEW name
+    # explicitly — a different id, or JARVIS_ALLOW_ALL_USERS=true — still
+    # wins, because setdefault only acts when the key is absent.
+    os.environ.setdefault(ENV_ALLOWED_USERS, _env(ENV_ALLOWED_USERS) or DEFAULT_USER_ID)
+
+    # ALLOW_ALL has no default to fall back to — unlike ALLOWED_USERS, an
+    # absent value here must STAY absent, or "neither name set" turns into
+    # "allow-all is set to something falsy-but-present", which is a
+    # different (and worse) authorization posture than "not configured".
+    # So this only ever copies a legacy value that is genuinely there.
+    _legacy_allow_all = _env(ENV_ALLOW_ALL_USERS)
+    if _legacy_allow_all is not None:
+        os.environ.setdefault(ENV_ALLOW_ALL_USERS, _legacy_allow_all)
 
     ctx.register_platform(
         name="jarvis",
