@@ -8,6 +8,7 @@ from .adapter import (
     ENV_ALLOW_ALL_USERS,
     ENV_ALLOWED_USERS,
     JarvisAdapter,
+    _env,
 )
 
 __all__ = ["JarvisAdapter", "register"]
@@ -145,7 +146,7 @@ def register(ctx):
     screen, in English, with a pairing code.
 
     Declaring them scopes the allowlist to this platform. Defaulting
-    `SAMANTHA_KIOSK_ALLOWED_USERS` below is what makes a fresh install work
+    `JARVIS_ALLOWED_USERS` below is what makes a fresh install work
     with no environment at all, which is the point of an appliance.
     """
     # A single-user appliance in the owner's home, on a socket bound to
@@ -157,8 +158,12 @@ def register(ctx):
     # platform; a one-entry allowlist keeps the gate a gate.
     #
     # setdefault, not assignment: an operator who sets either variable — a
-    # different id, or SAMANTHA_KIOSK_ALLOW_ALL_USERS=true — still wins.
-    os.environ.setdefault(ENV_ALLOWED_USERS, DEFAULT_USER_ID)
+    # different id, or JARVIS_ALLOW_ALL_USERS=true — still wins. Checked
+    # through _env() rather than a bare setdefault so a box that still
+    # carries the old SAMANTHA_KIOSK_ALLOWED_USERS is not overridden by
+    # this default under the new name.
+    if not _env(ENV_ALLOWED_USERS):
+        os.environ.setdefault(ENV_ALLOWED_USERS, DEFAULT_USER_ID)
 
     ctx.register_platform(
         name="jarvis",

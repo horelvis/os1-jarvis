@@ -967,3 +967,26 @@ def test_the_chat_is_called_jarvis():
     adapter = JarvisAdapter(config={})
     info = asyncio.run(adapter.get_chat_info("ignored"))
     assert info == {"name": "JARVIS", "type": "dm"}
+
+
+def test_the_port_comes_from_the_new_variable(monkeypatch):
+    monkeypatch.setenv("JARVIS_PORT", "7801")
+    assert JarvisAdapter(config={})._configured_port == 7801
+
+
+def test_the_old_variable_still_works(monkeypatch):
+    """A box that set SAMANTHA_KIOSK_PORT before 2026-08-28 keeps it.
+
+    Nothing on this machine sets any of the four (verified 2026-08-28:
+    no unit, no drop-in), so this protects a box we cannot see rather
+    than this one.
+    """
+    monkeypatch.delenv("JARVIS_PORT", raising=False)
+    monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "7802")
+    assert JarvisAdapter(config={})._configured_port == 7802
+
+
+def test_the_new_variable_wins_over_the_old(monkeypatch):
+    monkeypatch.setenv("JARVIS_PORT", "7803")
+    monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "7804")
+    assert JarvisAdapter(config={})._configured_port == 7803

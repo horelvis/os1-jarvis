@@ -19,7 +19,8 @@ author: Horelvis Castillo
 #
 # 1. AUTHORIZATION. Hermes default-denies a platform it has no allowlist
 #    for; a denied JARVIS turn is a log warning and nothing on the screen.
-#    register() declares SAMANTHA_KIOSK_ALLOWED_USERS and defaults it to
+#    register() declares JARVIS_ALLOWED_USERS (falling back to the old
+#    SAMANTHA_KIOSK_ALLOWED_USERS) and defaults it to
 #    "primary" — the user id frontend/src/net/wsClient.ts:80 sends. Change
 #    one without the other and every turn is dropped. With NO allowlist at
 #    all the default is worse than silence: Hermes greets the owner in
@@ -27,7 +28,8 @@ author: Horelvis Castillo
 #
 # 2. A TURN THAT NEVER COMES BACK. The gateway answers asynchronously, so
 #    nothing downstream guarantees a reply. The adapter arms a watchdog per
-#    accepted `chat` frame (SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
+#    accepted `chat` frame (JARVIS_TURN_TIMEOUT, falling back to the old
+#    SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
 #    pushes an `error` frame if nothing closed the turn. Without it the
 #    strip hangs forever — `busy` never clears, and because the STT
 #    commit is gated on `busy`, VOICE input dies with it.
@@ -48,23 +50,23 @@ python_dependencies:
   - "aiohttp>=3.9,<4"   # upper bound per Hermes dependency policy (plugins doctor warns without it)
 
 optional_env:
-  - name: SAMANTHA_KIOSK_PORT
-    description: "Puerto donde se sirve el WebSocket de la tira (por defecto 7777)"
-    prompt: "Puerto de la tira"
+  - name: JARVIS_PORT
+    description: "Puerto donde se sirve el WebSocket de JARVIS (por defecto 7777)"
+    prompt: "Puerto de JARVIS"
     password: false
-  - name: SAMANTHA_KIOSK_ALLOWED_USERS
+  - name: JARVIS_ALLOWED_USERS
     description: >
       Quién puede hablar con JARVIS (por defecto "primary", que es el
       user_id que envía la interfaz)
     prompt: "user_id autorizado"
     password: false
-  - name: SAMANTHA_KIOSK_ALLOW_ALL_USERS
+  - name: JARVIS_ALLOW_ALL_USERS
     description: >
       Deja pasar a cualquiera para hablar con JARVIS. No hace falta en un
       aparato de una sola persona; existe para depurar
     prompt: "¿Permitir a cualquiera? (true/false)"
     password: false
-  - name: SAMANTHA_KIOSK_TURN_TIMEOUT
+  - name: JARVIS_TURN_TIMEOUT
     description: >
       Segundos que espera antes de decir que algo se ha quedado a medias
       (por defecto 90)

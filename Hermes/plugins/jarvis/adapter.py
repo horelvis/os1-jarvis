@@ -163,18 +163,36 @@ except ImportError:  # pragma: no cover - only without Hermes installed
 _BAD_FRAME = "No te he entendido. ¿Me lo dices otra vez?"
 _TURN_LOST = "Algo se ha quedado a medias. ¿Me lo repites?"
 
-# Env var names, declared in plugin.yaml's optional_env (Task 4) and
-# exported by the manual acceptance test (Task 5). Config-dict keys stay
-# the fallback so unit tests can construct an adapter without touching the
-# process environment.
-_ENV_PORT = "SAMANTHA_KIOSK_PORT"
-_ENV_TURN_TIMEOUT = "SAMANTHA_KIOSK_TURN_TIMEOUT"
+# Env var names, declared in plugin.yaml's optional_env. Config-dict keys
+# stay the fallback so unit tests can construct an adapter without
+# touching the process environment.
+_ENV_PORT = "JARVIS_PORT"
+_ENV_TURN_TIMEOUT = "JARVIS_TURN_TIMEOUT"
 
 # Authorization, read by gateway/authz_mixin.py via the registry entry that
 # __init__.py's register() declares. Kept here so the name lives next to the
 # other two and register() cannot drift from the adapter.
-ENV_ALLOWED_USERS = "SAMANTHA_KIOSK_ALLOWED_USERS"
-ENV_ALLOW_ALL_USERS = "SAMANTHA_KIOSK_ALLOW_ALL_USERS"
+ENV_ALLOWED_USERS = "JARVIS_ALLOWED_USERS"
+ENV_ALLOW_ALL_USERS = "JARVIS_ALLOW_ALL_USERS"
+
+# The names these four had while the platform was called samantha_kiosk.
+# Nothing on the box that made this change set any of them — verified
+# 2026-08-28 across every unit and drop-in — so this map protects a
+# machine we cannot see. Losing an allowlist silently is the same class
+# of failure as the session key in samantha_vision/alert.py: it does not
+# raise, it just stops answering.
+_LEGACY_ENV = {
+    _ENV_PORT: "SAMANTHA_KIOSK_PORT",
+    _ENV_TURN_TIMEOUT: "SAMANTHA_KIOSK_TURN_TIMEOUT",
+    ENV_ALLOWED_USERS: "SAMANTHA_KIOSK_ALLOWED_USERS",
+    ENV_ALLOW_ALL_USERS: "SAMANTHA_KIOSK_ALLOW_ALL_USERS",
+}
+
+
+def _env(name: str) -> str | None:
+    """The new variable, or the one it replaced. Never raises."""
+    return os.getenv(name) or os.getenv(_LEGACY_ENV.get(name, ""), None)
+
 
 # The user id the OS1 frontend sends. Pinned by `frontend/src/net/wsClient.ts:80`
 # (`userId = "primary"`); if that default ever changes, this must change with
@@ -245,15 +263,15 @@ class JarvisAdapter(BasePlatformAdapter):
         # Environment first, then the config dict, then a default — the
         # house pattern (see plugins/platforms/irc/adapter.py's
         # `os.getenv("IRC_SERVER") or extra.get("server", "")`). Without
-        # this, SAMANTHA_KIOSK_PORT would be documented but silently ignored.
-        raw_port = os.getenv(_ENV_PORT) or cfg.get("port", 7777)
+        # this, JARVIS_PORT would be documented but silently ignored.
+        raw_port = _env(_ENV_PORT) or cfg.get("port", 7777)
         try:
             self._configured_port = int(raw_port)
         except (TypeError, ValueError):
             self._configured_port = 7777
         self.port = self._configured_port
 
-        raw_timeout = os.getenv(_ENV_TURN_TIMEOUT) or cfg.get(
+        raw_timeout = _env(_ENV_TURN_TIMEOUT) or cfg.get(
             "turn_timeout", _TURN_TIMEOUT_DEFAULT
         )
         try:
@@ -326,11 +344,11 @@ class JarvisAdapter(BasePlatformAdapter):
                 # retry (api_server.py's own history, #52132/#38803).
                 # Non-retryable drops it from the reconnect queue; the
                 # operator recovers by freeing the port or setting
-                # SAMANTHA_KIOSK_PORT, then `/platform resume jarvis`.
+                # JARVIS_PORT, then `/platform resume jarvis`.
                 self._set_fatal_error(
                     "jarvis_port_in_use",
                     f"Port {self._configured_port} already in use. Set "
-                    f"SAMANTHA_KIOSK_PORT to a different value, then "
+                    f"JARVIS_PORT to a different value, then "
                     f"`/platform resume jarvis`.",
                     retryable=False,
                 )
