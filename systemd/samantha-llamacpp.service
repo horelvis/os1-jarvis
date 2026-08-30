@@ -12,6 +12,27 @@
 #   systemctl --user edit samantha-llamacpp.service
 # and set Environment= lines in the override.
 #
+# **A model override must budget for WHISPER, and one did not.** The
+# widget loads faster-whisper onto the same GPU (~2.5 GB) and this unit
+# knows nothing about it, so an override that fits its own arithmetic can
+# still leave no room for his ears. That happened: a drop-in of
+# 2026-08-27 swapped in the Heretic RVN-IQ4_XS build (14.0 GiB against
+# UD-Q3_K_XL's 12.2) for better Spanish at 4 bits, and its own comment
+# worked out "~22.7 of 24 GiB, margin 1.3" — a margin measured before
+# Whisper. The result was `CUDA failed with error out of memory`, caught
+# and logged by the widget and visible nowhere else: the strip drew, the
+# wave animated, the gateway connected, and he could not hear a word.
+#
+# It went unnoticed for three days because a SECOND bug hid it — the
+# widget unit named `DISPLAY=:1` on a `:0` box, so the strip never
+# started and nobody ever saw Whisper fail. Rolled back 2026-08-30.
+#
+# The Heretic build is still on disk and the question it was chosen for
+# — Spanish at 4 bits — was never actually measured against the cost.
+# Worth revisiting deliberately; the budget is the whole constraint
+# (CLAUDE.md §2.1), and CosyVoice (~4.9 GB) and Whisper (~2.5 GB) come
+# out of it before the model gets a byte.
+#
 # Sampling defaults are Qwen3-recommended (temp 0.6, top-k 20, top-p 0.95,
 # min-p 0, presence-penalty 1.5). Backend (Samantha) never overrides them,
 # so this file is the single source of truth for model behavior.

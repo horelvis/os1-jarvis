@@ -393,7 +393,13 @@ Four times faster on less memory. Two causes, both needed: the smaller
 quant fits **entirely** on the GPU next to CosyVoice and Whisper instead
 of spilling layers onto the CPU, and b10603 is ~1500 builds of
 optimisation ahead. §1.4 asks for 30 tok/s; this is the decision that
-delivers it. Everything resident at once: 23.3 GB of 24.5.
+delivers it. Everything resident at once, **re-measured 2026-08-30**:
+llama-server 15,296 MiB + CosyVoice 4,950 + the widget (Whisper inside)
+2,476 = **22,947 MiB of 24,564, leaving 1,126 free.** That margin is the
+number that matters, and it is why a model override is not a free
+choice: a build 2 GB larger fits its own arithmetic and leaves Whisper
+nothing. One did, on 2026-08-27 — see the comment in
+`systemd/samantha-llamacpp.service` and §12.
 
 **Three things that each cost a round, now in `samantha-config.yaml`:**
 - **`enable_thinking: false`.** Qwen3.8 reasons by default and puts
@@ -2009,7 +2015,8 @@ true — a 4090, a smaller quant and a current llama.cpp put a 27B beside
 CosyVoice and Whisper with room to spare, four times faster than the
 obvious quantisation. §2.5 has the table.
 
-**Cost:** the box must hold everything at once (23.3 GB of 24.5), so
+**Cost:** the box must hold everything at once (22,947 MiB of 24,564
+measured 2026-08-30, 1,126 free), so
 adding anything that wants VRAM now costs tokens per second. And
 llama.cpp must be recent: b9115 refused the file outright, missing a
 tensor of Qwen3.8's hybrid Gated DeltaNet.
