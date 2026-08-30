@@ -61,7 +61,7 @@ cd widget
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -e ".[dev]"
 
-DISPLAY=:1 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD/../backend:$PWD/.. \
+DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD/../backend:$PWD/.. \
   .venv/bin/python -m samantha_widget
 ```
 

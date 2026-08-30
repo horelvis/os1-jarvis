@@ -8,9 +8,19 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-# X11 only (spec §8). :1 is this box's session; on another display this
-# is the one line that changes.
-Environment=DISPLAY=:1
+# X11 only (§2.2). DISPLAY and XAUTHORITY are deliberately NOT set here:
+# GNOME imports them into the systemd user manager when the session
+# starts (`systemctl --user show-environment`), and `After=`/`PartOf=
+# graphical-session.target` above guarantee this unit starts after that.
+# Inheriting is also the only version that survives the session number
+# changing.
+#
+# This line used to read `Environment=DISPLAY=:1`, and it was simply
+# wrong: this box's session is `:0`. The unit could never start — it
+# died in `Gtk couldn't be initialized` before any of our code ran, and
+# the strip was absent with the rest of the stack perfectly healthy.
+# Found 2026-08-30. `samantha-ui.service`, the dead kiosk unit, had `:0`
+# all along.
 # Unbuffered, so `journalctl --user -u samantha-widget -f` shows a
 # traceback at the moment it happens rather than at exit.
 Environment=PYTHONUNBUFFERED=1

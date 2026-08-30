@@ -39,7 +39,7 @@ can act on it. Not a window you open. Something that is there.
 **Stack at a glance:**
 - **Hardware:** one box with an RTX 4090 (24 GB VRAM). VRAM is the
   budget everything competes for — see the note below.
-- **OS:** Ubuntu with GNOME on X11 (`DISPLAY=:1`). Wayland out of scope.
+- **OS:** Ubuntu with GNOME on X11 (`DISPLAY=:0`). Wayland out of scope.
 - **Surface:** `widget/` — a GTK4 strip, no browser, no webview.
   Transparent, borderless, always above, drawn with GSK.
 - **Brain:** Hermes Agent gateway on `:7777` (plugin `jarvis`), which
@@ -217,7 +217,7 @@ the user already owned, the mini-PC stopped being the target.
 ### 2.2 Operating System: Ubuntu with GNOME on X11
 
 **Decision:** Ubuntu with a full GNOME desktop, running **X11**
-(`DISPLAY=:1`). Wayland is out of scope.
+(`DISPLAY=:0`). Wayland is out of scope.
 
 **Revised 2026-08-23.** This used to read "Ubuntu Server 24.04 LTS",
 with no desktop, because the kiosk needed none. A widget needs a desktop
@@ -248,6 +248,15 @@ mean either a compositor-specific protocol or losing the placement.
 - NVIDIA drivers from official Ubuntu repositories
 - All services managed via systemd **user** units (`systemctl --user`),
   since they need the user's session and its display
+- **A unit must NOT set `DISPLAY` itself.** GNOME imports `DISPLAY` and
+  `XAUTHORITY` into the systemd user manager when the session starts
+  (`systemctl --user show-environment`), and a unit that is `After=` /
+  `PartOf=graphical-session.target` inherits them. `samantha-widget.service`
+  hardcoded `DISPLAY=:1` on a box whose session is `:0`, and the failure
+  is silent in the worst way: the process dies in `Gtk couldn't be
+  initialized` before any of our code runs, so the strip is simply absent
+  while llama-server, the gateway and CosyVoice all look perfectly
+  healthy. Found 2026-08-30, after it had been that way since the rename.
 
 ### 2.3 Display Layer: a GTK4 strip on the desktop
 
@@ -773,7 +782,7 @@ python3 -m venv --system-site-packages .venv
 
 # Run him. PYTHONPATH reaches samantha.tts (CosyVoice) and Hermes'
 # markers.py; PYTHONNOUSERSITE keeps ~/.local out of the way (§2.8).
-DISPLAY=:1 PYTHONNOUSERSITE=1 \
+DISPLAY=:0 PYTHONNOUSERSITE=1 \
   PYTHONPATH=$PWD/../backend:$PWD/.. \
   .venv/bin/python -m samantha_widget
 
@@ -844,7 +853,7 @@ cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python tools/probe_gateway.py "¿Qu�
 ### Verifying anything visual
 
 ```bash
-ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
+ffmpeg -y -f x11grab -video_size 1920x1080 -i :0 -frames:v 1 /tmp/strip.png
 xwininfo -name "JARVIS"            # did you photograph the strip, or the lock screen?
 # The title is "JARVIS" — window.py:101 sets it (it was "Samantha"
 # until 2026-08-28), and no code anywhere calls the window
@@ -864,7 +873,7 @@ says a keystroke or a click cannot be delivered to the strip (§2.3, the
 keyboard.
 
 ```bash
-DISPLAY=:1 widget/.venv/bin/python widget/tools/click.py 1309 1032
+DISPLAY=:0 widget/.venv/bin/python widget/tools/click.py 1309 1032
 ```
 
 ### Legacy: backend and frontend

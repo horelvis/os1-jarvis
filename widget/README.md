@@ -44,7 +44,7 @@ system packages), and it drags in two problems that both fail silently:
 
 ## Run
 
-    DISPLAY=:1 \
+    DISPLAY=:0 \
     PYTHONNOUSERSITE=1 \
     PYTHONPATH=<repo>/backend:<repo> \
     .venv/bin/python -m samantha_widget
@@ -163,7 +163,7 @@ camera — point `SAMANTHA_WIDGET_PHOTO` at one or more image files.
 Nothing about this program's appearance is provable from a test. Capture
 the screen and look at it:
 
-    ffmpeg -y -f x11grab -video_size 1920x1080 -i :1 -frames:v 1 /tmp/strip.png
+    ffmpeg -y -f x11grab -video_size 1920x1080 -i :0 -frames:v 1 /tmp/strip.png
 
 ## Cambiar la personalidad
 
@@ -195,7 +195,7 @@ To press one from a script — the strip has no keyboard shortcut and
 `xdotool` is not installed here, but `libXtst` is:
 
 ```bash
-DISPLAY=:1 xwininfo -name "JARVIS" | grep -E "Absolute|Width"
-DISPLAY=:1 .venv/bin/python tools/click.py 1345 1032          # the typed line, at 900x96 centred
-DISPLAY=:1 .venv/bin/python tools/type.py "hola" --enter      # and type into it
+DISPLAY=:0 xwininfo -name "JARVIS" | grep -E "Absolute|Width"
+DISPLAY=:0 .venv/bin/python tools/click.py 1345 1032          # the typed line, at 900x96 centred
+DISPLAY=:0 .venv/bin/python tools/type.py "hola" --enter      # and type into it
 ```
