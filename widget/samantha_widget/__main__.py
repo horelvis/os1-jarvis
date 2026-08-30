@@ -316,7 +316,7 @@ class SamanthaApp(Gtk.Application):
     def _start_voice_loop(self, wave, band, window) -> None:
         import numpy as np
 
-        from .audio import Microphone, Player, describe_devices
+        from .audio import Microphone, Player, SpectrumAnalyser, describe_devices
         from .gateway import GatewayClient
         from .speech import (
             ClauseChunker,
@@ -451,6 +451,9 @@ class SamanthaApp(Gtk.Application):
 
         def set_level(level: float) -> None:
             GLib.idle_add(wave.set_level, level)
+
+        def set_bands(bands: list[float]) -> None:
+            GLib.idle_add(wave.set_bands, bands)
 
         def on_utterance(pcm: bytes) -> None:
             loop.call_soon_threadsafe(lambda: self._spawn(dispatch(pcm)))
@@ -615,6 +618,9 @@ class SamanthaApp(Gtk.Application):
 
         # ── the microphone, always open ───────────────────────────────
         detector = UtteranceDetector(SileroDetector())
+        # One analyser per source, because it holds the sliding window
+        # and the two rates differ: 16 kHz here against the player's 24.
+        mic_spectrum = SpectrumAnalyser(INPUT_RATE)
 
         def on_frame(frame: bytes) -> None:
             if hotword.heard(frame):
@@ -679,8 +685,19 @@ class SamanthaApp(Gtk.Application):
                 machine.speech_started()
             if detector.speaking:
                 samples = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
-                rms = float(np.sqrt(np.mean((samples / 32768.0) ** 2)))
+                samples /= 32768.0
+                rms = float(np.sqrt(np.mean(samples**2)))
                 set_level(min(1.0, rms * 6))
+                # And the SPECTRUM, which is what makes the bars belong
+                # to the voice. Without it `wave.set_level` above is the
+                # only thing the strip hears, and `BarsModel.set_level`
+                # says what that looks like in its own docstring: a
+                # "fallback for callers with no spectrum" that moves
+                # every band together in a fixed arch. Reported
+                # 2026-08-30 as "una onda uniforme que nada tiene que
+                # ver con la voz". It must come AFTER set_level, which
+                # feeds both models and would otherwise overwrite this.
+                set_bands(mic_spectrum.analyse(samples))
             if utterance is not None:
                 machine.heard(utterance)
 

@@ -107,6 +107,65 @@ def _warp(position: float) -> float:
     return _BAND_LOW_HZ + span * (position**_BAND_GAMMA)
 
 
+class SpectrumAnalyser:
+    """Audio in, BAND_COUNT magnitudes out. One per rate, stateful.
+
+    Follows the technique in dlbeer.co.nz/articles/fftvis.html: a
+    power-of-two window, a Hamming taper, gamma-warped bands, and the
+    PEAK of each band in decibels rather than its average — an average
+    hides exactly the peaks that make the bars look like they belong to
+    the sound. Time smoothing, which that article calls the single most
+    important part, lives in BarsModel.
+
+    It holds the sliding window, so one instance belongs to one source.
+    The two sources do not share a rate — the microphone is 16 kHz and
+    the player 24 kHz — and the band edges are computed from it, which
+    is the whole reason this takes `rate` rather than reading a
+    constant.
+
+    It exists as a class because for months only the PLAYER analysed
+    anything: the microphone produced a single RMS, and the strip fell
+    back to `BarsModel.set_level`, which moves every band together in a
+    fixed arch. Reported 2026-08-30 as "una onda uniforme que nada tiene
+    que ver con la voz", and that is exactly what it was.
+    """
+
+    def __init__(self, rate: int) -> None:
+        self.rate = rate
+        self._edges: list[tuple[int, int]] | None = None
+        self._window = None
+        # The last _FFT_SIZE samples, oldest first — the analysis
+        # window, kept separate from the caller's block so the two can
+        # have different sizes.
+        self._recent = None
+
+    def analyse(self, samples) -> list[float]:
+        """Slide `samples` (float, -1..1) in, and read the bands out."""
+        import numpy as np
+
+        samples = np.asarray(samples, dtype=np.float32)
+        if self._edges is None:
+            self._edges = _band_edges(_FFT_SIZE, self.rate)
+            self._window = np.hamming(_FFT_SIZE)
+            self._recent = np.zeros(_FFT_SIZE, dtype=np.float32)
+
+        take = min(len(samples), _FFT_SIZE)
+        if take:
+            self._recent = np.concatenate((self._recent[take:], samples[-take:]))
+
+        spectrum = np.abs(np.fft.rfft(self._recent * self._window))
+        # Normalise so a full-scale sine reads as 1.0 regardless of size.
+        spectrum = spectrum * (2.0 / _FFT_SIZE)
+
+        out = []
+        for start, stop in self._edges:
+            band = spectrum[start:stop]
+            peak = float(band.max()) if band.size else 0.0
+            db = 20.0 * np.log10(peak + 1e-9)
+            out.append(min(1.0, max(0.0, (db - _DB_FLOOR) / (_DB_CEILING - _DB_FLOOR))))
+        return out
+
+
 def describe_devices() -> str:
     """One line naming the chosen devices. Log it; do not parse it."""
     try:
@@ -190,12 +249,7 @@ class Player:
         # One level per 20 ms block, oldest first — the waveform the
         # strip scrolls. Kept here because this is where the blocks are.
         self.history: list[float] = [0.0] * HISTORY_LEN
-        self._edges: list[tuple[int, int]] | None = None
-        self._window = None
-        # The last _FFT_SIZE samples, oldest first — the analysis window,
-        # kept separate from the write block so the two can have
-        # different sizes.
-        self._recent = None
+        self._analyser = SpectrumAnalyser(OUTPUT_RATE)
 
     def start(self) -> None:
         self._stream = sd.RawOutputStream(
@@ -273,7 +327,7 @@ class Player:
                     if samples.size:
                         samples /= 32768.0
                         self.level = float(np.sqrt(np.mean(samples**2)))
-                        self.bands = self._analyse(samples, np)
+                        self.bands = self._analyser.analyse(samples)
                         # PEAK for the waveform, not RMS. RMS is the
                         # average and it flattens speech into a smooth
                         # blob; the peak keeps the spikes and quiet gaps
@@ -284,35 +338,3 @@ class Player:
                 self._playing = False
                 self.level = 0.0
                 self.bands = [0.0] * BAND_COUNT
-
-    def _analyse(self, samples, np) -> list[float]:
-        """The newest audio → BAND_COUNT magnitudes, each 0..1.
-
-        Follows the technique in dlbeer.co.nz/articles/fftvis.html: a
-        power-of-two window, a Hamming taper, gamma-warped bands, and the
-        PEAK of each band in decibels rather than its average — an
-        average hides exactly the peaks that make the bars look like they
-        belong to the sound. Time smoothing, which that article calls the
-        single most important part, lives in BarsModel.
-        """
-        if self._edges is None:
-            self._edges = _band_edges(_FFT_SIZE, OUTPUT_RATE)
-            self._window = np.hamming(_FFT_SIZE)
-            self._recent = np.zeros(_FFT_SIZE, dtype=np.float32)
-
-        # Slide the newest block into the analysis window.
-        take = min(len(samples), _FFT_SIZE)
-        self._recent = np.concatenate((self._recent[take:], samples[-take:]))
-
-        spectrum = np.abs(np.fft.rfft(self._recent * self._window))
-        # Normalise so a full-scale sine reads as 1.0 regardless of size.
-        spectrum = spectrum * (2.0 / _FFT_SIZE)
-
-        out = []
-        for start, stop in self._edges:
-            band = spectrum[start:stop]
-            peak = float(band.max()) if band.size else 0.0
-            db = 20.0 * np.log10(peak + 1e-9)
-            out.append(min(1.0, max(0.0, (db - _DB_FLOOR) / (_DB_CEILING - _DB_FLOOR))))
-        return out
-        self.level = 0.0
