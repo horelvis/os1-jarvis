@@ -11,10 +11,12 @@ teléfono es un periférico, no una plataforma: el audio entra por el mismo
 `dispatch()` que usa el micrófono de la mesa, así que es la misma sesión
 y la misma memoria, y el gateway nunca se entera de que existe.
 
-**Aceptación en un iPhone real, esta misma noche.** Todo lo anterior era
-lógica probada por unidad y un servidor que arranca; que Safari capture,
-suba y reproduzca de verdad es justo lo que §2.3 dice que ningún test
-puede zanjar. Se probó en mano, se habló, y contestó.
+**Aceptación en un iPhone real, esta misma noche — y DESPUÉS del arreglo
+del destino, no antes.** Todo lo anterior era lógica probada por unidad y
+un servidor que arranca; que Safari capture, suba y reproduzca de verdad
+es justo lo que §2.3 dice que ningún test puede zanjar. Se probó en mano,
+se habló, y contestó — pero la respuesta llegó al teléfono sólo una vez
+que ese arreglo estuvo puesto. Hasta entonces salía entera por la tira.
 
 **Y la persona encontró un fallo que ningún test vio, porque todos
 afirmaban la mitad equivocada.** El destino de la respuesta — mesa o
@@ -52,6 +54,29 @@ sólo un teléfono en una mano lo encontró.** Corregido en
   físico y Safari tiene su propio volumen encima; una app nativa puede
   saltarse el interruptor, una página no. Es indistinguible de una
   función rota si no se sabe.
+
+**La última revisión encontró dos fallos de seguridad con una sola
+causa: nada en el proceso sabía si el turno en curso lo había pedido un
+teléfono.** `dispatch` preguntaba `remote_desk.busy` — que es otra
+pregunta — y de ahí salían los dos: durante **todo** turno de teléfono la
+palabra de activación se saltaba, así que la habitación era un micrófono
+abierto delante de un agente que tiene `terminal`; y un turno de la mesa
+al cerrarse (una transcripción vacía, o toda eco — lo más común que oye
+la mesa) soltaba la reserva del teléfono **a mitad de respuesta**, y una
+pregunta hecha en privado terminaba de contestarse en voz alta en la
+casa. Un dictamen previo lo había llamado «raro (los dos hablando a la
+vez)»; era cada turno. Se marca el origen del turno donde se conoce
+(`TurnOrigin`), y de paso un turno no pedido — un recordatorio, un aviso
+de cámara — deja de quitarle la reserva a un teléfono.
+
+**Y el CA de casa lleva ya `nameConstraints`.** Está instalado como raíz
+del sistema en tres iPhones y su clave vive 0600 en la misma caja que el
+agente con `terminal`: sin restringir, quien se lleve esa clave puede
+suplantar cualquier sitio del mundo ante esos teléfonos. Limitado a
+`brain.local` y a la IP de casa, el radio de daño es esta caja.
+**Cuesta una cosa:** el CA que ya está en los teléfonos es el viejo, sin
+restringir; para tener el nuevo hay que borrar `~/.samantha/certs` y
+volver a dar de alta los tres teléfonos.
 
 **Fuera de alcance, y no por descuido:** cámaras en el teléfono.
 `JARVIS_PLATFORM` sigue fijo a mano en `samantha_vision/__init__.py`

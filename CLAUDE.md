@@ -1223,8 +1223,14 @@ affordable: listening happens in both, speaking in one.
 **Cost, stated:** authentication was "only from this machine" and is now
 a shared secret; the threat model becomes whoever is on the wifi. A
 certificate must be trusted by hand on each iPhone (two minutes, ten
-years). And `qrcode[png]` joins the dependency list — verified here to
-write a 501-byte PNG without importing Pillow.
+years). And `qrcode[png]` joins the dependency list — `[png]` is pypng,
+which is what writes the file. **Corrected 2026-09-01, on review:** this
+used to claim the PNG was written "without importing Pillow", measured.
+It was not a property of the code — the measurement was taken in a
+throwaway virtualenv where Pillow was simply absent, and `qrcode`'s own
+package init imports Pillow's style drawers whatever image factory is
+asked for, succeeding here because `python3-pil` is installed for
+unrelated reasons. `pyproject.toml` was corrected and this was not.
 
 **Out of scope, and not by accident:** cameras on the phone.
 `JARVIS_PLATFORM` is hard-coded in `samantha_vision/__init__.py` exactly
@@ -1232,10 +1238,13 @@ so an image of the inside of this house cannot reach another surface
 (§12, 2026-08-25). Showing them on a phone reopens that decision; it does
 not extend this one.
 
-**Acceptance passed on a real iPhone, the same day.** Everything above
-was unit-tested logic and a server that starts; whether Safari actually
+**Acceptance passed on a real iPhone, the same day — and AFTER the
+destination-binding fix below, not before.** Everything above was
+unit-tested logic and a server that starts; whether Safari actually
 captures, uploads and plays back is exactly the class of thing §2.3 says
-no test can settle. It was held in a hand, spoken to, and answered.
+no test can settle. It was held in a hand, spoken to, and answered — but
+the reply reached the phone only once that fix had landed. Until then
+every word of it came out of the strip.
 
 **And the person found a defect no test had, because every test asserted
 the wrong half of the bug.** The reply's destination — desk or phone —
@@ -1249,6 +1258,33 @@ none asserted **where the bytes landed**, so the suite was green while a
 phone that asked a question heard the strip answer instead. Fixed by
 binding the destination to each clause when it is **queued**, not when it
 is synthesised.
+
+**Two of the fixes the final review forced are worth their own line,
+because both were security and both came from one missing fact: nothing
+in the process knew whether the turn in flight had been asked for on a
+phone.** `dispatch` asked `remote_desk.busy` instead — a different
+question — and so the wake word was skipped for the whole of every phone
+turn, leaving the room an open microphone in front of an agent that
+holds a terminal; and a desk turn settling (an empty transcription, or
+an all-echo one — the two commonest things the desk hears) freed the
+phone's claim MID-ANSWER and finished a private question out loud in the
+house. A pre-flight ruling had called the first "rare (both speaking at
+once)"; it was every phone turn, and that ruling is reversed. Both are
+fixed by marking the turn's origin at the one place that knows it, and
+`TurnOrigin` in `__main__.py` carries the reasoning. The same marker
+settles an older parked question: an unprompted turn — a cron reminder,
+a camera alert — is not a phone's, so it no longer takes a phone's claim
+away either.
+
+**And the house CA now carries `nameConstraints`.** It is installed on
+three iPhones as a system root and its key sits 0600 on the same box as
+the `terminal` agent; unconstrained, whoever took that key could
+impersonate any site in the world to those phones. Permitted to
+`brain.local` and this LAN address, the blast radius is this box.
+**Operational cost:** `ensure_certificate` reuses what it finds, so the
+CA already trusted on the phones is the old unconstrained one. Getting
+the constraint means deleting `~/.samantha/certs` and enrolling the
+three phones again.
 
 **The ritual that shipped with the plan was wrong in three of its four
 steps, and only a phone in a hand found it** — see
