@@ -152,7 +152,7 @@ class Speaker:
         self.sink = player
         self._client = None
         self._generation = 0
-        self._queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[int, str, object]] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -169,16 +169,26 @@ class Speaker:
         self.sink = self._player
 
     def enqueue(self, clause: str) -> None:
-        """Queue a clause to be spoken after everything already queued."""
-        self._queue.put_nowait((self._generation, clause))
+        """Queue a clause, WITH the sink it was destined for.
+
+        The destination is captured here rather than read at synthesis
+        time, because those are seconds apart and the routing does not
+        survive the gap. The gateway sends a reply's text in a burst and
+        its `done` arrives while CosyVoice is still working, and that
+        `done` sends the sink home — so a clause synthesised afterwards
+        would play in the room even though it was answering a phone.
+        Measured on a live iPhone 2026-09-01: not one byte reached the
+        phone, every time.
+        """
+        self._queue.put_nowait((self._generation, clause, self.sink))
 
     async def _run(self) -> None:
         while True:
-            generation, clause = await self._queue.get()
+            generation, clause, sink = await self._queue.get()
             if generation != self._generation:
                 continue  # queued before an interruption; drop it
             try:
-                await self.say(clause)
+                await self.say(clause, sink)
             except Exception:
                 # A dead CosyVoice must not kill the worker, or she goes
                 # mute for the rest of the session with no error path.
@@ -198,7 +208,13 @@ class Speaker:
             self._queue.get_nowait()
         self._player.stop()
 
-    async def say(self, clause: str) -> None:
+    async def say(self, clause: str, sink) -> None:
+        """Synthesise one clause and write it to `sink`.
+
+        `sink` is the destination captured by `enqueue` at queue time,
+        not necessarily `self.sink` right now — see `enqueue`'s
+        docstring for why the two can differ by the time this runs.
+        """
         from Hermes.plugins.samantha_voice import tts
 
         if self._client is None:
@@ -210,5 +226,5 @@ class Speaker:
         async for chunk, _backend in tts.stream(clause, client=self._client):
             if generation != self._generation:
                 return  # interrupted while this clause was synthesising
-            self.sink.write(chunk)
+            sink.write(chunk)
             await asyncio.sleep(0)  # let the loop breathe between chunks

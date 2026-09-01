@@ -218,3 +218,54 @@ def test_the_speaker_can_be_pointed_somewhere_else() -> None:
 
     speaker.route_home()
     assert speaker.sink is home
+
+
+async def test_a_clause_still_reaches_the_phone_once_route_home_fires_first(
+    monkeypatch,
+) -> None:
+    """Measured on a live iPhone, 2026-09-01: the gateway sends a reply's
+    text in a burst and its `done` arrives while CosyVoice is still
+    synthesising the first clause — `on_done` calls `route_home()`
+    seconds before the worker ever touches the queue. If the sink were
+    read at synthesis time instead of capture time, every reply would
+    play on the desk regardless of who asked. Not one byte reached the
+    phone, every time, until `enqueue` started carrying the destination
+    with the clause.
+    """
+    import asyncio
+
+    from Hermes.plugins.samantha_voice import tts
+
+    from samantha_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01\x02", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    home, phone = Sink(), Sink()
+    speaker = Speaker(home)
+
+    speaker.route_to(phone)
+    speaker.enqueue("Hola, señor.")
+    # The `done` that ends the turn arrives — and routes home — before
+    # the worker has pulled the clause off the queue.
+    speaker.route_home()
+
+    speaker.start()
+    for _ in range(200):
+        if phone.written:
+            break
+        await asyncio.sleep(0)
+    speaker._worker.cancel()
+
+    assert phone.written == [b"\x01\x02"]
+    assert home.written == []
