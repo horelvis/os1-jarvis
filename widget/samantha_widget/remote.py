@@ -60,7 +60,15 @@ ANSWERING_SECONDS = 600.0
 # long enough to walk to a phone and scan the QR, and not a minute
 # longer that the secret sits readable by anyone else on the wifi with
 # a browser.
-ENROLMENT_SECONDS = 300.0
+#
+# `SAMANTHA_WIDGET_ENROLMENT_SECONDS` moves it, at the user's asking
+# (2026-09-01): five minutes is short if you are not already standing at
+# the machine. The default stays 300 because the number is not arbitrary
+# — it is exposure — but which minute that is belongs to whoever owns
+# the house. Note that an ALREADY enrolled phone never needs this window
+# again: the secret lives in its home-screen link and the certificate is
+# issued for ten years. This bounds only ADDING one.
+ENROLMENT_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_ENROLMENT_SECONDS", "300"))
 
 
 class Enrolment:

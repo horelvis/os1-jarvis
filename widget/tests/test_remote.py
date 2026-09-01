@@ -415,3 +415,27 @@ async def test_the_ceiling_is_hit_at_the_real_thirty_seconds_and_says_so() -> No
     # Exactly thirty seconds of 16 kHz audio: the buffer stopped AT the
     # ceiling, never one chunk past it.
     assert len(seen[0]) == MAX_UTTERANCE_BYTES
+
+
+def test_the_enrolment_window_can_be_moved_without_touching_code(monkeypatch) -> None:
+    """The user, 2026-09-01: five minutes is short if you are not already
+    standing at the machine.
+
+    It stays short by default, because the number is not arbitrary — it
+    is how long the shared secret sits readable to anyone on the wifi
+    with a browser. But which minute that is belongs to whoever owns the
+    house, not to this file.
+    """
+    import importlib
+
+    from samantha_widget import remote
+
+    monkeypatch.setenv("SAMANTHA_WIDGET_ENROLMENT_SECONDS", "900")
+    reloaded = importlib.reload(remote)
+    try:
+        assert reloaded.ENROLMENT_SECONDS == 900.0
+    finally:
+        monkeypatch.delenv("SAMANTHA_WIDGET_ENROLMENT_SECONDS")
+        importlib.reload(remote)
+
+    assert remote.ENROLMENT_SECONDS == 300.0
