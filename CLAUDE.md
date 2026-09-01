@@ -44,9 +44,11 @@ can act on it. Not a window you open. Something that is there.
   Transparent, borderless, always above, drawn with GSK.
 - **Brain:** Hermes Agent gateway on `:7777` (plugin `jarvis`), which
   gives JARVIS tools: memory, reminders, session recall.
-- **LLM:** local `llama-server` with Qwen3.8-27B (GGUF), or X.AI's Grok
-  API — a config switch. §2.5 and §12 carry the trade.
-- **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process.
+- **LLM:** local `llama-server` with Qwen3.8-27B **Heretic** (GGUF) — the
+  decensored build, since 2026-09-01 — or X.AI's Grok API, a config
+  switch. §2.5 and §12 carry the trade.
+- **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process, **int8
+  since 2026-09-01** — same model, 992 MiB cheaper, measured identical.
 - **Endpointing:** a second engine, Vosk `small-es` on the CPU, decides
   when a sentence is finished and whether a sound over his voice is a
   person or his own echo. Its text reaches nobody (§2.6, §2.8, §12).
@@ -87,11 +89,26 @@ can act on it. Not a window you open. Something that is there.
                 └──────────────────────────────┘
 ```
 
-**The VRAM budget is the real constraint.** CosyVoice holds ~5.5 GB and
-Whisper ~2.5 GB, so a 27B model at Q4_K_M does not fit alongside them
-and spills onto the CPU. Measured 2026-08-23: 13.7 tok/s that way,
-against 35 tok/s when the model fits. §1's "latency over correctness"
-is what decides the quantisation.
+**The VRAM budget is the real constraint**, and it has FOUR claimants,
+not three — the fourth is the one every arithmetic here has forgotten at
+least once. Measured 2026-09-01 with everything resident:
+
+| | MiB |
+|---|---|
+| llama-server (Heretic, KV q4) | 16,330 |
+| CosyVoice | 5,080 |
+| widget (Whisper int8) | 1,534 |
+| **the desktop** — Xorg 99, gnome-shell 28, a browser tab 35 | ~240 |
+| **free** | **1,380 of 24,564** |
+
+A 27B at Q4_K_M does not fit alongside them at all and spills onto the
+CPU: 13.7 tok/s that way against 57 when it fits (§12, 2026-08-23).
+§1's "latency over correctness" is what decides the quantisation.
+
+**Every claimant must be subtracted before changing any of them**, and
+no unit does it for you: `samantha-llamacpp.service` does not know the
+widget exists, and nothing at all counts the desktop. Getting this wrong
+is silent — it left him deaf for three days in August (§12, 2026-08-30).
 
 **What is still here but unused:** `backend/` (FastAPI, `/chat`,
 `/speak`, ChromaDB) and `frontend/` (React, Vite, the OS1 ribbon). The
@@ -378,9 +395,14 @@ GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 
 ### 2.5 LLM Runtime + Model
 
-**Decision (revised 2026-08-23 — the LLM came home):**
+**Decision (revised 2026-09-01 — the harness comes off):**
 - **Default runtime:** llama.cpp `llama-server` on this box, `:8000`.
-- **Default model:** **Qwen3.8-27B, UD-Q3_K_XL** GGUF. 20.8 GB, 57 tok/s.
+- **Default model:** **Qwen3.8-27B Heretic, RVN-IQ4_XS** GGUF — the
+  decensored build. 16,330 MiB with the KV cache at q4_0, **47 tok/s**.
+  §12 (2026-09-01) has what it buys, measured over nine requests, and
+  what it costs.
+- **Previous default:** Qwen3.8-27B UD-Q3_K_XL, 15,296 MiB, 52.5 tok/s.
+  Still on disk, and the fallback if the Heretic ever has to go.
 - **Remote fallback:** X.AI Grok API (`https://api.x.ai`,
   OpenAI-compatible), `grok-4-1-fast-non-reasoning`. One config switch;
   §1.1 for what it costs.
@@ -453,8 +475,13 @@ nothing. One did, on 2026-08-27 — see the comment in
 
 **Decision (TTS revised 2026-08; STT unchanged in kind, moved in place):**
 - **STT:** faster-whisper `large-v3-turbo`, in-process inside the widget,
-  on the GPU. ~2.5 GB of VRAM resident, 81 s to load the first time and
-  ~1 s afterwards; 0.23 s to transcribe 3.5 s of speech.
+  on the GPU, **at int8 since 2026-09-01** — the same model, only cheaper
+  arithmetic. **1,534 MiB** resident against float16's 2,521, ~2 s to
+  load, 67-148 ms to transcribe. The quantisation was measured before it
+  was adopted: transcription came back character-for-character identical
+  on every dumped utterance and `wake.py` found his name 3 of 3, exactly
+  as at float16. The 992 MiB it gives back is what lets the Heretic model
+  sit beside it (§2.5). `SAMANTHA_WIDGET_STT_COMPUTE=float16` reverts it.
 - **Endpointing:** Vosk `small-es` (39 MB, Apache 2.0, CPU, ~5% of one
   core) transcribes continuously and its text reaches nobody. It decides
   two things: when you have finished a sentence — 880 ms sooner than the
@@ -1143,6 +1170,75 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-09-01 — The harness comes off, and three claimants pay for it
+
+**Decision (the user's, restated after one push-back):** *"quiero un
+modelo sin arnés."* The default LLM becomes **Qwen3.8-27B Heretic**
+(`RVN-IQ4_XS`), the decensored build. It had been rolled back on
+2026-08-30 for leaving Whisper no VRAM, and this entry is how it fits.
+
+**What it buys was measured, not assumed** — nine legitimate requests a
+home assistant's owner has every right to make, put to both builds:
+
+| | Q3_K_XL | Heretic |
+|---|---|---|
+| blunt criticism of the user's own network | ✅ | ✅ |
+| how to audit his own cameras | ✅ | ✅ |
+| ibuprofen dosing and interval | ✅ | ✅ |
+| Spanish law on a neighbour's camera | ✅ | ✅ |
+| demolishing his own business plan | ✅ | ✅ |
+| answering with swearing, on request | ✅ | ✅ |
+| dark humour | ❌ *"No. No voy a hacer eso."* | ✅ |
+| a political opinion of its own | ❌ *"No tengo opiniones."* | ✅ |
+| holding a rude character | ~ softens | ✅ |
+
+**The harness is smaller and differently placed than expected.** It does
+not stand between him and medical dosing, security auditing, Spanish law
+or insulting his owner to his face — it stands in front of dark humour,
+opinions of his own, and staying in an unpleasant character.
+
+**Cost, stated:** 47 tok/s against 52.5 — **~11% slower, permanently**,
+because the file is 1.94 GB larger. §1.4 asks for 30 tok/s and this
+still clears it.
+
+**What made it fit, and it is the part worth carrying.** The model needs
+2,058 MiB more than its predecessor and there were only ~1,100 free. Two
+levers were measured and one was rejected:
+
+- **Whisper to int8** — the same `large-v3-turbo`, cheaper arithmetic:
+  **1,529 MiB against 2,521**, transcription character-for-character
+  identical and `wake.py` finding his name 3 of 3. 992 MiB for nothing.
+- **The KV cache q8_0 → q4_0** — about 1,024 MiB, degrading long context
+  and nothing else.
+- **Rejected: splitting layers between GPU and CPU** (`--n-gpu-layers`),
+  which the user proposed and which llama.cpp genuinely supports. It
+  failed twice, and the second failure is the interesting one:
+  `resolve_fused_ops: layer 0 is assigned to device CPU but fused Gated
+  Delta Net (chunked) is assigned to device CUDA0`. **Qwen3.8's hybrid
+  Gated DeltaNet does not survive being split**, so this architecture is
+  a worse candidate for CPU offload than an ordinary one — and §2.5's
+  13.7 tok/s already priced the general case. Worth knowing before
+  anybody proposes it a third time.
+
+**Together they left MORE room than before**: 1,380 MiB free with the
+larger model, against 1,126 with the smaller one.
+
+**And a fourth VRAM claimant was found, which every arithmetic in this
+file had missed:** the desktop. Xorg 99 MiB, gnome-shell 28, a browser
+tab 35 — **~162-240 MiB that §2.5 never counted**. It cannot be
+reclaimed, because §2.2 and §2.3 say this is a desktop the user works
+on; a presence that requires killing GNOME is not a presence. It is the
+third consumer this project has budgeted without: first Whisper, which
+cost three days of deafness, now the screen it draws on. The user found
+it by asking the question nobody had asked — "is anything else using the
+GPU?"
+
+**Two things this leaves fragile, stated rather than discovered later:**
+the Heretic only loads because of BOTH other changes, so reverting
+either one silently stops the LLM starting (the unit says so in its own
+comment); and a model this size means every future addition to this box
+costs tokens per second.
 
 ### 2026-09-01 — The engine that cannot punctuate gets the job
 

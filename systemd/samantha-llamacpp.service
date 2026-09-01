@@ -56,7 +56,31 @@ Type=simple
 # on first run and caches under ~/.cache/llama.cpp/.
 # The model file, not a -hf spec: it is already on disk and pulling it
 # again on every install is 13 GB nobody needs.
-Environment=SAMANTHA_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q3_K_XL.gguf
+# The Heretic build — Qwen3.8-27B with the refusal behaviour removed
+# (user's decision, 2026-09-01: "quiero un modelo sin arnés"). Measured
+# against the UD-Q3_K_XL it replaces, over nine legitimate home-assistant
+# requests a guardrailed model tends to decline:
+#
+#   both answer          blunt criticism of the user's network · how to
+#                        audit his own cameras · ibuprofen dosing · Spanish
+#                        law on a neighbour's camera · demolishing his
+#                        business plan · swearing on request
+#   only the Heretic     dark humour · stating a political opinion of its
+#                        own · holding a rude character without softening
+#
+# It costs 17,354 MiB against 15,296, and 46 tok/s against 52.5 — the
+# larger file is ~12% slower even wholly on the GPU.
+#
+# IT ONLY FITS BECAUSE OF TWO OTHER CHANGES made the same day, and if
+# either is reverted this model stops loading:
+#   · Whisper moved to int8 (stt.py), giving back 992 MiB
+#   · the KV cache below, q8_0 → q4_0, giving back ~450 MiB
+#
+# The budget, measured 2026-09-01 with everything resident:
+#   llama-server 17,354 + CosyVoice 5,080 + widget 1,529 + the DESKTOP 162
+#   (Xorg 99, gnome-shell 28, a browser tab 35 — §2.5's arithmetic never
+#   counted it) = 24,125 of 24,564.
+Environment=SAMANTHA_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-Heretic-GGUF/RVN-IQ4_XS-multilingual.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.
@@ -84,8 +108,8 @@ ExecStart=%h/git/llama.cpp/build/bin/llama-server \
     --host ${SAMANTHA_LLAMA_HOST} \
     --port ${SAMANTHA_LLAMA_PORT} \
     --n-gpu-layers ${SAMANTHA_LLAMA_NGL} \
-    --cache-type-k q8_0 \
-    --cache-type-v q8_0 \
+    --cache-type-k q4_0 \
+    --cache-type-v q4_0 \
     --ctx-size ${SAMANTHA_LLAMA_CTX} \
     --jinja \
     --flash-attn on \

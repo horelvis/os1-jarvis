@@ -20,6 +20,25 @@ import re
 
 DEFAULT_MODEL = "large-v3-turbo"
 
+# int8 rather than float16, and it is the SAME model — only the arithmetic
+# is cheaper. Measured 2026-09-01 on this box, against the dumped
+# utterances and the real `wake.py` comparison:
+#
+#   float16       2,521 MiB   "Jarvis, ¿qué tiempo va a ser en Guadalmar
+#                              mañana?"   · name found 3/3 · 67-71 ms
+#   int8_float16  1,529 MiB   character-for-character identical on every
+#                              clip       · name found 3/3 · 67-74 ms
+#
+# 992 MiB back for no measurable loss. That GB is what lets a larger model
+# sit beside it — the VRAM budget is what everything here competes for
+# (CLAUDE.md §2.5), and the widget is the only process that can give any
+# up without giving up a capability.
+#
+# `SAMANTHA_WIDGET_STT_COMPUTE=float16` restores the old arithmetic
+# without a code change, for a box where the quantisation does cost
+# something this one could not measure.
+COMPUTE_TYPE = os.environ.get("SAMANTHA_WIDGET_STT_COMPUTE", "int8_float16")
+
 # The words this box says that Whisper does not expect a living room to
 # say. Handed to the decoder as part of its `initial_prompt`, which is
 # the same mechanism that fixed his name on 2026-08-26 — and the file
@@ -96,7 +115,7 @@ class Transcriber:
         from faster_whisper import WhisperModel
 
         self._model = WhisperModel(
-            self.model_name, device="cuda", compute_type="float16"
+            self.model_name, device="cuda", compute_type=COMPUTE_TYPE
         )
 
     def transcribe(self, pcm: bytes) -> str:
