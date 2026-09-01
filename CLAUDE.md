@@ -538,7 +538,19 @@ there is no Web Speech API.
   `EchoFilter` run against Vosk's live partial. The threshold it
   replaces could not work: the user's voice measures RMS 0.054-0.088 and
   his echo with the speakers beside the microphone measures 0.178 —
-  louder than the person.
+  louder than the person. `SAMANTHA_WIDGET_MIC_GATE=1` remains, off by
+  default, as the fallback for a box where deciding it on words is not
+  enough — it deafens the microphone for as long as he speaks, which
+  works everywhere and costs being able to interrupt him at all.
+- **The speech engine failing costs speed, never hearing** (2026-09-01).
+  Vosk missing, or raising later, leaves the 1.2 s floor closing turns
+  and every sound treated as a person: `VoskSwitch` turns the feature
+  off on the first exception and logs once, and `audio.py`'s pump
+  survives anything its callback raises. Both exist because the
+  microphone thread calls that callback OUTSIDE its own `try` — one
+  traceback there and he is deaf while looking perfectly healthy, which
+  is exactly what an oversized Whisper model cost for three days on
+  2026-08-27 (§2.5).
 
 **Two things that cost days, both silent:**
 - **PortAudio's `callback=` mode segfaults under GTK.** No traceback, and

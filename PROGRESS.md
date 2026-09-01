@@ -1,5 +1,56 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-01 — La última pasada: seis hallazgos, y uno le dejaba sordo ✅
+
+La revisión final de la rama, antes de darla por cerrada. Seis hallazgos,
+todos arreglados en una pasada. 301 tests, subiendo desde 293.
+
+**El grave: una llamada a Vosk que lanza le deja sordo para siempre.**
+Los cuatro `push()` / `reset()` del callback de audio no tenían guarda.
+`push()` ejecuta `AcceptWaveform` y `json.loads`; `reset()` construye un
+`KaldiRecognizer`. Cualquier excepción salía del callback hacia
+`audio.py:_pump`, que lo llama FUERA de su propio `try` — el hilo del
+micrófono vuelve y no arranca nunca más. Sordo, con aspecto de estar
+perfectamente sano, y un traceback en el journal. Es exactamente lo que
+costó tres días el 2026-08-27 con un modelo de Whisper que no cabía.
+Ahora todas pasan por `VoskSwitch`: el primer fallo apaga la función
+para siempre y lo dice UNA vez, y a partir de ahí se comporta como antes
+de esta rama — el suelo de 1,2 s cierra los turnos y todo sonido es una
+persona. `build_may_close` y `build_is_a_person` sostienen los flujos
+directamente, así que también leen el interruptor: si no, contestarían
+con palabras rancias de un flujo que ya nadie alimenta. Y debajo de todo
+eso, `_pump` sobrevive a lo que sea que lance su callback: la invariante
+es «fallar es callar, nunca ensordecer», y el respaldo tiene que estar en
+el hilo que oye.
+
+**El arreglo estructural que la entrada de abajo dejó «deliberadamente
+sin hacer» está hecho.** `Stream.reset()` es gratis cuando no se ha
+empujado nada desde el último reset — un `_dirty` puesto en `push()` y
+limpiado en `reset()`. 22,7 ms medidos por reconstrucción, el 71% de un
+frame de 32 ms, en el hilo de PortAudio, que no puede bloquearse jamás.
+Tres rondas de revisión encontraron el mismo defecto en tres sitios
+distintos porque ningún sitio de llamada dice que sea caro; ahora el
+precio se paga en un solo lugar. Las tres guardas de transición escritas
+a mano se quedan: siguen siendo correctas y se ahorran hasta la
+comprobación, pero han pasado de ser obligatorias a ser una optimización.
+
+**Y tres cosas más pequeñas.** `_busy["was"]` se quedaba varado por el
+retorno temprano del micrófono apagado — apaga el micro a mitad de
+respuesta y la respuesta siguiente se acumula sobre la anterior en
+`.room`, hasta que la primera envejece más allá de los 45 s de
+`EchoFilter`, el residuo deja de encajar y se interrumpe a sí mismo sin
+nadie en la habitación; la contabilidad es ahora lo primero que hace el
+callback, por encima de toda rama que pueda retornar. `.turn` se
+desincronizaba con una tos: `vad.py:_emit` se resetea y devuelve None
+cuando el habla dura menos de 0,4 s, y el callback sólo olvidaba cuando
+sobrevivía un enunciado — ahora olvida cuando olvida el detector.
+`widget/README.md` seguía documentando `SAMANTHA_WIDGET_BARGE_RMS` como
+«(default 0.05)» y como lo que separa su eco de una persona, que es
+justo lo que no puede hacer; y CLAUDE.md §2.8 vuelve a mencionar
+`SAMANTHA_WIDGET_MIC_GATE`, que sigue ahí como repliegue para una caja
+donde decidirlo sobre palabras no baste.
+
+
 ## 2026-09-01 — El motor que no sabe puntuar decide cuándo callas ✅
 
 Se pidió una alternativa a Whisper; la primera medición la retiró y dejó
