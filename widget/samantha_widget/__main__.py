@@ -633,6 +633,24 @@ class SamanthaApp(Gtk.Application):
             on_interrupt=speaker.interrupt,
         )
 
+        from .remote import HOSTNAME, PORT, RemoteDesk, serve
+        from .remote_auth import Guard, load_or_create_secret
+
+        def on_remote_utterance(pcm: bytes, endpoint) -> None:
+            """A phone released its button.
+
+            Two things the desk path does are deliberately skipped, and
+            for the same reasons `on_typed` skips them: the wake word (a
+            button was pressed — he is being addressed) and the VAD (the
+            button is the utterance boundary). The echo filter still
+            runs inside `dispatch`, and costs nothing here because the
+            phone's microphone is closed while he answers.
+            """
+            speaker.route_to(endpoint)
+            machine.heard(pcm)
+
+        remote_desk = RemoteDesk(on_utterance=on_remote_utterance)
+
         async def dispatch(pcm: bytes) -> None:
             seconds = len(pcm) / 2 / INPUT_RATE
             print(
@@ -649,6 +667,12 @@ class SamanthaApp(Gtk.Application):
                 # the user should hear about.
                 print("transcripción vacía", file=sys.stderr, flush=True)
                 machine.error("")
+                # A phone can reach this with nothing said (a press
+                # released instantly): without giving the turn back here
+                # too, it never reaches on_error and the desk stays
+                # locked to a phone that already fell silent.
+                speaker.route_home()
+                remote_desk.release()
                 return
             print(f"→ {text}", file=sys.stderr, flush=True)
             text = echo.clean(text, time.monotonic())
@@ -656,8 +680,15 @@ class SamanthaApp(Gtk.Application):
                 # All of it was him. Not a turn, and not an error.
                 print("(era su propio eco)", file=sys.stderr, flush=True)
                 machine.error("")
+                speaker.route_home()
+                remote_desk.release()
                 return
-            spoken = wake.heard(text, time.monotonic())
+            # A phone's press IS the address — the button already did
+            # what the wake word does at the desk (accepted 2026-09-01;
+            # a sentence said at the desk while a phone holds the turn
+            # also skips the wake word, which is rare and fails towards
+            # answering rather than ignoring).
+            spoken = text if remote_desk.busy else wake.heard(text, time.monotonic())
             if spoken is None:
                 # Somebody was talking in the room, not to him. Ending
                 # the turn the same way an empty transcription does: the
@@ -694,12 +725,20 @@ class SamanthaApp(Gtk.Application):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause)
             machine.done()
+            # Give the room — and any phone waiting its turn — back.
+            # This is the recovery path for a held turn, not bookkeeping:
+            # without it, a reply that hangs or crashes locks every
+            # phone in the house out until the widget restarts.
+            speaker.route_home()
+            remote_desk.release()
 
         def on_error(message: str) -> None:
             if message:
                 say(message)
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
+            speaker.route_home()
+            remote_desk.release()
 
         def on_photo(path: str, camera: str) -> None:
             # Straight to the GTK thread. Everything else the gateway
@@ -977,10 +1016,13 @@ class SamanthaApp(Gtk.Application):
                 vosk.run(partials.turn.reset)
 
         def _boot() -> None:
-            # Both run for the lifetime of the process, on the loop that
-            # owns them.
+            # All three run for the lifetime of the process, on the loop
+            # that owns them.
             self._spawn(client.run())
             speaker.start()
+            secret = load_or_create_secret()
+            guard = Guard(secret, f"https://{HOSTNAME}:{PORT}")
+            self._spawn(serve(remote_desk, guard, loop))
 
         def _drive_speaking_level() -> bool:
             """Make the line follow her own voice while she talks.

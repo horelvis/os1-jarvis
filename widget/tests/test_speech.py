@@ -185,3 +185,36 @@ def test_a_multi_sentence_body_is_kept_whole() -> None:
     assert (
         unwrap_delivery(text) == "Riega las plantas. Y abre la ventana, que hace bueno."
     )
+
+
+# ── routing ──────────────────────────────────────────────────────────
+
+
+def test_the_speaker_can_be_pointed_somewhere_else() -> None:
+    """The user, 2026-09-01: "la respuesta de JARVIS tiene que oírse por
+    el canal que pregunta." The Speaker writes PCM to a sink; making the
+    sink swappable is the whole of routing a reply to a phone.
+
+    It is also what keeps two speakers from ever sounding at once, which
+    is what made "he is in both places" affordable: cross-room feedback
+    cannot happen if only one room is sounding.
+    """
+    from samantha_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+    home, phone = Sink(), Sink()
+    speaker = Speaker(home)
+
+    assert speaker.sink is home
+
+    speaker.route_to(phone)
+    assert speaker.sink is phone
+
+    speaker.route_home()
+    assert speaker.sink is home

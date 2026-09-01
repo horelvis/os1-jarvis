@@ -145,6 +145,11 @@ class Speaker:
 
     def __init__(self, player) -> None:
         self._player = player
+        # Where the PCM goes. `player` is the desk; a phone that pressed
+        # its button becomes this for the length of its own turn, which
+        # is what "the answer is heard on the channel that asked" means
+        # in code. Anything with `write(pcm)` qualifies.
+        self.sink = player
         self._client = None
         self._generation = 0
         self._queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
@@ -154,6 +159,14 @@ class Speaker:
         """Start the worker. Must be called on the asyncio loop."""
         if self._worker is None:
             self._worker = asyncio.ensure_future(self._run())
+
+    def route_to(self, sink) -> None:
+        """Send what he says next to this sink instead of the desk."""
+        self.sink = sink
+
+    def route_home(self) -> None:
+        """Back to the speaker in the room with the strip in it."""
+        self.sink = self._player
 
     def enqueue(self, clause: str) -> None:
         """Queue a clause to be spoken after everything already queued."""
@@ -197,5 +210,5 @@ class Speaker:
         async for chunk, _backend in tts.stream(clause, client=self._client):
             if generation != self._generation:
                 return  # interrupted while this clause was synthesising
-            self._player.write(chunk)
+            self.sink.write(chunk)
             await asyncio.sleep(0)  # let the loop breathe between chunks
