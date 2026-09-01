@@ -1,5 +1,73 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-01 — El motor que no sabe puntuar decide cuándo callas ✅
+
+Se pidió una alternativa a Whisper; la primera medición la retiró y dejó
+otra cosa en su lugar. Después de que dejas de hablar, la tira esperaba
+1,2 s de silencio contra 61-135 ms de transcripción — el motor nunca fue
+lo lento. Lo que se entrega en su lugar es un segundo motor, Vosk
+`small-es` (39 MB, Apache 2.0, en la CPU), que transcribe todo el rato y
+cuyo texto no llega a ninguna parte — ni a la pantalla, ni al modelo, ni
+a la red. Decide dos cosas: si la frase suena terminada, y si un sonido
+mientras él habla es una persona o su propio eco. Whisper sigue
+produciendo, sin cambios, cada palabra que ve Hermes. CLAUDE.md §0, §2.6,
+§2.8, §9 y §12 llevan el resultado; §12 lleva además por qué un solo
+motor resultó imposible (Moonshine no oye «Jarvis» — «ya luis», «yardi»
+— y sólo Vosk salva una de las dos frases, por suerte).
+
+**Los commits:** `cd37e4c` la regla de finalización (`endpoint.py`,
+`CompletionRule`); `2d4330c` el disparo corto de la VAD, 0,35 s, junto a
+su suelo de 1,2 s; `ac8c083` Vosk en sí, un modelo y dos flujos
+independientes, `.turn` y `.room`; `78e2b06` el cableado del
+endpointing en el callback de audio; y `9284b4e`, `f7b5fc2`, `ae53268`,
+`8a383de` — el arreglo de la interrupción (barge-in) y sus tres rondas
+de revisión. 293 tests, subiendo desde 285, todos en verde.
+
+**Lo medido, y es lo que decide la arquitectura, no lo que la
+justifica.** En la pausa a mitad de frase del usuario, Whisper escribió
+«…habrá que comprobar que estén encendidas y con red.» — limpia,
+puntuada, terminada — y cerrar ahí le habría cortado; siguió diciendo
+otra cosa. Vosk, en el mismo instante, escribió «…que estén encendidas
+y» y esperó. El mejor transcriptor es el peor endpointer, precisamente
+porque es el mejor: completa la frase que oyó en vez de dejarla colgada
+donde la dejó quien hablaba. Sobre la grabación: Vosk 2 cierres buenos y
+0 cortes, Moonshine 1 y 1, Whisper 0 y 2. Ahorro medido: 880 ms por
+turno.
+
+**Y arregla, de paso, no poder interrumpirle.** La puerta de barge-in
+era un umbral de volumen y no podía funcionar: la voz del usuario mide
+RMS 0,054-0,088 y su propio eco, con los altavoces junto al micrófono,
+0,178 — más alto que la persona. Ahora es un suelo de silencio
+(`SAMANTHA_WIDGET_BARGE_RMS`, 0,01) y `EchoFilter` decide sobre palabras,
+contra el parcial en vivo de Vosk.
+
+**Lo que NO está probado, dicho sin adornos.** La muestra sobre la que
+descansa todo el diseño es UNA grabación larga del usuario más cuatro
+clips de agosto. No es un corpus. **El corte prematuro — la regla
+cortando una frase antes de que termine — midió CERO en esa muestra, y
+eso no es lo mismo que imposible**: el suelo de 1,2 s acota cuánto puede
+equivocarse la regla, no lo impide. Y ninguna de las dos comprobaciones
+de comportamiento se ha hecho todavía: nadie le ha hablado con una pausa
+a mitad de frase para confirmar que ahora responde antes, y nadie le ha
+hablado por encima para confirmar que ahora se calla. Las dos necesitan
+a una persona delante y quedan pendientes.
+
+**Lo que costó tres rondas de revisión, y merece quedar escrito porque
+el mismo defecto apareció tres veces en tres sitios distintos:** un
+`Stream.reset()` caro — construye un reconocedor de voz entero — llamado
+una vez por frame de audio en vez de una vez por transición de estado.
+Cada una de las tres apariciones la introdujo una instrucción del agente
+coordinador, no el implementador. El arreglo estructural —que `reset()`
+sea barato cuando no hay nada que olvidar— está identificado y
+**deliberadamente sin hacer**: el código actual es correcto, y tocar eso
+queda fuera del alcance aprobado para esta tarea.
+
+**Coste, dicho llanamente:** un segundo motor STT en el árbol de
+dependencias de la tira; una lista de palabras en español escrita a
+mano, que es toda la regla y no generaliza a nada; y ~300 ms más lento
+para reaccionar a una interrupción que un frame de 32 ms.
+
+
 ## 2026-09-01 — No habrá cara: el avatar se descarta entero ✅
 
 Decisión del usuario, después de dos días midiéndolo: *«vamos a

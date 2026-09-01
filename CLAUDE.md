@@ -47,6 +47,9 @@ can act on it. Not a window you open. Something that is there.
 - **LLM:** local `llama-server` with Qwen3.8-27B (GGUF), or X.AI's Grok
   API — a config switch. §2.5 and §12 carry the trade.
 - **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process.
+- **Endpointing:** a second engine, Vosk `small-es` on the CPU, decides
+  when a sentence is finished and whether a sound over his voice is a
+  person or his own echo. Its text reaches nobody (§2.6, §2.8, §12).
 - **VAD:** Silero v5 over onnxruntime, CPU, always listening.
 - **TTS:** CosyVoice 3 zero-shot on `:8093`, JARVIS' cloned voice.
 - **Ears:** he answers to his name (§2.8). Everything else in the room
@@ -452,6 +455,14 @@ nothing. One did, on 2026-08-27 — see the comment in
 - **STT:** faster-whisper `large-v3-turbo`, in-process inside the widget,
   on the GPU. ~2.5 GB of VRAM resident, 81 s to load the first time and
   ~1 s afterwards; 0.23 s to transcribe 3.5 s of speech.
+- **Endpointing:** Vosk `small-es` (39 MB, Apache 2.0, CPU, ~5% of one
+  core) transcribes continuously and its text reaches nobody. It decides
+  two things: when you have finished a sentence — 880 ms sooner than the
+  1.2 s of silence, measured — and whether a sound while he speaks is a
+  person or his own echo. **Whisper is deliberately not doing this job**:
+  measured 2026-09-01, the best transcriber is the worst endpointer,
+  because it completes the sentence it heard instead of leaving it
+  hanging where the speaker did.
 - **TTS:** **CosyVoice 3** zero-shot, in Docker on `:8093`, cloning his
   voice from one reference clip plus its transcript in `voices/`.
   24 kHz int16, synthesised clause by clause so he starts speaking
@@ -521,7 +532,13 @@ there is no Web Speech API.
 - **Playback** is raw PCM from CosyVoice, written to the output stream
   clause by clause, strictly sequentially — synthesising clauses
   concurrently interleaves their chunks and garbles the speech.
-- **The microphone is gated while he speaks**, or he hears himself.
+- **He can be interrupted, and it is decided on words rather than
+  volume** (2026-09-01). `SAMANTHA_WIDGET_BARGE_RMS` survives as a
+  silence floor (0.01); whether a sound is a person or his own echo is
+  `EchoFilter` run against Vosk's live partial. The threshold it
+  replaces could not work: the user's voice measures RMS 0.054-0.088 and
+  his echo with the speakers beside the microphone measures 0.178 —
+  louder than the person.
 
 **Two things that cost days, both silent:**
 - **PortAudio's `callback=` mode segfaults under GTK.** No traceback, and
@@ -1047,6 +1064,8 @@ If you encounter:
 | The wave (drawing / pure model) | `widget/samantha_widget/{wave,wave_model,bars_model}.py` |
 | Colour, and the shadow to kill | `widget/samantha_widget/theme.py` |
 | Listening: VAD and transcription | `widget/samantha_widget/{vad,stt}.py` |
+| Deciding you have finished (rule / model) | `widget/samantha_widget/endpoint.py` |
+| The clock that asks, and the one that decides | `widget/samantha_widget/vad.py` |
 | Speaking: clauses and playback | `widget/samantha_widget/{speech,audio}.py` |
 | The link to the brain | `widget/samantha_widget/gateway.py` |
 | Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
@@ -1112,6 +1131,59 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-09-01 — The engine that cannot punctuate gets the job
+
+**Decision:** a second STT engine — Vosk `small-es`, 39 MB, Apache 2.0,
+on the CPU — decides when somebody has finished speaking and whether a
+sound over him is a person or his own echo. Its text is never shown,
+spoken or sent. **faster-whisper is unchanged** and still produces every
+word Hermes sees.
+
+**The request was "an alternative to Whisper", and the first measurement
+retired it.** After you stop talking he waits 1.2 s of silence against
+61-135 ms of transcription, so the engine was never what made him slow.
+A faster engine buys nothing; what buys something is not waiting.
+
+**A single engine turned out to be impossible, and not for any of the
+reasons the search suggested.** With Moonshine transcribing, JARVIS
+would not have answered either real sentence in which the user says his
+name — it came back as «ya luis» and «yardi», and `wake.py`'s 0.6 ratio
+rejects both. Vosk salvages one of two, by luck. Only Whisper with its
+`initial_prompt` gets both, and being ignored is the one failure a wake
+word cannot afford.
+
+**The finding that decided the architecture inverts the obvious answer.**
+At the user's mid-sentence pause Whisper wrote «…habrá que comprobar que
+estén encendidas y con red.» — clean, punctuated, finished — and closing
+there cut him off; he went on to say something else entirely. Vosk, at
+the same instant, wrote «…que estén encendidas y» and waited. **Whisper
+completes the sentence it heard; Vosk leaves it hanging where the
+speaker left it.** Over the recording: Vosk 2 good closes and 0 cuts,
+Moonshine 1 and 1, Whisper 0 and 2. The best transcriber is the worst
+endpointer, for precisely the reason it is the best, so the split is
+architectural rather than a saving.
+
+**It also fixes being unable to interrupt him**, reported the same day.
+The barge-in gate was a loudness threshold and could not work: the
+user's voice measures RMS 0.054-0.088 and his echo with the speakers
+beside the microphone measures 0.178 — louder than the person. It is now
+a silence floor, and `EchoFilter` decides on words against Vosk's live
+partial. Amends §2.8.
+
+**Two things measured that correct what was believed here:** Moonshine
+DOES have biasing (`set_keyterms`, better designed than `initial_prompt`)
+— and with "Jarvis" in the list the transcription came back identical
+character for character. And **sherpa-onnx**, which has exactly the
+hotwords this project wanted and is Apache 2.0 on the ONNX runtime
+already in the tree, **has no Spanish streaming model at all**.
+
+**Costs, stated:** a second STT engine in the widget's dependency tree;
+a new class of bug — the premature cut — which measured zero on a sample
+of one long recording plus four August clips and is bounded, not
+prevented, by the 1.2 s floor; a hand-written Spanish word list that is
+the whole of the rule and generalises to nothing; and ~300 ms slower to
+react to an interruption than a 32 ms frame.
 
 ### 2026-09-01 — He gets no face: the avatar is dropped, all of it
 
