@@ -35,6 +35,27 @@ def test_lan_address_is_a_real_private_address() -> None:
     assert not address.is_loopback
 
 
+def test_lan_address_matches_what_the_routing_table_would_use() -> None:
+    """The prefix checks this replaces were over-fitted to this box's
+    Docker bridges; `172.16.0.0/12` is a legitimate home network. What
+    is worth pinning is the METHOD — the address the kernel would send
+    from — because that is what keeps the result off a bridge on any
+    machine, not a string prefix."""
+    import shutil
+
+    if shutil.which("ip") is None:
+        pytest.skip("iproute2 is not installed")
+    out = subprocess.run(
+        ["ip", "-4", "route", "get", "192.0.2.1"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    expected = out[out.index("src") + 1]
+
+    assert lan_address() == expected
+
+
 @pytest.mark.skipif(
     subprocess.run(["which", "openssl"], capture_output=True).returncode != 0,
     reason="openssl is not installed",

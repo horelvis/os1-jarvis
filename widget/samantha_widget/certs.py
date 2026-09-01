@@ -13,12 +13,26 @@ wants to do that twice.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import socket
 import subprocess
 from pathlib import Path
 
 _YEARS = 3650
+
+
+@contextlib.contextmanager
+def _private_files():
+    """openssl creates its own output files, so the only way a key is
+    never briefly world-readable is to narrow the umask around the call.
+    A chmod afterwards closes a window that has already been open for
+    the length of a 2048-bit keygen."""
+    previous = os.umask(0o077)
+    try:
+        yield
+    finally:
+        os.umask(previous)
 
 
 def lan_address() -> str:
@@ -58,7 +72,8 @@ def ensure_certificate(
     if ca_pem.is_file() and cert_pem.is_file() and key_pem.is_file():
         return ca_pem, cert_pem, key_pem
 
-    _run(["openssl", "genrsa", "-out", str(ca_key), "2048"])
+    with _private_files():
+        _run(["openssl", "genrsa", "-out", str(ca_key), "2048"])
     os.chmod(ca_key, 0o600)
     _run(
         [
@@ -89,7 +104,8 @@ def ensure_certificate(
         f"subjectAltName=DNS:{hostname},IP:{ip}\n"
     )
     csr = directory / "jarvis.csr"
-    _run(["openssl", "genrsa", "-out", str(key_pem), "2048"])
+    with _private_files():
+        _run(["openssl", "genrsa", "-out", str(key_pem), "2048"])
     os.chmod(key_pem, 0o600)
     _run(
         [
