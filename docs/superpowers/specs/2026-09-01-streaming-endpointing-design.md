@@ -175,6 +175,54 @@ admitted:
 - **usually does not end one, but can** — `es`, `hay`, `no`, `también`,
   `más` → **reject from the list**
 
+## The second thing the same engine fixes: interrupting him
+
+**Reported by the user, 2026-09-01: "no se calla, sigue hablando."**
+Folded into this design rather than given its own, because the cure is
+the engine this design already installs.
+
+**The mechanism cannot work, and that is measured rather than
+suspected.** While he speaks, `__main__.py` drops every frame under
+`SAMANTHA_WIDGET_BARGE_RMS` (0.05) so his own voice returning through
+the room cannot open a turn. The measurements of 2026-08-26:
+
+| | RMS |
+|---|---|
+| the user's voice | 0.054–0.088 |
+| his echo, speakers away from the microphone | 0.027–0.035 |
+| his echo, speakers beside it | **0.178** |
+
+In the good case a person clears the threshold by **0.004**. In the bad
+case his echo is *louder than the person* and no threshold exists that
+separates them — the file says so in its own comment. Speaking normally
+instead of loudly, turning the volume up, or nudging a speaker is enough
+to stop existing. This is not a mis-tuned constant; it is a single
+scalar asked to separate two things that are not always separable by
+loudness.
+
+**The fix inverts what the threshold is for.** `echo.py` already exploits
+the unfair advantage that the widget knows exactly what it just said —
+but it applies that after the fact, to a finished transcript. With Vosk
+transcribing continuously, the same comparison can be made *while* he
+talks: words matching what he is currently saying are his echo and are
+dropped; different words are a person, and he stops.
+
+So the RMS gate stops having to separate echo from person — impossible —
+and only has to separate sound from silence, which is trivial. It drops
+to a low floor and is no longer what decides.
+
+**Cost, stated:** reaction is slower. The gate answers in one 32 ms
+frame; Vosk needs roughly 300 ms of speech before there are words to
+compare, so he talks a little longer over an interruption than he does
+today in the cases where today works at all. The trade is a mechanism
+that works at any volume and any speaker position against one that
+works in a 0.004 window.
+
+**This amends CLAUDE.md §2.8**, which describes the RMS gate as the
+barge-in mechanism, and §8 requires that to be a stated decision rather
+than a side effect. `SAMANTHA_WIDGET_BARGE_RMS` survives as the silence
+floor, with a much lower default.
+
 ## Testing
 
 `CompletionRule` being pure, it is table-driven, and today's recordings
@@ -186,6 +234,12 @@ supply the first rows as fixed cases:
 | «…de otro proveedor que no son las que había antes» | close |
 | «hola ya veis que pueda se» | wait |
 | «¿qué hora es?» | close (the `es` regression) |
+
+The barge-in half is likewise split so its policy is pure: given what he
+is currently saying and what the microphone is hearing, is this his echo
+or a person? That is `echo.py`'s existing comparison against a live
+partial rather than a finished transcript, so it is tested the same way
+— text in, verdict out, no audio.
 
 Above that, `UtteranceDetector` driven by a scripted probe — the pattern
 `vad.py` already supports — and one regression test fixing that when the
