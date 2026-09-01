@@ -91,6 +91,27 @@ def test_a_turn_survives_several_system_dones_before_the_real_one() -> None:
     assert machine.state is WaveState.IDLE
 
 
+def test_done_with_no_token_reports_that_it_did_not_settle() -> None:
+    """A caller may need to undo something that belongs to the turn —
+    routing a reply back to the phone that asked for it — and must not
+    undo it on a `done` that belongs to a system message this ignores.
+    """
+    machine, _ = _machine()
+    _up_to_thinking(machine)
+
+    assert machine.done() is False
+    assert machine.state is WaveState.THINKING
+
+
+def test_done_after_a_real_token_reports_that_it_settled() -> None:
+    machine, _ = _machine()
+    _up_to_thinking(machine)
+    machine.token("Hola, me alegro de oírte.")
+
+    assert machine.done() is True
+    assert machine.state is WaveState.IDLE
+
+
 def test_a_second_reply_still_needs_its_own_token() -> None:
     """The flag resets on settle, so the next stray `done` is ignored too."""
     machine, _ = _machine()

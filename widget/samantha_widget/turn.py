@@ -78,14 +78,21 @@ class TurnMachine:
         self._heard_token = True
         self._go(WaveState.SPEAKING)
 
-    def done(self) -> None:
-        """End the turn, but only if she actually said something."""
+    def done(self) -> bool:
+        """End the turn, but only if she actually said something.
+
+        Returns whether the turn settled, because a caller may need to
+        undo something that belongs to the turn — routing a reply back
+        to the phone that asked for it — and must not undo it on a
+        `done` that belongs to a system message this ignores.
+        """
         if not self._heard_token:
             # A `done` belonging to a system message the filter dropped.
             # Settling here would drop the wave out of `thinking` while
             # the model is still composing.
-            return
+            return False
         self._settle()
+        return True
 
     def error(self, message: str) -> None:
         """Unlike `done`, this always settles: the turn is over either way."""

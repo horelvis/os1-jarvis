@@ -652,51 +652,69 @@ class SamanthaApp(Gtk.Application):
         remote_desk = RemoteDesk(on_utterance=on_remote_utterance)
 
         async def dispatch(pcm: bytes) -> None:
-            seconds = len(pcm) / 2 / INPUT_RATE
-            print(
-                f"oído: {seconds:.1f}s de voz (whisper listo: {transcriber.ready})",
-                file=sys.stderr,
-                flush=True,
-            )
-            if _DUMP_DIR:
-                _dump_utterance(pcm)
-            text = await asyncio.to_thread(transcriber.transcribe, pcm)
-            if not text:
-                # Either Whisper is not up yet, or it heard nothing it
-                # believed. Both end the turn quietly; neither is an error
-                # the user should hear about.
-                print("transcripción vacía", file=sys.stderr, flush=True)
+            # Wrapped whole: `transcriber.transcribe` can raise (a
+            # starved GPU has left him deaf before — CLAUDE.md §12,
+            # 2026-08-30) and so can `client.send_chat`, the same reason
+            # `on_typed`'s `_send` wraps its own call. Unlike a typed
+            # turn, this one may be holding a phone's claim on
+            # `remote_desk` with no expiry left to save it —
+            # `_claimed_at` is already `None` by the time `dispatch`
+            # runs — so an uncaught exception here would lock every
+            # phone in the house out until the widget restarts.
+            try:
+                seconds = len(pcm) / 2 / INPUT_RATE
+                print(
+                    f"oído: {seconds:.1f}s de voz (whisper listo: {transcriber.ready})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if _DUMP_DIR:
+                    _dump_utterance(pcm)
+                text = await asyncio.to_thread(transcriber.transcribe, pcm)
+                if not text:
+                    # Either Whisper is not up yet, or it heard nothing it
+                    # believed. Both end the turn quietly; neither is an
+                    # error the user should hear about.
+                    print("transcripción vacía", file=sys.stderr, flush=True)
+                    machine.error("")
+                    # A phone can reach this with nothing said (a press
+                    # released instantly): without giving the turn back
+                    # here too, it never reaches on_error and the desk
+                    # stays locked to a phone that already fell silent.
+                    speaker.route_home()
+                    remote_desk.release()
+                    return
+                print(f"→ {text}", file=sys.stderr, flush=True)
+                text = echo.clean(text, time.monotonic())
+                if not text.strip():
+                    # All of it was him. Not a turn, and not an error.
+                    print("(era su propio eco)", file=sys.stderr, flush=True)
+                    machine.error("")
+                    speaker.route_home()
+                    remote_desk.release()
+                    return
+                # A phone's press IS the address — the button already did
+                # what the wake word does at the desk (accepted
+                # 2026-09-01; a sentence said at the desk while a phone
+                # holds the turn also skips the wake word, which is rare
+                # and fails towards answering rather than ignoring).
+                spoken = (
+                    text if remote_desk.busy else wake.heard(text, time.monotonic())
+                )
+                if spoken is None:
+                    # Somebody was talking in the room, not to him.
+                    # Ending the turn the same way an empty transcription
+                    # does: the wave goes back to listening and he never
+                    # knew.
+                    print("(no era para él)", file=sys.stderr, flush=True)
+                    machine.error("")
+                    return
+                await client.send_chat(spoken, wake=wake.named)
+            except Exception as exc:
+                print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
-                # A phone can reach this with nothing said (a press
-                # released instantly): without giving the turn back here
-                # too, it never reaches on_error and the desk stays
-                # locked to a phone that already fell silent.
                 speaker.route_home()
                 remote_desk.release()
-                return
-            print(f"→ {text}", file=sys.stderr, flush=True)
-            text = echo.clean(text, time.monotonic())
-            if not text.strip():
-                # All of it was him. Not a turn, and not an error.
-                print("(era su propio eco)", file=sys.stderr, flush=True)
-                machine.error("")
-                speaker.route_home()
-                remote_desk.release()
-                return
-            # A phone's press IS the address — the button already did
-            # what the wake word does at the desk (accepted 2026-09-01;
-            # a sentence said at the desk while a phone holds the turn
-            # also skips the wake word, which is rare and fails towards
-            # answering rather than ignoring).
-            spoken = text if remote_desk.busy else wake.heard(text, time.monotonic())
-            if spoken is None:
-                # Somebody was talking in the room, not to him. Ending
-                # the turn the same way an empty transcription does: the
-                # wave goes back to listening and he never knew.
-                print("(no era para él)", file=sys.stderr, flush=True)
-                machine.error("")
-                return
-            await client.send_chat(spoken, wake=wake.named)
 
         # ── the gateway's replies ─────────────────────────────────────
         def on_token(token: str) -> None:
@@ -724,13 +742,20 @@ class SamanthaApp(Gtk.Application):
             for clause in chunker.flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause)
-            machine.done()
-            # Give the room — and any phone waiting its turn — back.
-            # This is the recovery path for a held turn, not bookkeeping:
-            # without it, a reply that hangs or crashes locks every
-            # phone in the house out until the widget restarts.
-            speaker.route_home()
-            remote_desk.release()
+            if machine.done():
+                # Give the room — and any phone waiting its turn — back.
+                # This is the recovery path for a held turn, not
+                # bookkeeping: without it, a reply that hangs or crashes
+                # locks every phone in the house out until the widget
+                # restarts. Gated on the real settle, not on every
+                # `done`: the gateway emits one after each of its own
+                # system messages too (turn.py, one measured turn
+                # carried six), and releasing on THAT one would send the
+                # sink home and free the desk before the real tokens
+                # ever arrive — a question asked on a phone, answered
+                # out loud in the room.
+                speaker.route_home()
+                remote_desk.release()
 
         def on_error(message: str) -> None:
             if message:
