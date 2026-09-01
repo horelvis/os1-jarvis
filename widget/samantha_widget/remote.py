@@ -22,6 +22,7 @@ from typing import Callable, Protocol
 from aiohttp import WSMsgType, web
 
 from .certs import ensure_certificate, lan_address
+from .enrol import mobileconfig, write_qr
 from .remote_audio import MAX_UTTERANCE_BYTES, resample_to_input
 from .remote_auth import Guard, load_or_create_secret
 
@@ -203,6 +204,53 @@ async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
     await site.start()
     print(
         f"móvil: escuchando en https://{HOSTNAME}:{PORT} ({lan_address()}), CA en {ca}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+    # Plain HTTP, and only these two routes. The certificate cannot be
+    # fetched over a connection that requires trusting it.
+    welcome = web.Application()
+
+    async def _welcome(request: web.Request) -> web.Response:
+        target = f"https://{HOSTNAME}:{PORT}/#{guard.secret}"
+        return web.Response(
+            content_type="text/html",
+            text=(
+                "<!doctype html><meta charset=utf-8>"
+                "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                "<title>JARVIS</title>"
+                "<style>body{font-family:-apple-system,sans-serif;margin:2rem;"
+                "background:#141210;color:#d1684e}a{display:block;margin:1.5rem 0;"
+                "padding:1rem;border:1px solid #d1684e;border-radius:.5rem;"
+                "color:inherit;text-decoration:none;text-align:center}</style>"
+                "<h1>JARVIS en casa</h1>"
+                "<a href='/ca'>1 · Instalar el certificado</a>"
+                "<p>Después: Ajustes → General → Información → "
+                "Ajustes de confianza de certificados → activar "
+                "<b>JARVIS Home CA</b>.</p>"
+                f"<a href='{target}'>2 · Abrir JARVIS</a>"
+            ),
+        )
+
+    async def _ca(request: web.Request) -> web.Response:
+        return web.Response(
+            body=mobileconfig(ca),
+            content_type="application/x-apple-aspen-config",
+        )
+
+    welcome.router.add_get("/", _welcome)
+    welcome.router.add_get("/ca", _ca)
+    welcome_runner = web.AppRunner(welcome)
+    await welcome_runner.setup()
+    await web.TCPSite(welcome_runner, lan_address(), PORT + 1).start()
+
+    qr = write_qr(
+        f"http://{lan_address()}:{PORT + 1}/",
+        Path.home() / ".samantha" / "enrol-qr.png",
+    )
+    print(
+        f"móvil: alta en http://{lan_address()}:{PORT + 1}/ · QR {qr}",
         file=sys.stderr,
         flush=True,
     )

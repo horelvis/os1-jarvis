@@ -773,6 +773,28 @@ class SamanthaApp(Gtk.Application):
             print(f"foto: {camera} -> {path}", file=sys.stderr, flush=True)
             GLib.idle_add(band.show_photo, path, camera)
 
+        if os.getenv("SAMANTHA_WIDGET_SHOW_QR") == "1":
+            # The band already draws a PNG for the cameras; this is the
+            # same gesture, not a new one — `remote.serve()` writes the
+            # QR to this same path once at startup. `band` only exists
+            # from `do_activate` onward, which is why this cannot sit
+            # beside `_SWITCHES_OFF` and the other module-level switches
+            # above: nothing named `band` exists there at all.
+            # It carries the shared secret, so it must not linger: it
+            # goes away with the band's own fade (`photo.FADE_S`, 15 s)
+            # rather than staying on a screen or in a log.
+            from pathlib import Path
+
+            GLib.timeout_add_seconds(
+                3,
+                lambda: (
+                    band.show_photo(
+                        str(Path.home() / ".samantha" / "enrol-qr.png"), "alta"
+                    ),
+                    False,
+                )[1],
+            )
+
         def on_live_open(
             camera: str, epoch: int, extradata: bytes, w: int, h: int
         ) -> None:

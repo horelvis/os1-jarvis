@@ -28,6 +28,10 @@ dependencies = [
     # venv transitively long before that; this is where it becomes a
     # thing we actually depend on.
     "aiohttp>=3.9",
+    # The enrolment QR. Pure Python, and writes PNG through pypng — with
+    # `[png]` it never imports Pillow, verified on this box 2026-09-01
+    # (a 501-byte file, `PIL` absent from sys.modules).
+    "qrcode[png]>=8",
 ]
 
 [project.optional-dependencies]
