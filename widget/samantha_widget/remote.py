@@ -35,6 +35,18 @@ CERT_DIR = Path.home() / ".samantha" / "certs"
 # own ceiling (remote_audio.py); this is that plus slack.
 HELD_TURN_SECONDS = 35.0
 
+# How long a turn may be held once the button is released. The recording
+# ceiling (HELD_TURN_SECONDS) stops applying at `finish` — a reply can
+# legitimately take minutes, since he holds a terminal. This is the
+# backstop under that: a turn producing no answer at all (the
+# `📬 No home channel` first turn of a new session is exactly that
+# shape) would otherwise hold the phone forever, and the next thing
+# said in the room would play on it.
+#
+# The gateway's own error path is the FIRST recovery and normally fires
+# well inside this; this only catches turns that end in silence.
+ANSWERING_SECONDS = 600.0
+
 
 class Endpoint(Protocol):
     """Anywhere his voice can come out.
@@ -62,12 +74,16 @@ class RemoteDesk:
     def __init__(self, on_utterance: Callable[[bytes, Endpoint], None]) -> None:
         self._on_utterance = on_utterance
         self.current: Endpoint | None = None
-        # Set while — and only while — recording: the deadline exists to
-        # catch a phone that presses and never releases. `None` means
-        # either nobody holds the turn, or an utterance came in and the
-        # reply is now legitimately in progress (see `finish`), and
-        # neither of those expires.
+        # Set whenever somebody holds the turn, RECORDING or ANSWERING —
+        # `None` only while nobody does. Which ceiling applies to it is
+        # `_allowance`: short while recording (a phone that presses and
+        # never releases), long while answering (a reply that never
+        # settles — see `finish`). Both expire; neither is unbounded,
+        # because a turn producing no answer at all is a real, measured
+        # shape (CLAUDE.md §5, the `📬 No home channel` first turn) and
+        # must not hold a phone forever.
         self._claimed_at: float | None = None
+        self._allowance: float = HELD_TURN_SECONDS
 
     @property
     def busy(self) -> bool:
@@ -77,25 +93,24 @@ class RemoteDesk:
         """True if this endpoint now holds the turn.
 
         `now` is a monotonic clock reading, injectable for tests. A turn
-        still in its RECORDING phase and held longer than
-        `HELD_TURN_SECONDS` is stolen rather than defended — its holder
-        cannot possibly still be mid-utterance, since that is longer
-        than an utterance is allowed to be. A turn whose recording has
-        already finished (`_claimed_at` is `None`, set by `finish`) is
-        never stolen this way: the reply itself may legitimately take
-        minutes — he holds a terminal."""
+        held longer than its current allowance — `HELD_TURN_SECONDS`
+        while recording, `ANSWERING_SECONDS` while answering (see
+        `finish`) — is stolen rather than defended: its holder cannot
+        possibly still be in that phase.
+        """
         if now is None:
             now = time.monotonic()
         if self.current is not None and self.current is not endpoint:
             expired = (
                 self._claimed_at is not None
-                and now - self._claimed_at >= HELD_TURN_SECONDS
+                and now - self._claimed_at >= self._allowance
             )
             if not expired:
                 endpoint.refuse()
                 return False
         self.current = endpoint
         self._claimed_at = now
+        self._allowance = HELD_TURN_SECONDS
         return True
 
     def release(self, endpoint: Endpoint | None = None) -> None:
@@ -107,18 +122,27 @@ class RemoteDesk:
         self.current = None
         self._claimed_at = None
 
-    def finish(self, pcm: bytes, endpoint: Endpoint) -> None:
+    def finish(self, pcm: bytes, endpoint: Endpoint, now: float | None = None) -> None:
         """The button was released: hand the utterance up with the
         endpoint that spoke, so the reply knows where to go.
 
-        This also ENDS the deadline. `_claimed_at` exists to catch a
-        phone that presses and never releases; once `end` has arrived
-        that risk is gone, and what remains is the reply, which may
-        legitimately take minutes — he holds a terminal. Letting the
-        clock run here means another phone steals the turn mid-answer
-        and the one that asked is told nothing.
+        This also SWITCHES the deadline rather than clearing it.
+        `_claimed_at` while recording exists to catch a phone that
+        presses and never releases; once `end` has arrived that risk is
+        gone, and what remains is the reply, which may legitimately
+        take minutes — he holds a terminal. Clearing the deadline
+        entirely was the first version of this, and it traded one bug
+        for another: a turn that ends in silence — no token at all, the
+        gateway's own `📬 No home channel` first-turn quirk is exactly
+        that shape — then held the phone with no way back except its
+        own socket dropping. Re-stamping with `ANSWERING_SECONDS`
+        keeps the short ceiling from firing mid-answer while still
+        giving a silent turn a way out.
         """
-        self._claimed_at = None
+        if now is None:
+            now = time.monotonic()
+        self._claimed_at = now
+        self._allowance = ANSWERING_SECONDS
         self._on_utterance(pcm, endpoint)
 
 
@@ -214,7 +238,11 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
                         if not desk.claim(endpoint, time.monotonic()):
                             continue
                     elif frame.get("type") == "end" and desk.current is endpoint:
-                        desk.finish(resample_to_input(bytes(buffer), rate), endpoint)
+                        desk.finish(
+                            resample_to_input(bytes(buffer), rate),
+                            endpoint,
+                            time.monotonic(),
+                        )
                         buffer.clear()
                 elif message.type == WSMsgType.BINARY:
                     if desk.current is endpoint and len(buffer) < MAX_UTTERANCE_BYTES:
