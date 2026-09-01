@@ -208,6 +208,27 @@ def _apply_asking_to_wake(wake: WakeWord, open_: bool, now: float) -> None:
         wake.release()
 
 
+def build_may_close(stream, rule):
+    """The question `vad.py` asks at 0.35 s of quiet.
+
+    `stream` is the `.turn` stream, or None when Vosk did not load.
+    Answers False for every reason a question can go wrong — no model, a
+    raising engine, nothing heard yet — because False is exactly today's
+    behaviour and the 1.2 s threshold is still underneath it.
+    """
+
+    def may_close() -> bool:
+        if stream is None:
+            return False
+        try:
+            return rule.looks_complete(stream.partial())
+        except Exception as exc:
+            print(f"endpointing falló: {exc!r}", file=sys.stderr, flush=True)
+            return False
+
+    return may_close
+
+
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.samantha.widget")
@@ -617,7 +638,19 @@ class SamanthaApp(Gtk.Application):
         client.on_live_end = on_live_end
 
         # ── the microphone, always open ───────────────────────────────
-        detector = UtteranceDetector(SileroDetector())
+        from .endpoint import CompletionRule, load_partials
+
+        partials = load_partials()
+        rule = CompletionRule()
+        print(
+            "endpointing: activo" if partials else "endpointing: apagado",
+            file=sys.stderr,
+            flush=True,
+        )
+        detector = UtteranceDetector(
+            SileroDetector(),
+            may_close=build_may_close(partials.turn if partials else None, rule),
+        )
         # One analyser per source, because it holds the sliding window
         # and the two rates differ: 16 kHz here against the player's 24.
         mic_spectrum = SpectrumAnalyser(INPUT_RATE)
@@ -679,6 +712,19 @@ class SamanthaApp(Gtk.Application):
                     # and reported as "ahora se autointerrumpe".
                     return
 
+            if partials is not None:
+                # The same frames the detector is holding, so the rule is
+                # asked about exactly that audio. Fed even before the
+                # detector calls it speech: the preroll matters here for
+                # the same reason it matters for the wake word (§2.8).
+                #
+                # Only reached when he is NOT speaking — the barge-in
+                # branch above returns early while `player.busy`, and
+                # that is deliberate: his own echo must never enter the
+                # sentence the endpointing rule is judging. What listens
+                # over him is `.room`, fed in Task 5.
+                partials.turn.push(frame)
+
             was_speaking = detector.speaking
             utterance = detector.push(frame)
             if detector.speaking and not was_speaking:
@@ -700,6 +746,8 @@ class SamanthaApp(Gtk.Application):
                 set_bands(mic_spectrum.analyse(samples))
             if utterance is not None:
                 machine.heard(utterance)
+            if utterance is not None and partials is not None:
+                partials.turn.reset()
 
         def _boot() -> None:
             # Both run for the lifetime of the process, on the loop that

@@ -55,3 +55,44 @@ def test_the_question_resolving_shuts_it_again():
     _apply_asking_to_wake(w, False, now=50.0)
 
     assert w.heard("y otra cosa", now=51.0) is None
+
+
+def test_endpointing_is_wired_only_when_the_model_loaded(monkeypatch) -> None:
+    """The two states this must have, and no third one.
+
+    With a model: the detector is asked. Without: it is not, and nothing
+    anywhere raises — which is the property that keeps a missing 39 MB
+    file from costing a voice turn.
+    """
+    from samantha_widget.__main__ import build_may_close
+    from samantha_widget.endpoint import CompletionRule
+
+    assert build_may_close(None, CompletionRule())() is False
+
+    class FakeStream:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def partial(self) -> str:
+            return self.text
+
+    assert (
+        build_may_close(FakeStream("enciendeme la luz del salon"), CompletionRule())()
+        is True
+    )
+    assert (
+        build_may_close(FakeStream("enciendeme la luz del"), CompletionRule())()
+        is False
+    )
+
+
+def test_a_broken_partials_object_never_closes_a_turn() -> None:
+    """Vosk throwing mid-turn must not end somebody's sentence."""
+    from samantha_widget.__main__ import build_may_close
+    from samantha_widget.endpoint import CompletionRule
+
+    class Exploding:
+        def partial(self) -> str:
+            raise RuntimeError("boom")
+
+    assert build_may_close(Exploding(), CompletionRule())() is False
