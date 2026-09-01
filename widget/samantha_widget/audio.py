@@ -13,6 +13,7 @@ what the input produces anyway, since there is no microphone plugged in.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 
 import sounddevice as sd
@@ -213,13 +214,37 @@ class Microphone:
         self._thread.start()
 
     def _pump(self) -> None:
+        # Whether the callback has already failed once. Anything raised
+        # in there is a bug of ours, and a bug that repeats does so 31
+        # times a second: one line, then silence.
+        blamed = False
         while self._running and self._stream is not None:
             try:
                 frame, _overflowed = self._stream.read(FRAME_SAMPLES)
             except Exception:
                 # An unplugged device should make her deaf, not dead.
                 return
-            self._on_frame(bytes(frame))
+            try:
+                self._on_frame(bytes(frame))
+            except Exception as exc:
+                # The callback is called OUTSIDE the read's `try` on
+                # purpose — a device that has gone away ends this thread,
+                # and a frame we mishandled must not. Before 2026-09-01
+                # nothing caught this at all: anything the callback
+                # raised (a Vosk recognizer refusing to build, say) came
+                # out here, ended the thread, and left him deaf while
+                # every service around him looked healthy. The real guard
+                # is at the call site — `VoskSwitch` in `__main__.py`,
+                # which turns the feature off rather than the microphone
+                # — and this is the backstop under it, so that no future
+                # callback can cost the ears either.
+                if not blamed:
+                    blamed = True
+                    print(
+                        f"la captura falló y sigue escuchando: {exc!r}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
     def stop(self) -> None:
         self._running = False

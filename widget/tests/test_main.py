@@ -258,3 +258,169 @@ def test_turn_resets_once_per_mic_off_toggle_never_while_it_holds() -> None:
         False,
         True,
     ]
+
+
+def test_a_raising_vosk_call_costs_the_feature_and_not_the_microphone(capsys) -> None:
+    """The invariant this branch is built on: failure is silence, never
+    deafness.
+
+    `Stream.push` runs `AcceptWaveform` plus `json.loads`, and
+    `Stream.reset` constructs a `KaldiRecognizer`. Either can raise, and
+    an exception raised there used to propagate out of the frame
+    callback into `audio.py`'s `_pump`, which calls it OUTSIDE its own
+    `try`: the thread returns, the microphone is never read again, and
+    he is deaf while every service around him looks healthy. That is not
+    hypothetical — it is how a Whisper model that would not fit cost
+    three days on 2026-08-27.
+    """
+    from samantha_widget.__main__ import VoskSwitch
+
+    calls = []
+
+    def boom(frame: bytes) -> None:
+        calls.append(frame)
+        raise RuntimeError("AcceptWaveform: model is corrupt")
+
+    switch = VoskSwitch(True)
+
+    # It does not raise, and the feature is off from here on.
+    switch.run(boom, b"\x00\x00")
+    assert switch.on is False
+    assert switch.alive() is False
+
+    # And it is off for good: a thousand more frames call nothing and
+    # log nothing. Once, not thirty-one times a second.
+    for _ in range(1000):
+        switch.run(boom, b"\x00\x00")
+
+    assert calls == [b"\x00\x00"]
+    assert capsys.readouterr().err.count("endpointing apagado") == 1
+
+
+def test_after_that_he_behaves_exactly_as_he_did_before_the_branch() -> None:
+    """The other half of the invariant, and the reason `alive` exists.
+
+    `build_may_close` and `build_is_a_person` hold their streams
+    directly, so turning the switch off is not enough on its own: a
+    stream nobody is feeding any more would keep answering out of stale
+    words — the endpointing closing turns on a sentence that is no
+    longer there, and `is_a_person` refusing to interrupt him, which is
+    the bug this whole branch exists to fix. Off must mean the 1.2 s
+    floor and an interruptible reply, exactly as before.
+    """
+    from samantha_widget.__main__ import (
+        VoskSwitch,
+        build_is_a_person,
+        build_may_close,
+    )
+    from samantha_widget.echo import EchoFilter
+    from samantha_widget.endpoint import CompletionRule
+
+    class Stale:
+        def partial(self) -> str:
+            # A complete sentence, and his own words — so with Vosk ON
+            # this closes the turn and reports his echo.
+            return "buenas tardes"
+
+    switch = VoskSwitch(True)
+    echo = EchoFilter()
+    echo.spoke("Buenas tardes.", 100.0)
+    may_close = build_may_close(Stale(), CompletionRule(), switch.alive)
+    is_a_person = build_is_a_person(Stale(), echo, switch.alive)
+
+    assert may_close() is True
+    assert is_a_person(101.0) is False
+
+    def boom() -> None:
+        raise RuntimeError("KaldiRecognizer: out of memory")
+
+    switch.run(boom)
+
+    assert may_close() is False  # the 1.2 s floor, and nothing above it
+    assert is_a_person(101.0) is True  # he can be interrupted again
+
+
+def test_room_is_forgotten_even_when_the_mic_is_switched_off_mid_reply() -> None:
+    """Fix round 5, 2026-09-01: `_busy["was"]` was stranded by the
+    mic-off early return, exactly as round 2's Critical stranded it
+    below the busy branch — the bookkeeping sat AFTER a branch that
+    returns, so on the frames it never reached, `was_busy` was never
+    updated and the reset never fired.
+
+    The sequence that costs it, and the one driven here: mic on, he
+    speaks (`.room` fills) → mic switched off mid-reply → that reply
+    ends WITH THE MIC OFF, which is the frame the old code never reached
+    → a second reply begins and ends. `.room` then holds both replies;
+    once the first one's lines age past `EchoFilter`'s 45 s window they
+    stop matching, the residue survives `clean()`, `is_a_person` reports
+    a person, and he interrupts himself with nobody in the room.
+
+    So the bookkeeping is now the first thing the callback does, above
+    EVERY branch that can return, and this drives it the same way: one
+    unconditional call per frame, mic switch included.
+    """
+    from samantha_widget.__main__ import _room_bookkeeping
+
+    frames = [
+        # (mic_on, player.busy)
+        (True, True),  # he is answering, mic on
+        (True, True),
+        (False, True),  # the mic switch goes off mid-reply
+        (False, False),  # reply 1 ENDS with the mic still off  ← the bug
+        (False, True),  # reply 2 begins, mic still off
+        (True, True),  # mic switched back on mid-reply-2
+        (True, False),  # reply 2 ends
+    ]
+
+    was_busy = True
+    resets = []
+    for _mic_on, busy in frames:
+        should_reset, was_busy = _room_bookkeeping(was_busy, busy)
+        resets.append(should_reset)
+
+    # Once per reply, on the frame it ends — including the one that ends
+    # while nobody is listening.
+    assert resets == [False, False, False, True, False, False, True]
+
+
+def test_a_discarded_utterance_still_ends_the_detectors_turn() -> None:
+    """Finding 5: `.turn` used to be reset only when an utterance
+    survived, and `vad.py`'s `_emit` resets itself and returns None when
+    the speech ran shorter than 0.4 s. A cough therefore left its words
+    in `.turn` for the next sentence to inherit, and those words then
+    answered `may_close` about audio that was no longer there.
+
+    The callback keys the reset on the DETECTOR instead — `speaking`
+    only ever goes True → False inside `reset()` — so this pins the
+    signal it now watches: a discarded utterance flips it exactly as a
+    kept one does.
+    """
+    from samantha_widget.vad import FRAME_SAMPLES, UtteranceDetector
+
+    frame = b"\x00\x00" * FRAME_SAMPLES
+    frame_seconds = FRAME_SAMPLES / 16000
+
+    class Scripted:
+        def __init__(self, script: list[float]) -> None:
+            self.script = list(script)
+
+        def speech_probability(self, _frame: bytes) -> float:
+            return self.script.pop(0) if self.script else 0.0
+
+    # 0.16 s of speech — enough to start a turn (3 frames), far short of
+    # the 0.4 s an utterance needs to survive — then 1.5 s of quiet.
+    script = [0.9] * 5 + [0.0] * round(1.5 / frame_seconds)
+    detector = UtteranceDetector(Scripted(script))
+
+    flips = 0
+    utterances = []
+    for _ in script:
+        was_speaking = detector.speaking
+        utterance = detector.push(frame)
+        if utterance is not None:
+            utterances.append(utterance)
+        if was_speaking and not detector.speaking:
+            flips += 1
+
+    assert utterances == []  # the cough was discarded, as it should be
+    assert flips == 1  # and the reset the callback watches still fired

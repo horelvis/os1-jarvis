@@ -143,3 +143,59 @@ def test_the_two_streams_do_not_hear_each_other() -> None:
 
     assert partials.turn.partial() == ""
     assert partials.turn is not partials.room
+
+
+class CountingRecognizer:
+    """Stands in for `KaldiRecognizer`, which costs 22.7 ms to build."""
+
+    built = 0
+
+    def __init__(self) -> None:
+        CountingRecognizer.built += 1
+
+    # Vosk's own capitalisation, kept so this is a drop-in.
+    def AcceptWaveform(self, frame: bytes) -> bool:
+        del frame
+        return False
+
+    def PartialResult(self) -> str:
+        return '{"partial": ""}'
+
+
+def test_a_reset_with_nothing_pushed_does_not_rebuild_the_recognizer() -> None:
+    """The structural half of the 22.7 ms finding.
+
+    Three review rounds each caught `reset()` being called once per
+    FRAME instead of once per transition, in three different places,
+    because nothing at a call site says it is expensive: 22.7 ms is 71%
+    of a frame period, on the PortAudio thread, which must never block.
+    Rather than trust a fourth hand-written guard, the cost is paid here
+    — a reset with nothing to forget forgets nothing.
+    """
+    from samantha_widget.endpoint import _Stream
+
+    CountingRecognizer.built = 0
+    stream = _Stream(CountingRecognizer)
+    assert CountingRecognizer.built == 1  # the one in __init__
+
+    for _ in range(100):
+        stream.reset()
+
+    assert CountingRecognizer.built == 1
+
+
+def test_a_reset_after_a_push_does_rebuild_it() -> None:
+    """And the other half: forgetting must still actually forget, or a
+    turn inherits the words of the one before it."""
+    from samantha_widget.endpoint import _Stream
+
+    CountingRecognizer.built = 0
+    stream = _Stream(CountingRecognizer)
+
+    stream.push(b"\x00\x00" * 512)
+    stream.reset()
+    assert CountingRecognizer.built == 2
+
+    # And it is free again immediately afterwards, with nothing new in.
+    stream.reset()
+    assert CountingRecognizer.built == 2

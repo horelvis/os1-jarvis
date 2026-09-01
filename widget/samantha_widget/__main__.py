@@ -210,17 +210,69 @@ def _apply_asking_to_wake(wake: WakeWord, open_: bool, now: float) -> None:
         wake.release()
 
 
-def build_may_close(stream, rule):
+class VoskSwitch:
+    """Vosk's on/off switch, and the only thing that ever throws it.
+
+    The invariant this whole feature is built on is **failure is
+    silence, never deafness**: if the engine misbehaves he waits the old
+    1.2 s and interrupts on the old terms, but the microphone keeps
+    working. Nothing in `endpoint.py` can promise that on its own —
+    `Stream.push` runs `AcceptWaveform` plus `json.loads`, and
+    `Stream.reset` constructs a `KaldiRecognizer`. Either can raise (a
+    truncated model, a memory failure, a version mismatch), and an
+    exception raised there propagates out of the frame callback into
+    `audio.py`'s `_pump`, which calls it OUTSIDE its own `try`. The
+    thread returns, the microphone is never read again, and he is deaf
+    while looking perfectly healthy — with one traceback in the journal.
+    That is not hypothetical: it is exactly how a Whisper model that
+    would not fit cost three days on 2026-08-27 (CLAUDE.md §2.5).
+
+    So every Vosk call the microphone thread makes goes through `run()`.
+    The first failure takes the feature out of the path for good — off
+    is a state it never comes back from, because a recognizer that has
+    started raising has no reason to stop — and says so ONCE, not
+    thirty-one times a second.
+    """
+
+    def __init__(self, on: bool) -> None:
+        self.on = on
+
+    def alive(self) -> bool:
+        """For `build_may_close` and `build_is_a_person`, which hold the
+        streams directly and must fall back the moment this goes off."""
+        return self.on
+
+    def run(self, call, *args) -> None:
+        """One Vosk call. Never raises, whatever the engine does."""
+        if not self.on:
+            return
+        try:
+            call(*args)
+        except Exception as exc:
+            self.on = False
+            print(
+                f"endpointing apagado, Vosk falló: {exc!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+
+def build_may_close(stream, rule, alive=lambda: True):
     """The question `vad.py` asks at 0.35 s of quiet.
 
     `stream` is the `.turn` stream, or None when Vosk did not load.
+    `alive` is `VoskSwitch.alive`, which goes False the first time the
+    engine raises anywhere — this holds the stream directly, so without
+    it a switched-off Vosk would still be questioned here.
+
     Answers False for every reason a question can go wrong — no model, a
-    raising engine, nothing heard yet — because False is exactly today's
-    behaviour and the 1.2 s threshold is still underneath it.
+    switch thrown, a raising engine, nothing heard yet — because False is
+    exactly today's behaviour and the 1.2 s threshold is still
+    underneath it.
     """
 
     def may_close() -> bool:
-        if stream is None:
+        if stream is None or not alive():
             return False
         try:
             return rule.looks_complete(stream.partial())
@@ -231,11 +283,13 @@ def build_may_close(stream, rule):
     return may_close
 
 
-def build_is_a_person(stream, echo):
+def build_is_a_person(stream, echo, alive=lambda: True):
     """While HE is talking: is this sound somebody else, or his own echo?
 
     `stream` is `VoskPartials.room` — the one fed ONLY while he speaks —
-    or None when Vosk did not load.
+    or None when Vosk did not load. `alive` is `VoskSwitch.alive`: once
+    the engine has raised anywhere, this stream is no longer being fed,
+    so its words are stale and the answer must go back to True.
 
     Before 2026-09-01 this was a loudness threshold, and it could not
     work. The user's voice measures RMS 0.054-0.088; his own echo with
@@ -256,7 +310,7 @@ def build_is_a_person(stream, echo):
     """
 
     def is_a_person(now: float) -> bool:
-        if stream is None:
+        if stream is None or not alive():
             # No Vosk: back to the old world, where the RMS floor is the
             # only gate. Erring towards interrupting, because refusing to
             # is the bug this replaces.
@@ -735,6 +789,11 @@ class SamanthaApp(Gtk.Application):
 
         partials = load_partials()
         rule = CompletionRule()
+        # Every Vosk call below goes through this, and the first failure
+        # turns the feature off rather than killing the microphone
+        # thread. See `VoskSwitch` for what that thread's death looks
+        # like from outside: perfectly healthy, and deaf.
+        vosk = VoskSwitch(partials is not None)
         print(
             "endpointing: activo" if partials else "endpointing: apagado",
             file=sys.stderr,
@@ -742,11 +801,15 @@ class SamanthaApp(Gtk.Application):
         )
         detector = UtteranceDetector(
             SileroDetector(),
-            may_close=build_may_close(partials.turn if partials else None, rule),
+            may_close=build_may_close(
+                partials.turn if partials else None, rule, vosk.alive
+            ),
         )
         # Decided on words, not loudness — see `build_is_a_person`'s own
         # docstring for why a scalar could never do this job.
-        is_a_person = build_is_a_person(partials.room if partials else None, echo)
+        is_a_person = build_is_a_person(
+            partials.room if partials else None, echo, vosk.alive
+        )
         # One analyser per source, because it holds the sliding window
         # and the two rates differ: 16 kHz here against the player's 24.
         mic_spectrum = SpectrumAnalyser(INPUT_RATE)
@@ -770,6 +833,24 @@ class SamanthaApp(Gtk.Application):
             _should_reset_turn, _mic["was_on"] = _turn_bookkeeping(
                 _mic["was_on"], wave.switches.mic_on
             )
+            # `.room`'s busy/quiet bookkeeping — computed and APPLIED
+            # here, above EVERY branch that can return, which is the
+            # whole of the contract `_room_bookkeeping`'s docstring asks
+            # for. It sat below the mic-off branch until 2026-09-01, and
+            # that branch strands it exactly as the busy branch did in
+            # round 2: switch the mic off mid-reply and `_busy["was"]`
+            # stops being updated, so the frame on which he actually
+            # stops talking never resets `.room`. A second reply then
+            # lands on top of the first, the first ages past
+            # `EchoFilter`'s 45 s window, the residue stops matching, and
+            # he interrupts himself with nobody in the room.
+            _should_reset_room, _busy["was"] = _room_bookkeeping(
+                _busy["was"], player.busy
+            )
+            if vosk.on and _should_reset_room:
+                # He just stopped. Whatever `.room` collected was his; the
+                # next answer starts from nothing.
+                vosk.run(partials.room.reset)
             if not wave.switches.mic_on:
                 # The microphone switch on the strip. The stream stays
                 # open — closing PortAudio from this callback is the
@@ -779,7 +860,7 @@ class SamanthaApp(Gtk.Application):
                 # sentence does not resume when it comes back on.
                 if detector.speaking:
                     detector.reset()
-                if partials is not None and _should_reset_turn:
+                if vosk.on and _should_reset_turn:
                     # `.turn` is fed preroll before the detector ever
                     # calls anything speech (see the comment where it is
                     # pushed, below) — NOT nested under
@@ -789,7 +870,7 @@ class SamanthaApp(Gtk.Application):
                     # next turn either. Guarded by the transition flag so
                     # it fires once per toggle, not every frame the
                     # switch stays off.
-                    partials.turn.reset()
+                    vosk.run(partials.turn.reset)
                 return
             if _MIC_GATE and player.busy and not detector.speaking:
                 # No echo cancellation on this box: he is talking and
@@ -817,29 +898,13 @@ class SamanthaApp(Gtk.Application):
                         flush=True,
                     )
 
-            # `.room`'s busy/quiet bookkeeping — computed and APPLIED
-            # before the busy branch below, which returns early on every
-            # frame of an ordinary, uninterrupted reply. Doing this after
-            # that branch (round 1's placement) meant `_busy["was"]` was
-            # only ever updated on frames that fell through it — which for
-            # a whole uninterrupted reply is none of them — so the reset
-            # never fired and `.room` grew without bound. See
-            # `_room_bookkeeping`'s docstring for the full history.
-            _should_reset_room, _busy["was"] = _room_bookkeeping(
-                _busy["was"], player.busy
-            )
-            if partials is not None and _should_reset_room:
-                # He just stopped. Whatever `.room` collected was his; the
-                # next answer starts from nothing.
-                partials.room.reset()
-
             if player.busy and not detector.speaking:
                 # He is talking and nobody has cut in yet. Feed `.room`
                 # FIRST: every path below can return, and a stream that
                 # is only fed after the gates never hears the sentence
                 # the gates are asking about.
-                if partials is not None:
-                    partials.room.push(frame)
+                if vosk.on:
+                    vosk.run(partials.room.push, frame)
 
                 import numpy as _np
 
@@ -856,7 +921,7 @@ class SamanthaApp(Gtk.Application):
                     # autointerrumpe".
                     return
 
-            if partials is not None:
+            if vosk.on:
                 # The same frames the detector is holding, so the rule is
                 # asked about exactly that audio. Fed even before the
                 # detector calls it speech: the preroll matters here for
@@ -870,7 +935,7 @@ class SamanthaApp(Gtk.Application):
                 # starts hearing the interruption on the same frame
                 # `.room` judged it — it does not wait for `player.busy`
                 # to clear.
-                partials.turn.push(frame)
+                vosk.run(partials.turn.push, frame)
 
             was_speaking = detector.speaking
             utterance = detector.push(frame)
@@ -893,8 +958,18 @@ class SamanthaApp(Gtk.Application):
                 set_bands(mic_spectrum.analyse(samples))
             if utterance is not None:
                 machine.heard(utterance)
-            if utterance is not None and partials is not None:
-                partials.turn.reset()
+            if was_speaking and not detector.speaking and vosk.on:
+                # The detector has just reset itself, so `.turn` must
+                # too. Keyed on the DETECTOR rather than on `utterance`,
+                # which is not the same question: `vad.py`'s `_emit`
+                # resets and returns None when the speech was shorter
+                # than 0.4 s, so a cough used to leave its words in
+                # `.turn` for the next sentence to inherit — and those
+                # words then answer `may_close` about audio that is no
+                # longer there. `detector.speaking` only ever goes True →
+                # False inside `reset()`, which makes this exactly "the
+                # detector forgot; forget with it".
+                vosk.run(partials.turn.reset)
 
         def _boot() -> None:
             # Both run for the lifetime of the process, on the loop that

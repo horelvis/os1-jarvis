@@ -92,9 +92,17 @@ class _Stream:
         self._make_recognizer = make_recognizer
         self._recognizer = make_recognizer()
         self._settled = ""
+        # Whether anything has been pushed since the last reset — the
+        # whole of what makes `reset()` free when there is nothing to
+        # forget. See its docstring for the 22.7 ms it is protecting.
+        self._dirty = False
 
     def push(self, frame: bytes) -> None:
         """One 16 kHz mono int16 frame. Same frames the VAD sees."""
+        # Set BEFORE the call, not after: if `AcceptWaveform` raises
+        # halfway through, the recognizer may already have swallowed
+        # part of the frame, and the safe direction is to rebuild it.
+        self._dirty = True
         if self._recognizer.AcceptWaveform(frame):
             done = json.loads(self._recognizer.Result())["text"]
             self._settled = f"{self._settled} {done}".strip()
@@ -110,9 +118,28 @@ class _Stream:
         return f"{self._settled} {flying}".strip()
 
     def reset(self) -> None:
-        """A turn ended. Forget it, or the next one inherits its words."""
+        """A turn ended. Forget it, or the next one inherits its words.
+
+        Free when there is nothing to forget, and that is not an
+        optimisation for its own sake. Constructing a `KaldiRecognizer`
+        measured **22.7 ms** on this machine (20 iterations, warm) — 71%
+        of a 32 ms frame period, on the PortAudio reader thread, which
+        must never block. Three separate review rounds each caught this
+        being called once per FRAME instead of once per transition, in
+        three different places, because nothing at a call site says it
+        is expensive.
+
+        So the price is paid here instead of at every call site. The
+        three hand-written transition guards upstream stay — they are
+        still correct, and they skip even this check — but they are now
+        an optimisation rather than the only thing standing between the
+        microphone thread and a 22.7 ms stall thirty-one times a second.
+        """
+        if not self._dirty:
+            return
         self._recognizer = self._make_recognizer()
         self._settled = ""
+        self._dirty = False
 
 
 class VoskPartials:
