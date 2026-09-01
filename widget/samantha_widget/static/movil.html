@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>JARVIS</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; height:100dvh; display:grid; place-items:center;
+         background:#141210; color:#d1684e;
+         font-family:-apple-system,system-ui,sans-serif; }
+  #talk { width:70vw; height:70vw; max-width:320px; max-height:320px;
+          border-radius:50%; border:2px solid #d1684e; background:transparent;
+          color:#d1684e; font-size:1.1rem; -webkit-user-select:none;
+          user-select:none; touch-action:none; }
+  #talk[data-state="rec"]  { background:#d1684e; color:#141210; }
+  #talk[data-state="busy"] { opacity:.35; }
+  #state { position:fixed; bottom:2rem; opacity:.7; font-size:.9rem; }
+</style>
+<button id="talk" data-state="idle">Mantén pulsado</button>
+<div id="state"></div>
+<script>
+const talk = document.getElementById('talk');
+const state = document.getElementById('state');
+const token = location.hash.slice(1);
+let ws, ctx, node, stream;
+
+function say(text) { state.textContent = text; }
+
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?t=${encodeURIComponent(token)}`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => say('Listo');
+  ws.onclose = () => { say('Sin conexión'); setTimeout(connect, 2000); };
+  ws.onmessage = async (event) => {
+    if (typeof event.data === 'string') {
+      const frame = JSON.parse(event.data);
+      if (frame.type === "busy") { talk.dataset.state = 'busy'; say('Está ocupado'); }
+      return;
+    }
+    play(event.data);
+  };
+}
+
+// His voice: 24 kHz int16 from CosyVoice, played as it arrives.
+let playAt = 0;
+function play(buffer) {
+  if (!ctx) return;
+  const pcm = new Int16Array(buffer);
+  const audio = ctx.createBuffer(1, pcm.length, 24000);
+  const channel = audio.getChannelData(0);
+  for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+  const source = ctx.createBufferSource();
+  source.buffer = audio;
+  source.connect(ctx.destination);
+  playAt = Math.max(playAt, ctx.currentTime);
+  source.start(playAt);
+  playAt += audio.duration;
+}
+
+async function begin() {
+  // Safari requires the AudioContext to be born of a user gesture, and
+  // pressing this button is that gesture.
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  if (!stream) stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  talk.dataset.state = 'rec';
+  say('Escuchando');
+  // The device chooses the rate; we report it rather than assume it.
+  ws.send(JSON.stringify({type:"start", rate: ctx.sampleRate}));
+  const source = ctx.createMediaStreamSource(stream);
+  node = ctx.createScriptProcessor(4096, 1, 1);
+  node.onaudioprocess = (event) => {
+    if (talk.dataset.state !== 'rec' || ws.readyState !== 1) return;
+    const input = event.inputBuffer.getChannelData(0);
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      out[i] = s < 0 ? s * 32768 : s * 32767;
+    }
+    ws.send(out.buffer);
+  };
+  source.connect(node);
+  node.connect(ctx.destination);
+}
+
+function end() {
+  if (talk.dataset.state !== 'rec') return;
+  talk.dataset.state = 'idle';
+  say('Pensando');
+  if (node) { node.disconnect(); node = null; }
+  ws.send(JSON.stringify({type:"end"}));
+}
+
+talk.addEventListener('pointerdown', (e) => { e.preventDefault(); begin(); });
+talk.addEventListener('pointerup', (e) => { e.preventDefault(); end(); });
+talk.addEventListener('pointercancel', end);
+connect();
+</script>

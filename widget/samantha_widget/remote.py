@@ -177,6 +177,14 @@ async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
     """
     app = web.Application()
     app.router.add_get("/ws", _handler(desk, guard, loop))
+
+    static = Path(__file__).parent / "static"
+
+    async def page(request: web.Request) -> web.FileResponse:
+        return web.FileResponse(static / "movil.html")
+
+    app.router.add_get("/", page)
+
     ca, cert, key = ensure_certificate(CERT_DIR, HOSTNAME, lan_address())
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(str(cert), str(key))

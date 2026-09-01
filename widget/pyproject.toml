@@ -40,6 +40,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["samantha_widget*"]
 
+[tool.setuptools.package-data]
+samantha_widget = ["static/*.html"]
+
 [tool.ruff]
 line-length = 88
 
