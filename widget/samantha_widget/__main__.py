@@ -377,6 +377,102 @@ def _turn_bookkeeping(was_on: bool, is_on: bool) -> tuple[bool, bool]:
     return (was_on and not is_on, is_on)
 
 
+class TurnOrigin:
+    """Whether the turn in flight was asked for on a phone, and by which.
+
+    Nothing else in the process knows. `dispatch` is one function
+    serving two mouths, and until this existed it asked
+    `remote_desk.busy` — "is SOME phone holding the turn" — which is a
+    different question and answers it wrongly in both directions:
+
+    - a sentence said at the DESK while a phone held the turn skipped
+      the wake word, so for the whole of every phone turn the room was
+      an open microphone dispatching turns to an agent that holds a
+      terminal;
+    - and a desk turn settling — an empty transcription and an
+      all-echo one, the two commonest desk outcomes — called
+      `route_home()` and `release()`, which freed the phone's claim
+      MID-ANSWER and sent every clause queued after it into the room. A
+      question asked privately on a phone, finished out loud in the
+      house.
+
+    One turn runs at a time, so one slot each is enough and no turn
+    identity has to travel over the wire. `pending` is written the
+    instant a phone's audio is handed up and read-and-cleared by
+    `dispatch`; `current` is what that turn is, for as long as it is
+    settling — `on_done` and `on_error` arrive long after `dispatch`
+    has returned. Both `None` means the desk, which is also what an
+    UNPROMPTED turn is: a cron reminder or a camera alert now settles
+    without touching a phone's claim, which it used to take away.
+    """
+
+    def __init__(self) -> None:
+        self.pending: object | None = None
+        self.current: object | None = None
+
+    def arriving(self, endpoint: object) -> None:
+        """A phone's utterance is on its way into `dispatch`."""
+        self.pending = endpoint
+
+    def take(self) -> object | None:
+        """The endpoint this turn belongs to, or None for the desk."""
+        self.current = self.pending
+        self.pending = None
+        return self.current
+
+    def settle(self) -> object | None:
+        """The endpoint the turn being settled belonged to, and forget it."""
+        current, self.current = self.current, None
+        return current
+
+
+def spoken_text(
+    text: str, phone: object | None, wake: WakeWord, now: float
+) -> str | None:
+    """What he was actually told, or None if it was not for him.
+
+    A phone's press IS the address — the button did what the wake word
+    does at the desk — so a phone turn skips it. A DESK utterance always
+    goes through the wake word, whatever any phone is doing: the two
+    microphones are in different rooms and only one of them was pressed.
+    """
+    if phone is not None:
+        return text
+    return wake.heard(text, now)
+
+
+def settle_turn(phone: object | None, speaker, desk) -> None:
+    """Give the voice and the phone's claim back — if it was a phone's.
+
+    Called on every way a turn can end. A desk turn settles nothing on
+    the phone side: it never held the claim, and taking it away is how
+    an empty desk transcription used to end a phone's answer halfway
+    through. The endpoint is passed to `release` so its own identity
+    guard applies too, in case the claim has moved on since.
+    """
+    if phone is None:
+        return
+    speaker.route_home()
+    desk.release(phone)
+
+
+async def _serve_quietly(coro) -> None:
+    """Await `coro`, and survive it failing.
+
+    `serve()` opens sockets and may make a certificate: the interface
+    not up yet at boot, PORT already busy, openssl missing. None of
+    those is a reason for the strip, the desk microphone and the
+    gateway to go with it. Spawned bare, the exception is also never
+    retrieved — asyncio reports it only if and when the task is
+    collected — so the phone surface would be simply absent, with
+    nothing said anywhere.
+    """
+    try:
+        await coro
+    except Exception as exc:
+        print(f"móvil: sin superficie ({exc!r})", file=sys.stderr, flush=True)
+
+
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.samantha.widget")
@@ -634,6 +730,7 @@ class SamanthaApp(Gtk.Application):
             on_interrupt=speaker.interrupt,
         )
 
+        from .certs import lan_address
         from .remote import HOSTNAME, PORT, Enrolment, RemoteDesk, serve
         from .remote_auth import Guard, load_or_create_secret
 
@@ -646,11 +743,27 @@ class SamanthaApp(Gtk.Application):
             button is the utterance boundary). The echo filter still
             runs inside `dispatch`, and costs nothing here because the
             phone's microphone is closed while he answers.
+
+            The marker goes down immediately before the audio is handed
+            up, and `dispatch` takes it: it is the only thing that tells
+            that one function whether the mouth it is serving is in the
+            room or in somebody's hand.
             """
             speaker.route_to(endpoint)
+            origin.arriving(endpoint)
             machine.heard(pcm)
 
-        remote_desk = RemoteDesk(on_utterance=on_remote_utterance)
+        origin = TurnOrigin()
+        remote_desk = RemoteDesk(
+            on_utterance=on_remote_utterance,
+            # The claim and the voice go home together, on every way a
+            # claim can end — including the one nobody calls: a claim
+            # that simply expires. Without it the sink went on pointing
+            # at a phone that had dropped, and the next reply, to
+            # anybody, was written into a dead socket while the room
+            # heard nothing.
+            on_release=lambda: speaker.route_home(),
+        )
         # Closed until the QR is actually shown (below) — the welcome
         # page it points at hands the shared secret to whoever asks,
         # over plain HTTP, with no check of its own (remote.py).
@@ -666,6 +779,11 @@ class SamanthaApp(Gtk.Application):
             # `_claimed_at` is already `None` by the time `dispatch`
             # runs — so an uncaught exception here would lock every
             # phone in the house out until the widget restarts.
+            # Read and cleared at the top, and bound for the life of
+            # this turn: everything below asks THIS, never
+            # `remote_desk.busy` — see `TurnOrigin` for the two
+            # different bugs that question caused.
+            phone = origin.take()
             try:
                 seconds = len(pcm) / 2 / INPUT_RATE
                 print(
@@ -686,8 +804,10 @@ class SamanthaApp(Gtk.Application):
                     # released instantly): without giving the turn back
                     # here too, it never reaches on_error and the desk
                     # stays locked to a phone that already fell silent.
-                    speaker.route_home()
-                    remote_desk.release()
+                    # Only if it WAS the phone's turn, though — an empty
+                    # desk transcription is the commonest event in the
+                    # room, and it used to end a phone's answer halfway.
+                    settle_turn(origin.settle(), speaker, remote_desk)
                     return
                 print(f"→ {text}", file=sys.stderr, flush=True)
                 text = echo.clean(text, time.monotonic())
@@ -695,31 +815,32 @@ class SamanthaApp(Gtk.Application):
                     # All of it was him. Not a turn, and not an error.
                     print("(era su propio eco)", file=sys.stderr, flush=True)
                     machine.error("")
-                    speaker.route_home()
-                    remote_desk.release()
+                    settle_turn(origin.settle(), speaker, remote_desk)
                     return
-                # A phone's press IS the address — the button already did
-                # what the wake word does at the desk (accepted
-                # 2026-09-01; a sentence said at the desk while a phone
-                # holds the turn also skips the wake word, which is rare
-                # and fails towards answering rather than ignoring).
-                spoken = (
-                    text if remote_desk.busy else wake.heard(text, time.monotonic())
-                )
+                # A phone's press IS the address, and ONLY a phone's.
+                # This asked `remote_desk.busy` until 2026-09-01, which
+                # made the room a wake-word-free microphone for the
+                # whole of every phone turn — the "rare (both speaking
+                # at once)" that ruling assumed was in fact every one of
+                # them. Reversed on review.
+                spoken = spoken_text(text, phone, wake, time.monotonic())
                 if spoken is None:
                     # Somebody was talking in the room, not to him.
                     # Ending the turn the same way an empty transcription
                     # does: the wave goes back to listening and he never
-                    # knew.
+                    # knew. Only ever reached at the desk — a phone turn
+                    # never asks the wake word — but the origin is
+                    # forgotten here too, or the NEXT turn to settle
+                    # would inherit it.
                     print("(no era para él)", file=sys.stderr, flush=True)
                     machine.error("")
+                    origin.settle()
                     return
                 await client.send_chat(spoken, wake=wake.named)
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
-                speaker.route_home()
-                remote_desk.release()
+                settle_turn(origin.settle(), speaker, remote_desk)
 
         # ── the gateway's replies ─────────────────────────────────────
         def on_token(token: str) -> None:
@@ -759,16 +880,19 @@ class SamanthaApp(Gtk.Application):
                 # sink home and free the desk before the real tokens
                 # ever arrive — a question asked on a phone, answered
                 # out loud in the room.
-                speaker.route_home()
-                remote_desk.release()
+                #
+                # And gated on the ORIGIN of the turn being settled: a
+                # desk turn gives nothing back, so an unprompted one — a
+                # cron reminder, a camera alert — no longer takes a
+                # phone's claim away either.
+                settle_turn(origin.settle(), speaker, remote_desk)
 
         def on_error(message: str) -> None:
             if message:
                 say(message)
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
-            speaker.route_home()
-            remote_desk.release()
+            settle_turn(origin.settle(), speaker, remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
             # Straight to the GTK thread. Everything else the gateway
@@ -1099,8 +1223,17 @@ class SamanthaApp(Gtk.Application):
             self._spawn(client.run())
             speaker.start()
             secret = load_or_create_secret()
-            guard = Guard(secret, f"https://{HOSTNAME}:{PORT}")
-            self._spawn(serve(remote_desk, guard, enrolment, loop))
+            # Both ways in: the name, and the address it resolves to.
+            # mDNS is not guaranteed on a house network — the LAN IP is
+            # the design's own fallback — and a browser sends the origin
+            # it was loaded from, so a Guard bound to the name alone
+            # refuses every connection the fallback ever makes.
+            guard = Guard(
+                secret,
+                f"https://{HOSTNAME}:{PORT}",
+                f"https://{lan_address()}:{PORT}",
+            )
+            self._spawn(_serve_quietly(serve(remote_desk, guard, enrolment, loop)))
 
         def _drive_speaking_level() -> bool:
             """Make the line follow her own voice while she talks.

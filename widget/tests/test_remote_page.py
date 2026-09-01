@@ -39,3 +39,31 @@ def test_the_visible_text_is_spanish() -> None:
     text = PAGE.read_text()
 
     assert "Mantén pulsado" in text
+
+
+def test_the_microphone_is_released_when_the_press_ends() -> None:
+    """iOS lights its recording indicator for as long as a track is
+    live. Held across presses it stays lit for the whole session, which
+    reads — correctly, from outside — as "it is listening to me all the
+    time"."""
+    text = PAGE.read_text()
+
+    assert "getTracks().forEach" in text
+    assert "track.stop()" in text
+
+
+def test_a_refused_press_cleans_up_too() -> None:
+    """`end()` returned before `node.disconnect()` when he was busy, so
+    every refused press leaked a live ScriptProcessor."""
+    text = PAGE.read_text()
+    end = text[text.index("function end()") :]
+
+    assert end.index("stopMic()") < end.index("wasRecording) return")
+
+
+def test_hitting_the_ceiling_is_said_out_loud() -> None:
+    """Silent truncation turns a long question into half a question."""
+    text = PAGE.read_text()
+
+    assert '"truncated"' in text
+    assert "Demasiado largo" in text

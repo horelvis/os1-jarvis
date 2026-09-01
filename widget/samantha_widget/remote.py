@@ -11,6 +11,7 @@ so `remote_auth.Guard` is not a formality.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import ssl
@@ -23,7 +24,7 @@ from aiohttp import WSMsgType, web
 
 from .certs import ensure_certificate, lan_address
 from .enrol import mobileconfig, write_qr
-from .remote_audio import MAX_UTTERANCE_BYTES, resample_to_input
+from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret
 
 PORT = int(os.getenv("SAMANTHA_WIDGET_REMOTE_PORT", "8443"))
@@ -32,9 +33,12 @@ CERT_DIR = Path.home() / ".samantha" / "certs"
 
 # A held turn expires: a phone that presses and never releases — a
 # vanished network, an app killed mid-utterance — must not lock out
-# every other phone in the house forever. 30 s is MAX_UTTERANCE_BYTES'
-# own ceiling (remote_audio.py); this is that plus slack.
-HELD_TURN_SECONDS = 35.0
+# every other phone in the house forever. It is the recording ceiling
+# plus slack, and it is written as that sum rather than as 35.0 so the
+# two cannot drift: while the ceiling was silently being applied to the
+# 48 kHz buffer a press really ended at ~10 s, and this number was
+# three times what it needed to be without anything saying so.
+HELD_TURN_SECONDS = MAX_UTTERANCE_SECONDS + 5.0
 
 # How long a turn may be held once the button is released. The recording
 # ceiling (HELD_TURN_SECONDS) stops applying at `finish` — a reply can
@@ -70,9 +74,22 @@ class Enrolment:
 
     def __init__(self) -> None:
         self._opened_at: float | None = None
+        # The listening socket, raised and dropped with the window. See
+        # `attach`; `None` in every test that only drives the clock.
+        self._site: EnrolmentSite | None = None
+
+    def attach(self, site: EnrolmentSite) -> None:
+        """The socket to raise with this window and drop with it.
+
+        Optional, and the window means the same thing without one: the
+        handlers ask `is_open` too. `serve()` is the only caller.
+        """
+        self._site = site
 
     def open_enrolment(self, now: float | None = None) -> None:
         self._opened_at = time.monotonic() if now is None else now
+        if self._site is not None:
+            self._site.open_soon()
 
     def is_open(self, now: float | None = None) -> bool:
         if self._opened_at is None:
@@ -80,6 +97,71 @@ class Enrolment:
         if now is None:
             now = time.monotonic()
         return now - self._opened_at < ENROLMENT_SECONDS
+
+
+class EnrolmentSite:
+    """The plain-HTTP welcome socket, bound only while enrolment is open.
+
+    404-ing the handlers bounds ACCIDENT — a phone that kept the link
+    and came back tomorrow. It does not bound attack: the site used to
+    be started once, for the life of the process, so anyone on the wifi
+    polling `PORT + 1` collected the shared secret in cleartext the
+    instant somebody walked to the strip and opened the window. Binding
+    and unbinding the socket with the window instead means there is
+    nothing to poll: for all but five minutes of the box's uptime the
+    port is closed, and the 404s are what is left over for the seconds
+    around the edges.
+
+    `open_soon` is callable from any thread — the QR is shown on the GTK
+    one — and the unbind is a timer on the loop rather than something
+    the next request happens to notice, because "no request arrives" is
+    exactly the case that has to close the socket.
+    """
+
+    def __init__(self, runner: web.AppRunner, host: str, port: int, loop) -> None:
+        self._runner = runner
+        self._host = host
+        self._port = port
+        self._loop = loop
+        self._site: web.TCPSite | None = None
+        self._closer: asyncio.TimerHandle | None = None
+        self._tasks: set[asyncio.Task] = set()
+
+    @property
+    def bound(self) -> bool:
+        return self._site is not None
+
+    def open_soon(self, seconds: float = ENROLMENT_SECONDS) -> None:
+        """Bind the socket, and arrange for it to go away again."""
+        self._loop.call_soon_threadsafe(self._track, self.open(seconds))
+
+    def _track(self, coro) -> None:
+        task = self._loop.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def open(self, seconds: float = ENROLMENT_SECONDS) -> None:
+        if self._site is None:
+            self._site = web.TCPSite(self._runner, self._host, self._port)
+            await self._site.start()
+            print(
+                f"móvil: alta abierta en http://{self._host}:{self._port}/ "
+                f"({seconds:.0f}s)",
+                file=sys.stderr,
+                flush=True,
+            )
+        if self._closer is not None:
+            self._closer.cancel()
+        self._closer = self._loop.call_later(seconds, lambda: self._track(self.close()))
+
+    async def close(self) -> None:
+        if self._closer is not None:
+            self._closer.cancel()
+            self._closer = None
+        site, self._site = self._site, None
+        if site is not None:
+            await site.stop()
+            print("móvil: alta cerrada", file=sys.stderr, flush=True)
 
 
 class Endpoint(Protocol):
@@ -105,8 +187,18 @@ class RemoteDesk:
     reads as him being confused rather than busy.
     """
 
-    def __init__(self, on_utterance: Callable[[bytes, Endpoint], None]) -> None:
+    def __init__(
+        self,
+        on_utterance: Callable[[bytes, Endpoint], None],
+        on_release: Callable[[], None] | None = None,
+    ) -> None:
         self._on_utterance = on_utterance
+        # Called on EVERY way a claim ends — released, or stolen when it
+        # expires — and it is how his voice comes home with it. Only the
+        # claim used to expire: the sink went on pointing at a phone
+        # that had dropped, so the NEXT reply, to anybody, was written
+        # into a dead socket and the room heard nothing at all.
+        self._on_release = on_release
         self.current: Endpoint | None = None
         # Set whenever somebody holds the turn, RECORDING or ANSWERING —
         # `None` only while nobody does. Which ceiling applies to it is
@@ -142,6 +234,9 @@ class RemoteDesk:
             if not expired:
                 endpoint.refuse()
                 return False
+            # Stolen, not released: the previous holder never said so,
+            # which is exactly why its sink has to be given up here.
+            self._give_back()
         self.current = endpoint
         self._claimed_at = now
         self._allowance = HELD_TURN_SECONDS
@@ -153,8 +248,15 @@ class RemoteDesk:
         the first one's turn."""
         if endpoint is not None and self.current is not endpoint:
             return
+        self._give_back()
+
+    def _give_back(self) -> None:
+        """Both halves of giving the turn back: the claim AND the voice."""
+        was_held = self.current is not None
         self.current = None
         self._claimed_at = None
+        if was_held and self._on_release is not None:
+            self._on_release()
 
     def finish(self, pcm: bytes, endpoint: Endpoint, now: float | None = None) -> None:
         """The button was released: hand the utterance up with the
@@ -187,18 +289,42 @@ class WebEndpoint:
         self._ws = ws
         self._loop = loop
         self.name = name
+        # Every send is a task, and a task nobody holds is a task the
+        # loop may collect before it runs — a chunk of his voice missing
+        # with nothing anywhere to say so. Held here until they finish,
+        # and the first failure is printed: a phone that drops mid-reply
+        # is a real event, and silence about it is indistinguishable
+        # from him having stopped talking.
+        self._tasks: set[asyncio.Task] = set()
+        self._complained = False
+
+    def _send(self, coro) -> None:
+        task = self._loop.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._finished)
+
+    def _finished(self, task: asyncio.Task) -> None:
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        failure = task.exception()
+        if failure is not None and not self._complained:
+            self._complained = True
+            print(
+                f"móvil: audio perdido hacia {self.name} ({failure!r})",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def write(self, pcm: bytes) -> None:
         # Called from the Speaker on the asyncio loop already, but going
         # through call_soon_threadsafe costs nothing and makes this safe
         # from the audio thread too.
-        self._loop.call_soon_threadsafe(
-            lambda: self._loop.create_task(self._ws.send_bytes(pcm))
-        )
+        self._loop.call_soon_threadsafe(self._send, self._ws.send_bytes(pcm))
 
     def refuse(self) -> None:
         self._loop.call_soon_threadsafe(
-            lambda: self._loop.create_task(self._ws.send_json({"type": "busy"}))
+            self._send, self._ws.send_json({"type": "busy"})
         )
 
 
@@ -244,23 +370,26 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
         return web.Response(
             body=mobileconfig(ca),
             content_type="application/x-apple-aspen-config",
-            # iOS decides "this is a configuration profile, offer to
-            # install it" from the type AND the filename together —
-            # the type alone is not enough. Measured live 2026-09-01:
-            # served at /ca with no Content-Disposition, Safari fell
-            # through to a plain download and "Perfil descargado" never
-            # appeared in Settings. The route itself has to end in
-            # `.mobileconfig` too (see the route below) — the header
-            # alone was not enough either. `inline`, never `attachment`:
-            # attachment is an explicit instruction to download, the
-            # exact behaviour this fixes.
+            # Belt and braces, and never demonstrated necessary — said
+            # plainly here because this file used to claim the opposite
+            # as a measurement. iOS decides "this is a configuration
+            # profile, offer to install it" from the type, the filename
+            # and the route together, and profile delivery is not worth
+            # resting on the MIME type alone. What WAS observed on
+            # 2026-09-01 — a plain download and no "Perfil descargado"
+            # in Settings — happened in **Chrome**, which does not
+            # install profiles on iOS at all; `/ca` was never once shown
+            # to fail in Safari, which is the only browser that does.
+            # `inline`, never `attachment`: attachment is an explicit
+            # instruction to download.
             headers={"Content-Disposition": 'inline; filename="jarvis.mobileconfig"'},
         )
 
     welcome.router.add_get("/", _welcome)
-    # Not `/ca` — a route with no file extension, however the header
-    # names it, still reads to iOS as "a download", not "a profile to
-    # install". Do not "tidy" this back to `/ca`.
+    # A route that ends in `.mobileconfig`, for the same belt-and-braces
+    # reason as the header above: it costs nothing, and iOS reads the
+    # extension. It is not known to be required — `/ca` was never tried
+    # in Safari — so keep it, but do not repeat the story that it was.
     welcome.router.add_get("/jarvis.mobileconfig", _ca)
     return welcome
 
@@ -307,18 +436,21 @@ async def serve(
     )
 
     # Plain HTTP, and only these two routes. The certificate cannot be
-    # fetched over a connection that requires trusting it.
+    # fetched over a connection that requires trusting it. The runner is
+    # set up now and the SOCKET is not: it goes up with the enrolment
+    # window and comes down with it (`EnrolmentSite`), so there is
+    # nothing on PORT + 1 to find while enrolment is closed.
     welcome = build_welcome_app(guard, enrolment, ca)
     welcome_runner = web.AppRunner(welcome)
     await welcome_runner.setup()
-    await web.TCPSite(welcome_runner, lan_address(), PORT + 1).start()
+    enrolment.attach(EnrolmentSite(welcome_runner, lan_address(), PORT + 1, loop))
 
     qr = write_qr(
         f"http://{lan_address()}:{PORT + 1}/",
         Path.home() / ".samantha" / "enrol-qr.png",
     )
     print(
-        f"móvil: alta en http://{lan_address()}:{PORT + 1}/ · QR {qr}",
+        f"móvil: alta (cerrada) en http://{lan_address()}:{PORT + 1}/ · QR {qr}",
         file=sys.stderr,
         flush=True,
     )
@@ -349,6 +481,8 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
         endpoint = WebEndpoint(ws, request.remote or "phone", loop)
         buffer = bytearray()
         rate = 48000
+        ceiling = max_bytes_at(rate)
+        truncated = False
         try:
             async for message in ws:
                 if message.type == WSMsgType.TEXT:
@@ -357,8 +491,16 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
                     except ValueError:
                         continue
                     if frame.get("type") == "start":
-                        rate = int(frame.get("rate", 48000))
+                        try:
+                            rate = int(frame.get("rate", 48000))
+                            ceiling = max_bytes_at(rate)
+                        except (TypeError, ValueError):
+                            # A client that cannot say its own rate gets
+                            # no turn — and keeps its socket, rather
+                            # than having the exception close it.
+                            continue
                         buffer.clear()
+                        truncated = False
                         if not desk.claim(endpoint, time.monotonic()):
                             continue
                     elif frame.get("type") == "end" and desk.current is endpoint:
@@ -369,8 +511,21 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
                         )
                         buffer.clear()
                 elif message.type == WSMsgType.BINARY:
-                    if desk.current is endpoint and len(buffer) < MAX_UTTERANCE_BYTES:
-                        buffer += message.data
+                    if desk.current is not endpoint:
+                        continue
+                    # Measured BEFORE appending, and against the ceiling
+                    # at the rate this phone is actually sending: the
+                    # old `len(buffer) < MAX_UTTERANCE_BYTES` let the
+                    # chunk that crosses the line through whole, and
+                    # compared a 48 kHz buffer against a 16 kHz number.
+                    if len(buffer) + len(message.data) > ceiling:
+                        if not truncated:
+                            truncated = True
+                            # Silence here turns a long press into half
+                            # a question with nothing to explain it.
+                            await ws.send_json({"type": "truncated"})
+                        continue
+                    buffer += message.data
         finally:
             # Whatever happened — a malformed frame past the guard
             # above, a bad rate, resample_to_input raising on an
@@ -388,10 +543,12 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
 __all__ = [
     "CERT_DIR",
     "ENROLMENT_SECONDS",
+    "HELD_TURN_SECONDS",
     "HOSTNAME",
     "PORT",
     "Endpoint",
     "Enrolment",
+    "EnrolmentSite",
     "Guard",
     "RemoteDesk",
     "WebEndpoint",

@@ -75,6 +75,28 @@ def ensure_certificate(
     with _private_files():
         _run(["openssl", "genrsa", "-out", str(ca_key), "2048"])
     os.chmod(ca_key, 0o600)
+    # nameConstraints, and it is not decoration. This CA is installed on
+    # three iPhones as a SYSTEM ROOT, which means it can vouch for any
+    # name in the world to those phones — and `ca.key` sits 0600 on the
+    # same box as an agent holding the `terminal` toolset. Unconstrained,
+    # whoever obtains that key owns the banking session of every phone in
+    # the house. Constrained, the blast radius shrinks from "the whole
+    # internet" to "this box": the only certificates those phones will
+    # accept from it are for `brain.local` and this LAN address.
+    #
+    # Critical, deliberately: a client that cannot understand the
+    # constraint must reject the chain rather than ignore the limit. iOS
+    # understands it.
+    ca_config = directory / "ca.cnf"
+    ca_config.write_text(
+        "[req]\ndistinguished_name=dn\nprompt=no\nx509_extensions=ca_ext\n"
+        "[dn]\nCN=JARVIS Home CA\n"
+        "[ca_ext]\nsubjectKeyIdentifier=hash\n"
+        "basicConstraints=critical,CA:TRUE\n"
+        "keyUsage=critical,keyCertSign,cRLSign\n"
+        "nameConstraints=critical,"
+        f"permitted;DNS:{hostname},permitted;IP:{ip}/255.255.255.255\n"
+    )
     _run(
         [
             "openssl",
@@ -89,8 +111,10 @@ def ensure_certificate(
             str(_YEARS),
             "-out",
             str(ca_pem),
-            "-subj",
-            "/CN=JARVIS Home CA",
+            "-config",
+            str(ca_config),
+            "-extensions",
+            "ca_ext",
         ]
     )
 

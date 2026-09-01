@@ -9,7 +9,14 @@ the worst kind of failure this project has.
 import math
 import struct
 
-from samantha_widget.remote_audio import MAX_UTTERANCE_BYTES, resample_to_input
+import pytest
+
+from samantha_widget.remote_audio import (
+    MAX_UTTERANCE_BYTES,
+    MAX_UTTERANCE_SECONDS,
+    max_bytes_at,
+    resample_to_input,
+)
 from samantha_widget.vad import INPUT_RATE
 
 
@@ -70,3 +77,17 @@ def test_there_is_a_ceiling_on_one_utterance() -> None:
     widget allocate without bound. Thirty seconds is the same cap
     `vad.py` puts on a spoken turn."""
     assert MAX_UTTERANCE_BYTES == 30 * INPUT_RATE * 2
+
+
+def test_the_ceiling_is_scaled_to_the_rate_that_is_arriving() -> None:
+    """`MAX_UTTERANCE_BYTES` is thirty seconds AT 16 kHz. A phone sends
+    48, so measuring its buffer against that number cut every press at
+    about ten seconds — a third of what every comment around it said."""
+    assert max_bytes_at(INPUT_RATE) == MAX_UTTERANCE_BYTES
+    assert max_bytes_at(48000) == 3 * MAX_UTTERANCE_BYTES
+    assert max_bytes_at(44100) / 2 / 44100 == MAX_UTTERANCE_SECONDS
+
+
+def test_an_impossible_rate_has_no_ceiling_to_offer() -> None:
+    with pytest.raises(ValueError):
+        max_bytes_at(0)

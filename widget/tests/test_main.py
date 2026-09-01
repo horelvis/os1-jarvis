@@ -10,9 +10,14 @@ a strip, a socket or a display.
 """
 
 from samantha_widget.__main__ import (
+    TurnOrigin,
     _apply_asking_to_wake,
     _apply_error_to_wake_window,
+    _serve_quietly,
+    settle_turn,
+    spoken_text,
 )
+from samantha_widget.remote import RemoteDesk
 from samantha_widget.wake import WakeWord
 
 
@@ -424,3 +429,141 @@ def test_a_discarded_utterance_still_ends_the_detectors_turn() -> None:
 
     assert utterances == []  # the cough was discarded, as it should be
     assert flips == 1  # and the reset the callback watches still fired
+
+
+# ── whose turn is this, and what it costs to guess ────────────────────
+#
+# `dispatch` is one function serving two mouths. It used to ask
+# `remote_desk.busy` — "is SOME phone holding the turn" — which is a
+# different question, and the two answers it got wrong were both
+# security-shaped: a desk sentence skipping the wake word for the whole
+# of every phone turn, and a desk turn's settle freeing a phone's claim
+# mid-answer.
+
+
+class FakeSpeaker:
+    def __init__(self) -> None:
+        self.sink = "desk"
+
+    def route_to(self, sink) -> None:
+        self.sink = sink
+
+    def route_home(self) -> None:
+        self.sink = "desk"
+
+
+class FakePhone:
+    name = "iphone-cocina"
+
+    def write(self, pcm: bytes) -> None:
+        pass
+
+    def refuse(self) -> None:
+        pass
+
+
+def test_a_desk_utterance_while_a_phone_holds_the_turn_still_needs_his_name():
+    """The one that made the room an open microphone. A phone turn is
+    seconds of a held button plus however long a reply takes, and for
+    all of it anything said at the desk was dispatched straight to an
+    agent holding a terminal — no name required."""
+    wake = WakeWord("Jarvis")
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    desk.claim(FakePhone(), now=0.0)
+    assert desk.busy is True
+
+    assert spoken_text("borra todo el disco", None, wake, now=0.0) is None
+    assert spoken_text("Jarvis, qué hora es", None, wake, now=0.0) == "qué hora es"
+
+
+def test_a_phone_press_is_the_address_and_needs_no_name():
+    wake = WakeWord("Jarvis")
+    phone = FakePhone()
+
+    assert spoken_text("qué hora es", phone, wake, now=0.0) == "qué hora es"
+
+
+def test_a_desk_turn_settling_does_not_release_a_phones_claim():
+    """An empty transcription and an all-echo one are the two commonest
+    things the desk microphone produces, and each of them used to end a
+    phone's answer halfway through — every clause queued after it
+    played out loud in the room."""
+    speaker = FakeSpeaker()
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    phone = FakePhone()
+    desk.claim(phone, now=0.0)
+    speaker.route_to(phone)
+
+    settle_turn(None, speaker, desk)  # the desk's turn, not the phone's
+
+    assert desk.current is phone
+    assert speaker.sink is phone
+
+
+def test_a_phone_turn_settling_gives_the_room_back():
+    speaker = FakeSpeaker()
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    phone = FakePhone()
+    desk.claim(phone, now=0.0)
+    speaker.route_to(phone)
+
+    settle_turn(phone, speaker, desk)
+
+    assert desk.current is None
+    assert speaker.sink == "desk"
+
+
+def test_a_settle_from_a_turn_that_is_no_longer_the_holders_is_ignored():
+    """`release` is given the endpoint, so its own identity guard
+    applies: a late settle cannot free a claim that has since moved."""
+    speaker = FakeSpeaker()
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    old, new = FakePhone(), FakePhone()
+    desk.claim(new, now=0.0)
+
+    settle_turn(old, speaker, desk)
+
+    assert desk.current is new
+
+
+def test_an_unprompted_turn_does_not_take_a_phones_claim():
+    """A cron reminder and a camera alert arrive with no utterance of
+    their own, so nothing ever marked them, so they settle as the desk
+    — which is what they are. They used to send the sink home and free
+    whichever phone was mid-answer."""
+    origin = TurnOrigin()
+    speaker = FakeSpeaker()
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    phone = FakePhone()
+    desk.claim(phone, now=0.0)
+    speaker.route_to(phone)
+
+    settle_turn(origin.settle(), speaker, desk)  # the reminder's own `done`
+
+    assert desk.current is phone
+    assert speaker.sink is phone
+
+
+def test_the_marker_is_one_shot():
+    """Read and cleared at the top of the turn it belongs to. A marker
+    that survived would make the NEXT desk turn look like a phone's."""
+    origin = TurnOrigin()
+    phone = FakePhone()
+    origin.arriving(phone)
+
+    assert origin.take() is phone
+    assert origin.settle() is phone
+    assert origin.take() is None
+    assert origin.settle() is None
+
+
+async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):
+    """The interface not up at boot, the port busy, openssl missing.
+    Spawned bare, the exception is never even retrieved."""
+
+    async def refuses() -> None:
+        raise OSError("address already in use")
+
+    await _serve_quietly(refuses())
+
+    assert "sin superficie" in capsys.readouterr().err

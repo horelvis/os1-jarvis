@@ -76,3 +76,24 @@ def test_refused_origins(origin: str) -> None:
     guard = Guard(secret="s" * 32, origin="https://brain.local:8443")
 
     assert guard.origin_ok(origin) is False
+
+
+def test_both_ways_in_are_accepted() -> None:
+    """mDNS is the nice path and it is not guaranteed on a house
+    network, so the LAN address is the design's own fallback. A browser
+    sends the origin it was loaded from and `origin_ok` compares whole,
+    so a Guard bound to the name alone refused every connection the
+    fallback ever made."""
+    guard = Guard("s" * 32, "https://brain.local:8443", "https://192.168.100.58:8443")
+
+    assert guard.origin_ok("https://brain.local:8443") is True
+    assert guard.origin_ok("https://192.168.100.58:8443") is True
+
+
+def test_a_second_origin_widens_nothing_else() -> None:
+    guard = Guard("s" * 32, "https://brain.local:8443", "https://192.168.100.58:8443")
+
+    assert guard.origin_ok("https://brain.local.evil.com:8443") is False
+    assert guard.origin_ok("http://192.168.100.58:8443") is False
+    assert guard.origin_ok("https://192.168.100.59:8443") is False
+    assert guard.origin_ok("https://192.168.100.58:9999") is False

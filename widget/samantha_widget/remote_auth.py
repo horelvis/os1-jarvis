@@ -51,9 +51,17 @@ def load_or_create_secret(path: Path | None = None) -> str:
 class Guard:
     """The two questions asked of every connection."""
 
-    def __init__(self, secret: str, origin: str) -> None:
+    def __init__(self, secret: str, origin: str, *also: str) -> None:
         self.secret = secret
         self.origin = origin
+        # More than one, because there is more than one way in. The page
+        # is reached at `https://brain.local:8443` when mDNS works and
+        # at the LAN address when it does not — the fallback the design
+        # asks for, and the one that matters on a network whose router
+        # does not answer `.local`. A browser sends the origin it was
+        # loaded from, and `origin_ok` compares whole, so binding only
+        # the name refused every connection made by the fallback.
+        self.origins = [origin, *also]
 
     def token_ok(self, offered: str | None) -> bool:
         """Constant-time: a timing oracle on a LAN is not theoretical."""
@@ -69,14 +77,21 @@ class Guard:
         # `brain.local.evil.com`.
         try:
             offered = urlsplit(origin)
-            mine = urlsplit(self.origin)
         except ValueError:
             return False
         if not offered.scheme or not offered.hostname:
             return False
+        return any(self._same(offered, mine) for mine in self.origins)
+
+    @staticmethod
+    def _same(offered, mine: str) -> bool:
+        try:
+            expected = urlsplit(mine)
+        except ValueError:
+            return False
         return (
-            offered.scheme == mine.scheme
-            and offered.hostname == mine.hostname
+            offered.scheme == expected.scheme
+            and offered.hostname == expected.hostname
             and (offered.port or (443 if offered.scheme == "https" else 80))
-            == (mine.port or (443 if mine.scheme == "https" else 80))
+            == (expected.port or (443 if expected.scheme == "https" else 80))
         )

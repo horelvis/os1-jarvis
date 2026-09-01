@@ -35,6 +35,9 @@ function connect() {
     if (typeof event.data === 'string') {
       const frame = JSON.parse(event.data);
       if (frame.type === "busy") { talk.dataset.state = 'busy'; say('Está ocupado'); }
+      // The ceiling on one press (remote_audio.py). Without saying so,
+      // a long question simply arrives as half a question.
+      if (frame.type === "truncated") { say('Demasiado largo: solo he oído el principio'); }
       return;
     }
     play(event.data);
@@ -62,6 +65,10 @@ async function begin() {
   // pressing this button is that gesture.
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
   await ctx.resume();
+  // Acquired per press and released at `stopMic`. Held across presses,
+  // the iPhone's recording indicator stays lit for the whole session,
+  // which reads — correctly, as far as anyone can tell from outside —
+  // as "it is listening to me all the time".
   if (!stream) stream = await navigator.mediaDevices.getUserMedia({audio:true});
   talk.dataset.state = 'rec';
   say('Escuchando');
@@ -83,11 +90,21 @@ async function begin() {
   node.connect(ctx.destination);
 }
 
+// Everything `begin()` opened, closed — the node AND the microphone
+// itself. Called on every way a press can end, including the refused
+// one: `end()` used to return before this on a press he was too busy
+// for, leaking a live ScriptProcessor per press.
+function stopMic() {
+  if (node) { node.disconnect(); node = null; }
+  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }
+}
+
 function end() {
-  if (talk.dataset.state !== 'rec') return;
+  const wasRecording = talk.dataset.state === 'rec';
+  stopMic();
+  if (!wasRecording) return;
   talk.dataset.state = 'idle';
   say('Pensando');
-  if (node) { node.disconnect(); node = null; }
   ws.send(JSON.stringify({type:"end"}));
 }
 

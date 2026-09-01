@@ -6,6 +6,10 @@ ages badly — he would answer something asked a minute ago — so a press
 during a running turn is refused and the page says so.
 """
 
+import asyncio
+
+import pytest
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from samantha_widget.remote import (
@@ -13,9 +17,12 @@ from samantha_widget.remote import (
     ENROLMENT_SECONDS,
     HELD_TURN_SECONDS,
     Enrolment,
+    EnrolmentSite,
     RemoteDesk,
+    _handler,
     build_welcome_app,
 )
+from samantha_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
 from samantha_widget.remote_auth import Guard
 
 
@@ -156,8 +163,10 @@ async def test_the_welcome_routes_404_while_the_window_is_closed(
     """A closed window has to look like nothing is there — 404, not
     403, which would confirm to a scanning stranger that something is
     listening on this port at all. Route names per the live acceptance
-    fix of 2026-09-01: /jarvis.mobileconfig, not /ca — iOS needs the
-    extension in the path to offer to install rather than download.
+    fix of 2026-09-01: /jarvis.mobileconfig, not /ca — belt and braces
+    for iOS profile delivery, which reads the path as well as the type
+    (never demonstrated necessary: the download that was observed was
+    Chrome's, and only Safari installs profiles on iOS at all).
 
     `ca` is never read on this path — the 404 fires before the handler
     would touch it — so a path that does not exist is fine here."""
@@ -173,11 +182,13 @@ async def test_the_welcome_routes_404_while_the_window_is_closed(
 async def test_the_profile_route_advertises_a_mobileconfig_filename(
     tmp_path,
 ) -> None:
-    """Verified live 2026-09-01: with content-type alone and no
-    Content-Disposition, and a route with no file extension, Safari
-    downloaded the profile as a file instead of offering to install it
-    as a configuration profile — "Perfil descargado" never appeared in
-    Settings. Both signals have to be present, so this checks both."""
+    """iOS reads the type, the filename and the path together when it
+    decides whether to offer to INSTALL a profile rather than download
+    it, and profile delivery is not worth resting on the MIME type
+    alone — so both extra signals are asserted here. Neither was ever
+    shown to be required: the plain download observed on 2026-09-01 was
+    **Chrome**, which does not install profiles on iOS at all, and `/ca`
+    was never tried in Safari, which is the only browser that does."""
     ca = tmp_path / "ca.pem"
     ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
     guard = Guard("secret", "https://brain.local:8443")
@@ -208,3 +219,199 @@ def test_a_reply_that_never_settles_can_still_be_stolen_eventually() -> None:
     assert desk.claim(second, now=ANSWERING_SECONDS + 1) is True
     assert desk.current is second
     assert second.refusals == 0
+
+
+def test_the_ceiling_and_the_held_turn_cannot_drift_apart() -> None:
+    """The recording deadline exists to catch a phone that presses and
+    never releases, so it has to sit just above the longest press the
+    server will accept. While the ceiling was being applied to the
+    48 kHz buffer, the longest press was really ~10 s and nothing said
+    so."""
+    assert HELD_TURN_SECONDS == MAX_UTTERANCE_SECONDS + 5.0
+
+
+def test_releasing_sends_his_voice_home_too() -> None:
+    """The claim and the sink are two halves of one thing. Only the
+    claim used to come back."""
+    homed = []
+    desk = RemoteDesk(
+        on_utterance=lambda pcm, endpoint: None,
+        on_release=lambda: homed.append(True),
+    )
+    phone = FakeEndpoint("iphone-cocina")
+    desk.claim(phone)
+
+    desk.release(phone)
+
+    assert homed == [True]
+
+
+def test_a_claim_that_merely_EXPIRES_sends_his_voice_home() -> None:
+    """The recovery path nobody calls. A phone that drops during a turn
+    that produces no token at all is released by nothing — only the
+    deadline ends it — and until this the sink went on pointing at that
+    dead socket, so the NEXT reply, to anybody, was written into it and
+    the desk stayed mute."""
+    homed = []
+    desk = RemoteDesk(
+        on_utterance=lambda pcm, endpoint: None,
+        on_release=lambda: homed.append(True),
+    )
+    gone, next_one = FakeEndpoint("gone"), FakeEndpoint("next")
+    desk.claim(gone, now=0.0)
+
+    assert desk.claim(next_one, now=ANSWERING_SECONDS + 1) is True
+    assert homed == [True]
+
+
+def test_a_release_that_frees_nothing_does_not_move_his_voice() -> None:
+    homed = []
+    desk = RemoteDesk(
+        on_utterance=lambda pcm, endpoint: None,
+        on_release=lambda: homed.append(True),
+    )
+    first, second = FakeEndpoint("a"), FakeEndpoint("b")
+    desk.claim(first)
+
+    desk.release(second)
+
+    assert homed == []
+
+
+class FakeSite:
+    def __init__(self) -> None:
+        self.opened = 0
+
+    def open_soon(self, seconds: float = ENROLMENT_SECONDS) -> None:
+        self.opened += 1
+
+
+def test_opening_the_window_raises_the_socket() -> None:
+    """Not just the handlers: the socket itself. 404s bound accident —
+    a phone that kept the link — and nothing else. Anyone on the wifi
+    polling the port collected the secret the moment the window
+    opened."""
+    enrolment = Enrolment()
+    site = FakeSite()
+    enrolment.attach(site)
+
+    enrolment.open_enrolment(now=0.0)
+
+    assert site.opened == 1
+
+
+def test_the_window_still_works_with_no_socket_attached() -> None:
+    """Every test of the timing drives it without one, and the handlers
+    ask `is_open` too."""
+    enrolment = Enrolment()
+    enrolment.open_enrolment(now=0.0)
+
+    assert enrolment.is_open(now=1.0) is True
+
+
+async def test_the_enrolment_socket_is_up_only_while_the_window_is() -> None:
+    """A real socket, bound and unbound. The unbind is a timer rather
+    than something the next request notices, because "no request
+    arrives" is exactly the case that has to close the port."""
+    app = web.Application()
+
+    async def hello(request: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    app.router.add_get("/", hello)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = EnrolmentSite(runner, "127.0.0.1", 0, asyncio.get_running_loop())
+    try:
+        assert site.bound is False
+
+        await site.open(seconds=0.05)
+        assert site.bound is True
+        port = runner.addresses[0][1]
+        _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.close()
+        await writer.wait_closed()
+
+        await asyncio.sleep(0.3)
+        assert site.bound is False
+        with pytest.raises(OSError):
+            await asyncio.open_connection("127.0.0.1", port)
+    finally:
+        await site.close()
+        await runner.cleanup()
+
+
+async def _socket(desk: RemoteDesk) -> tuple[TestClient, web.Application]:
+    app = web.Application()
+    app.router.add_get(
+        "/ws", _handler(desk, Guard("s" * 32, "https://brain.local:8443"), None)
+    )
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    return client, app
+
+
+async def test_thirty_seconds_at_48k_is_thirty_seconds_not_ten() -> None:
+    """`MAX_UTTERANCE_BYTES` is 30 s AT 16 kHz, and a phone sends 48 —
+    so measuring the incoming buffer against it cut every press at
+    about ten seconds while every comment around it said thirty. This
+    sends twenty seconds of 48 kHz audio — comfortably past the point
+    the 16 kHz number cut a press, comfortably inside the real one — and
+    expects all of it through."""
+    seen: list[bytes] = []
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: seen.append(pcm))
+    client, _ = await _socket(desk)
+    try:
+        ws = await client.ws_connect("/ws?t=" + "s" * 32)
+        await ws.send_json({"type": "start", "rate": 48000})
+        for _ in range(20):
+            await ws.send_bytes(b"\x01\x02" * 50_000)  # 100 kB each, 2 MB total
+        await ws.send_json({"type": "end"})
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if seen:
+                break
+        await ws.close()
+    finally:
+        await client.close()
+
+    assert seen, "the utterance never arrived"
+    seconds = len(seen[0]) / 2 / 16000
+    assert seconds > 15.0, f"cut at {seconds:.1f}s — the 16 kHz ceiling again"
+
+
+async def test_the_ceiling_is_hit_at_the_real_thirty_seconds_and_says_so() -> None:
+    """Hitting it used to be silent, so a long press became half a
+    question with nothing to explain it. And the chunk that crosses the
+    line is refused whole rather than appended and then noticed:
+    `len(buffer) < ceiling` let one full chunk past the number it was
+    defending.
+
+    8 kHz keeps this cheap — the ceiling is the same thirty seconds
+    either way, and thirty seconds at 8 kHz is 480 kB rather than the
+    2.8 MB a phone's 48 would put through the loopback."""
+    seen: list[bytes] = []
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: seen.append(pcm))
+    client, _ = await _socket(desk)
+    try:
+        ws = await client.ws_connect("/ws?t=" + "s" * 32)
+        await ws.send_json({"type": "start", "rate": 8000})
+        for _ in range(9):  # 9 x 60 kB against a 480 kB ceiling
+            await ws.send_bytes(b"\x01\x02" * 30_000)
+
+        told = await asyncio.wait_for(ws.receive_json(), timeout=5)
+        assert told == {"type": "truncated"}
+
+        await ws.send_json({"type": "end"})
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if seen:
+                break
+        await ws.close()
+    finally:
+        await client.close()
+
+    assert seen, "the utterance never arrived"
+    # Exactly thirty seconds of 16 kHz audio: the buffer stopped AT the
+    # ceiling, never one chunk past it.
+    assert len(seen[0]) == MAX_UTTERANCE_BYTES

@@ -21,7 +21,23 @@ from .vad import INPUT_RATE
 # The same ceiling `vad.py` puts on a spoken turn, for the same reason
 # plus one: a held button, or a client that lies, must not be able to
 # make this process allocate without bound.
-MAX_UTTERANCE_BYTES = 30 * INPUT_RATE * 2
+MAX_UTTERANCE_SECONDS = 30
+MAX_UTTERANCE_BYTES = MAX_UTTERANCE_SECONDS * INPUT_RATE * 2
+
+
+def max_bytes_at(rate: int) -> int:
+    """`MAX_UTTERANCE_SECONDS` of mono int16, in bytes, at `rate`.
+
+    The ceiling belongs to the audio as it ARRIVES, not to what it will
+    become. A phone records at its device rate — 48 kHz here, three
+    times what this pipeline speaks — so measuring its incoming buffer
+    against `MAX_UTTERANCE_BYTES` cut a press at ten seconds while
+    every comment around it said thirty, and half a question simply
+    vanished. Found in review 2026-09-01.
+    """
+    if rate <= 0:
+        raise ValueError(f"impossible sample rate: {rate}")
+    return MAX_UTTERANCE_SECONDS * rate * 2
 
 
 def resample_to_input(pcm: bytes, source_rate: int) -> bytes:
