@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 INPUT_RATE = 16000
 FRAME_SAMPLES = 512
@@ -49,6 +49,17 @@ _START_FRAMES = 3
 _SILENCE_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_SILENCE", "1.2"))
 _MIN_UTTERANCE_SECONDS = 0.4
 
+# How much quiet is enough to ASK whether the sentence is finished. The
+# answer comes from `endpoint.py`, which has the words; this file only
+# owns the clock.
+#
+# Measured 2026-09-01 on the user's own recording: every internal pause
+# in it ran 0.26-0.61 s, so a trigger at 0.35 s fires INSIDE most
+# mid-sentence breaths. That is the point — the silence is deliberately
+# not the decision. If the rule cannot tell a breath from an ending,
+# lowering this value alone re-creates the defect of 2026-08-26.
+_ASK_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_ASK_SILENCE", "0.35"))
+
 # How much of the quiet before a turn is kept in front of it. The first
 # syllable of a word routinely sits under the threshold, and before
 # 2026-08-26 everything under it was discarded — which cost nothing
@@ -69,8 +80,18 @@ class SpeechProbe(Protocol):
 
 
 class UtteranceDetector:
-    def __init__(self, probe: SpeechProbe) -> None:
+    def __init__(
+        self,
+        probe: SpeechProbe,
+        *,
+        may_close: Callable[[], bool] = lambda: False,
+    ) -> None:
         self._probe = probe
+        # Asked once per pause, when the quiet crosses _ASK_SECONDS.
+        # Defaults to "never", so a detector built the old way behaves
+        # exactly as it did — which is what the existing tests assert.
+        self._may_close = may_close
+        self._asked = False
         self._buffer = bytearray()
         self._speech_run = 0
         self._silence_seconds = 0.0
@@ -82,6 +103,7 @@ class UtteranceDetector:
         self._speech_run = 0
         self._silence_seconds = 0.0
         self._speech_seconds = 0.0
+        self._asked = False
         self.speaking = False
 
     def push(self, frame: bytes) -> bytes | None:
@@ -112,6 +134,13 @@ class UtteranceDetector:
 
         if len(self._buffer) / 2 / INPUT_RATE >= _MAX_UTTERANCE_SECONDS:
             return self._emit(force=True)
+        if is_speech:
+            # Talking again: the next pause gets its own question.
+            self._asked = False
+        elif not self._asked and self._silence_seconds >= _ASK_SECONDS:
+            self._asked = True
+            if self._may_close():
+                return self._emit()
         if self._silence_seconds >= _SILENCE_SECONDS:
             return self._emit()
         return None

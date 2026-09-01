@@ -186,3 +186,72 @@ def test_a_real_gap_between_sentences_still_ends_the_turn() -> None:
         if out is not None:
             utterances.append(out)
     assert len(utterances) == 2, f"{len(utterances)} turns, expected 2"
+
+
+# ── the short trigger: asking, not deciding ───────────────────────────
+#
+# `_SILENCE_SECONDS` is still the floor — the point at which he closes
+# the turn regardless of what anybody thinks. `_ASK_SECONDS` is new and
+# earlier: at 0.35 s of quiet, the detector asks a callback whether the
+# sentence so far reads as finished. Say yes and the turn ends 880 ms
+# sooner than it used to; say no (or supply nothing) and nothing changes
+# — the callback defaults to "never", which is what keeps every test
+# above this line passing unmodified.
+
+
+def _run_with(script: list[float], may_close) -> list[bytes]:
+    detector = UtteranceDetector(ScriptedProbe(script), may_close=may_close)
+    return [u for _ in script if (u := detector.push(FRAME)) is not None]
+
+
+def test_the_short_trigger_closes_a_turn_early() -> None:
+    """0.35 s of quiet plus a rule that says yes ends the turn.
+
+    Measured 2026-09-01: 880 ms earlier than the 1.2 s threshold.
+    """
+    script = _frames((0.0, 0.5), (0.9, 2.0), (0.0, 0.5))
+
+    utterances = _run_with(script, lambda: True)
+
+    assert len(utterances) == 1
+
+
+def test_a_rule_that_declines_leaves_todays_behaviour_exactly() -> None:
+    """The 1.2 s threshold is the floor, not a thing the rule can lower.
+
+    This is the regression that matters: if Vosk never loads, or the rule
+    is always wrong, he must behave precisely as he did before.
+    """
+    script = _frames((0.0, 0.5), (0.9, 2.0), (0.0, 0.5))
+
+    assert _run_with(script, lambda: False) == []
+
+    longer = _frames((0.0, 0.5), (0.9, 2.0), (0.0, 2.0))
+    assert len(_run_with(longer, lambda: False)) == 1
+
+
+def test_the_rule_is_asked_once_per_pause_not_once_per_frame() -> None:
+    """Otherwise a two-second pause asks it sixty times, and every one of
+    those is a Vosk query and a chance to disagree with the last."""
+    asked = {"n": 0}
+
+    def may_close() -> bool:
+        asked["n"] += 1
+        return False
+
+    _run_with(_frames((0.0, 0.5), (0.9, 2.0), (0.0, 2.0)), may_close)
+
+    assert asked["n"] == 1
+
+
+def test_the_rule_is_not_asked_before_anybody_has_spoken() -> None:
+    """A quiet room must not drive a transcriber."""
+    asked = {"n": 0}
+
+    def may_close() -> bool:
+        asked["n"] += 1
+        return False
+
+    _run_with(_frames((0.0, 5.0)), may_close)
+
+    assert asked["n"] == 0
