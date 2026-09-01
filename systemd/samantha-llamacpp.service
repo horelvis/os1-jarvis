@@ -56,6 +56,11 @@ Type=simple
 # on first run and caches under ~/.cache/llama.cpp/.
 # The model file, not a -hf spec: it is already on disk and pulling it
 # again on every install is 13 GB nobody needs.
+# Source: https://huggingface.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF
+# (the repo also carries RVN-Q2_K 10 GB, IQ3_S 12 GB, IQ4_XS 14 GB — the
+# one used here — and Q6_K 21 GB, which does not fit on this box. The
+# "-multilingual" and "-mtp" suffixes are separate variants of each.)
+#
 # The Heretic build — Qwen3.8-27B with the refusal behaviour removed
 # (user's decision, 2026-09-01: "quiero un modelo sin arnés"). Measured
 # against the UD-Q3_K_XL it replaces, over nine legitimate home-assistant
