@@ -48,9 +48,11 @@ signal available is the last word — which is why the word list IS the
 rule, and why it is tested this heavily.
 """
 
+from pathlib import Path
+
 import pytest
 
-from samantha_widget.endpoint import CompletionRule
+from samantha_widget.endpoint import CompletionRule, VoskPartials, load_partials
 
 
 @pytest.fixture
@@ -133,6 +135,26 @@ def test_accents_separate_a_question_from_a_conjunction(
 
 Run: `cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python -m pytest tests/test_endpoint.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'samantha_widget.endpoint'`
+
+The file imports `VoskPartials` and `load_partials`, which Task 3 adds. Until
+then this import is what makes the whole file fail to collect, which is the
+correct failing state for Task 1: implement `CompletionRule` AND add
+placeholder-free stubs? **No** — instead, Task 1 defines `CompletionRule`
+only, and Task 3 completes the module. To keep Task 1 independently green,
+Task 1 writes the import line as it will finally be and Task 1's Step 3
+implementation includes the two names Task 3 fills in:
+
+```python
+class VoskPartials:  # completed in Task 3
+    def __init__(self, *_args, **_kwargs) -> None:
+        raise FileNotFoundError("Vosk support arrives in Task 3")
+
+
+def load_partials():  # completed in Task 3
+    return None
+```
+
+Delete both when Task 3 replaces them.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -446,14 +468,12 @@ Add to `dependencies` in `widget/pyproject.toml`, after `faster-whisper`:
 
 - [ ] **Step 2: Write the failing test**
 
-Append to `widget/tests/test_endpoint.py`:
+Append to `widget/tests/test_endpoint.py`. **The imports it needs are
+already at the top of the file** — Task 1 put them there, because ruff has
+E402 enabled (`pyproject.toml`) and a module-level import after a function
+fails lint:
 
 ```python
-from pathlib import Path
-
-from samantha_widget.endpoint import VoskPartials, load_partials
-
-
 def test_a_missing_model_is_reported_not_raised(tmp_path, monkeypatch) -> None:
     """Failure here must cost the FEATURE, never the widget.
 
@@ -974,14 +994,27 @@ reintroduced from the other side.
 ```
 
 And `.room` has to be emptied between his answers, or the echo of the
-last one is still sitting there when he starts the next. Put this where
-the callback sees him go quiet — immediately after the block above:
+last one is still sitting there when he starts the next. **On the
+TRANSITION, not on every quiet frame** — `reset()` builds a new
+`KaldiRecognizer`, and doing that per frame is ~31 model objects a second.
+Add a flag beside the other callback state:
 
 ```python
-            elif partials is not None and not player.busy:
-                # He stopped. Whatever `.room` collected was his; the
-                # next answer starts from nothing.
+            elif partials is not None and _busy["was"]:
+                # He just stopped. Whatever `.room` collected was his; the
+                # next answer starts from nothing. Guarded by the flag
+                # because reset() constructs a recognizer and this branch
+                # is reached on every quiet frame.
                 partials.room.reset()
+            _busy["was"] = player.busy
+```
+
+Declare `_busy` next to `_trace` at module level:
+
+```python
+# Whether he was speaking on the previous frame, so `.room` can be reset
+# once when he stops rather than thirty-one times a second.
+_busy = {"was": False}
 ```
 
 Build the closure next to the detector:
