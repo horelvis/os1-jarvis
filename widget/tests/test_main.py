@@ -214,3 +214,47 @@ def test_room_resets_once_per_reply_never_mid_reply() -> None:
         False,
         True,
     ]
+
+
+def test_turn_resets_once_per_mic_off_toggle_never_while_it_holds() -> None:
+    """Fix round 3, 2026-09-01: un-nesting `partials.turn.reset()` from
+    `if detector.speaking:` (needed because `.turn` holds preroll from
+    before the detector ever calls anything speech) removed a bound that
+    had only ever existed by accident — `detector.reset()` on the same
+    path cleared `detector.speaking`, so the branch stopped re-entering.
+    Without that accident, nothing stopped the reset firing on EVERY
+    frame the mic switch stayed off: ~31 `KaldiRecognizer` constructions
+    a second, indefinitely, on the PortAudio thread.
+
+    Same defect class as round 1's finding and round 2's Critical, so the
+    same shape of test: a SEQUENCE of frames driven through
+    `_turn_bookkeeping` exactly as the callback does — one call per
+    frame, `next_was_on` always fed back — not a truth table over the
+    pure function alone.
+    """
+    from samantha_widget.__main__ import _turn_bookkeeping
+
+    # on, on — mic on, nothing to reset
+    # off, off, off — switched off and left off for three frames: resets
+    #     once, on the very first off frame, and never again while it
+    #     stays off (this is exactly what round 3's bug got wrong)
+    # on, on — switched back on: no reset, and no leftover state
+    # off — switched off a second time: resets once more
+    frames = [True, True, False, False, False, True, True, False]
+
+    was_on = True
+    resets = []
+    for is_on in frames:
+        should_reset, was_on = _turn_bookkeeping(was_on, is_on)
+        resets.append(should_reset)
+
+    assert resets == [
+        False,
+        False,
+        True,
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]

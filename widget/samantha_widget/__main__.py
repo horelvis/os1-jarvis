@@ -96,6 +96,10 @@ _trace = {"n": 0}
 # Whether he was speaking on the previous frame, so `.room` can be reset
 # once when he stops rather than thirty-one times a second.
 _busy = {"was": False}
+# Whether the microphone was on for the previous frame, so `.turn` can be
+# cleared once when it is switched off rather than thirty-one times a
+# second. `Stream.reset()` constructs a recognizer.
+_mic = {"was_on": True}
 try:
     _HOTWORD_SENSITIVITY = float(
         os.environ.get("SAMANTHA_WIDGET_HOTWORD_SENSITIVITY", "")
@@ -297,6 +301,25 @@ def _room_bookkeeping(was_busy: bool, busy: bool) -> tuple[bool, bool]:
     before anything can return — is what closes that.
     """
     return (was_busy and not busy, busy)
+
+
+def _turn_bookkeeping(was_on: bool, is_on: bool) -> tuple[bool, bool]:
+    """(should_reset, next_was_on) — the mic-on→off transition only.
+
+    Same shape as `_room_bookkeeping`, for the same reason: before this,
+    `partials.turn.reset()` in the mic-off branch was nested under
+    `if detector.speaking:`, which happened to bound it to once by
+    accident — `detector.reset()` on the same path cleared
+    `detector.speaking`, so the branch stopped re-entering. Un-nesting it
+    (so `.turn`'s preroll, held before the detector ever calls anything
+    speech, is cleared even when the mic goes off before that) removed
+    that accidental bound: with nothing else guarding it, the reset fired
+    on EVERY frame for as long as the switch stayed off — ~31
+    `KaldiRecognizer` constructions a second on the PortAudio thread,
+    indefinitely. This is the transition guard that was missing, in the
+    same shape as `.room`'s.
+    """
+    return (was_on and not is_on, is_on)
 
 
 class SamanthaApp(Gtk.Application):
@@ -737,6 +760,16 @@ class SamanthaApp(Gtk.Application):
                 wake.answered(time.monotonic())
             elif _HOTWORD_TRACE and hotword.last_score >= _HOTWORD_TRACE:
                 print(f"hotword: {hotword.last_score:.2f}", file=sys.stderr, flush=True)
+            # `.turn`'s on/off bookkeeping — computed every frame, on the
+            # transition only, the same shape as `.room`'s below. Without
+            # this, un-nesting the reset from `detector.speaking` (needed
+            # because `.turn` holds preroll from before the detector ever
+            # calls anything speech) leaves nothing bounding it: it would
+            # fire, and construct a fresh `KaldiRecognizer`, on every
+            # single frame for as long as the mic switch stayed off.
+            _should_reset_turn, _mic["was_on"] = _turn_bookkeeping(
+                _mic["was_on"], wave.switches.mic_on
+            )
             if not wave.switches.mic_on:
                 # The microphone switch on the strip. The stream stays
                 # open — closing PortAudio from this callback is the
@@ -746,14 +779,16 @@ class SamanthaApp(Gtk.Application):
                 # sentence does not resume when it comes back on.
                 if detector.speaking:
                     detector.reset()
-                if partials is not None:
+                if partials is not None and _should_reset_turn:
                     # `.turn` is fed preroll before the detector ever
                     # calls anything speech (see the comment where it is
                     # pushed, below) — NOT nested under
                     # `detector.speaking` for that reason: the mic can go
                     # off mid-preroll, before the detector has said
                     # anything, and those words must not survive into the
-                    # next turn either.
+                    # next turn either. Guarded by the transition flag so
+                    # it fires once per toggle, not every frame the
+                    # switch stays off.
                     partials.turn.reset()
                 return
             if _MIC_GATE and player.busy and not detector.speaking:
