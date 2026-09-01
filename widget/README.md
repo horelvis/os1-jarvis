@@ -75,6 +75,8 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_CONSOLE_LINGER` | Seconds the console stays up after the work finishes, before it puts itself away (default 60). A press on it closes it sooner; `0` makes it go the moment the run ends. |
 | `SAMANTHA_WIDGET_CONSOLE_LINES` | How many lines the console keeps, and so how tall the strip gets while it is up (default 20 — about 430 px, the live camera's height). Ten until 2026-08-27, which was too short to read a tool's output in. |
 | `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
+| `SAMANTHA_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.samantha/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
+| `SAMANTHA_WIDGET_ASK_SILENCE` | Seconds of quiet after which he asks himself whether your sentence is finished (default 0.35). The 1.2 s of `SAMANTHA_WIDGET_SILENCE` remains the floor: this only ever closes a turn EARLIER, never later. |
 
 ### The models it needs
 
@@ -85,6 +87,14 @@ it she runs and is simply mute.
 - **Whisper**: `large-v3-turbo`, downloaded automatically on first load
   (~1.5 GB, 81 s the first time, ~1 s after that). Needs the GPU: it
   sits at roughly 2.5 GB of VRAM alongside CosyVoice.
+- **Vosk**: `vosk-model-small-es-0.42`, 39 MB, Apache 2.0. The
+  endpointing model. Optional: without it he waits the full 1.2 s,
+  exactly as he did before 2026-09-01.
+
+      mkdir -p ~/.samantha/models
+      curl -sL -o /tmp/vosk-es.zip \
+        https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
+      unzip -q -d ~/.samantha/models /tmp/vosk-es.zip
 
 ## The cameras are not here any more
 

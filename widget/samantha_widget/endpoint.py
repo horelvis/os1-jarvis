@@ -16,7 +16,13 @@ cannot punctuate is the one that tells the truth.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import sys
+from pathlib import Path
+
+from .vad import INPUT_RATE
 
 # Spanish words that CANNOT end a sentence. The distinction is the whole
 # rule and it is narrower than it looks: a word that merely *usually*
@@ -71,10 +77,85 @@ class CompletionRule:
         return words[-1] not in _CANNOT_END
 
 
-class VoskPartials:  # completed in Task 3
-    def __init__(self, *_args, **_kwargs) -> None:
-        raise FileNotFoundError("Vosk support arrives in Task 3")
+DEFAULT_MODEL_PATH = Path.home() / ".samantha" / "models" / "vosk-model-small-es-0.42"
 
 
-def load_partials():  # completed in Task 3
-    return None
+class _Stream:
+    """One Vosk recognizer, and the words it has produced so far.
+
+    `VoskPartials` hands each of `.turn` and `.room` its own instance of
+    this, built from the same loaded `Model` — so `reset()` on one never
+    touches the other, and a `push()` on one is invisible to the other.
+    """
+
+    def __init__(self, make_recognizer) -> None:
+        self._make_recognizer = make_recognizer
+        self._recognizer = make_recognizer()
+        self._settled = ""
+
+    def push(self, frame: bytes) -> None:
+        """One 16 kHz mono int16 frame. Same frames the VAD sees."""
+        if self._recognizer.AcceptWaveform(frame):
+            done = json.loads(self._recognizer.Result())["text"]
+            self._settled = f"{self._settled} {done}".strip()
+
+    def partial(self) -> str:
+        """Everything heard since the last reset, settled and in flight.
+
+        Before the first `push()`, Vosk's own result has no "partial"
+        key at all (`{"text": ""}`) — `.get` treats that the same as an
+        empty one rather than raising.
+        """
+        flying = json.loads(self._recognizer.PartialResult()).get("partial", "")
+        return f"{self._settled} {flying}".strip()
+
+    def reset(self) -> None:
+        """A turn ended. Forget it, or the next one inherits its words."""
+        self._recognizer = self._make_recognizer()
+        self._settled = ""
+
+
+class VoskPartials:
+    """The room, transcribed as it arrives, for nobody to read.
+
+    Vosk rather than Whisper because this text is never shown, never
+    spoken and never sent — and because it is better at THIS job for the
+    reason it is worse at the other one (see the module docstring). It
+    costs ~5% of one core and 39 MB on disk.
+
+    One `Model` is loaded and carries two independent streams, `.turn`
+    and `.room` — see the module docstring for why they must not hear
+    each other. A second `KaldiRecognizer` on the same model is cheap:
+    ~10% of one core total, and never both fed at once in practice.
+    """
+
+    def __init__(self, model_path: str | os.PathLike[str] | None = None) -> None:
+        from vosk import KaldiRecognizer, Model, SetLogLevel
+
+        path = Path(
+            model_path or os.getenv("SAMANTHA_WIDGET_VOSK_MODEL") or DEFAULT_MODEL_PATH
+        )
+        if not path.is_dir():
+            raise FileNotFoundError(f"Vosk model not at {path} — see widget/README.md")
+        SetLogLevel(-1)  # it prints a page of Kaldi banner otherwise
+        model = Model(str(path))
+        self.turn = _Stream(lambda: KaldiRecognizer(model, INPUT_RATE))
+        self.room = _Stream(lambda: KaldiRecognizer(model, INPUT_RATE))
+
+
+def load_partials() -> VoskPartials | None:
+    """`VoskPartials`, or None with one line of explanation.
+
+    None is not an error: it means the endpointing and the text-based
+    barge-in are off and he behaves exactly as he did before this
+    existed. Every caller must be written so that is true.
+    """
+    try:
+        return VoskPartials()
+    except Exception as exc:  # any failure means "off"
+        print(
+            f"endpointing apagado, Vosk no cargó: {exc!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None

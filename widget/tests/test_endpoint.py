@@ -6,11 +6,11 @@ signal available is the last word — which is why the word list IS the
 rule, and why it is tested this heavily.
 """
 
+from pathlib import Path
+
 import pytest
 
-# VoskPartials and load_partials are unused until Task 3 completes the
-# module; imported now so the import line does not have to change later.
-from samantha_widget.endpoint import (  # noqa: F401
+from samantha_widget.endpoint import (
     CompletionRule,
     VoskPartials,
     load_partials,
@@ -81,9 +81,65 @@ def test_accents_separate_a_question_from_a_conjunction(
 ) -> None:
     """`que` cannot end a sentence; `qué` can. Same for como/cómo.
 
-    Whisper writes the accent and Vosk does not, so this matters mostly
-    for the tests — but folding accents away would put `qué` into the
-    dangling set and lose "no sé qué".
+    Both engines write the accent, and the accent is what separates
+    `que` from `qué` and `se` from `sé` — which is why the word list
+    keeps the unaccented forms only and never folds accents away.
     """
     assert rule.looks_complete("no se que") is False
     assert rule.looks_complete("no se que hacer") is True
+
+
+def test_the_accented_verb_can_end_a_sentence(rule: CompletionRule) -> None:
+    """`se` (pronoun) cannot end a sentence; `sé` (verb) can, and Vosk
+    writes the accent — measured on this box, 2026-09-01."""
+    assert rule.looks_complete("no lo sé") is True
+    assert rule.looks_complete("hola ya veis que pueda se") is False
+
+
+def test_a_missing_model_is_reported_not_raised(tmp_path, monkeypatch) -> None:
+    """Failure here must cost the FEATURE, never the widget.
+
+    2026-08-30 is the precedent: a model that would not fit left Whisper
+    unable to load, the exception was caught and printed, and JARVIS was
+    deaf for three days looking perfectly healthy. A thing whose whole
+    purpose is making him faster must not be able to make him worse.
+    """
+    monkeypatch.setenv("SAMANTHA_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
+
+    assert load_partials() is None
+
+
+def test_the_model_path_can_be_overridden(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SAMANTHA_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
+    with pytest.raises(FileNotFoundError):
+        VoskPartials()
+
+
+@pytest.mark.skipif(
+    not (Path.home() / ".samantha/models/vosk-model-small-es-0.42").is_dir(),
+    reason="the Vosk model is not installed on this box",
+)
+def test_silence_transcribes_to_nothing() -> None:
+    """The one test that needs the model. Silence in, nothing out —
+    enough to prove the wiring without shipping any audio."""
+    partials = VoskPartials()
+    for _ in range(30):
+        partials.turn.push(b"\x00\x00" * 512)
+
+    assert partials.turn.partial() == ""
+
+
+@pytest.mark.skipif(
+    not (Path.home() / ".samantha/models/vosk-model-small-es-0.42").is_dir(),
+    reason="the Vosk model is not installed on this box",
+)
+def test_the_two_streams_do_not_hear_each_other() -> None:
+    """The property the whole split exists for: audio fed to one stream
+    must not appear in the other's partial. Without it his echo lands in
+    the sentence being judged for endpointing."""
+    partials = VoskPartials()
+    for _ in range(30):
+        partials.room.push(b"\x00\x00" * 512)
+
+    assert partials.turn.partial() == ""
+    assert partials.turn is not partials.room
