@@ -1,5 +1,68 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-01 (noche) — JARVIS sale del escritorio, y un teléfono de verdad encontró lo que ningún test vio ✅
+
+Decisión del usuario: *«la idea es darle movilidad»*, sobre la red de la
+casa y no sobre internet. Tres iPhones llegan a él por una página que
+sirve el propio widget; se mantiene pulsado el botón, se habla, se
+suelta, y **contesta por el teléfono que preguntó** — regla del usuario:
+*«la respuesta de JARVIS tiene que oírse por el canal que pregunta.»* El
+teléfono es un periférico, no una plataforma: el audio entra por el mismo
+`dispatch()` que usa el micrófono de la mesa, así que es la misma sesión
+y la misma memoria, y el gateway nunca se entera de que existe.
+
+**Aceptación en un iPhone real, esta misma noche.** Todo lo anterior era
+lógica probada por unidad y un servidor que arranca; que Safari capture,
+suba y reproduzca de verdad es justo lo que §2.3 dice que ningún test
+puede zanjar. Se probó en mano, se habló, y contestó.
+
+**Y la persona encontró un fallo que ningún test vio, porque todos
+afirmaban la mitad equivocada.** El destino de la respuesta — mesa o
+teléfono — se leía en el momento de **sintetizar** cada cláusula, pero el
+gateway manda el texto entero de un tirón y su `done` llega mientras
+CosyVoice todavía trabaja en cláusulas anteriores. Para cuando existía el
+primer byte de audio, el turno ya había terminado y el destino ya se
+había deshecho de vuelta a la mesa. Cada test existente afirmaba el
+*valor* del destino en algún punto del turno — y ese valor era correcto
+todo el tiempo — y ninguno afirmaba **dónde aterrizaban los bytes**, así
+que la suite estaba en verde mientras un teléfono que preguntaba oía
+contestar a la tira. Se arregla atando el destino a cada cláusula cuando
+se **encola**, no cuando se sintetiza.
+
+**El ritual escrito en el plan fallaba en tres de sus cuatro pasos, y
+sólo un teléfono en una mano lo encontró.** Corregido en
+`widget/README.md`, "Putting him on a phone":
+
+- **Tiene que ser Safari.** El usuario probó primero con Chrome y recibió
+  una descarga de fichero sin ningún aviso de instalación. En iOS sólo
+  Safari instala perfiles de configuración — cualquier otro navegador es
+  WebKit por debajo, pero la descarga se comporta distinto a propósito.
+- **Son dos instalaciones separadas, no una instalación más un
+  interruptor.** Palabras del usuario: *«había que hacer 2 pasos,
+  instalar el perfil y luego el certificado.»* Primero el perfil desde
+  Ajustes, y luego, aparte, confiar en el certificado.
+- **No se manda a nadie a una ruta fija de Ajustes.** El plan decía
+  Ajustes → General → Información → Confianza de certificados; el
+  usuario lo encontró en otro sitio y perdió tiempo buscando donde se le
+  había dicho. Ahora se describe qué buscar, no un menú que puede no
+  coincidir con su versión de iOS.
+- **El interruptor de silencio del iPhone silencia la página.** El
+  usuario tenía el sonido apagado y no oyó nada mientras todo funcionaba
+  por dentro. En iOS el audio de una página web obedece al interruptor
+  físico y Safari tiene su propio volumen encima; una app nativa puede
+  saltarse el interruptor, una página no. Es indistinguible de una
+  función rota si no se sabe.
+
+**Fuera de alcance, y no por descuido:** cámaras en el teléfono.
+`JARVIS_PLATFORM` sigue fijo a mano en `samantha_vision/__init__.py`
+precisamente para que una imagen del interior de la casa no llegue a otra
+superficie (§12, 2026-08-25). Enseñarlas en un teléfono reabre esa
+decisión; no la extiende.
+
+Detalle completo, incluida la autenticación, el aprovisionamiento por QR
+y la matriz de riesgo: `CLAUDE.md` §0, §1.1, §2.1, §9 y §12
+(2026-09-01, "He stops being tied to the desk").
+
 ## 2026-09-01 (tarde) — Le quitamos el arnés, y medimos qué cuesta ✅
 
 Decisión del usuario, sostenida tras una objeción mía: *«quiero un modelo

@@ -77,6 +77,11 @@ it she runs and is simply mute.
 | `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
 | `SAMANTHA_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.samantha/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
 | `SAMANTHA_WIDGET_ASK_SILENCE` | Seconds of quiet after which he asks himself whether your sentence is finished (default 0.35). The 1.2 s of `SAMANTHA_WIDGET_SILENCE` remains the floor: this only ever closes a turn EARLIER, never later. |
+| `SAMANTHA_WIDGET_REMOTE_PORT` | Where the phone page listens (default 8443). The enrolment page is this plus one, over plain HTTP, because a certificate cannot be fetched over a connection that requires trusting it. |
+| `SAMANTHA_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
+| `SAMANTHA_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
+| `SAMANTHA_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.samantha/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
+| `SAMANTHA_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
@@ -95,6 +100,45 @@ it she runs and is simply mute.
       curl -sL -o /tmp/vosk-es.zip \
         https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
       unzip -q -d ~/.samantha/models /tmp/vosk-es.zip
+
+### Putting him on a phone
+
+**It must be Safari.** Chrome (and every other browser on iOS — all of
+them are WebKit underneath, by Apple's rule) downloads the enrolment
+profile as a plain file with no install prompt, and nothing happens next.
+Only Safari offers to install a configuration profile. This is the
+mistake that costs the most time, so it goes first.
+
+It is also **two separate installs, not one install plus a toggle** — in
+the user's own words, after the first real attempt: *«había que hacer 2
+pasos, instalar el perfil y luego el certificado.»* The profile is
+installed first, from Settings; the certificate is trusted **separately**,
+afterwards. Skipping the second step looks like it worked — the page
+loads — right up until the microphone or the WebSocket needs the
+connection actually trusted.
+
+1. Point the phone's camera at the QR (`SAMANTHA_WIDGET_SHOW_QR=1` at
+   start, or any time with
+   `systemctl --user kill -s USR1 samantha-widget.service` — no restart
+   needed). **Open the link in Safari.**
+2. **1 · Instalar el certificado** → Settings shows "Profile Downloaded"
+   → Install. This installs the profile. It does not yet trust it.
+3. Separately, find where this iOS version lets you trust an installed
+   root certificate — look for **Certificate Trust Settings**, somewhere
+   under Settings → General → About, or wherever your iOS puts it; the
+   exact path has moved between versions and is not worth asserting here.
+   Turn on **JARVIS Home CA**. iOS cannot be made to do this step from a
+   profile — it is deliberately a human's decision.
+4. **2 · Abrir JARVIS** → Share → Add to Home Screen.
+
+**If it looks broken but the log shows it working, check the silent
+switch.** A web page's audio obeys the iPhone's physical silent switch,
+and Safari has its own volume on top of the system one — a native app
+can override the switch, a page cannot. Muted and silent look identical
+from across the room; the difference is a switch on the side of the
+phone, not a bug.
+
+Two minutes, once per phone. The certificate is issued for ten years.
 
 ## The cameras are not here any more
 

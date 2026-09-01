@@ -66,6 +66,10 @@ can act on it. Not a window you open. Something that is there.
   is what was asked for.
 - **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
   (§2.7) still exists in `backend/` but the gateway path never uses it.
+- **Phones:** three iPhones on the house network reach him through
+  `widget/samantha_widget/remote.py` — a page with one button, held to
+  speak. The phone is a peripheral of the widget, not a platform: the
+  gateway still sees one strip and one session (§12, 2026-09-01).
 - **Language:** Spanish (Spain) — every user-facing string, prompt and
   voice.
 
@@ -150,6 +154,13 @@ as the primary interaction mode.
      git-ignored, so this must be re-applied on every box.
    - Cron/reminders resolve their own model, separately from the
      gateway. Pinning one and not the other splits the path.
+   - **He now listens on the house network**, not only on loopback
+     (2026-09-01). Nothing leaves the house, so this principle's letter
+     holds — but the premise underneath it changed: authentication used
+     to be "only from this machine" and is now a shared secret plus an
+     origin check, and what is behind them is an agent holding
+     `terminal`. The threat model is **whoever is on the wifi**, guests
+     included.
 
 2. **Conversational first, and able to act.** Samantha is designed for
    the relationship. She remembers, she asks, she has opinions. She is
@@ -233,6 +244,9 @@ the user already owned, the mini-PC stopped being the target.
   13.7 tok/s measured, against 57 tok/s when it fits (§12, 2026-08-23).
 - Everything is on one machine. There is no second box, no network hop,
   and every service in §0's diagram is on loopback.
+- **Except one, since 2026-09-01:** the phone page binds the LAN
+  interface. Never `0.0.0.0` — this box has twelve Docker bridges and no
+  container has any business reaching JARVIS.
 
 ### 2.2 Operating System: Ubuntu with GNOME on X11
 
@@ -1120,6 +1134,8 @@ If you encounter:
 | The two switches (drawing / pure model) | `widget/samantha_widget/{wave,switches}.py` |
 | The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/samantha_widget/live_decode.py` |
 | Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
+| The phone: socket, auth, audio, enrolment | `widget/samantha_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
+| The page it serves | `widget/samantha_widget/static/movil.html` |
 | The surface Hermes speaks through | `Hermes/plugins/jarvis/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
 | Model, provider, TTS provider | `Hermes/samantha-config.yaml` |
@@ -1174,6 +1190,75 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-09-01 — He stops being tied to the desk
+
+**Decision (the user's):** *"la idea es darle movilidad"*, over the
+house's own network and not the internet. Three iPhones reach him through
+a page the widget serves; hold the button, speak, release, and **he
+answers on the phone that spoke** — the user's own rule: *"la respuesta
+de JARVIS tiene que oírse por el canal que pregunta."*
+
+**The phone is a peripheral, not a platform.** Audio that arrives enters
+`dispatch()`, the same path the desk microphone uses, so it is the same
+session and the same memory. The gateway never learns it exists — one
+strip, and `adapter.py`'s origin check and one-strip swap are untouched.
+
+**Four things were checked rather than assumed**, and each closes a door:
+Home Assistant does not exist on this box (port closed, no container, one
+comment in a config) — which also invalidates a decision taken the same
+day in the parked observability work; a browser will not open a
+microphone outside a secure context, and on iOS every browser is WebKit;
+Apple's Walkie-Talkie is watchOS over FaceTime with no third-party API;
+and iOS 16's `PushToTalk` framework does give background audio from the
+lock screen but needs a native app, an Apple entitlement and **APNs**, so
+its best feature leaves the house.
+
+**Push-to-talk removes three subsystems from the phone's path**, each
+deliberately: no VAD (the button is the boundary), no wake word (pressing
+is addressing him), and no echo problem — because only one room ever
+sounds at a time. That last one is what made "he is in both places"
+affordable: listening happens in both, speaking in one.
+
+**Cost, stated:** authentication was "only from this machine" and is now
+a shared secret; the threat model becomes whoever is on the wifi. A
+certificate must be trusted by hand on each iPhone (two minutes, ten
+years). And `qrcode[png]` joins the dependency list — verified here to
+write a 501-byte PNG without importing Pillow.
+
+**Out of scope, and not by accident:** cameras on the phone.
+`JARVIS_PLATFORM` is hard-coded in `samantha_vision/__init__.py` exactly
+so an image of the inside of this house cannot reach another surface
+(§12, 2026-08-25). Showing them on a phone reopens that decision; it does
+not extend this one.
+
+**Acceptance passed on a real iPhone, the same day.** Everything above
+was unit-tested logic and a server that starts; whether Safari actually
+captures, uploads and plays back is exactly the class of thing §2.3 says
+no test can settle. It was held in a hand, spoken to, and answered.
+
+**And the person found a defect no test had, because every test asserted
+the wrong half of the bug.** The reply's destination — desk or phone —
+was read at the moment a clause was **synthesised**, but the gateway
+sends a reply's text in one burst and its `done` arrives while CosyVoice
+is still working on earlier clauses. By the time the first byte of audio
+existed, the turn had already ended and the destination had already been
+undone back to the desk. Every existing test asserted the sink's *value*
+at some point in the turn — which was correct throughout its life — and
+none asserted **where the bytes landed**, so the suite was green while a
+phone that asked a question heard the strip answer instead. Fixed by
+binding the destination to each clause when it is **queued**, not when it
+is synthesised.
+
+**The ritual that shipped with the plan was wrong in three of its four
+steps, and only a phone in a hand found it** — see
+`widget/README.md`, "Putting him on a phone": Chrome downloads the
+profile instead of offering to install it (Safari only), the profile and
+the certificate are two separate installs and not one install plus a
+toggle, the trust step's menu is worth describing rather than naming (it
+moves between iOS versions), and the iPhone's silent switch mutes the
+page exactly as it mutes anything else, which reads as a broken feature
+from a working one.
 
 ### 2026-09-01 — The harness comes off, and three claimants pay for it
 
