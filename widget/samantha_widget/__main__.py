@@ -844,9 +844,14 @@ class SamanthaApp(Gtk.Application):
             # lands on top of the first, the first ages past
             # `EchoFilter`'s 45 s window, the residue stops matching, and
             # he interrupts himself with nobody in the room.
-            _should_reset_room, _busy["was"] = _room_bookkeeping(
-                _busy["was"], player.busy
-            )
+            # `audible`, not `busy`: `busy` goes False for ~0.36 s between
+            # clauses while CosyVoice makes the next one and the speaker is
+            # still sounding. Resetting `.room` there would throw away the
+            # echo context in the middle of his own sentence, and gating on
+            # it left those gaps with no gate at all — the feedback loop of
+            # 2026-09-01. `audio.py:audible` carries the measurement.
+            _audible = player.audible(time.monotonic())
+            _should_reset_room, _busy["was"] = _room_bookkeeping(_busy["was"], _audible)
             if vosk.on and _should_reset_room:
                 # He just stopped. Whatever `.room` collected was his; the
                 # next answer starts from nothing.
@@ -872,7 +877,7 @@ class SamanthaApp(Gtk.Application):
                     # switch stays off.
                     vosk.run(partials.turn.reset)
                 return
-            if _MIC_GATE and player.busy and not detector.speaking:
+            if _MIC_GATE and _audible and not detector.speaking:
                 # No echo cancellation on this box: he is talking and
                 # nobody has cut in, so drop the frame rather than let
                 # his own voice, coming back through the room, start a
@@ -880,7 +885,7 @@ class SamanthaApp(Gtk.Application):
                 # interrupted — see _MIC_GATE.
                 return
 
-            if _TRACE_MIC and player.busy:
+            if _TRACE_MIC and _audible:
                 # While HE is talking: what the microphone is actually
                 # picking up, and whether the detector thinks somebody
                 # is speaking. This is the only place that can answer
@@ -898,7 +903,7 @@ class SamanthaApp(Gtk.Application):
                         flush=True,
                     )
 
-            if player.busy and not detector.speaking:
+            if _audible and not detector.speaking:
                 # He is talking and nobody has cut in yet. Feed `.room`
                 # FIRST: every path below can return, and a stream that
                 # is only fed after the gates never hears the sentence
@@ -931,9 +936,9 @@ class SamanthaApp(Gtk.Application):
                 # interrupts him: the busy branch above returns early only
                 # for silence or his own echo (`is_a_person` false). A
                 # frame judged to be a person falls through it with
-                # `player.busy` still True and lands here, so `.turn`
+                # `audible` still True and lands here, so `.turn`
                 # starts hearing the interruption on the same frame
-                # `.room` judged it — it does not wait for `player.busy`
+                # `.room` judged it — it does not wait for `audible`
                 # to clear.
                 vosk.run(partials.turn.push, frame)
 

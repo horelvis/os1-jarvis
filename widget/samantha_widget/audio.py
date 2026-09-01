@@ -12,9 +12,11 @@ what the input produces anyway, since there is no microphone plugged in.
 
 from __future__ import annotations
 
+import os
 import queue
 import sys
 import threading
+import time
 
 import sounddevice as sd
 
@@ -257,6 +259,15 @@ class Microphone:
             self._stream = None
 
 
+# How long after the last block written his voice is still assumed to be
+# in the room. Must exceed the between-clause synthesis gap (~0.36 s
+# measured) plus PortAudio's output latency plus the acoustic trip.
+# `SAMANTHA_WIDGET_AUDIBLE_TAIL` moves it for a room with different
+# speakers; too short reopens the feedback loop, too long only means an
+# interruption is judged on its words for a moment longer.
+TAIL_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_AUDIBLE_TAIL", "1.2"))
+
+
 class Player:
     """A queue feeding one output stream, with a level for the wave."""
 
@@ -266,6 +277,10 @@ class Player:
         self._thread: threading.Thread | None = None
         self._running = False
         self._playing = False
+        # When the last block was handed to PortAudio. `audible()` reads
+        # it; nothing else should. 0.0 means he has not spoken yet, which
+        # is far enough in the past to read as silent.
+        self._last_block_at = 0.0
         self.level = 0.0
         # Per-band magnitudes of the block currently going out, 0..1.
         # Read by the GTK thread; a plain list assignment is atomic
@@ -328,8 +343,39 @@ class Player:
         leaves the queue before it reaches the speakers, and a gate that
         opened there would let her own final syllable back into the
         microphone.
+
+        **This is about the QUEUE, not about the room.** `say()` waits on
+        it clause by clause, so it must go False the moment a clause is
+        written or he would speak with a pause after every phrase. For
+        "is his voice still in the air", which is what a microphone gate
+        needs, use `audible()`.
         """
         return self._playing or not self._queue.empty()
+
+    def audible(self, now: float) -> bool:
+        """Is his voice still reaching the microphone?
+
+        `busy` answers a question about the queue and goes False between
+        clauses — measured 2026-09-01 on the real player, a three-clause
+        reply spent 0.70 s of its 2.70 s with `busy` False, in two gaps
+        of ~0.36 s while CosyVoice synthesised the next clause. The
+        speaker is still sounding through every one of those gaps.
+
+        That mattered because the barge-in gate was written as
+        `if player.busy and not detector.speaking`, so those gaps had NO
+        gate at all: his own voice reached the detector, opened a turn,
+        and `detector.speaking` then kept the gate bypassed for the whole
+        remainder of the reply. The user met the result as a feedback
+        loop — he transcribed himself and answered himself, with the GPU
+        pinned at 94% for as long as it went on.
+
+        The tail has to cover the synthesis gap plus PortAudio's own
+        output latency plus the trip across the room. A frame inside it
+        is not dropped, only JUDGED — `build_is_a_person` still lets a
+        real interruption through on its words — so erring long costs
+        nothing but a text comparison.
+        """
+        return self.busy or (now - self._last_block_at) < TAIL_SECONDS
 
     def _pump(self) -> None:
         import numpy as np
@@ -348,6 +394,11 @@ class Player:
                     if self._stream is None:
                         break
                     self._stream.write(block)
+                    # Stamped per BLOCK, not per clause: `write` returns
+                    # when PortAudio takes the bytes, so this is the
+                    # latest moment we know sound was still being handed
+                    # to the speaker.
+                    self._last_block_at = time.monotonic()
                     samples = np.frombuffer(block, dtype=np.int16).astype(np.float32)
                     if samples.size:
                         samples /= 32768.0
