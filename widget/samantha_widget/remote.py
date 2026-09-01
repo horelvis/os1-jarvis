@@ -48,6 +48,39 @@ HELD_TURN_SECONDS = 35.0
 # well inside this; this only catches turns that end in silence.
 ANSWERING_SECONDS = 600.0
 
+# The plain-HTTP welcome page hands the shared secret to whoever asks —
+# it is embedded, in cleartext, in the second link's href — with no
+# check of its own; that is the cost of it being reachable before a
+# phone has any reason yet to trust this box (see enrol.py). Serving it
+# at all therefore has to be a WINDOW, not a standing service: 300 s is
+# long enough to walk to a phone and scan the QR, and not a minute
+# longer that the secret sits readable by anyone else on the wifi with
+# a browser.
+ENROLMENT_SECONDS = 300.0
+
+
+class Enrolment:
+    """Whether the plain-HTTP welcome page (and `/ca`) may answer.
+
+    Closed until something opens it — showing the QR on the strip,
+    today (`SAMANTHA_WIDGET_SHOW_QR=1`) — and closed again on its own
+    `ENROLMENT_SECONDS` later. `now` is a monotonic clock reading,
+    injectable for tests, the same way `RemoteDesk.claim` is.
+    """
+
+    def __init__(self) -> None:
+        self._opened_at: float | None = None
+
+    def open_enrolment(self, now: float | None = None) -> None:
+        self._opened_at = time.monotonic() if now is None else now
+
+    def is_open(self, now: float | None = None) -> bool:
+        if self._opened_at is None:
+            return False
+        if now is None:
+            now = time.monotonic()
+        return now - self._opened_at < ENROLMENT_SECONDS
+
 
 class Endpoint(Protocol):
     """Anywhere his voice can come out.
@@ -169,7 +202,9 @@ class WebEndpoint:
         )
 
 
-async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
+async def serve(
+    desk: RemoteDesk, guard: Guard, enrolment: Enrolment, loop
+) -> web.AppRunner:
     """Start the HTTPS server. Returns the runner so it can be stopped.
 
     Routes are registered here, one `app.router.add_*` line per route, so
@@ -213,6 +248,11 @@ async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
     welcome = web.Application()
 
     async def _welcome(request: web.Request) -> web.Response:
+        if not enrolment.is_open():
+            # A closed window looks like nothing is there — 404, not
+            # 403, which would confirm to a scanning stranger that
+            # something is listening on this port at all.
+            raise web.HTTPNotFound()
         target = f"https://{HOSTNAME}:{PORT}/#{guard.secret}"
         return web.Response(
             content_type="text/html",
@@ -234,6 +274,8 @@ async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
         )
 
     async def _ca(request: web.Request) -> web.Response:
+        if not enrolment.is_open():
+            raise web.HTTPNotFound()
         return web.Response(
             body=mobileconfig(ca),
             content_type="application/x-apple-aspen-config",
@@ -319,9 +361,11 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
 
 __all__ = [
     "CERT_DIR",
+    "ENROLMENT_SECONDS",
     "HOSTNAME",
     "PORT",
     "Endpoint",
+    "Enrolment",
     "Guard",
     "RemoteDesk",
     "WebEndpoint",

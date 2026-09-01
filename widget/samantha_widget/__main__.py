@@ -633,7 +633,7 @@ class SamanthaApp(Gtk.Application):
             on_interrupt=speaker.interrupt,
         )
 
-        from .remote import HOSTNAME, PORT, RemoteDesk, serve
+        from .remote import HOSTNAME, PORT, Enrolment, RemoteDesk, serve
         from .remote_auth import Guard, load_or_create_secret
 
         def on_remote_utterance(pcm: bytes, endpoint) -> None:
@@ -650,6 +650,10 @@ class SamanthaApp(Gtk.Application):
             machine.heard(pcm)
 
         remote_desk = RemoteDesk(on_utterance=on_remote_utterance)
+        # Closed until the QR is actually shown (below) — the welcome
+        # page it points at hands the shared secret to whoever asks,
+        # over plain HTTP, with no check of its own (remote.py).
+        enrolment = Enrolment()
 
         async def dispatch(pcm: bytes) -> None:
             # Wrapped whole: `transcriber.transcribe` can raise (a
@@ -780,20 +784,24 @@ class SamanthaApp(Gtk.Application):
             # from `do_activate` onward, which is why this cannot sit
             # beside `_SWITCHES_OFF` and the other module-level switches
             # above: nothing named `band` exists there at all.
-            # It carries the shared secret, so it must not linger: it
-            # goes away with the band's own fade (`photo.FADE_S`, 15 s)
-            # rather than staying on a screen or in a log.
+            #
+            # The QR itself is harmless — it encodes only a LAN URL, no
+            # secret — so its going away with the band's own fade
+            # (`photo.FADE_S`, 15 s) is not what protects anything.
+            # What DOES need bounding is the plain-HTTP page it points
+            # at, which hands over the shared secret to whoever asks;
+            # `enrolment.open_enrolment` starts that window at the exact
+            # moment the QR becomes something a phone could scan, not at
+            # `serve()`'s startup, so the window is not open for however
+            # long the widget has simply been running.
             from pathlib import Path
 
-            GLib.timeout_add_seconds(
-                3,
-                lambda: (
-                    band.show_photo(
-                        str(Path.home() / ".samantha" / "enrol-qr.png"), "alta"
-                    ),
-                    False,
-                )[1],
-            )
+            def _show_qr() -> bool:
+                enrolment.open_enrolment(time.monotonic())
+                band.show_photo(str(Path.home() / ".samantha" / "enrol-qr.png"), "alta")
+                return False  # GLib.SOURCE_REMOVE
+
+            GLib.timeout_add_seconds(3, _show_qr)
 
         def on_live_open(
             camera: str, epoch: int, extradata: bytes, w: int, h: int
@@ -1069,7 +1077,7 @@ class SamanthaApp(Gtk.Application):
             speaker.start()
             secret = load_or_create_secret()
             guard = Guard(secret, f"https://{HOSTNAME}:{PORT}")
-            self._spawn(serve(remote_desk, guard, loop))
+            self._spawn(serve(remote_desk, guard, enrolment, loop))
 
         def _drive_speaking_level() -> bool:
             """Make the line follow her own voice while she talks.

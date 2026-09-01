@@ -2,50 +2,36 @@
 
 One QR, pointing at a welcome page served over PLAIN HTTP — deliberately,
 because of a chicken-and-egg: HTTPS cannot be used before the certificate
-it depends on is trusted. That page carries nothing sensitive; the link
-with the secret in it is behind the second button, over HTTPS.
+it depends on is trusted. The QR itself is harmless — it encodes only a
+LAN URL. The page behind it is not: it embeds the shared secret,
+in cleartext, in its second link's href. That is exactly why serving
+the page at all is bounded to a short window rather than the life of
+the process — see `remote.Enrolment` and `remote.ENROLMENT_SECONDS`.
 """
 
 from __future__ import annotations
 
+import os
 import plistlib
 import uuid
 from pathlib import Path
 
 
 def write_qr(url: str, path: Path) -> Path:
-    """A PNG of `url`. Pillow is never imported — see pyproject.
+    """A PNG of `url`, via pypng (`qrcode[png]`'s `PyPNGImage`).
 
-    That claim does not hold for free. `qrcode`'s own
-    `image/styles/moduledrawers/__init__.py` — pulled in by ANY submodule
-    of `qrcode.image.*`, `PyPNGImage` included — does `try: from .pil
-    import ... except ImportError: pass`. The `[png]` extra only means
-    Pillow is not a *declared* dependency; if it happens to already be
-    importable — as it is on this box, via the apt package `python3-pil`,
-    for reasons that have nothing to do with us — that bare `try`
-    succeeds and Pillow loads anyway. Measured 2026-09-01: a plain
-    `import qrcode` here pulls in `PIL.Image` and friends whether we
-    asked for them or not.
-    `sys.modules["PIL"] = None` is the standard way to make an import
-    fail without touching what is actually installed (Python treats a
-    `None` entry as "already looked for, not there"); it is only in
-    place for the one import this function needs, and it is undone
-    before returning either way.
+    Written 0600 for consistency with `certs.py` and `remote_auth.py` —
+    not because this file holds anything sensitive (it does not: `url`
+    is a LAN address, never the secret), but a QR that is world-readable
+    while its neighbours are locked down invites the wrong guess about
+    which of the two matters.
     """
-    import sys
-
-    blocked = "PIL" not in sys.modules
-    if blocked:
-        sys.modules["PIL"] = None  # type: ignore[assignment]
-    try:
-        import qrcode
-        from qrcode.image.pure import PyPNGImage
-    finally:
-        if blocked:
-            del sys.modules["PIL"]
+    import qrcode
+    from qrcode.image.pure import PyPNGImage
 
     path.parent.mkdir(parents=True, exist_ok=True)
     qrcode.make(url, image_factory=PyPNGImage, box_size=8, border=2).save(str(path))
+    os.chmod(path, 0o600)
     return path
 
 

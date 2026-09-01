@@ -6,7 +6,13 @@ ages badly — he would answer something asked a minute ago — so a press
 during a running turn is refused and the page says so.
 """
 
-from samantha_widget.remote import ANSWERING_SECONDS, HELD_TURN_SECONDS, RemoteDesk
+from samantha_widget.remote import (
+    ANSWERING_SECONDS,
+    ENROLMENT_SECONDS,
+    HELD_TURN_SECONDS,
+    Enrolment,
+    RemoteDesk,
+)
 
 
 class FakeEndpoint:
@@ -112,6 +118,32 @@ def test_finishing_ends_the_deadline_so_a_long_reply_is_not_stolen() -> None:
     assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is False
     assert desk.current is first
     assert second.refusals == 1
+
+
+def test_enrolment_is_closed_until_opened() -> None:
+    """Before anything opens it — at startup — the welcome page and /ca
+    must answer as if nothing were listening."""
+    enrolment = Enrolment()
+
+    assert enrolment.is_open(now=0.0) is False
+
+
+def test_enrolment_opens_when_asked() -> None:
+    enrolment = Enrolment()
+    enrolment.open_enrolment(now=0.0)
+
+    assert enrolment.is_open(now=1.0) is True
+
+
+def test_enrolment_closes_again_on_its_own() -> None:
+    """No sleeping: the clock is passed in, the same way RemoteDesk's
+    ceilings are tested. The secret sits in that page's HTML in
+    cleartext for exactly ENROLMENT_SECONDS, not for as long as the
+    widget runs."""
+    enrolment = Enrolment()
+    enrolment.open_enrolment(now=0.0)
+
+    assert enrolment.is_open(now=ENROLMENT_SECONDS + 1) is False
 
 
 def test_a_reply_that_never_settles_can_still_be_stolen_eventually() -> None:
