@@ -159,7 +159,7 @@ def test_nothing_heard_yet_is_not_a_person() -> None:
     assert build_is_a_person(Nothing(), EchoFilter())(1.0) is False
 
 
-def test_room_only_resets_on_the_busy_to_quiet_transition() -> None:
+def test_room_resets_once_per_reply_never_mid_reply() -> None:
     """Fix round 1, 2026-09-01: the first draft used `elif` on the
     busy-branch guard (`player.busy and not detector.speaking`), which is
     False for every frame of an interruption in progress — `player.busy`
@@ -168,19 +168,49 @@ def test_room_only_resets_on_the_busy_to_quiet_transition() -> None:
     interruption: ~31 KaldiRecognizer objects a second at the exact
     moment somebody is talking over him.
 
-    `_room_transitioned_to_quiet` is tested directly on the two booleans
-    involved, with no player, no detector and no audio.
+    Fix round 2's CRITICAL bug lived one level up, in the CALLER rather
+    than in this decision: the assignment feeding the next `was_busy`
+    back into `_busy["was"]` sat below the busy branch, which returns
+    early on EVERY frame of an ordinary, uninterrupted reply (the quiet
+    frame and the his-own-echo frame both return before reaching it) —
+    so across a whole reply `_busy["was"]` was never actually updated and
+    the reset never fired at all. `.room` then grew without bound past
+    `EchoFilter`'s 45 s memory, which is worse than the bug this task
+    exists to fix: he starts interrupting himself with nobody in the
+    room.
+
+    A truth table over two booleans (round 1's test) cannot catch that —
+    it never exercises the CALLER's wiring, only the decision in
+    isolation. This drives a whole SEQUENCE of frames through
+    `_room_bookkeeping`, exactly as the callback does — one call per
+    frame, always applying `next_was_busy` — and counts every reset.
     """
-    from samantha_widget.__main__ import _room_transitioned_to_quiet
+    from samantha_widget.__main__ import _room_bookkeeping
 
-    # An interruption in progress: busy stays True frame after frame.
-    # Must never fire while that holds, no matter how many frames pass.
-    assert _room_transitioned_to_quiet(True, True) is False
-    assert _room_transitioned_to_quiet(True, True) is False
-    assert _room_transitioned_to_quiet(True, True) is False
+    # quiet, quiet — nothing has happened yet, nothing to reset
+    # busy, busy, busy — one whole uninterrupted reply: never resets
+    #     mid-reply, which is the frame-by-frame version of the CRITICAL
+    #     bug (every one of these used to leave `was_busy` at False)
+    # quiet, quiet — resets exactly once, on the frame busy ends, and
+    #     not again on the quiet frame after it
+    # busy — a second reply starts fresh: no leftover reset
+    # quiet — resets again, once, when that one ends too
+    frames = [False, False, True, True, True, False, False, True, False]
 
-    # He actually stops: fires exactly once, on that one frame.
-    assert _room_transitioned_to_quiet(False, True) is True
+    was_busy = False
+    resets = []
+    for busy in frames:
+        should_reset, was_busy = _room_bookkeeping(was_busy, busy)
+        resets.append(should_reset)
 
-    # Already quiet: does not fire again on the next quiet frame.
-    assert _room_transitioned_to_quiet(False, False) is False
+    assert resets == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        False,
+        False,
+        True,
+    ]

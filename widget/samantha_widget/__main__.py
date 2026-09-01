@@ -268,22 +268,35 @@ def build_is_a_person(stream, echo):
     return is_a_person
 
 
-def _room_transitioned_to_quiet(busy: bool, was_busy: bool) -> bool:
-    """True exactly on the frame where `player.busy` goes True → False.
+def _room_bookkeeping(was_busy: bool, busy: bool) -> tuple[bool, bool]:
+    """One frame's worth of `.room`'s busy/quiet housekeeping.
 
-    Extracted out of the callback so the firing discipline can be tested
-    without a player, a detector or real audio. It matters because
-    `.room.reset()` builds a new `KaldiRecognizer`: the first draft of
-    this used `elif` on the busy-branch condition above, which is False
-    for every frame where `player.busy` is True and `detector.speaking`
-    is also True — exactly what an interruption in progress looks like,
-    since playback does not stop the instant he is cut off. That built
-    ~31 recognizers a second for as long as the interruption lasted, at
-    the single most latency-sensitive moment in the feature. Testing
-    `busy` directly, rather than relying on which branch was NOT taken,
-    is what fixes it.
+    Returns `(should_reset, next_was_busy)`. Extracted as the SINGLE
+    decision the callback makes about `.room`'s lifecycle, so a whole
+    SEQUENCE of frames can be driven through it in a test — with no
+    player, no detector, no audio — and the property that matters
+    checked directly: reset fires once on the frame busy genuinely ends,
+    never mid-reply, never mid-interruption.
+
+    Round 1 fixed firing on every frame of an interruption in progress
+    (`player.busy` and `detector.speaking` both True): this function
+    depends on neither the branch structure above it nor
+    `detector.speaking`, only on `busy` going True → False, so that
+    class of bug cannot recur here.
+
+    Round 2's CRITICAL bug lived one level up, in the CALLER: the
+    assignment feeding `next_was_busy` back into `_busy["was"]` sat below
+    a branch that returns early on every frame of an ordinary,
+    uninterrupted reply (the quiet frame and the his-own-echo frame both
+    return before reaching it) — so across a whole reply `_busy["was"]`
+    was never actually updated, the reset never fired, and `.room` grew
+    without bound until `EchoFilter`'s 45 s window no longer recognised
+    its own contents as his — the exact regression this task exists to
+    prevent, arriving from the fix meant to guard against it. The
+    contract this function makes explicit — call it once, unconditionally,
+    before anything can return — is what closes that.
     """
-    return was_busy and not busy
+    return (was_busy and not busy, busy)
 
 
 class SamanthaApp(Gtk.Application):
@@ -733,12 +746,15 @@ class SamanthaApp(Gtk.Application):
                 # sentence does not resume when it comes back on.
                 if detector.speaking:
                     detector.reset()
-                    if partials is not None:
-                        # The detector forgot the half-heard sentence; the
-                        # transcriber has to forget it too, or its words
-                        # survive into the next turn and are judged as if
-                        # somebody had just said them.
-                        partials.turn.reset()
+                if partials is not None:
+                    # `.turn` is fed preroll before the detector ever
+                    # calls anything speech (see the comment where it is
+                    # pushed, below) — NOT nested under
+                    # `detector.speaking` for that reason: the mic can go
+                    # off mid-preroll, before the detector has said
+                    # anything, and those words must not survive into the
+                    # next turn either.
+                    partials.turn.reset()
                 return
             if _MIC_GATE and player.busy and not detector.speaking:
                 # No echo cancellation on this box: he is talking and
@@ -766,6 +782,22 @@ class SamanthaApp(Gtk.Application):
                         flush=True,
                     )
 
+            # `.room`'s busy/quiet bookkeeping — computed and APPLIED
+            # before the busy branch below, which returns early on every
+            # frame of an ordinary, uninterrupted reply. Doing this after
+            # that branch (round 1's placement) meant `_busy["was"]` was
+            # only ever updated on frames that fell through it — which for
+            # a whole uninterrupted reply is none of them — so the reset
+            # never fired and `.room` grew without bound. See
+            # `_room_bookkeeping`'s docstring for the full history.
+            _should_reset_room, _busy["was"] = _room_bookkeeping(
+                _busy["was"], player.busy
+            )
+            if partials is not None and _should_reset_room:
+                # He just stopped. Whatever `.room` collected was his; the
+                # next answer starts from nothing.
+                partials.room.reset()
+
             if player.busy and not detector.speaking:
                 # He is talking and nobody has cut in yet. Feed `.room`
                 # FIRST: every path below can return, and a stream that
@@ -788,18 +820,6 @@ class SamanthaApp(Gtk.Application):
                     # him mid-sentence — reported once as "ahora se
                     # autointerrumpe".
                     return
-            if partials is not None and _room_transitioned_to_quiet(
-                player.busy, _busy["was"]
-            ):
-                # He just stopped. Whatever `.room` collected was his; the
-                # next answer starts from nothing. Tested on `player.busy`
-                # directly, not on which branch above was skipped — an
-                # `elif` here fires on every frame of an interruption in
-                # progress (busy AND detector.speaking, both True), which
-                # built one KaldiRecognizer per frame instead of one per
-                # reply. See `_room_transitioned_to_quiet`'s docstring.
-                partials.room.reset()
-            _busy["was"] = player.busy
 
             if partials is not None:
                 # The same frames the detector is holding, so the rule is
@@ -807,11 +827,14 @@ class SamanthaApp(Gtk.Application):
                 # detector calls it speech: the preroll matters here for
                 # the same reason it matters for the wake word (§2.8).
                 #
-                # Only reached when he is NOT speaking — the barge-in
-                # branch above returns early while `player.busy`, and
-                # that is deliberate: his own echo must never enter the
-                # sentence the endpointing rule is judging. What listens
-                # over him is `.room`, fed in Task 5.
+                # Reached while he is NOT speaking, AND on the frame that
+                # interrupts him: the busy branch above returns early only
+                # for silence or his own echo (`is_a_person` false). A
+                # frame judged to be a person falls through it with
+                # `player.busy` still True and lands here, so `.turn`
+                # starts hearing the interruption on the same frame
+                # `.room` judged it — it does not wait for `player.busy`
+                # to clear.
                 partials.turn.push(frame)
 
             was_speaking = detector.speaking
