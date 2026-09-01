@@ -6,13 +6,17 @@ ages badly — he would answer something asked a minute ago — so a press
 during a running turn is refused and the page says so.
 """
 
+from aiohttp.test_utils import TestClient, TestServer
+
 from samantha_widget.remote import (
     ANSWERING_SECONDS,
     ENROLMENT_SECONDS,
     HELD_TURN_SECONDS,
     Enrolment,
     RemoteDesk,
+    build_welcome_app,
 )
+from samantha_widget.remote_auth import Guard
 
 
 class FakeEndpoint:
@@ -121,8 +125,8 @@ def test_finishing_ends_the_deadline_so_a_long_reply_is_not_stolen() -> None:
 
 
 def test_enrolment_is_closed_until_opened() -> None:
-    """Before anything opens it — at startup — the welcome page and /ca
-    must answer as if nothing were listening."""
+    """Before anything opens it — at startup — the welcome page and
+    /jarvis.mobileconfig must answer as if nothing were listening."""
     enrolment = Enrolment()
 
     assert enrolment.is_open(now=0.0) is False
@@ -144,6 +148,51 @@ def test_enrolment_closes_again_on_its_own() -> None:
     enrolment.open_enrolment(now=0.0)
 
     assert enrolment.is_open(now=ENROLMENT_SECONDS + 1) is False
+
+
+async def test_the_welcome_routes_404_while_the_window_is_closed(
+    tmp_path,
+) -> None:
+    """A closed window has to look like nothing is there — 404, not
+    403, which would confirm to a scanning stranger that something is
+    listening on this port at all. Route names per the live acceptance
+    fix of 2026-09-01: /jarvis.mobileconfig, not /ca — iOS needs the
+    extension in the path to offer to install rather than download.
+
+    `ca` is never read on this path — the 404 fires before the handler
+    would touch it — so a path that does not exist is fine here."""
+    guard = Guard("secret", "https://brain.local:8443")
+    enrolment = Enrolment()  # never opened
+    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+
+    async with TestClient(TestServer(app)) as client:
+        assert (await client.get("/")).status == 404
+        assert (await client.get("/jarvis.mobileconfig")).status == 404
+
+
+async def test_the_profile_route_advertises_a_mobileconfig_filename(
+    tmp_path,
+) -> None:
+    """Verified live 2026-09-01: with content-type alone and no
+    Content-Disposition, and a route with no file extension, Safari
+    downloaded the profile as a file instead of offering to install it
+    as a configuration profile — "Perfil descargado" never appeared in
+    Settings. Both signals have to be present, so this checks both."""
+    ca = tmp_path / "ca.pem"
+    ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
+    guard = Guard("secret", "https://brain.local:8443")
+    enrolment = Enrolment()
+    enrolment.open_enrolment()  # real clock: the route checks it too
+    app = build_welcome_app(guard, enrolment, ca)
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/jarvis.mobileconfig")
+
+        assert response.status == 200
+        assert (
+            response.headers["Content-Disposition"]
+            == 'inline; filename="jarvis.mobileconfig"'
+        )
 
 
 def test_a_reply_that_never_settles_can_still_be_stolen_eventually() -> None:

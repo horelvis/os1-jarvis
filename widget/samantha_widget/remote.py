@@ -60,7 +60,7 @@ ENROLMENT_SECONDS = 300.0
 
 
 class Enrolment:
-    """Whether the plain-HTTP welcome page (and `/ca`) may answer.
+    """Whether the plain-HTTP welcome page (and `/jarvis.mobileconfig`) may answer.
 
     Closed until something opens it — showing the QR on the strip,
     today (`SAMANTHA_WIDGET_SHOW_QR=1`) — and closed again on its own
@@ -202,6 +202,69 @@ class WebEndpoint:
         )
 
 
+def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Application:
+    """The plain-HTTP side: a welcome page and the CA profile it links to.
+
+    Pulled out of `serve()` so it can be built and hit directly in a
+    test — a real `aiohttp.test_utils.TestServer` around this app, no
+    socket on the LAN, no certificate, no `serve()` at all — rather than
+    only through the whole of `serve()`'s TCP binding.
+    """
+    welcome = web.Application()
+
+    async def _welcome(request: web.Request) -> web.Response:
+        if not enrolment.is_open():
+            # A closed window looks like nothing is there — 404, not
+            # 403, which would confirm to a scanning stranger that
+            # something is listening on this port at all.
+            raise web.HTTPNotFound()
+        target = f"https://{HOSTNAME}:{PORT}/#{guard.secret}"
+        return web.Response(
+            content_type="text/html",
+            text=(
+                "<!doctype html><meta charset=utf-8>"
+                "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                "<title>JARVIS</title>"
+                "<style>body{font-family:-apple-system,sans-serif;margin:2rem;"
+                "background:#141210;color:#d1684e}a{display:block;margin:1.5rem 0;"
+                "padding:1rem;border:1px solid #d1684e;border-radius:.5rem;"
+                "color:inherit;text-decoration:none;text-align:center}</style>"
+                "<h1>JARVIS en casa</h1>"
+                "<a href='/jarvis.mobileconfig'>1 · Instalar el certificado</a>"
+                "<p>Después: Ajustes → General → Información → "
+                "Ajustes de confianza de certificados → activar "
+                "<b>JARVIS Home CA</b>.</p>"
+                f"<a href='{target}'>2 · Abrir JARVIS</a>"
+            ),
+        )
+
+    async def _ca(request: web.Request) -> web.Response:
+        if not enrolment.is_open():
+            raise web.HTTPNotFound()
+        return web.Response(
+            body=mobileconfig(ca),
+            content_type="application/x-apple-aspen-config",
+            # iOS decides "this is a configuration profile, offer to
+            # install it" from the type AND the filename together —
+            # the type alone is not enough. Measured live 2026-09-01:
+            # served at /ca with no Content-Disposition, Safari fell
+            # through to a plain download and "Perfil descargado" never
+            # appeared in Settings. The route itself has to end in
+            # `.mobileconfig` too (see the route below) — the header
+            # alone was not enough either. `inline`, never `attachment`:
+            # attachment is an explicit instruction to download, the
+            # exact behaviour this fixes.
+            headers={"Content-Disposition": 'inline; filename="jarvis.mobileconfig"'},
+        )
+
+    welcome.router.add_get("/", _welcome)
+    # Not `/ca` — a route with no file extension, however the header
+    # names it, still reads to iOS as "a download", not "a profile to
+    # install". Do not "tidy" this back to `/ca`.
+    welcome.router.add_get("/jarvis.mobileconfig", _ca)
+    return welcome
+
+
 async def serve(
     desk: RemoteDesk, guard: Guard, enrolment: Enrolment, loop
 ) -> web.AppRunner:
@@ -245,44 +308,7 @@ async def serve(
 
     # Plain HTTP, and only these two routes. The certificate cannot be
     # fetched over a connection that requires trusting it.
-    welcome = web.Application()
-
-    async def _welcome(request: web.Request) -> web.Response:
-        if not enrolment.is_open():
-            # A closed window looks like nothing is there — 404, not
-            # 403, which would confirm to a scanning stranger that
-            # something is listening on this port at all.
-            raise web.HTTPNotFound()
-        target = f"https://{HOSTNAME}:{PORT}/#{guard.secret}"
-        return web.Response(
-            content_type="text/html",
-            text=(
-                "<!doctype html><meta charset=utf-8>"
-                "<meta name=viewport content='width=device-width,initial-scale=1'>"
-                "<title>JARVIS</title>"
-                "<style>body{font-family:-apple-system,sans-serif;margin:2rem;"
-                "background:#141210;color:#d1684e}a{display:block;margin:1.5rem 0;"
-                "padding:1rem;border:1px solid #d1684e;border-radius:.5rem;"
-                "color:inherit;text-decoration:none;text-align:center}</style>"
-                "<h1>JARVIS en casa</h1>"
-                "<a href='/ca'>1 · Instalar el certificado</a>"
-                "<p>Después: Ajustes → General → Información → "
-                "Ajustes de confianza de certificados → activar "
-                "<b>JARVIS Home CA</b>.</p>"
-                f"<a href='{target}'>2 · Abrir JARVIS</a>"
-            ),
-        )
-
-    async def _ca(request: web.Request) -> web.Response:
-        if not enrolment.is_open():
-            raise web.HTTPNotFound()
-        return web.Response(
-            body=mobileconfig(ca),
-            content_type="application/x-apple-aspen-config",
-        )
-
-    welcome.router.add_get("/", _welcome)
-    welcome.router.add_get("/ca", _ca)
+    welcome = build_welcome_app(guard, enrolment, ca)
     welcome_runner = web.AppRunner(welcome)
     await welcome_runner.setup()
     await web.TCPSite(welcome_runner, lan_address(), PORT + 1).start()
@@ -369,6 +395,7 @@ __all__ = [
     "Guard",
     "RemoteDesk",
     "WebEndpoint",
+    "build_welcome_app",
     "load_or_create_secret",
     "serve",
 ]

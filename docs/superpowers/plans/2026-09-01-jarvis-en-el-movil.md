@@ -1277,7 +1277,7 @@ The step the user actually has to do, made into a gesture: he shows you the code
 
 **Files:**
 - Create: `widget/samantha_widget/enrol.py`
-- Modify: `widget/samantha_widget/remote.py` (the welcome page over plain HTTP, and `/ca`)
+- Modify: `widget/samantha_widget/remote.py` (the welcome page over plain HTTP, and `/jarvis.mobileconfig` — moved off `/ca` in the round-3 live fix: iOS needs the file extension in the path, not just the MIME type, to offer install rather than download)
 - Modify: `widget/pyproject.toml` (`qrcode[png]`)
 - Test: `widget/tests/test_enrol.py`
 
@@ -1446,7 +1446,7 @@ inside `serve()`, after the HTTPS one starts:
                 "padding:1rem;border:1px solid #d1684e;border-radius:.5rem;"
                 "color:inherit;text-decoration:none;text-align:center}</style>"
                 "<h1>JARVIS en casa</h1>"
-                "<a href='/ca'>1 · Instalar el certificado</a>"
+                "<a href='/jarvis.mobileconfig'>1 · Instalar el certificado</a>"
                 "<p>Después: Ajustes → General → Información → "
                 "Ajustes de confianza de certificados → activar "
                 "<b>JARVIS Home CA</b>.</p>"
@@ -1461,7 +1461,7 @@ inside `serve()`, after the HTTPS one starts:
         )
 
     welcome.router.add_get("/", _welcome)
-    welcome.router.add_get("/ca", _ca)
+    welcome.router.add_get("/jarvis.mobileconfig", _ca)
     welcome_runner = web.AppRunner(welcome)
     await welcome_runner.setup()
     await web.TCPSite(welcome_runner, lan_address(), PORT + 1).start()
