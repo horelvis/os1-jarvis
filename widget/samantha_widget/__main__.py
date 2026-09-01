@@ -74,30 +74,28 @@ _HOTWORD_MODEL = os.environ.get("SAMANTHA_WIDGET_HOTWORD", "")
 # Diagnostic: log what the microphone hears WHILE he is speaking.
 _TRACE_MIC = os.environ.get("SAMANTHA_WIDGET_TRACE_MIC") == "1"
 
-# How loud the room has to be, WHILE he is speaking, before a frame is
-# allowed to start a turn. This is the partial version of
-# SAMANTHA_WIDGET_MIC_GATE: that dropped every frame and made him
-# impossible to interrupt; this drops only the quiet ones, so his own
-# voice coming back through the room cannot start a turn while somebody
-# talking near the microphone still can.
+# How loud the room has to be, WHILE he is speaking, before a frame may
+# start a turn.
 #
-# Measured 2026-08-26, and the calibration is as much physical as it is
-# numeric. The user's voice sits at RMS 0.054-0.088 in the dumped
-# utterances. His own echo measured:
+# Until 2026-09-01 this was 0.05 and was asked to separate his own echo
+# from a person, which the measurements below show it cannot do:
 #
-#   speaker beside the microphone, volume 0.54 → 0.178  (LOUDER than
-#       the person in the room: no threshold can separate that)
-#   the same, volume 0.25                      → 0.011-0.026
-#   speakers moved away from it, volume 0.50   → 0.027-0.035
+#   the user's voice                            0.054-0.088
+#   his echo, speakers moved away, volume 0.50  0.027-0.035
+#   his echo, speakers beside it, volume 0.54   0.178  ← louder than a
+#       person, and no threshold survives that
 #
-# Moving them apart is what made this workable at a normal volume; the
-# user did that. 0.05 sits above the echo and below a person talking,
-# with the margin the 0.035 of the first attempt did not have.
+# It is now a SILENCE floor and nothing more — separating sound from no
+# sound, which any scalar can do. Whether a sound is him or somebody
+# else is decided on words, in `build_is_a_person`.
 try:
-    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.05"))
+    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.01"))
 except ValueError:
-    _BARGE_RMS = 0.05
+    _BARGE_RMS = 0.01
 _trace = {"n": 0}
+# Whether he was speaking on the previous frame, so `.room` can be reset
+# once when he stops rather than thirty-one times a second.
+_busy = {"was": False}
 try:
     _HOTWORD_SENSITIVITY = float(
         os.environ.get("SAMANTHA_WIDGET_HOTWORD_SENSITIVITY", "")
@@ -227,6 +225,47 @@ def build_may_close(stream, rule):
             return False
 
     return may_close
+
+
+def build_is_a_person(stream, echo):
+    """While HE is talking: is this sound somebody else, or his own echo?
+
+    `stream` is `VoskPartials.room` — the one fed ONLY while he speaks —
+    or None when Vosk did not load.
+
+    Before 2026-09-01 this was a loudness threshold, and it could not
+    work. The user's voice measures RMS 0.054-0.088; his own echo with
+    the speakers beside the microphone measures 0.178 — LOUDER than the
+    person — so no threshold separates them, and with the speakers moved
+    away a person cleared the gate by 0.004. Speaking normally instead of
+    loudly was enough to stop existing, which is exactly what was
+    reported: "no se calla, sigue hablando".
+
+    Words settle it where volume cannot, using the unfair advantage
+    `echo.py` already has: the widget knows what it just said. Anything
+    left after his own lines are cut out is somebody else.
+
+    Cost, stated: ~300 ms of speech must reach Vosk before there are
+    words to judge, against the 32 ms of a single frame. He talks a
+    little longer over an interruption than the old gate did in the
+    cases where the old gate worked at all.
+    """
+
+    def is_a_person(now: float) -> bool:
+        if stream is None:
+            # No Vosk: back to the old world, where the RMS floor is the
+            # only gate. Erring towards interrupting, because refusing to
+            # is the bug this replaces.
+            return True
+        try:
+            heard = stream.partial()
+        except Exception:
+            return True
+        if not heard.strip():
+            return False
+        return bool(echo.clean(heard, now).strip())
+
+    return is_a_person
 
 
 class SamanthaApp(Gtk.Application):
@@ -651,6 +690,9 @@ class SamanthaApp(Gtk.Application):
             SileroDetector(),
             may_close=build_may_close(partials.turn if partials else None, rule),
         )
+        # Decided on words, not loudness — see `build_is_a_person`'s own
+        # docstring for why a scalar could never do this job.
+        is_a_person = build_is_a_person(partials.room if partials else None, echo)
         # One analyser per source, because it holds the sliding window
         # and the two rates differ: 16 kHz here against the player's 24.
         mic_spectrum = SpectrumAnalyser(INPUT_RATE)
@@ -673,6 +715,12 @@ class SamanthaApp(Gtk.Application):
                 # sentence does not resume when it comes back on.
                 if detector.speaking:
                     detector.reset()
+                    if partials is not None:
+                        # The detector forgot the half-heard sentence; the
+                        # transcriber has to forget it too, or its words
+                        # survive into the next turn and are judged as if
+                        # somebody had just said them.
+                        partials.turn.reset()
                 return
             if _MIC_GATE and player.busy and not detector.speaking:
                 # No echo cancellation on this box: he is talking and
@@ -700,17 +748,35 @@ class SamanthaApp(Gtk.Application):
                         flush=True,
                     )
 
-            if _BARGE_RMS > 0 and player.busy and not detector.speaking:
+            if player.busy and not detector.speaking:
+                # He is talking and nobody has cut in yet. Feed `.room`
+                # FIRST: every path below can return, and a stream that
+                # is only fed after the gates never hears the sentence
+                # the gates are asking about.
+                if partials is not None:
+                    partials.room.push(frame)
+
                 import numpy as _np
 
                 _s = _np.frombuffer(frame, dtype=_np.int16).astype(_np.float32)
-                if float(_np.sqrt(_np.mean((_s / 32768.0) ** 2))) < _BARGE_RMS:
-                    # Too quiet to be somebody talking over him: his own
-                    # voice, back through the room. Dropped rather than
-                    # fed to the detector, which would otherwise start a
-                    # turn and interrupt him mid-sentence — measured,
-                    # and reported as "ahora se autointerrumpe".
+                _rms = float(_np.sqrt(_np.mean((_s / 32768.0) ** 2)))
+                if _BARGE_RMS > 0 and _rms < _BARGE_RMS:
+                    # Silence. Not him, not anybody.
                     return
+                if not is_a_person(time.monotonic()):
+                    # Loud enough, but the words are his own coming back
+                    # through the room. Dropped rather than fed to the
+                    # detector, which would start a turn and interrupt
+                    # him mid-sentence — reported once as "ahora se
+                    # autointerrumpe".
+                    return
+            elif partials is not None and _busy["was"]:
+                # He just stopped. Whatever `.room` collected was his; the
+                # next answer starts from nothing. Guarded by the flag
+                # because reset() constructs a recognizer and this branch
+                # is reached on every quiet frame.
+                partials.room.reset()
+            _busy["was"] = player.busy
 
             if partials is not None:
                 # The same frames the detector is holding, so the rule is

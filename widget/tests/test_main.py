@@ -96,3 +96,64 @@ def test_a_broken_partials_object_never_closes_a_turn() -> None:
             raise RuntimeError("boom")
 
     assert build_may_close(Exploding(), CompletionRule())() is False
+
+
+def test_his_own_words_coming_back_are_not_an_interruption() -> None:
+    """The measurement this replaces, from CLAUDE.md §2.8:
+
+        the user's voice          RMS 0.054-0.088
+        his echo, speakers away   RMS 0.027-0.035
+        his echo, speakers beside RMS 0.178   ← louder than the person
+
+    A single scalar cannot separate the last row from the first, and the
+    file said so in its own comment. The widget knows what it just said,
+    so this is decided on words instead: `EchoFilter` already returns ""
+    when everything it was handed was his.
+    """
+    from samantha_widget.__main__ import build_is_a_person
+    from samantha_widget.echo import EchoFilter
+
+    echo = EchoFilter()
+    echo.spoke("Buenas tardes, señor. Le cuento algo un poco más largo.", 100.0)
+
+    class HisEcho:
+        def partial(self) -> str:
+            return "buenas tardes senor le cuento algo un poco mas largo"
+
+    assert build_is_a_person(HisEcho(), echo)(101.0) is False
+
+
+def test_somebody_talking_over_him_is_an_interruption() -> None:
+    from samantha_widget.__main__ import build_is_a_person
+    from samantha_widget.echo import EchoFilter
+
+    echo = EchoFilter()
+    echo.spoke("Buenas tardes, señor. Le cuento algo un poco más largo.", 100.0)
+
+    class APerson:
+        def partial(self) -> str:
+            return "para jarvis no me interesa eso ahora mismo"
+
+    assert build_is_a_person(APerson(), echo)(101.0) is True
+
+
+def test_with_no_partials_everything_is_a_person() -> None:
+    """No Vosk means falling back to the old world, where the RMS floor
+    is the only gate. Refusing to interrupt would be worse than
+    interrupting too easily: it is the bug being fixed."""
+    from samantha_widget.__main__ import build_is_a_person
+    from samantha_widget.echo import EchoFilter
+
+    assert build_is_a_person(None, EchoFilter())(1.0) is True
+
+
+def test_nothing_heard_yet_is_not_a_person() -> None:
+    """Vosk has no words yet. Not an interruption, and not an error."""
+    from samantha_widget.__main__ import build_is_a_person
+    from samantha_widget.echo import EchoFilter
+
+    class Nothing:
+        def partial(self) -> str:
+            return ""
+
+    assert build_is_a_person(Nothing(), EchoFilter())(1.0) is False
