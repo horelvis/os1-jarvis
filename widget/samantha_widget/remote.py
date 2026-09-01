@@ -15,6 +15,7 @@ import json
 import os
 import ssl
 import sys
+import time
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -27,6 +28,12 @@ from .remote_auth import Guard, load_or_create_secret
 PORT = int(os.getenv("SAMANTHA_WIDGET_REMOTE_PORT", "8443"))
 HOSTNAME = os.getenv("SAMANTHA_WIDGET_REMOTE_NAME", "brain.local")
 CERT_DIR = Path.home() / ".samantha" / "certs"
+
+# A held turn expires: a phone that presses and never releases — a
+# vanished network, an app killed mid-utterance — must not lock out
+# every other phone in the house forever. 30 s is MAX_UTTERANCE_BYTES'
+# own ceiling (remote_audio.py); this is that plus slack.
+HELD_TURN_SECONDS = 35.0
 
 
 class Endpoint(Protocol):
@@ -55,17 +62,27 @@ class RemoteDesk:
     def __init__(self, on_utterance: Callable[[bytes, Endpoint], None]) -> None:
         self._on_utterance = on_utterance
         self.current: Endpoint | None = None
+        self._claimed_at: float = 0.0
 
     @property
     def busy(self) -> bool:
         return self.current is not None
 
-    def claim(self, endpoint: Endpoint) -> bool:
-        """True if this endpoint now holds the turn."""
+    def claim(self, endpoint: Endpoint, now: float | None = None) -> bool:
+        """True if this endpoint now holds the turn.
+
+        `now` is a monotonic clock reading, injectable for tests. A
+        turn held longer than `HELD_TURN_SECONDS` is stolen rather than
+        defended — its holder cannot possibly still be mid-utterance,
+        since that is longer than an utterance is allowed to be."""
+        if now is None:
+            now = time.monotonic()
         if self.current is not None and self.current is not endpoint:
-            endpoint.refuse()
-            return False
+            if now - self._claimed_at < HELD_TURN_SECONDS:
+                endpoint.refuse()
+                return False
         self.current = endpoint
+        self._claimed_at = now
         return True
 
     def release(self, endpoint: Endpoint | None = None) -> None:
@@ -116,7 +133,14 @@ async def serve(desk: RemoteDesk, guard: Guard, loop) -> web.AppRunner:
     ca, cert, key = ensure_certificate(CERT_DIR, HOSTNAME, lan_address())
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(str(cert), str(key))
-    runner = web.AppRunner(app)
+    # access_log=None, structurally: aiohttp's default access logger
+    # formats %r — the whole request line, which here is
+    # "GET /ws?t=<the shared secret>". It is silent today only because
+    # the root logger sits at WARNING; any dependency or debug flag
+    # raising that to INFO would put the secret in the journal,
+    # including on the 403 path. Not worth being one config change away
+    # from a leak.
+    runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     # One interface, never 0.0.0.0: this box has twelve Docker bridges,
     # and no container has any business reaching this socket.
@@ -136,26 +160,51 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
             raise web.HTTPForbidden()
         if not guard.token_ok(request.query.get("t")):
             raise web.HTTPForbidden()
-        ws = web.WebSocketResponse(heartbeat=20)
+        ws = web.WebSocketResponse(
+            heartbeat=20,
+            # permessage-deflate is aiohttp's default, and every browser
+            # offers it. CLAUDE.md §12 (2026-08-27) already paid for
+            # this exact bug on the gateway side: with deflate
+            # negotiated, aiohttp refuses the FIRST compressed data
+            # frame of a connection if a control frame reached it
+            # first, and the 20 s heartbeat ping IS that control frame
+            # for any phone idle between presses. The symptom last time
+            # was a sentence vanishing on the wire with nothing in any
+            # log. PCM barely compresses and these are LAN frames — do
+            # not re-enable this.
+            compress=False,
+        )
         await ws.prepare(request)
         endpoint = WebEndpoint(ws, request.remote or "phone", loop)
         buffer = bytearray()
         rate = 48000
-        async for message in ws:
-            if message.type == WSMsgType.TEXT:
-                frame = json.loads(message.data)
-                if frame.get("type") == "start":
-                    rate = int(frame.get("rate", 48000))
-                    buffer.clear()
-                    if not desk.claim(endpoint):
+        try:
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    try:
+                        frame = json.loads(message.data)
+                    except ValueError:
                         continue
-                elif frame.get("type") == "end" and desk.current is endpoint:
-                    desk.finish(resample_to_input(bytes(buffer), rate), endpoint)
-                    buffer.clear()
-            elif message.type == WSMsgType.BINARY:
-                if desk.current is endpoint and len(buffer) < MAX_UTTERANCE_BYTES:
-                    buffer += message.data
-        desk.release(endpoint)
+                    if frame.get("type") == "start":
+                        rate = int(frame.get("rate", 48000))
+                        buffer.clear()
+                        if not desk.claim(endpoint, time.monotonic()):
+                            continue
+                    elif frame.get("type") == "end" and desk.current is endpoint:
+                        desk.finish(resample_to_input(bytes(buffer), rate), endpoint)
+                        buffer.clear()
+                elif message.type == WSMsgType.BINARY:
+                    if desk.current is endpoint and len(buffer) < MAX_UTTERANCE_BYTES:
+                        buffer += message.data
+        finally:
+            # Whatever happened — a malformed frame past the guard
+            # above, a bad rate, resample_to_input raising on an
+            # odd-length buffer, on_utterance raising, or the socket
+            # just dying mid-utterance — the turn goes back. Without
+            # this, `desk.current` points at a dead endpoint forever
+            # and every phone in the house is told he is busy until
+            # the widget restarts.
+            desk.release(endpoint)
         return ws
 
     return handle

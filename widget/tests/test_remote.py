@@ -6,7 +6,7 @@ ages badly — he would answer something asked a minute ago — so a press
 during a running turn is refused and the page says so.
 """
 
-from samantha_widget.remote import RemoteDesk
+from samantha_widget.remote import HELD_TURN_SECONDS, RemoteDesk
 
 
 class FakeEndpoint:
@@ -73,3 +73,26 @@ def test_a_release_by_a_phone_that_does_not_hold_the_turn_is_ignored() -> None:
     desk.release(second)
 
     assert desk.current is first
+
+
+def test_a_turn_held_under_the_ceiling_cannot_be_stolen() -> None:
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    first, second = FakeEndpoint("a"), FakeEndpoint("b")
+    desk.claim(first, now=0.0)
+
+    assert desk.claim(second, now=HELD_TURN_SECONDS - 1) is False
+    assert desk.current is first
+    assert second.refusals == 1
+
+
+def test_a_turn_held_past_the_ceiling_is_stolen_not_refused() -> None:
+    """A phone that pressed and vanished — a dead app, a dropped
+    connection with no `end` frame — must not lock out the house
+    forever. No sleeping: the clock is passed in."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    first, second = FakeEndpoint("a"), FakeEndpoint("b")
+    desk.claim(first, now=0.0)
+
+    assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is True
+    assert desk.current is second
+    assert second.refusals == 0
