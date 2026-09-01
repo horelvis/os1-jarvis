@@ -62,7 +62,12 @@ class RemoteDesk:
     def __init__(self, on_utterance: Callable[[bytes, Endpoint], None]) -> None:
         self._on_utterance = on_utterance
         self.current: Endpoint | None = None
-        self._claimed_at: float = 0.0
+        # Set while — and only while — recording: the deadline exists to
+        # catch a phone that presses and never releases. `None` means
+        # either nobody holds the turn, or an utterance came in and the
+        # reply is now legitimately in progress (see `finish`), and
+        # neither of those expires.
+        self._claimed_at: float | None = None
 
     @property
     def busy(self) -> bool:
@@ -71,14 +76,22 @@ class RemoteDesk:
     def claim(self, endpoint: Endpoint, now: float | None = None) -> bool:
         """True if this endpoint now holds the turn.
 
-        `now` is a monotonic clock reading, injectable for tests. A
-        turn held longer than `HELD_TURN_SECONDS` is stolen rather than
-        defended — its holder cannot possibly still be mid-utterance,
-        since that is longer than an utterance is allowed to be."""
+        `now` is a monotonic clock reading, injectable for tests. A turn
+        still in its RECORDING phase and held longer than
+        `HELD_TURN_SECONDS` is stolen rather than defended — its holder
+        cannot possibly still be mid-utterance, since that is longer
+        than an utterance is allowed to be. A turn whose recording has
+        already finished (`_claimed_at` is `None`, set by `finish`) is
+        never stolen this way: the reply itself may legitimately take
+        minutes — he holds a terminal."""
         if now is None:
             now = time.monotonic()
         if self.current is not None and self.current is not endpoint:
-            if now - self._claimed_at < HELD_TURN_SECONDS:
+            expired = (
+                self._claimed_at is not None
+                and now - self._claimed_at >= HELD_TURN_SECONDS
+            )
+            if not expired:
                 endpoint.refuse()
                 return False
         self.current = endpoint
@@ -92,10 +105,20 @@ class RemoteDesk:
         if endpoint is not None and self.current is not endpoint:
             return
         self.current = None
+        self._claimed_at = None
 
     def finish(self, pcm: bytes, endpoint: Endpoint) -> None:
         """The button was released: hand the utterance up with the
-        endpoint that spoke, so the reply knows where to go."""
+        endpoint that spoke, so the reply knows where to go.
+
+        This also ENDS the deadline. `_claimed_at` exists to catch a
+        phone that presses and never releases; once `end` has arrived
+        that risk is gone, and what remains is the reply, which may
+        legitimately take minutes — he holds a terminal. Letting the
+        clock run here means another phone steals the turn mid-answer
+        and the one that asked is told nothing.
+        """
+        self._claimed_at = None
         self._on_utterance(pcm, endpoint)
 
 

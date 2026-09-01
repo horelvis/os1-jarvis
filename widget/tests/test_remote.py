@@ -96,3 +96,19 @@ def test_a_turn_held_past_the_ceiling_is_stolen_not_refused() -> None:
     assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is True
     assert desk.current is second
     assert second.refusals == 0
+
+
+def test_finishing_ends_the_deadline_so_a_long_reply_is_not_stolen() -> None:
+    """The deadline is for the RECORDING phase only — a phone that
+    pressed and never released. Once `end` arrived and `finish()` ran,
+    the reply may legitimately take minutes (he holds a terminal), so a
+    claim well past HELD_TURN_SECONDS after the press must still be
+    refused, not allowed to steal the turn mid-answer."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    first, second = FakeEndpoint("a"), FakeEndpoint("b")
+    desk.claim(first, now=0.0)
+    desk.finish(b"\x01\x02" * 100, first)
+
+    assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is False
+    assert desk.current is first
+    assert second.refusals == 1
