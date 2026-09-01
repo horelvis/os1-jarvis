@@ -268,6 +268,24 @@ def build_is_a_person(stream, echo):
     return is_a_person
 
 
+def _room_transitioned_to_quiet(busy: bool, was_busy: bool) -> bool:
+    """True exactly on the frame where `player.busy` goes True → False.
+
+    Extracted out of the callback so the firing discipline can be tested
+    without a player, a detector or real audio. It matters because
+    `.room.reset()` builds a new `KaldiRecognizer`: the first draft of
+    this used `elif` on the busy-branch condition above, which is False
+    for every frame where `player.busy` is True and `detector.speaking`
+    is also True — exactly what an interruption in progress looks like,
+    since playback does not stop the instant he is cut off. That built
+    ~31 recognizers a second for as long as the interruption lasted, at
+    the single most latency-sensitive moment in the feature. Testing
+    `busy` directly, rather than relying on which branch was NOT taken,
+    is what fixes it.
+    """
+    return was_busy and not busy
+
+
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.samantha.widget")
@@ -770,11 +788,16 @@ class SamanthaApp(Gtk.Application):
                     # him mid-sentence — reported once as "ahora se
                     # autointerrumpe".
                     return
-            elif partials is not None and _busy["was"]:
+            if partials is not None and _room_transitioned_to_quiet(
+                player.busy, _busy["was"]
+            ):
                 # He just stopped. Whatever `.room` collected was his; the
-                # next answer starts from nothing. Guarded by the flag
-                # because reset() constructs a recognizer and this branch
-                # is reached on every quiet frame.
+                # next answer starts from nothing. Tested on `player.busy`
+                # directly, not on which branch above was skipped — an
+                # `elif` here fires on every frame of an interruption in
+                # progress (busy AND detector.speaking, both True), which
+                # built one KaldiRecognizer per frame instead of one per
+                # reply. See `_room_transitioned_to_quiet`'s docstring.
                 partials.room.reset()
             _busy["was"] = player.busy
 

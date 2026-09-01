@@ -157,3 +157,30 @@ def test_nothing_heard_yet_is_not_a_person() -> None:
             return ""
 
     assert build_is_a_person(Nothing(), EchoFilter())(1.0) is False
+
+
+def test_room_only_resets_on_the_busy_to_quiet_transition() -> None:
+    """Fix round 1, 2026-09-01: the first draft used `elif` on the
+    busy-branch guard (`player.busy and not detector.speaking`), which is
+    False for every frame of an interruption in progress — `player.busy`
+    stays True until playback actually stops, while `detector.speaking`
+    is already True. That fired the reset every frame throughout the
+    interruption: ~31 KaldiRecognizer objects a second at the exact
+    moment somebody is talking over him.
+
+    `_room_transitioned_to_quiet` is tested directly on the two booleans
+    involved, with no player, no detector and no audio.
+    """
+    from samantha_widget.__main__ import _room_transitioned_to_quiet
+
+    # An interruption in progress: busy stays True frame after frame.
+    # Must never fire while that holds, no matter how many frames pass.
+    assert _room_transitioned_to_quiet(True, True) is False
+    assert _room_transitioned_to_quiet(True, True) is False
+    assert _room_transitioned_to_quiet(True, True) is False
+
+    # He actually stops: fires exactly once, on that one frame.
+    assert _room_transitioned_to_quiet(False, True) is True
+
+    # Already quiet: does not fire again on the next quiet frame.
+    assert _room_transitioned_to_quiet(False, False) is False
