@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
 import threading
 import time
@@ -777,7 +778,9 @@ class SamanthaApp(Gtk.Application):
             print(f"foto: {camera} -> {path}", file=sys.stderr, flush=True)
             GLib.idle_add(band.show_photo, path, camera)
 
-        if os.getenv("SAMANTHA_WIDGET_SHOW_QR") == "1":
+        from pathlib import Path
+
+        def _show_qr() -> bool:
             # The band already draws a PNG for the cameras; this is the
             # same gesture, not a new one — `remote.serve()` writes the
             # QR to this same path once at startup. `band` only exists
@@ -794,14 +797,34 @@ class SamanthaApp(Gtk.Application):
             # moment the QR becomes something a phone could scan, not at
             # `serve()`'s startup, so the window is not open for however
             # long the widget has simply been running.
-            from pathlib import Path
+            enrolment.open_enrolment(time.monotonic())
+            band.show_photo(str(Path.home() / ".samantha" / "enrol-qr.png"), "alta")
+            return False  # GLib.SOURCE_REMOVE
 
-            def _show_qr() -> bool:
-                enrolment.open_enrolment(time.monotonic())
-                band.show_photo(str(Path.home() / ".samantha" / "enrol-qr.png"), "alta")
-                return False  # GLib.SOURCE_REMOVE
-
+        if os.getenv("SAMANTHA_WIDGET_SHOW_QR") == "1":
+            # Shows the code a few seconds after startup — a shortcut for
+            # exercising the path with no phone in the room. The normal
+            # way in is the signal below, which needs no flag and no
+            # restart.
             GLib.timeout_add_seconds(3, _show_qr)
+
+        def _on_enrol_signal(*_args: object) -> None:
+            """Open enrolment for a few minutes and show the code.
+
+            A signal rather than a route: nothing on the network can send
+            one, so the window cannot be opened by the people it exists
+            to keep out. `systemctl --user kill -s USR1
+            samantha-widget.service` is the whole ritual.
+
+            `add_signal_handler`'s callback runs on whatever thread is
+            executing `loop.run_forever()` — the asyncio thread started
+            below, never the GTK one — so, like `on_photo`, this crosses
+            through `GLib.idle_add` rather than touching the band
+            directly.
+            """
+            GLib.idle_add(_show_qr)
+
+        loop.add_signal_handler(signal.SIGUSR1, _on_enrol_signal)
 
         def on_live_open(
             camera: str, epoch: int, extradata: bytes, w: int, h: int

@@ -1523,7 +1523,7 @@ Add to the table in `widget/README.md`:
 | `SAMANTHA_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
 | `SAMANTHA_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
 | `SAMANTHA_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.samantha/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
-| `SAMANTHA_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. It carries the secret, so it fades with the band rather than staying on screen. |
+| `SAMANTHA_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 ```
 
 And, in the setup section, the ritual per iPhone:
@@ -1531,8 +1531,9 @@ And, in the setup section, the ritual per iPhone:
 ```markdown
 ### Putting him on a phone
 
-1. Point the phone's camera at the QR (`SAMANTHA_WIDGET_SHOW_QR=1`, or the
-   path printed at startup).
+1. Point the phone's camera at the QR (`SAMANTHA_WIDGET_SHOW_QR=1` at start,
+   or any time with `systemctl --user kill -s USR1 samantha-widget.service`
+   — no restart needed).
 2. **1 · Instalar el certificado** → Settings shows "Profile Downloaded" →
    Install.
 3. **Settings → General → About → Certificate Trust Settings** → turn on
