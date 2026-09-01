@@ -1,5 +1,97 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-01 — No habrá cara: el avatar se descarta entero ✅
+
+Decisión del usuario, después de dos días midiéndolo: *«vamos a
+descartar el uso de un avatar hiperhumano, no ofrece nada util salvo
+bonito»* — y el descarte no se queda en el fotorrealista, alcanza a
+**cualquier** avatar. A JARVIS lo representa la onda, como desde mayo, y
+esto cierra la pregunta en vez de aplazarla. CLAUDE.md §12 lleva la
+decisión; la spec `2026-08-30-avatar-3d-design.md` queda marcada como
+superseded y se conserva por lo medido.
+
+**No hubo nada que revertir, y merece decirse.** El diseño nunca llegó
+al código: no se escribió plan, no se mezcló nada, los dos spikes fueron
+desechables a propósito y `git grep -i avatar` encuentra esa spec y
+nada más. **La regla dura que el diseño proponía romper no llegó a
+romperse**: su propia cabecera decía que §2.3 y §3 perderían el «MUST
+NOT introduce a browser / webview of any kind» *cuando esto se
+entregue, no antes*, y no se entregó. La prohibición sigue entera.
+
+**Lo que compraron los dos días, aunque la respuesta fuera que no:**
+
+- **La cara nunca fue lo caro.** Un avatar de navegador, recortado con
+  alfa sobre el escritorio, cuesta **~50 MiB de VRAM** — medido, en
+  pantalla. Lo caro es lo que lo mueve, y la comparación honesta de esos
+  motores está en la spec (`unreal-audio2lipsync`, MIT de verdad, 43,7
+  MB de pesos y repliegue a CPU, contra los 2,2 GB de NVIDIA
+  Audio2Face).
+- **Dos cosas que dábamos por hacer resultaron estar hechas.** La banda
+  compone alfa sin tocar nada — `do_snapshot` apila texturas y no pinta
+  fondo — y la región de entrada existe en `ewmh.py` por
+  `XShapeCombineRectangles`, con `XShapeCombineMask` enlazado y sin
+  usar. El §12 del 2026-08-25 la sigue describiendo como aplazada, y no
+  lo está.
+- **La vía nativa se puso precio en vez de adivinarse.** UE 5.7 se
+  compiló de fuentes en esta caja — 150 GB, ~50 min — y un MetaHuman
+  ensamblado en el Creator cuesta **3.240 MiB de VRAM**. Ese número es
+  el que volvió concreta la decisión: no cabe junto al 27B, y comprarlo
+  significaba mudar el LLM.
+
+**Lo que desbloquea, que es el dividendo real.** Tres conversaciones
+convergían en una sola elección forzada — el avatar, bajar el LLM a 12B
+y sustituir a Whisper — porque la VRAM del avatar era lo que volvía
+urgentes a las otras dos. Sin él, **el 27B se queda donde está** y la
+pregunta de Whisper vuelve a decidirse por sus propios méritos
+(latencia, castellano, streaming), barata, cuando se retome.
+
+**Lo borrado con la decisión:** el árbol de UE 5.7 en
+`~/git/UnrealEngine` (150 GB) y el proyecto de prueba bajo
+`~/Documents/Unreal Projects/`. Ninguno fue jamás dependencia de nada de
+aquí.
+
+
+## 2026-08-30 — Tres reparaciones, y dos de ellas se tapaban entre sí ✅
+
+Sin entrada hasta hoy; se registra ahora por §8. Tres commits, y el
+orden importa porque el primero escondía al segundo durante tres días.
+
+- **`5c259e2` — la unit nombraba una pantalla que esta caja no tiene.**
+  `samantha-widget.service` llevaba `Environment=DISPLAY=:1` y la sesión
+  gráfica es `:0`, así que el proceso moría en `Gtk couldn't be
+  initialized` antes de llegar a ningún código nuestro: la tira ausente
+  con llama-server, la pasarela y CosyVoice de aspecto impecable. La
+  línea se quita en vez de corregirse — GNOME importa `DISPLAY` y
+  `XAUTHORITY` al gestor de usuario y la unit ya es
+  `PartOf=graphical-session.target`, así que heredar es lo correcto hoy
+  y lo único que sobrevive a que cambie el número de sesión. §2.2 gana
+  la regla.
+- **`b312b62` — un override de modelo 2 GB mayor dejó a Whisper sin
+  sitio, y se quedó sordo.** Un drop-in del 27-ago cambió el modelo por
+  el Heretic RVN-IQ4_XS (14,0 GiB contra 12,2) y su propio comentario
+  hacía la cuenta: «~22,7 de 24, margen 1,3» — **medida antes de
+  Whisper**, que el widget carga en la misma GPU y del que esa unit no
+  sabe nada. `CUDA failed with error out of memory`, y tres frases que
+  alguien le dijo mientras tanto en el journal: `oído: 3.1s de voz
+  (whisper listo: False)`. Duró tres días porque el fallo de DISPLAY
+  impedía que nadie viera fallar a Whisper. Revertido; medido después:
+  22.947 MiB de 24.564, 1.126 libres, `whisper listo en 1s`. §2.5 y §12
+  llevaban una estimación y ahora llevan la medida, porque **el margen
+  libre es lo que decide si el siguiente override es seguro**. El
+  Heretic sigue en disco: lo que se eligió de él nunca se midió contra
+  lo que costaba.
+- **`9e131ec` — las barras contestaban a cuánto gritabas, nunca a lo que
+  decías.** El análisis espectral (FFT, ventana de Hamming, bordes de
+  banda) vivía entero dentro de `Player`, así que el micrófono sólo
+  tenía un RMS escalar y el camino de escucha caía en
+  `BarsModel.set_level` — que lo dice en su propio docstring, «fallback
+  for callers with no spectrum» — dibujando las ochenta barras en un
+  arco fijo escalado por volumen. Extraído a `SpectrumAnalyser(rate)`,
+  que toma la frecuencia porque las dos fuentes no la comparten (16 kHz
+  el micro, 24 el reproductor). La calibración en dB se midió contra
+  este micrófono en vez de suponerse, y quedó igual.
+
+
 ## 2026-08-28 — El kiosko deja de serlo: la plataforma es JARVIS ✅
 
 Cierra `docs/superpowers/specs/2026-08-28-jarvis-platform-design.md`. La

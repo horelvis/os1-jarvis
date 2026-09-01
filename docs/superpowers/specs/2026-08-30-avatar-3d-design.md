@@ -1,15 +1,37 @@
 # He gets a face — the 3D avatar, design
 
-> **Status:** design, agreed with the user 2026-08-30. Rewritten the same
-> evening after the spikes: two of its four original decisions did not
-> survive contact with a screen, and the framing changed underneath all
-> of them.
+> **Status: SUPERSEDED 2026-09-01, never built.** The user, after the
+> measurements below and the UE 5.7 install that followed them:
+> *"vamos a descartar el uso de un avatar hiperhumano, no ofrece nada
+> util salvo bonito"* — and the discard covers **any** avatar, not only
+> the photorealistic one. JARVIS is represented by the wave. CLAUDE.md
+> §12 (2026-09-01) carries the decision.
 >
-> **It reverses a hard rule of CLAUDE.md, at the user's decision.** §2.3
-> and §3 say the project MUST NOT introduce "a browser / webview of any
-> kind". This design embeds WebKitGTK. The reasoning is under "Why a
-> webview" below. §2.3, §3 and §12 are updated when this ships, not
-> before.
+> **Nothing in this design ever reached the code**, so nothing was
+> reverted: no plan was written, and `git grep -i avatar` finds this
+> file and nothing else.
+>
+> **The rule it proposed to reverse still stands, untouched.** The
+> header below said §2.3 and §3 — "MUST NOT introduce a browser /
+> webview of any kind" — would be updated *when this ships, not
+> before*. It never shipped, so they were never updated. WebKitGTK is
+> still forbidden.
+>
+> **What survives is the measurements**, which is why the file is kept
+> rather than deleted: the band composes alpha unchanged, the input
+> region already exists in `ewmh.py`, a browser-grade render costs
+> ~50 MiB of VRAM, and `unreal-audio2lipsync` is genuinely MIT. Anyone
+> reopening this starts from evidence instead of from scratch.
+>
+> ---
+>
+> **The original status, for the history.** Design, agreed with the user
+> 2026-08-30. Rewritten the same evening after the spikes: two of its
+> four original decisions did not survive contact with a screen, and the
+> framing changed underneath all of them. It reversed a hard rule of
+> CLAUDE.md at the user's decision: §2.3 and §3 say the project MUST NOT
+> introduce "a browser / webview of any kind", and this design embedded
+> WebKitGTK. The reasoning is under "Why a webview" below.
 
 ## The framing, which decides everything else
 

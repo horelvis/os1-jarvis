@@ -1113,6 +1113,70 @@ If you encounter:
 
 Significant decisions made during development. Append-only.
 
+### 2026-09-01 — He gets no face: the avatar is dropped, all of it
+
+**Decision (the user's), after two days of measuring it:** *"vamos a
+descartar el uso de un avatar hiperhumano, no ofrece nada util salvo
+bonito."* And the discard is not limited to the photorealistic one — it
+covers **any** avatar. JARVIS is represented by the wave, as he has been
+since 2026-05, and that is the end of the question rather than a pause
+in it.
+
+**What it closes**, all three of the paths that were open on 2026-08-30:
+the browser-grade render (WebKitGTK + glTF with ARKit blendshapes +
+`unreal-audio2lipsync`), the native one (UE 5.7 + MetaHuman + Pixel
+Streaming), and borrowing somebody else's engine (Unclaw's MCP `speak`).
+`docs/superpowers/specs/2026-08-30-avatar-3d-design.md` is marked
+superseded and kept for its measurements.
+
+**Nothing had to be reverted, and that is worth stating.** The design
+was never implemented: no plan was written, no code was merged, and
+`git grep -i avatar` finds that one spec and nothing else. Both spikes
+were deliberately throwaway. **The hard rule the design proposed to
+break was therefore never broken** — its own header said §2.3 and §3
+would lose "MUST NOT introduce a browser / webview of any kind" *when
+this ships, not before*, and it did not ship. The prohibition stands
+whole.
+
+**What the two days bought, since the answer was "no":**
+
+- **The face was never the expensive part.** A browser-grade avatar,
+  cut out on the desktop with alpha over the strip, costs **~50 MiB of
+  VRAM** — measured, on screen. What costs is whatever drives it, and
+  the honest comparison of those drivers (`unreal-audio2lipsync`, MIT,
+  43.7 MB of weights and a CPU fallback, against NVIDIA Audio2Face's
+  2.2 GB) is in the spec.
+- **Two things this file described as missing turned out to be built.**
+  The band composes alpha unchanged — `do_snapshot` stacks textures and
+  never paints a background — and the input region exists in `ewmh.py`
+  as `XShapeCombineRectangles`, with `XShapeCombineMask` bound and
+  unused. §12's 2026-08-25 entry still calls that second one deferred,
+  and it is not.
+- **The native path was priced rather than guessed.** UE 5.7 was built
+  from source on this box — 150 GB, ~50 min of compilation — and a
+  MetaHuman assembled in the Creator costs **3,240 MiB of VRAM**. That
+  is the number that made the decision concrete: it does not fit beside
+  the 27B, and buying it meant moving the LLM.
+
+**What it unblocks, and it is the real dividend.** Three conversations
+were converging on one forced choice — the avatar, dropping the LLM to
+12B, and replacing Whisper — because the avatar's VRAM was what made the
+other two urgent. With it gone, **the 27B stays where it is** and the
+Whisper question goes back to being decided on its own merits
+(latency, Spanish, streaming), cheaply, whenever it is picked up.
+
+**Cost, stated plainly:** the strip stays a line on a screen. The user's
+own framing on 2026-08-30 — *"Jarvis no va a ser un producto comercial,
+es para el hogar"* — set the bar at "do I like having it there", and a
+face that is only pretty does not clear it. If the question ever
+reopens, the spec is evidence, not a starting point; this is the sixth
+architecture this project has considered for its surface and the fifth
+it has rejected.
+
+**Removed with the decision:** the 150 GB UE 5.7 tree at
+`~/git/UnrealEngine` and the test project under `~/Documents/Unreal
+Projects/`. Neither was ever a dependency of anything here.
+
 ### 2026-08-28 — The kiosk stops being a kiosk
 
 **Decision (the user's):** the concept "kiosk" becomes JARVIS. The
