@@ -1,5 +1,79 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-01 (tarde) — Le quitamos el arnés, y medimos qué cuesta ✅
+
+Decisión del usuario, sostenida tras una objeción mía: *«quiero un modelo
+sin arnés.»* El LLM por defecto pasa a ser **Qwen3.8-27B Heretic**
+(`RVN-IQ4_XS`), el build descensurado que se había revertido el 30-ago por
+dejar a Whisper sin VRAM. Esta entrada es cómo cabe y qué cuesta.
+
+**Lo que compra, medido antes de decidir** — nueve peticiones legítimas de
+un dueño a su asistente. Los dos modelos contestan la crítica a su propia
+red, cómo auditar sus cámaras, la dosis de ibuprofeno, la ley española
+sobre la cámara del vecino, destrozarle su plan de negocio y hablar con
+tacos. **Sólo el Heretic** hace humor negro, da opinión política propia y
+sostiene un personaje desagradable sin ablandarse. El arnés era más pequeño
+de lo que parecía y no estaba donde uno lo buscaría.
+
+**Cómo cabe.** Pedía 2.058 MiB más y había ~1.100 libres. Dos palancas
+medidas y una descartada:
+
+- **Whisper a int8** — el mismo `large-v3-turbo`, sólo aritmética más
+  barata: **1.529 MiB contra 2.521**, transcripción idéntica carácter por
+  carácter y `wake.py` encontrando su nombre 3 de 3. 992 MiB por nada.
+- **La caché KV de q8_0 a q4_0** — ~1.024 MiB, degradando contexto largo y
+  nada más. Medido después: el contexto largo no se degradó de forma
+  observable.
+- **Descartado: repartir capas entre GPU y CPU**, que propuso el usuario y
+  que llama.cpp sí soporta. Falló dos veces, y el segundo fallo nombra la
+  causa: `layer 0 is assigned to device CPU but fused Gated Delta Net
+  (chunked) is assigned to device CUDA0`. **La arquitectura híbrida de
+  Qwen3.8 no sobrevive al reparto**, así que es peor candidata al offload
+  que un modelo convencional.
+
+Juntas dejan **más aire que antes**: 1.380 MiB libres con el modelo grande
+contra 1.126 con el pequeño.
+
+**Y apareció un cuarto consumidor de VRAM que ninguna cuenta de este
+fichero había contado: el escritorio.** Xorg 99 MiB, gnome-shell 28, una
+pestaña del navegador 35. No se puede recuperar — §2.2 y §2.3 dicen que
+esto es un escritorio en el que el usuario trabaja. Es el tercer consumidor
+que este proyecto presupuesta olvidando: primero Whisper, que costó tres
+días de sordera, ahora la pantalla sobre la que dibuja. Lo encontró el
+usuario preguntando lo que nadie había preguntado: «¿hay algo más usando la
+GPU?».
+
+**El precio, con A/B el mismo día** y todo lo demás idéntico — misma caché,
+mismos prompts, misma temperatura, sólo cambia el fichero del modelo:
+
+| | Heretic IQ4_XS | Q3_K_XL |
+|---|---|---|
+| 68 kWh × 0,1432 € (= 9,74) | **6,98** | 9,85 |
+| «contesta con exactamente tres palabras» | cuatro | **tres** |
+| contestar sin la letra «a» | falla | falla |
+| recordar dos datos bajo 60 líneas de relleno | ✅ | ✅ |
+| rellenar argumentos de herramientas (4 casos) | **4/4** | **4/4** |
+| inventarse un generador de respaldo que no existe | sí | **sí, y encima lo ofrece** |
+
+El precio es **literalidad y aritmética**, que encaja con el punto de MMLU
+que su propia ficha admite. Lo que **no** es el precio, y yo había señalado
+mal: confabular sobre la casa. El modelo viejo lo hace igual, y termina con
+el ofrecimiento que el usuario pidió quitar en agosto.
+
+**Y una corrección a la documentación, que es lo más útil de la tarde.**
+§4 y §12 registran que el modelo local llama a `mirar` sin cámara 5 veces
+de 5 y rellena herramientas con `args={}` seis veces seguidas, y lo
+atribuyen al modelo. **No es el modelo.** Contra llama-server directo, con
+una carga `tools` normal, los DOS modelos aciertan 4 de 4, incluida
+`mirar({"camara":"entrada"})`. El fallo vive en el camino de Hermes — el
+puente de tool-search, las herramientas diferibles o el prompt de la
+plataforma. Quien vuelva a depurarlo debe empezar ahí.
+
+**Sin verificar todavía:** las dos comprobaciones habladas del endpointing
+(que conteste antes con una pausa dentro, y que se calle al hablarle
+encima). Siguen necesitando una persona en la habitación.
+
+
 ## 2026-09-01 — La última pasada: seis hallazgos, y uno le dejaba sordo ✅
 
 La revisión final de la rama, antes de darla por cerrada. Seis hallazgos,

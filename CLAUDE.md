@@ -770,7 +770,11 @@ on every drop after.
   ("puerta cerrada, el porche vacío" against a tool that said only
   "no hay nadie"). He also calls `mirar` with **no** camera 5 times out
   of 5, even when one was named, so a question about one camera comes
-  back as a survey of all of them. **Corrected 2026-08-26:** the "no
+  back as a survey of all of them. **The second half of that is not the
+  model's fault** — corrected 2026-09-01: asked directly, llama-server
+  fills `mirar({"camara":"entrada"})` correctly, on both the current
+  model and the one before it. The defect is in the Hermes path, not the
+  weights. §12 (2026-08-26) carries the measurement. **Corrected 2026-08-26:** the "no
   camera 5 times out of 5" was measured through `mirar`, whose handler
   reads the whole argument dict. `ver_en_vivo` named that parameter
   `camara` and crashed on it instead — `'dict' object has no attribute
@@ -1234,6 +1238,27 @@ cost three days of deafness, now the screen it draws on. The user found
 it by asking the question nobody had asked — "is anything else using the
 GPU?"
 
+**What the swap actually costs, A/B'd the same day with everything else
+held identical** — same KV quantisation, same prompts, same temperature,
+only the model file changed:
+
+| | Heretic IQ4_XS | Q3_K_XL |
+|---|---|---|
+| 68 kWh × 0.1432 € (= 9.74) | **6.98** | 9.85 |
+| "answer in exactly three words" | four words | **three** |
+| answer without the letter "a" | fails | fails |
+| recall two facts under 60 lines of filler | ✅ | ✅ |
+| fill a tool's arguments (4 cases) | **4/4** | **4/4** |
+| invents a backup generator the house lacks | yes | **yes, and offers to check it** |
+
+So the price is **literal instruction-following and arithmetic**, which
+matches the 1.04-point MMLU drop its own card admits. What is NOT the
+price, and was wrongly suspected: confabulating about the house — the
+old model does it just as readily, and ends with the offer the user
+asked to be rid of in August. Long-context recall survives the q4 KV
+cache intact, and tool arguments were never the problem (see the
+correction under 2026-08-26).
+
 **Two things this leaves fragile, stated rather than discovered later:**
 the Heretic only loads because of BOTH other changes, so reverting
 either one silently stops the LLM starting (the unit says so in its own
@@ -1547,6 +1572,17 @@ strip. The bridge works and is verified end to end. The plugin does not,
 and the reason is in the model rather than the code: **it calls a tool
 of ours with no arguments at all** — `args={}`, and Hermes' own
 `user_task` arriving as the string `"None"`, measured across six calls.
+
+> **Corrected 2026-09-01, and it moves where to look.** The blame here
+> lands on "the model", and that is wrong. Put the same tools to
+> llama-server directly, as a plain OpenAI `tools` payload, and BOTH the
+> old Q3_K_XL and the current Heretic fill them correctly — 4 of 4 each,
+> `mirar({"camara":"entrada"})` included, which is the exact call this
+> paragraph and §4 say failed 5 times out of 5. The model was never the
+> defect. Whatever breaks these arguments lives in the Hermes path: the
+> tool-search bridge, the deferrable-tool machinery, or the platform's
+> own prompt. Anyone debugging this again should start there, not at the
+> model.
 That is the failure §4 already records for `mirar` ("no camera 5 times
 out of 5, even when one was named"), and a wording that spelled it out
 changed nothing there either.
