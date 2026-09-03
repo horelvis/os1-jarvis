@@ -102,7 +102,14 @@ def test_the_host_is_what_is_approved() -> None:
 
 def test_pasajes_finds_a_cefr_level_by_its_two_character_code(tmp_path: Path) -> None:
     """B1, A2, C1 are the driving example of the whole plan — they must not
-    be filtered out as if they were noise."""
+    be filtered out as if they were noise.
+
+    The concept is "B1" alone (not "B1 Preliminary"): with any other
+    word in the concept, a longer surviving token like "preliminary"
+    can still find the passage on its own, which would make this test
+    pass whether or not the two-character code is kept — exactly the
+    gap the first version of this test had.
+    """
     curso = Curso(tmp_path / "curso.db")
 
     def traer(url: str) -> str:
@@ -113,7 +120,7 @@ def test_pasajes_finds_a_cefr_level_by_its_two_character_code(tmp_path: Path) ->
     urls = ["https://a.com/x"]
     base.aprobar_dominios(cid, urls, now=1.0)
     base.construir(cid, urls, now=1.0)
-    pasajes = base.pasajes(cid, "B1 Preliminary")
+    pasajes = base.pasajes(cid, "B1")
     assert pasajes
     assert "b1" in pasajes[0][1].lower()
 
