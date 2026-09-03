@@ -11,13 +11,13 @@ import struct
 
 import pytest
 
-from samantha_widget.remote_audio import (
+from jarvis_widget.remote_audio import (
     MAX_UTTERANCE_BYTES,
     MAX_UTTERANCE_SECONDS,
     max_bytes_at,
     resample_to_input,
 )
-from samantha_widget.vad import INPUT_RATE
+from jarvis_widget.vad import INPUT_RATE
 
 
 def _tone(samples: int, rate: int, hz: float = 440.0) -> bytes:

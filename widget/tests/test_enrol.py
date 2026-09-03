@@ -4,7 +4,7 @@ import io
 import plistlib
 import stat
 
-from samantha_widget.enrol import mobileconfig, write_qr
+from jarvis_widget.enrol import mobileconfig, write_qr
 
 
 def test_the_qr_is_a_png_that_is_not_empty(tmp_path) -> None:

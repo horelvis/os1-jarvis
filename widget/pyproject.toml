@@ -1,5 +1,5 @@
 [project]
-name = "samantha-widget"
+name = "jarvis-widget"
 version = "0.1.0"
 description = "Samantha as a floating desktop strip (GTK4/X11)"
 requires-python = ">=3.12"
@@ -24,7 +24,7 @@ dependencies = [
     "httpx>=0.27",
     "loguru>=0.7",
     # The phone surface serves HTTPS and a WebSocket from inside the
-    # widget's own loop (samantha_widget/remote.py). It arrived in the
+    # widget's own loop (jarvis_widget/remote.py). It arrived in the
     # venv transitively long before that; this is where it becomes a
     # thing we actually depend on.
     "aiohttp>=3.9",
@@ -46,10 +46,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["samantha_widget*"]
+include = ["jarvis_widget*"]
 
 [tool.setuptools.package-data]
-samantha_widget = ["static/*.html"]
+jarvis_widget = ["static/*.html"]
 
 [tool.ruff]
 line-length = 88

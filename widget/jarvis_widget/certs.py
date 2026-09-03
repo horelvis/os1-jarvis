@@ -43,7 +43,7 @@ def lan_address() -> str:
     are twelve of those here. No packet is sent; UDP connect only sets
     the socket's peer.
     """
-    override = os.getenv("SAMANTHA_WIDGET_REMOTE_HOST")
+    override = os.getenv("JARVIS_WIDGET_REMOTE_HOST")
     if override:
         return override
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

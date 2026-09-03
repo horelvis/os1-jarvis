@@ -7,7 +7,7 @@ and no GPU.
 import threading
 import time
 
-from samantha_widget.live_decode import MAX_QUEUE, Frame, LiveDecoder
+from jarvis_widget.live_decode import MAX_QUEUE, Frame, LiveDecoder
 
 
 class _Codec:

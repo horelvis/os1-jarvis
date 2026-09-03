@@ -36,7 +36,7 @@ def load_or_create_secret(path: Path | None = None) -> str:
     disk and readable.
     """
     target = Path(
-        path or os.getenv("SAMANTHA_WIDGET_REMOTE_TOKEN") or DEFAULT_SECRET_PATH
+        path or os.getenv("JARVIS_WIDGET_REMOTE_TOKEN") or DEFAULT_SECRET_PATH
     )
     if target.is_file():
         return target.read_text().strip()

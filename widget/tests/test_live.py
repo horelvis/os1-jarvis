@@ -4,7 +4,7 @@ No GTK in here, on purpose — the same split `photo.py` uses, and the
 reason both are testable on a box with no screen.
 """
 
-from samantha_widget.live import LIVE_HEIGHT, LiveModel
+from jarvis_widget.live import LIVE_HEIGHT, LiveModel
 
 
 def test_it_opens_at_the_large_size_not_as_a_thumbnail():

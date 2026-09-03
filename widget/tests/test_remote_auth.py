@@ -10,7 +10,7 @@ import stat
 
 import pytest
 
-from samantha_widget.remote_auth import Guard, load_or_create_secret
+from jarvis_widget.remote_auth import Guard, load_or_create_secret
 
 
 def test_a_secret_is_created_once_and_reused(tmp_path) -> None:
@@ -44,7 +44,7 @@ def test_token_comparison_is_constant_time() -> None:
     """A timing oracle on a 32-char secret over a LAN is not theoretical."""
     import inspect
 
-    from samantha_widget import remote_auth
+    from jarvis_widget import remote_auth
 
     assert "compare_digest" in inspect.getsource(remote_auth.Guard.token_ok)
 

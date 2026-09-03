@@ -28,9 +28,9 @@ from gi.repository import Gsk, Gtk  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from samantha_widget import theme  # noqa: E402
-from samantha_widget.wave import WaveArea  # noqa: E402
-from samantha_widget.wave_model import WaveState  # noqa: E402
+from jarvis_widget import theme  # noqa: E402
+from jarvis_widget.wave import WaveArea  # noqa: E402
+from jarvis_widget.wave_model import WaveState  # noqa: E402
 
 WIDTH = theme.STRIP_MAX_WIDTH
 HEIGHT = theme.STRIP_HEIGHT

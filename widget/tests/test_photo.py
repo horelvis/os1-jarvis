@@ -6,7 +6,7 @@ whole point of splitting `photo.py` (the state) from `photo_area.py`
 makes.
 """
 
-from samantha_widget.photo import (
+from jarvis_widget.photo import (
     MAX_PHOTOS,
     NATIVE,
     PAD,
@@ -173,7 +173,7 @@ def test_the_model_never_imports_gtk():
     """
     import pathlib
 
-    import samantha_widget.photo as module
+    import jarvis_widget.photo as module
 
     source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
     assert "import gi" not in source

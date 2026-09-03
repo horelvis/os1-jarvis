@@ -6,7 +6,7 @@ politeness into silence, and a strip that is always listening meets
 that failure hundreds of times a day.
 """
 
-from samantha_widget.stt import Transcriber, build_hint, clean
+from jarvis_widget.stt import Transcriber, build_hint, clean
 
 
 def test_whitespace_is_trimmed() -> None:
@@ -49,7 +49,7 @@ def test_the_hint_carries_his_name_and_the_words_this_box_says(monkeypatch):
     # being ignored is the failure a wake word cannot afford, and the
     # vocabulary because "git" came back as "Jeep" on 2026-08-27 and
     # killed two of three attempts to delegate a coding task.
-    monkeypatch.delenv("SAMANTHA_WIDGET_STT_HINT", raising=False)
+    monkeypatch.delenv("JARVIS_WIDGET_STT_HINT", raising=False)
     hint = build_hint("jarvis")
     assert hint.startswith("Hola Jarvis.")
     for word in ("git", "Claude Code", "pytest", "commits"):
@@ -57,7 +57,7 @@ def test_the_hint_carries_his_name_and_the_words_this_box_says(monkeypatch):
 
 
 def test_a_house_with_no_wake_word_still_gets_the_vocabulary(monkeypatch):
-    monkeypatch.delenv("SAMANTHA_WIDGET_STT_HINT", raising=False)
+    monkeypatch.delenv("JARVIS_WIDGET_STT_HINT", raising=False)
     hint = build_hint("")
     assert "Hola" not in hint
     assert "Claude Code" in hint
@@ -66,7 +66,7 @@ def test_a_house_with_no_wake_word_still_gets_the_vocabulary(monkeypatch):
 def test_the_environment_replaces_the_whole_hint(monkeypatch):
     # A different house says different words, and an empty value turns
     # the bias off rather than falling back to ours.
-    monkeypatch.setenv("SAMANTHA_WIDGET_STT_HINT", "  Solo esto.  ")
+    monkeypatch.setenv("JARVIS_WIDGET_STT_HINT", "  Solo esto.  ")
     assert build_hint("jarvis") == "Solo esto."
-    monkeypatch.setenv("SAMANTHA_WIDGET_STT_HINT", "")
+    monkeypatch.setenv("JARVIS_WIDGET_STT_HINT", "")
     assert build_hint("jarvis") == ""

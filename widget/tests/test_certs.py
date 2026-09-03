@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from samantha_widget.certs import ensure_certificate, lan_address
+from jarvis_widget.certs import ensure_certificate, lan_address
 
 
 def test_lan_address_is_a_real_private_address() -> None:

@@ -62,7 +62,7 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -e ".[dev]"
 
 DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD/../backend:$PWD/.. \
-  .venv/bin/python -m samantha_widget
+  .venv/bin/python -m jarvis_widget
 ```
 
 `--system-site-packages` is required (PyGObject and the GTK4 typelib are
@@ -87,7 +87,7 @@ removing them is plan 3, not yet written.
 The strip, the voice turn and the vision path are built and running.
 **The voice turn has never heard anybody**: this box has no microphone
 plugged in, so the last task of plan 2 needs hardware, not code. The
-switch `SAMANTHA_WIDGET_FAKE_MIC` is how everything downstream of the
+switch `JARVIS_WIDGET_FAKE_MIC` is how everything downstream of the
 microphone was proved without one.
 
 See [PROGRESS.md](PROGRESS.md) for what each day cost and what it found.

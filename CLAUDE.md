@@ -7,7 +7,7 @@
 >
 > **He is called JARVIS.** Until 2026-08-23 he was Samantha, and most
 > package names, environment variables and systemd units still carry that
-> name — `samantha_widget`, `samantha_vision`, `SAMANTHA_*`. Renaming them
+> name — `jarvis_widget`, `samantha_vision`, `SAMANTHA_*`. Renaming them
 > is not worth the churn. In prose he is JARVIS; in code, mostly samantha
 > — except the platform he speaks through, `jarvis` since 2026-08-28
 > (§10, §12).
@@ -68,7 +68,7 @@ can act on it. Not a window you open. Something that is there.
   (§2.7) is gone with `backend/`, deleted 2026-09-03; the gateway path
   never used it.
 - **Phones:** three iPhones on the house network reach him through
-  `widget/samantha_widget/remote.py` — a page with one button, held to
+  `widget/jarvis_widget/remote.py` — a page with one button, held to
   speak. The phone is a peripheral of the widget, not a platform: the
   gateway still sees one strip and one session (§12, 2026-09-01).
 - **Language:** Spanish (Spain) — every user-facing string, prompt and
@@ -286,7 +286,7 @@ mean either a compositor-specific protocol or losing the placement.
 - **A unit must NOT set `DISPLAY` itself.** GNOME imports `DISPLAY` and
   `XAUTHORITY` into the systemd user manager when the session starts
   (`systemctl --user show-environment`), and a unit that is `After=` /
-  `PartOf=graphical-session.target` inherits them. `samantha-widget.service`
+  `PartOf=graphical-session.target` inherits them. `jarvis-widget.service`
   hardcoded `DISPLAY=:1` on a box whose session is `:0`, and the failure
   is silent in the worst way: the process dies in `Gtk couldn't be
   initialized` before any of our code runs, so the strip is simply absent
@@ -335,9 +335,9 @@ presence but an application.
 **Implementation, and the two things that bite:**
 
 ```
-systemd --user: samantha-widget.service
+systemd --user: jarvis-widget.service
   ↓
-python -m samantha_widget      (venv with --system-site-packages)
+python -m jarvis_widget      (venv with --system-site-packages)
   ↓
 GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 ```
@@ -502,7 +502,7 @@ nothing. One did, on 2026-08-27 — see the comment in
   was adopted: transcription came back character-for-character identical
   on every dumped utterance and `wake.py` found his name 3 of 3, exactly
   as at float16. The 992 MiB it gives back is what lets the Heretic model
-  sit beside it (§2.5). `SAMANTHA_WIDGET_STT_COMPUTE=float16` reverts it.
+  sit beside it (§2.5). `JARVIS_WIDGET_STT_COMPUTE=float16` reverts it.
 - **Endpointing:** Vosk `small-es` (39 MB, Apache 2.0, CPU, ~5% of one
   core) transcribes continuously and its text reaches nobody. It decides
   two things: when you have finished a sentence — 880 ms sooner than the
@@ -566,7 +566,7 @@ there is no Web Speech API.
   starts and stops; `wake.py` then decides whether it was addressed to
   him. The 2026-08-22 decision below said "no wake word, no shortcut"
   and the user reversed it — a room he is in can now be talked in
-  without talking to him. `SAMANTHA_WIDGET_WAKE_WORD` empty restores the
+  without talking to him. `JARVIS_WIDGET_WAKE_WORD` empty restores the
   old behaviour exactly. Two things that cost a measurement each:
   **Whisper does not hear "Jarvis"** (five spellings in one morning, so
   matching is a similarity ratio, not a comparison), and **the name was
@@ -583,12 +583,12 @@ there is no Web Speech API.
   clause by clause, strictly sequentially — synthesising clauses
   concurrently interleaves their chunks and garbles the speech.
 - **He can be interrupted, and it is decided on words rather than
-  volume** (2026-09-01). `SAMANTHA_WIDGET_BARGE_RMS` survives as a
+  volume** (2026-09-01). `JARVIS_WIDGET_BARGE_RMS` survives as a
   silence floor (0.01); whether a sound is a person or his own echo is
   `EchoFilter` run against Vosk's live partial. The threshold it
   replaces could not work: the user's voice measures RMS 0.054-0.088 and
   his echo with the speakers beside the microphone measures 0.178 —
-  louder than the person. `SAMANTHA_WIDGET_MIC_GATE=1` remains, off by
+  louder than the person. `JARVIS_WIDGET_MIC_GATE=1` remains, off by
   default, as the fallback for a box where deciding it on words is not
   enough — it deafens the microphone for as long as he speaks, which
   works everywhere and costs being able to interrupt him at all.
@@ -605,7 +605,7 @@ there is no Web Speech API.
 **Two things that cost days, both silent:**
 - **PortAudio's `callback=` mode segfaults under GTK.** No traceback, and
   it surfaces inside whatever unrelated `import` happens to be running.
-  Read blocking from a thread of our own. `SAMANTHA_WIDGET_NO_MIC=1`
+  Read blocking from a thread of our own. `JARVIS_WIDGET_NO_MIC=1`
   exists because isolating the microphone is what found this.
 - **A venv with `--system-site-packages` also sees `~/.local/lib`**, and
   a different numpy / anyio / websockets there gets loaded instead.
@@ -617,7 +617,7 @@ microphone (`UACDemoV1.0`, `hw:2,0`) arrived; PipeWire's `default`
 source routes to it, measured at RMS 0.0066 / peak 0.075 against the
 0.0000 exactly — digital silence — that the onboard input used to give.
 Five turns spoken and answered, transcriptions clean.
-`SAMANTHA_WIDGET_FAKE_MIC` remains how the path is exercised with
+`JARVIS_WIDGET_FAKE_MIC` remains how the path is exercised with
 nobody in the room.
 
 > **The v3 decision, superseded, kept for the history.** Microphone
@@ -696,7 +696,7 @@ os1-samantha/
 ├── widget/                 ← HIM. The GTK4 strip and everything it does.
 │   ├── pyproject.toml
 │   ├── README.md           ← the venv, the models, the switches. Read it.
-│   ├── samantha_widget/
+│   ├── jarvis_widget/
 │   │   ├── __main__.py     ← the process: threads and wiring
 │   │   ├── window.py       ← the GTK4 window
 │   │   ├── ewmh.py         ← above + placed, by ClientMessage (§2.2)
@@ -781,9 +781,9 @@ on every drop after.
 - ~~**He has never heard a human voice.**~~ **He has, since 2026-08-25.**
   A USB microphone (`UACDemoV1.0`, `hw:2,0`) is plugged in, PipeWire's
   `default` source routes to it, and the local override that kept the
-  microphone shut — `samantha-widget.service.d/no-mic.conf` — is gone.
+  microphone shut — `jarvis-widget.service.d/no-mic.conf` — is gone.
   Five spoken turns, transcribed clean, answered out loud. That was the
-  last task of widget plan 2 and it is done. `SAMANTHA_WIDGET_FAKE_MIC`
+  last task of widget plan 2 and it is done. `JARVIS_WIDGET_FAKE_MIC`
   stays: it is still how the path is exercised without a human present.
 - **He can be asked to look — and that is the whole of what "asking"
   means.** Since 2026-08-25 the `mirar` tool answers "enséñame la
@@ -876,7 +876,7 @@ python3 -m venv --system-site-packages .venv
 # `backend/` too until that tree was deleted on 2026-09-03.
 DISPLAY=:0 PYTHONNOUSERSITE=1 \
   PYTHONPATH=$PWD/.. \
-  .venv/bin/python -m samantha_widget
+  .venv/bin/python -m jarvis_widget
 
 # Tests + lint
 .venv/bin/python -m pytest -v
@@ -898,10 +898,10 @@ systemctl --user daemon-reload
 
 systemctl --user enable --now samantha-llamacpp.service   # the LLM, :8000
 systemctl --user enable --now samantha-hermes.service     # the gateway, :7777
-systemctl --user enable --now samantha-widget.service     # him
+systemctl --user enable --now jarvis-widget.service     # him
 loginctl enable-linger $USER    # so they survive without a login
 
-journalctl --user -u samantha-widget.service -f
+journalctl --user -u jarvis-widget.service -f
 ```
 
 CosyVoice runs in Docker from `tts-server/cosyvoice/` and listens on
@@ -938,7 +938,7 @@ the strip first — a second connection replaces the first, so a probe
 racing a running widget proves nothing:
 
 ```bash
-systemctl --user stop samantha-widget.service
+systemctl --user stop jarvis-widget.service
 cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python tools/probe_gateway.py "¿Qué hora es?"
 ```
 
@@ -949,7 +949,7 @@ ffmpeg -y -f x11grab -video_size 1920x1080 -i :0 -frames:v 1 /tmp/strip.png
 xwininfo -name "JARVIS"            # did you photograph the strip, or the lock screen?
 # The title is "JARVIS" — window.py:101 sets it (it was "Samantha"
 # until 2026-08-28), and no code anywhere calls the window
-# "samantha-widget"; that is only the unit's name. Asking for the wrong
+# "jarvis-widget"; that is only the unit's name. Asking for the wrong
 # one answers "No window with name ... exists!" with the strip on screen
 # and running (2026-08-25).
 ```
@@ -961,7 +961,7 @@ a locked session is a convincing picture of the wrong thing.
 the pointer through XTEST by ctypes, the way `ewmh.py` reaches libX11 —
 `libXtst` is installed even though `xdotool` is not. Anywhere this file
 says a keystroke or a click cannot be delivered to the strip (§2.3, the
-`SAMANTHA_WIDGET_STATE` note above), that is now only true of the
+`JARVIS_WIDGET_STATE` note above), that is now only true of the
 keyboard.
 
 ```bash
@@ -1119,31 +1119,31 @@ If you encounter:
 
 | Feature / topic | Files |
 |---|---|
-| The process: threads and wiring | `widget/samantha_widget/__main__.py` |
-| One turn, as a state machine | `widget/samantha_widget/turn.py` |
-| The window: borderless, above, and how it grows | `widget/samantha_widget/{window,ewmh,geometry}.py` |
-| The photo band (drawing / pure model) | `widget/samantha_widget/{photo_area,photo}.py` |
-| The wave (drawing / pure model) | `widget/samantha_widget/{wave,wave_model,bars_model}.py` |
-| Colour, and the shadow to kill | `widget/samantha_widget/theme.py` |
-| Listening: VAD and transcription | `widget/samantha_widget/{vad,stt}.py` |
-| Deciding you have finished (rule / model) | `widget/samantha_widget/endpoint.py` |
-| The clock that asks, and the one that decides | `widget/samantha_widget/vad.py` |
-| Speaking: clauses and playback | `widget/samantha_widget/{speech,audio}.py` |
-| The link to the brain | `widget/samantha_widget/gateway.py` |
+| The process: threads and wiring | `widget/jarvis_widget/__main__.py` |
+| One turn, as a state machine | `widget/jarvis_widget/turn.py` |
+| The window: borderless, above, and how it grows | `widget/jarvis_widget/{window,ewmh,geometry}.py` |
+| The photo band (drawing / pure model) | `widget/jarvis_widget/{photo_area,photo}.py` |
+| The wave (drawing / pure model) | `widget/jarvis_widget/{wave,wave_model,bars_model}.py` |
+| Colour, and the shadow to kill | `widget/jarvis_widget/theme.py` |
+| Listening: VAD and transcription | `widget/jarvis_widget/{vad,stt}.py` |
+| Deciding you have finished (rule / model) | `widget/jarvis_widget/endpoint.py` |
+| The clock that asks, and the one that decides | `widget/jarvis_widget/vad.py` |
+| Speaking: clauses and playback | `widget/jarvis_widget/{speech,audio}.py` |
+| The link to the brain | `widget/jarvis_widget/gateway.py` |
 | Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
 | Being asked to look, and the JPEG it leaves | `Hermes/plugins/samantha_vision/{tool,snapshot}.py` |
 | The `photo` frame, and the path it refuses | `Hermes/plugins/jarvis/{protocol,adapter}.py` |
 | A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
 | The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
-| Whether he was being spoken to | `widget/samantha_widget/wake.py` |
-| The two switches (drawing / pure model) | `widget/samantha_widget/{wave,switches}.py` |
-| The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/samantha_widget/live_decode.py` |
-| Testing without a microphone | `widget/samantha_widget/fake_mic.py` |
-| The phone: socket, auth, audio, enrolment | `widget/samantha_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
-| The page it serves | `widget/samantha_widget/static/movil.html` |
+| Whether he was being spoken to | `widget/jarvis_widget/wake.py` |
+| The two switches (drawing / pure model) | `widget/jarvis_widget/{wave,switches}.py` |
+| The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/jarvis_widget/live_decode.py` |
+| Testing without a microphone | `widget/jarvis_widget/fake_mic.py` |
+| The phone: socket, auth, audio, enrolment | `widget/jarvis_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
+| The page it serves | `widget/jarvis_widget/static/movil.html` |
 | A course's state: the plan, concepts, questions | `Hermes/plugins/jarvis_teacher/curso.py` |
 | The sources, and the domain gate in front of them | `Hermes/plugins/jarvis_teacher/fuentes.py` |
-| The card, drawn and as state | `widget/samantha_widget/{ficha_area,ficha}.py` |
+| The card, drawn and as state | `widget/jarvis_widget/{ficha_area,ficha}.py` |
 | The surface Hermes speaks through | `Hermes/plugins/jarvis/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
 | Model, provider, TTS provider | `Hermes/samantha-config.yaml` |

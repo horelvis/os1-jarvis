@@ -21,7 +21,7 @@ Type=simple
 # the strip was absent with the rest of the stack perfectly healthy.
 # Found 2026-08-30. `samantha-ui.service`, the dead kiosk unit, had `:0`
 # all along.
-# Unbuffered, so `journalctl --user -u samantha-widget -f` shows a
+# Unbuffered, so `journalctl --user -u jarvis-widget -f` shows a
 # traceback at the moment it happens rather than at exit.
 Environment=PYTHONUNBUFFERED=1
 # The venv is --system-site-packages (it needs the system's PyGObject),
@@ -54,7 +54,7 @@ Environment=PYTHONNOUSERSITE=1
 # reaches them. Without this she runs and is mute: speech.py falls back
 # to a local copy of has_unclosed_tag, so the only symptom is silence.
 Environment=PYTHONPATH=%h/git/os1-samantha
-ExecStart=%h/git/os1-samantha/widget/.venv/bin/python -m samantha_widget
+ExecStart=%h/git/os1-samantha/widget/.venv/bin/python -m jarvis_widget
 Restart=on-failure
 RestartSec=3
 

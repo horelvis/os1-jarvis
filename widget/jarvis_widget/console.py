@@ -29,7 +29,7 @@ import os
 # what it actually produced was a terminal you could not read a tool's
 # output in. Twenty lines at the measured ~20 px is about 430 px of
 # strip, which is the live camera's 480 and no more.
-MAX_LINES = int(os.environ.get("SAMANTHA_WIDGET_CONSOLE_LINES") or 20)
+MAX_LINES = int(os.environ.get("JARVIS_WIDGET_CONSOLE_LINES") or 20)
 
 # One line, in pixels, at the console font size — and the room the
 # frame takes around them. The strip grows by what the CONTENT needs up
@@ -50,7 +50,7 @@ HEIGHT = LINE_HEIGHT * MAX_LINES + PADDING
 # lines. A click closes it sooner (`photo_area` has done the same for a
 # photo since 2026-08-25), and any new output cancels it: output means
 # the run is alive, whatever the marker said.
-LINGER_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_CONSOLE_LINGER", "60"))
+LINGER_SECONDS = float(os.environ.get("JARVIS_WIDGET_CONSOLE_LINGER", "60"))
 
 # Longer than this and a line is cut: a single 4,000-character blob from
 # a tool would otherwise push everything else out of the window and wrap

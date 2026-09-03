@@ -5,7 +5,7 @@ microphone gate came off: his own sentence came back through the room
 and Whisper transcribed it along with a real person talking.
 """
 
-from samantha_widget.echo import EchoFilter
+from jarvis_widget.echo import EchoFilter
 
 
 def test_nothing_said_means_nothing_is_cut():

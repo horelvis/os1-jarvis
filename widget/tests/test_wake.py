@@ -13,7 +13,7 @@ three of them, and being ignored is the one failure a wake word cannot
 afford: the user says it again, louder, and concludes he is broken.
 """
 
-from samantha_widget.wake import WakeWord
+from jarvis_widget.wake import WakeWord
 
 
 def test_his_name_opens_a_turn():

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from samantha_widget.ewmh import (
+from jarvis_widget.ewmh import (
     MAX_PROPS_PER_MESSAGE,
     NET_WM_STATE_ADD,
     Ewmh,

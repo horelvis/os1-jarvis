@@ -4,8 +4,8 @@ What matters here is that the bars answer the sound and settle when it
 stops — the two things that made the first version look wrong.
 """
 
-from samantha_widget.bars_model import BAND_COUNT, MAX_VISIBLE_TASKS, BarsModel
-from samantha_widget.wave_model import WaveState
+from jarvis_widget.bars_model import BAND_COUNT, MAX_VISIBLE_TASKS, BarsModel
+from jarvis_widget.wave_model import WaveState
 
 
 def _settle(model: BarsModel, frames: int = 120) -> None:
@@ -151,7 +151,7 @@ def test_a_quiet_voice_still_fills_the_strip() -> None:
     """Speech peaks around 0.3-0.5 of full scale; drawn literally that is
     a flat line with bumps, which is why the editor-style auto-gain is
     there."""
-    from samantha_widget.bars_model import WaveformModel
+    from jarvis_widget.bars_model import WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING
@@ -162,7 +162,7 @@ def test_a_quiet_voice_still_fills_the_strip() -> None:
 
 def test_silence_is_not_amplified_into_a_wall() -> None:
     """Auto-gain against the noise floor would make silence look loud."""
-    from samantha_widget.bars_model import WaveformModel
+    from jarvis_widget.bars_model import WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING
@@ -173,7 +173,7 @@ def test_silence_is_not_amplified_into_a_wall() -> None:
 
 def test_the_shape_survives_normalisation() -> None:
     """A peak twice as tall as its neighbour stays twice as tall."""
-    from samantha_widget.bars_model import WaveformModel
+    from jarvis_widget.bars_model import WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING
@@ -186,7 +186,7 @@ def test_the_shape_survives_normalisation() -> None:
 
 
 def test_a_short_history_is_padded_not_stretched() -> None:
-    from samantha_widget.bars_model import HISTORY_LEN, WaveformModel
+    from jarvis_widget.bars_model import HISTORY_LEN, WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING
@@ -197,7 +197,7 @@ def test_a_short_history_is_padded_not_stretched() -> None:
 
 def test_the_waveform_is_symmetric_about_the_centre() -> None:
     """Growing outwards from the middle, not scrolling sideways."""
-    from samantha_widget.bars_model import WaveformModel
+    from jarvis_widget.bars_model import WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING
@@ -212,7 +212,7 @@ def test_the_waveform_is_symmetric_about_the_centre() -> None:
 def test_the_newest_sound_is_in_the_middle() -> None:
     """A loud burst that just happened belongs at the centre, and the
     quiet that preceded it out at the edges."""
-    from samantha_widget.bars_model import WaveformModel
+    from jarvis_widget.bars_model import WaveformModel
 
     model = WaveformModel()
     model.state = WaveState.SPEAKING

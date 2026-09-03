@@ -473,7 +473,7 @@ class StripWindow(Gtk.ApplicationWindow):
         `live_rect()` is in the band widget's own coordinates. Those ARE
         window coordinates with no translation needed: the band is the
         first child of `self._frame`, a `Gtk.Box` with no margin or
-        padding in `theme.CSS` (`samantha_widget/theme.py`), so its
+        padding in `theme.CSS` (`jarvis_widget/theme.py`), so its
         top-left sits exactly on the window's — confirmed against the
         drawing itself, `photo_area.py`'s `do_snapshot`, which paints
         `live_rect()` with no offset either. Everything below the photo

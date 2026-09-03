@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from samantha_widget.endpoint import (
+from jarvis_widget.endpoint import (
     CompletionRule,
     VoskPartials,
     load_partials,
@@ -104,13 +104,13 @@ def test_a_missing_model_is_reported_not_raised(tmp_path, monkeypatch) -> None:
     deaf for three days looking perfectly healthy. A thing whose whole
     purpose is making him faster must not be able to make him worse.
     """
-    monkeypatch.setenv("SAMANTHA_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
+    monkeypatch.setenv("JARVIS_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
 
     assert load_partials() is None
 
 
 def test_the_model_path_can_be_overridden(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("SAMANTHA_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
+    monkeypatch.setenv("JARVIS_WIDGET_VOSK_MODEL", str(tmp_path / "nope"))
     with pytest.raises(FileNotFoundError):
         VoskPartials()
 
@@ -172,7 +172,7 @@ def test_a_reset_with_nothing_pushed_does_not_rebuild_the_recognizer() -> None:
     Rather than trust a fourth hand-written guard, the cost is paid here
     — a reset with nothing to forget forgets nothing.
     """
-    from samantha_widget.endpoint import _Stream
+    from jarvis_widget.endpoint import _Stream
 
     CountingRecognizer.built = 0
     stream = _Stream(CountingRecognizer)
@@ -187,7 +187,7 @@ def test_a_reset_with_nothing_pushed_does_not_rebuild_the_recognizer() -> None:
 def test_a_reset_after_a_push_does_rebuild_it() -> None:
     """And the other half: forgetting must still actually forget, or a
     turn inherits the words of the one before it."""
-    from samantha_widget.endpoint import _Stream
+    from jarvis_widget.endpoint import _Stream
 
     CountingRecognizer.built = 0
     stream = _Stream(CountingRecognizer)

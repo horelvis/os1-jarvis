@@ -1,4 +1,4 @@
-"""Entry point: python -m samantha_widget.
+"""Entry point: python -m jarvis_widget.
 
 Three threads and one rule. The GTK main thread owns every widget; one
 asyncio thread owns the WebSocket and the HTTP client to CosyVoice;
@@ -38,29 +38,29 @@ if TYPE_CHECKING:
 # Set to any of the four state names to freeze the wave there and skip
 # the voice loop entirely — how each state gets photographed, since
 # xdotool is not installed and a keystroke cannot be sent.
-_DEMO_STATE = os.environ.get("SAMANTHA_WIDGET_STATE")
+_DEMO_STATE = os.environ.get("JARVIS_WIDGET_STATE")
 
 # Skip opening the microphone. On a box with no microphone plugged in
 # there is nothing to open, and it makes the difference between "she
 # cannot hear" and "the process is broken" visible in one variable.
-_NO_MIC = os.environ.get("SAMANTHA_WIDGET_NO_MIC") == "1"
+_NO_MIC = os.environ.get("JARVIS_WIDGET_NO_MIC") == "1"
 
 # Say this once, a few seconds after starting, and show the speaking
 # wave while it plays. The only way to hear the widget's real voice path
 # — its own threads, its own queue, its own player — on a machine with
 # no microphone, where no turn can ever begin.
-_SAY_ON_START = os.environ.get("SAMANTHA_WIDGET_SAY")
+_SAY_ON_START = os.environ.get("JARVIS_WIDGET_SAY")
 
 # Speak this INTO the widget, as if into a microphone: it is synthesised,
 # resampled to 16 kHz and pushed through the same on_frame the real
 # microphone calls. Everything after that is real — Silero, Whisper, the
 # WebSocket to Hermes, and her reply spoken back. Only the air is faked.
-_FAKE_MIC_TEXT = os.environ.get("SAMANTHA_WIDGET_FAKE_MIC")
+_FAKE_MIC_TEXT = os.environ.get("JARVIS_WIDGET_FAKE_MIC")
 # His name, and how long a conversation stays open after he answers.
-_WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
+_WAKE_WORD = os.environ.get("JARVIS_WIDGET_WAKE_WORD", "jarvis")
 # Hear his name instead of reading it (user, 2026-08-26). Empty disables
 # the acoustic detector and leaves only `wake.py`'s filter over the
-# transcript. `SAMANTHA_WIDGET_HOTWORD_SENSITIVITY` moves the threshold;
+# transcript. `JARVIS_WIDGET_HOTWORD_SENSITIVITY` moves the threshold;
 # the model is trained on English and the phrase is said with a Spanish
 # accent, so the right value is a measurement, not a constant.
 # Empty by default, and the reason is a measurement rather than a
@@ -72,9 +72,9 @@ _WAKE_WORD = os.environ.get("SAMANTHA_WIDGET_WAKE_WORD", "jarvis")
 # never fire. Set it to `hey_jarvis` (or a path to a model trained on
 # this voice) to turn it back on; `wake.py`'s filter over the transcript
 # is what actually works here today.
-_HOTWORD_MODEL = os.environ.get("SAMANTHA_WIDGET_HOTWORD", "")
+_HOTWORD_MODEL = os.environ.get("JARVIS_WIDGET_HOTWORD", "")
 # Diagnostic: log what the microphone hears WHILE he is speaking.
-_TRACE_MIC = os.environ.get("SAMANTHA_WIDGET_TRACE_MIC") == "1"
+_TRACE_MIC = os.environ.get("JARVIS_WIDGET_TRACE_MIC") == "1"
 
 # How loud the room has to be, WHILE he is speaking, before a frame may
 # start a turn.
@@ -91,7 +91,7 @@ _TRACE_MIC = os.environ.get("SAMANTHA_WIDGET_TRACE_MIC") == "1"
 # sound, which any scalar can do. Whether a sound is him or somebody
 # else is decided on words, in `build_is_a_person`.
 try:
-    _BARGE_RMS = float(os.environ.get("SAMANTHA_WIDGET_BARGE_RMS", "0.01"))
+    _BARGE_RMS = float(os.environ.get("JARVIS_WIDGET_BARGE_RMS", "0.01"))
 except ValueError:
     _BARGE_RMS = 0.01
 _trace = {"n": 0}
@@ -104,52 +104,52 @@ _busy = {"was": False}
 _mic = {"was_on": True}
 try:
     _HOTWORD_SENSITIVITY = float(
-        os.environ.get("SAMANTHA_WIDGET_HOTWORD_SENSITIVITY", "")
+        os.environ.get("JARVIS_WIDGET_HOTWORD_SENSITIVITY", "")
     )
 except ValueError:
     _HOTWORD_SENSITIVITY = HOTWORD_SENSITIVITY
 # Log every score above this, to calibrate against a real voice.
 try:
-    _HOTWORD_TRACE = float(os.environ.get("SAMANTHA_WIDGET_HOTWORD_TRACE", ""))
+    _HOTWORD_TRACE = float(os.environ.get("JARVIS_WIDGET_HOTWORD_TRACE", ""))
 except ValueError:
     _HOTWORD_TRACE = 0.0
 
 # Start with these switches already off: "mic", "voice", or both. The
-# counterpart of SAMANTHA_WIDGET_STATE for the two glyphs at the end of
+# counterpart of JARVIS_WIDGET_STATE for the two glyphs at the end of
 # the strip — the struck-through state cannot be photographed otherwise,
 # because there is no way to send a click to this window (xdotool is not
 # installed, CLAUDE.md §5).
 _SWITCHES_OFF = {
-    s.strip() for s in os.environ.get("SAMANTHA_WIDGET_SWITCHES", "").split(",")
+    s.strip() for s in os.environ.get("JARVIS_WIDGET_SWITCHES", "").split(",")
 }
 try:
-    _WAKE_WINDOW = float(os.environ.get("SAMANTHA_WIDGET_WAKE_WINDOW", ""))
+    _WAKE_WINDOW = float(os.environ.get("JARVIS_WIDGET_WAKE_WINDOW", ""))
 except ValueError:
     _WAKE_WINDOW = WINDOW_SECONDS
 
 # Show these photos (comma-separated paths) a couple of seconds after
 # starting, exactly as if the gateway had pushed them. The only way to
 # photograph the band on a box where making him actually look at a
-# camera takes a whole live turn — the counterpart of SAMANTHA_WIDGET_SAY
+# camera takes a whole live turn — the counterpart of JARVIS_WIDGET_SAY
 # for the half of him you can see.
-_SHOW_ON_START = os.environ.get("SAMANTHA_WIDGET_PHOTO")
+_SHOW_ON_START = os.environ.get("JARVIS_WIDGET_PHOTO")
 
 # Feed the band a local video file as if the gateway had pushed it. The
-# counterpart of SAMANTHA_WIDGET_PHOTO for the half of him that moves:
+# counterpart of JARVIS_WIDGET_PHOTO for the half of him that moves:
 # the band, the decoder and the input region, with no gateway and no
 # camera in the room.
-_LIVE_ON_START = os.environ.get("SAMANTHA_WIDGET_LIVE")
+_LIVE_ON_START = os.environ.get("JARVIS_WIDGET_LIVE")
 
 # Write these lines into the strip's console a couple of seconds after
 # starting, as if something working had produced them. The counterpart
-# of SAMANTHA_WIDGET_PHOTO and _LIVE for the third thing the strip can
+# of JARVIS_WIDGET_PHOTO and _LIVE for the third thing the strip can
 # show — separate lines with "\n", or a path to a file to read.
-_CONSOLE_ON_START = os.environ.get("SAMANTHA_WIDGET_CONSOLE")
+_CONSOLE_ON_START = os.environ.get("JARVIS_WIDGET_CONSOLE")
 
 # Write every utterance the VAD closes to this directory as a WAV.
 # Diagnostic only: when a transcription comes back as nonsense there is
 # no way to tell from the text whether the audio was bad or Whisper was.
-_DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
+_DUMP_DIR = os.environ.get("JARVIS_WIDGET_DUMP")
 
 # Deafen the microphone while he speaks. Unconditional until 2026-08-25,
 # when a real microphone arrived and showed what it cost: to interrupt
@@ -163,7 +163,7 @@ _DUMP_DIR = os.environ.get("SAMANTHA_WIDGET_DUMP")
 # (~/.config/pipewire/pipewire.conf.d/99-echo-cancel.conf), so the
 # frames can flow and cutting in works. Set this to 1 on a box without
 # it, or he will hear himself and reply to it.
-_MIC_GATE = os.environ.get("SAMANTHA_WIDGET_MIC_GATE") == "1"
+_MIC_GATE = os.environ.get("JARVIS_WIDGET_MIC_GATE") == "1"
 
 
 def _apply_error_to_wake_window(wake: WakeWord, message: str, now: float) -> None:
@@ -608,7 +608,7 @@ class SamanthaApp(Gtk.Application):
         if _DEMO_STATE:
             state = WaveState(_DEMO_STATE)
             wave.set_state(state)
-            wave.set_task_count(int(os.environ.get("SAMANTHA_WIDGET_TASKS", "0")))
+            wave.set_task_count(int(os.environ.get("JARVIS_WIDGET_TASKS", "0")))
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 
@@ -762,7 +762,7 @@ class SamanthaApp(Gtk.Application):
             wave.switches.voice_on = False
 
         # He answers to his name (user, 2026-08-26). An empty
-        # SAMANTHA_WIDGET_WAKE_WORD restores the "everything heard is for
+        # JARVIS_WIDGET_WAKE_WORD restores the "everything heard is for
         # him" of every version before that.
         wake = WakeWord(_WAKE_WORD, window=_WAKE_WINDOW)
         hotword = Hotword(_HOTWORD_MODEL, sensitivity=_HOTWORD_SENSITIVITY)
@@ -1018,7 +1018,7 @@ class SamanthaApp(Gtk.Application):
             band.show_photo(str(Path.home() / ".samantha" / "enrol-qr.png"), "alta")
             return False  # GLib.SOURCE_REMOVE
 
-        if os.getenv("SAMANTHA_WIDGET_SHOW_QR") == "1":
+        if os.getenv("JARVIS_WIDGET_SHOW_QR") == "1":
             # Shows the code a few seconds after startup — a shortcut for
             # exercising the path with no phone in the room. The normal
             # way in is the signal below, which needs no flag and no
@@ -1031,7 +1031,7 @@ class SamanthaApp(Gtk.Application):
             A signal rather than a route: nothing on the network can send
             one, so the window cannot be opened by the people it exists
             to keep out. `systemctl --user kill -s USR1
-            samantha-widget.service` is the whole ritual.
+            jarvis-widget.service` is the whole ritual.
 
             `add_signal_handler`'s callback runs on whatever thread is
             executing `loop.run_forever()` — the asyncio thread started
@@ -1517,7 +1517,7 @@ def _feed_live_file(path: str, area: PhotoArea) -> None:
 
     The counterpart of `_feed_fake_mic`: no gateway, no camera, only the
     band, the decoder and (once the input region lands) the X11 region —
-    the way `SAMANTHA_WIDGET_PHOTO` lets the thumbnail half be built and
+    the way `JARVIS_WIDGET_PHOTO` lets the thumbnail half be built and
     photographed with neither.
 
     Runs on its own thread so opening the file and pacing the packets

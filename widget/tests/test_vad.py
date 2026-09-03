@@ -7,7 +7,7 @@ she interrupts people or ignores them. So it is tested here, exactly,
 with no model and no microphone in the room.
 """
 
-from samantha_widget.vad import FRAME_SAMPLES, UtteranceDetector
+from jarvis_widget.vad import FRAME_SAMPLES, UtteranceDetector
 
 FRAME = b"\x00\x00" * FRAME_SAMPLES
 FRAME_SECONDS = FRAME_SAMPLES / 16000
@@ -150,7 +150,7 @@ def test_the_run_up_never_grows_without_bound() -> None:
 # ── the pause in the middle of a sentence ─────────────────────────────
 #
 # Reported by the user 2026-08-26: "se cortan palabras cuando se habla".
-# Captured with SAMANTHA_WIDGET_DUMP the same evening — one sentence
+# Captured with JARVIS_WIDGET_DUMP the same evening — one sentence
 # arrived as two turns, two seconds apart:
 #
 #   16:31:44  → Te lo puedes consultar.

@@ -11,7 +11,7 @@ The filter comes from what the gateway actually sent on 2026-08-23
 ordinary token frames, in English, with emoji.
 """
 
-from samantha_widget.speech import ClauseChunker, is_system_message
+from jarvis_widget.speech import ClauseChunker, is_system_message
 
 
 def _feed(text: str) -> list[str]:
@@ -148,34 +148,34 @@ To stop or manage this job, send me a new message (e.g. "stop reminder Prueba ha
 def test_only_her_words_survive_a_scheduled_delivery() -> None:
     """Measured verbatim: she read the job id, the dashes and an English
     instruction out loud. Only the body is hers."""
-    from samantha_widget.speech import unwrap_delivery
+    from jarvis_widget.speech import unwrap_delivery
 
     assert unwrap_delivery(CRON_DELIVERY) == "La prueba ha salido bien."
 
 
 def test_unwrapping_is_idempotent() -> None:
-    from samantha_widget.speech import unwrap_delivery
+    from jarvis_widget.speech import unwrap_delivery
 
     once = unwrap_delivery(CRON_DELIVERY)
     assert unwrap_delivery(once) == once
 
 
 def test_an_ordinary_reply_passes_through_untouched() -> None:
-    from samantha_widget.speech import unwrap_delivery
+    from jarvis_widget.speech import unwrap_delivery
 
     plain = "Hola. Hay un momento, al final de la playa, en que todo calla."
     assert unwrap_delivery(plain) == plain
 
 
 def test_a_delivery_with_no_job_id_line_still_unwraps() -> None:
-    from samantha_widget.speech import unwrap_delivery
+    from jarvis_widget.speech import unwrap_delivery
 
     text = "Cronjob Response: Regar\n-------------\nRiega las plantas."
     assert unwrap_delivery(text) == "Riega las plantas."
 
 
 def test_a_multi_sentence_body_is_kept_whole() -> None:
-    from samantha_widget.speech import unwrap_delivery
+    from jarvis_widget.speech import unwrap_delivery
 
     text = (
         "Cronjob Response: X\n(job_id: abc)\n-------------\n"
@@ -199,7 +199,7 @@ def test_the_speaker_can_be_pointed_somewhere_else() -> None:
     is what made "he is in both places" affordable: cross-room feedback
     cannot happen if only one room is sounding.
     """
-    from samantha_widget.speech import Speaker
+    from jarvis_widget.speech import Speaker
 
     class Sink:
         def __init__(self) -> None:
@@ -236,7 +236,7 @@ async def test_a_clause_still_reaches_the_phone_once_route_home_fires_first(
 
     from Hermes.plugins.samantha_voice import tts
 
-    from samantha_widget.speech import Speaker
+    from jarvis_widget.speech import Speaker
 
     class Sink:
         def __init__(self) -> None:

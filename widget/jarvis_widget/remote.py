@@ -27,8 +27,8 @@ from .enrol import mobileconfig, write_qr
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret
 
-PORT = int(os.getenv("SAMANTHA_WIDGET_REMOTE_PORT", "8443"))
-HOSTNAME = os.getenv("SAMANTHA_WIDGET_REMOTE_NAME", "brain.local")
+PORT = int(os.getenv("JARVIS_WIDGET_REMOTE_PORT", "8443"))
+HOSTNAME = os.getenv("JARVIS_WIDGET_REMOTE_NAME", "brain.local")
 CERT_DIR = Path.home() / ".samantha" / "certs"
 
 # A held turn expires: a phone that presses and never releases — a
@@ -61,21 +61,21 @@ ANSWERING_SECONDS = 600.0
 # longer that the secret sits readable by anyone else on the wifi with
 # a browser.
 #
-# `SAMANTHA_WIDGET_ENROLMENT_SECONDS` moves it, at the user's asking
+# `JARVIS_WIDGET_ENROLMENT_SECONDS` moves it, at the user's asking
 # (2026-09-01): five minutes is short if you are not already standing at
 # the machine. The default stays 300 because the number is not arbitrary
 # — it is exposure — but which minute that is belongs to whoever owns
 # the house. Note that an ALREADY enrolled phone never needs this window
 # again: the secret lives in its home-screen link and the certificate is
 # issued for ten years. This bounds only ADDING one.
-ENROLMENT_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_ENROLMENT_SECONDS", "300"))
+ENROLMENT_SECONDS = float(os.environ.get("JARVIS_WIDGET_ENROLMENT_SECONDS", "300"))
 
 
 class Enrolment:
     """Whether the plain-HTTP welcome page (and `/jarvis.mobileconfig`) may answer.
 
     Closed until something opens it — showing the QR on the strip,
-    today (`SAMANTHA_WIDGET_SHOW_QR=1`) — and closed again on its own
+    today (`JARVIS_WIDGET_SHOW_QR=1`) — and closed again on its own
     `ENROLMENT_SECONDS` later. `now` is a monotonic clock reading,
     injectable for tests, the same way `RemoteDesk.claim` is.
     """

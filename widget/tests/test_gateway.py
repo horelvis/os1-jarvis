@@ -13,7 +13,7 @@ import json
 import pytest
 import websockets
 
-from samantha_widget.gateway import (
+from jarvis_widget.gateway import (
     GatewayClient,
     ProtocolError,
     decode_live_frame,

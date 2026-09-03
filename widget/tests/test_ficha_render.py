@@ -5,7 +5,7 @@ decoration: "la b" has to have something to refer to, and a syllabus is
 about its order.
 """
 
-from samantha_widget.ficha_area import bloques_a_widgets
+from jarvis_widget.ficha_area import bloques_a_widgets
 
 
 def test_a_question_is_lettered() -> None:

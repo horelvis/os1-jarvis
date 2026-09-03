@@ -39,7 +39,7 @@ HERMES_BIN="$REPO_ROOT/.hermes/src/.venv/bin/hermes"
 # one chokepoint worth teaching: both units that start a Hermes process
 # (samantha-hermes.service, samantha-hermes-serve.service) and every manual
 # invocation come through here, so nothing else has to know.
-# samantha-widget.service does not — it needs no credential.
+# jarvis-widget.service does not — it needs no credential.
 #
 # `set -a` exports everything the file defines; `set +a` puts it back. A
 # missing file is normal — a box with no cameras needs no credential — and

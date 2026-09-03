@@ -6,7 +6,7 @@ that the thinking packet travels — is arithmetic and belongs here where
 it can fail fast.
 """
 
-from samantha_widget.wave_model import WaveModel, WaveState
+from jarvis_widget.wave_model import WaveModel, WaveState
 
 WIDTH = 1000.0
 HEIGHT = 96.0

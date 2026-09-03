@@ -25,7 +25,7 @@ import json
 
 import pytest
 
-from samantha_widget.gateway import CONNECT_OPTIONS, GatewayClient
+from jarvis_widget.gateway import CONNECT_OPTIONS, GatewayClient
 
 aiohttp = pytest.importorskip(
     "aiohttp", reason="the gateway's library, not the strip's"

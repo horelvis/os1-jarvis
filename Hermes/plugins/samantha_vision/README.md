@@ -14,9 +14,9 @@ asked. The camera no longer only knocks. See "Being asked" below; the
 photo that goes with the answer reaches the strip and nothing else, for
 the reason in CLAUDE.md §12.
 
-It moved here from `widget/samantha_widget/vision.py` on 2026-08-24. The
+It moved here from `widget/jarvis_widget/vision.py` on 2026-08-24. The
 widget no longer opens a camera and no longer has camera switches; if
-you are looking for `SAMANTHA_WIDGET_CAMERA`, this is where it went.
+you are looking for `JARVIS_WIDGET_CAMERA`, this is where it went.
 
 ## What it needs
 

@@ -9,7 +9,7 @@ just the predicate that decides it — can be driven and asserted without
 a strip, a socket or a display.
 """
 
-from samantha_widget.__main__ import (
+from jarvis_widget.__main__ import (
     TurnOrigin,
     _apply_asking_to_wake,
     _apply_error_to_wake_window,
@@ -20,9 +20,9 @@ from samantha_widget.__main__ import (
     settle_turn,
     spoken_text,
 )
-from samantha_widget.ficha import ESPERA_S, FichaModel
-from samantha_widget.remote import RemoteDesk
-from samantha_widget.wake import WakeWord
+from jarvis_widget.ficha import ESPERA_S, FichaModel
+from jarvis_widget.remote import RemoteDesk
+from jarvis_widget.wake import WakeWord
 
 
 def test_an_empty_error_extends_the_window():
@@ -73,8 +73,8 @@ def test_endpointing_is_wired_only_when_the_model_loaded(monkeypatch) -> None:
     anywhere raises — which is the property that keeps a missing 39 MB
     file from costing a voice turn.
     """
-    from samantha_widget.__main__ import build_may_close
-    from samantha_widget.endpoint import CompletionRule
+    from jarvis_widget.__main__ import build_may_close
+    from jarvis_widget.endpoint import CompletionRule
 
     assert build_may_close(None, CompletionRule())() is False
 
@@ -97,8 +97,8 @@ def test_endpointing_is_wired_only_when_the_model_loaded(monkeypatch) -> None:
 
 def test_a_broken_partials_object_never_closes_a_turn() -> None:
     """Vosk throwing mid-turn must not end somebody's sentence."""
-    from samantha_widget.__main__ import build_may_close
-    from samantha_widget.endpoint import CompletionRule
+    from jarvis_widget.__main__ import build_may_close
+    from jarvis_widget.endpoint import CompletionRule
 
     class Exploding:
         def partial(self) -> str:
@@ -119,8 +119,8 @@ def test_his_own_words_coming_back_are_not_an_interruption() -> None:
     so this is decided on words instead: `EchoFilter` already returns ""
     when everything it was handed was his.
     """
-    from samantha_widget.__main__ import build_is_a_person
-    from samantha_widget.echo import EchoFilter
+    from jarvis_widget.__main__ import build_is_a_person
+    from jarvis_widget.echo import EchoFilter
 
     echo = EchoFilter()
     echo.spoke("Buenas tardes, señor. Le cuento algo un poco más largo.", 100.0)
@@ -133,8 +133,8 @@ def test_his_own_words_coming_back_are_not_an_interruption() -> None:
 
 
 def test_somebody_talking_over_him_is_an_interruption() -> None:
-    from samantha_widget.__main__ import build_is_a_person
-    from samantha_widget.echo import EchoFilter
+    from jarvis_widget.__main__ import build_is_a_person
+    from jarvis_widget.echo import EchoFilter
 
     echo = EchoFilter()
     echo.spoke("Buenas tardes, señor. Le cuento algo un poco más largo.", 100.0)
@@ -150,16 +150,16 @@ def test_with_no_partials_everything_is_a_person() -> None:
     """No Vosk means falling back to the old world, where the RMS floor
     is the only gate. Refusing to interrupt would be worse than
     interrupting too easily: it is the bug being fixed."""
-    from samantha_widget.__main__ import build_is_a_person
-    from samantha_widget.echo import EchoFilter
+    from jarvis_widget.__main__ import build_is_a_person
+    from jarvis_widget.echo import EchoFilter
 
     assert build_is_a_person(None, EchoFilter())(1.0) is True
 
 
 def test_nothing_heard_yet_is_not_a_person() -> None:
     """Vosk has no words yet. Not an interruption, and not an error."""
-    from samantha_widget.__main__ import build_is_a_person
-    from samantha_widget.echo import EchoFilter
+    from jarvis_widget.__main__ import build_is_a_person
+    from jarvis_widget.echo import EchoFilter
 
     class Nothing:
         def partial(self) -> str:
@@ -194,7 +194,7 @@ def test_room_resets_once_per_reply_never_mid_reply() -> None:
     `_room_bookkeeping`, exactly as the callback does — one call per
     frame, always applying `next_was_busy` — and counts every reset.
     """
-    from samantha_widget.__main__ import _room_bookkeeping
+    from jarvis_widget.__main__ import _room_bookkeeping
 
     # quiet, quiet — nothing has happened yet, nothing to reset
     # busy, busy, busy — one whole uninterrupted reply: never resets
@@ -241,7 +241,7 @@ def test_turn_resets_once_per_mic_off_toggle_never_while_it_holds() -> None:
     frame, `next_was_on` always fed back — not a truth table over the
     pure function alone.
     """
-    from samantha_widget.__main__ import _turn_bookkeeping
+    from jarvis_widget.__main__ import _turn_bookkeeping
 
     # on, on — mic on, nothing to reset
     # off, off, off — switched off and left off for three frames: resets
@@ -282,7 +282,7 @@ def test_a_raising_vosk_call_costs_the_feature_and_not_the_microphone(capsys) ->
     hypothetical — it is how a Whisper model that would not fit cost
     three days on 2026-08-27.
     """
-    from samantha_widget.__main__ import VoskSwitch
+    from jarvis_widget.__main__ import VoskSwitch
 
     calls = []
 
@@ -317,13 +317,13 @@ def test_after_that_he_behaves_exactly_as_he_did_before_the_branch() -> None:
     the bug this whole branch exists to fix. Off must mean the 1.2 s
     floor and an interruptible reply, exactly as before.
     """
-    from samantha_widget.__main__ import (
+    from jarvis_widget.__main__ import (
         VoskSwitch,
         build_is_a_person,
         build_may_close,
     )
-    from samantha_widget.echo import EchoFilter
-    from samantha_widget.endpoint import CompletionRule
+    from jarvis_widget.echo import EchoFilter
+    from jarvis_widget.endpoint import CompletionRule
 
     class Stale:
         def partial(self) -> str:
@@ -368,7 +368,7 @@ def test_room_is_forgotten_even_when_the_mic_is_switched_off_mid_reply() -> None
     EVERY branch that can return, and this drives it the same way: one
     unconditional call per frame, mic switch included.
     """
-    from samantha_widget.__main__ import _room_bookkeeping
+    from jarvis_widget.__main__ import _room_bookkeeping
 
     frames = [
         # (mic_on, player.busy)
@@ -404,7 +404,7 @@ def test_a_discarded_utterance_still_ends_the_detectors_turn() -> None:
     signal it now watches: a discarded utterance flips it exactly as a
     kept one does.
     """
-    from samantha_widget.vad import FRAME_SAMPLES, UtteranceDetector
+    from jarvis_widget.vad import FRAME_SAMPLES, UtteranceDetector
 
     frame = b"\x00\x00" * FRAME_SAMPLES
     frame_seconds = FRAME_SAMPLES / 16000

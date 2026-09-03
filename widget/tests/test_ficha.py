@@ -3,7 +3,7 @@
 No GTK in here, the way `photo.py` sits under `photo_area.py`.
 """
 
-from samantha_widget.ficha import (
+from jarvis_widget.ficha import (
     CHARS_PER_LINEA,
     CORREGIDA_S,
     ESPERA_S,

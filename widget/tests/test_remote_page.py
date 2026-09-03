@@ -5,7 +5,7 @@ the network."""
 
 from pathlib import Path
 
-PAGE = Path(__file__).parent.parent / "samantha_widget" / "static" / "movil.html"
+PAGE = Path(__file__).parent.parent / "jarvis_widget" / "static" / "movil.html"
 
 
 def test_the_page_exists_and_is_self_contained() -> None:

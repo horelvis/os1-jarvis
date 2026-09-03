@@ -205,7 +205,7 @@ def silence() -> str:
     `thinking` for as long as the build runs.
 
     `done` cannot be that frame. The widget refuses to settle on one it
-    heard no token for (`widget/samantha_widget/turn.py`), deliberately,
+    heard no token for (`widget/jarvis_widget/turn.py`), deliberately,
     because Hermes emits a `done` after each of its own system messages.
     An `error` always settles, and an EMPTY error settles silently — the
     widget already says nothing when the message is blank, and already

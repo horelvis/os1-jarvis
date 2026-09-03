@@ -43,10 +43,10 @@ _START_FRAMES = 3
 #
 # 1.2 s is roughly where commercial assistants sit, and the cost is
 # stated rather than hidden: he now waits half a second longer before
-# starting to answer. `SAMANTHA_WIDGET_SILENCE` moves it without a code
+# starting to answer. `JARVIS_WIDGET_SILENCE` moves it without a code
 # change, because the right value depends on how the person in the room
 # talks.
-_SILENCE_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_SILENCE", "1.2"))
+_SILENCE_SECONDS = float(os.environ.get("JARVIS_WIDGET_SILENCE", "1.2"))
 _MIN_UTTERANCE_SECONDS = 0.4
 
 # How much quiet is enough to ASK whether the sentence is finished. The
@@ -58,7 +58,7 @@ _MIN_UTTERANCE_SECONDS = 0.4
 # mid-sentence breaths. That is the point — the silence is deliberately
 # not the decision. If the rule cannot tell a breath from an ending,
 # lowering this value alone re-creates the defect of 2026-08-26.
-_ASK_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_ASK_SILENCE", "0.35"))
+_ASK_SECONDS = float(os.environ.get("JARVIS_WIDGET_ASK_SILENCE", "0.35"))
 
 # How much of the quiet before a turn is kept in front of it. The first
 # syllable of a word routinely sits under the threshold, and before

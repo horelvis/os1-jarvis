@@ -6,7 +6,7 @@ quiet afterwards — is ours, and it is what decides whether he wakes up
 when the television says something that rhymes.
 """
 
-from samantha_widget.hotword import Hotword
+from jarvis_widget.hotword import Hotword
 
 # One prediction per frame, so the scripted scores line up one-to-one.
 CHUNK = 512

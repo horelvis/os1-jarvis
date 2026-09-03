@@ -12,7 +12,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from samantha_widget.remote import (
+from jarvis_widget.remote import (
     ANSWERING_SECONDS,
     ENROLMENT_SECONDS,
     HELD_TURN_SECONDS,
@@ -22,8 +22,8 @@ from samantha_widget.remote import (
     _handler,
     build_welcome_app,
 )
-from samantha_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
-from samantha_widget.remote_auth import Guard
+from jarvis_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
+from jarvis_widget.remote_auth import Guard
 
 
 class FakeEndpoint:
@@ -428,14 +428,14 @@ def test_the_enrolment_window_can_be_moved_without_touching_code(monkeypatch) ->
     """
     import importlib
 
-    from samantha_widget import remote
+    from jarvis_widget import remote
 
-    monkeypatch.setenv("SAMANTHA_WIDGET_ENROLMENT_SECONDS", "900")
+    monkeypatch.setenv("JARVIS_WIDGET_ENROLMENT_SECONDS", "900")
     reloaded = importlib.reload(remote)
     try:
         assert reloaded.ENROLMENT_SECONDS == 900.0
     finally:
-        monkeypatch.delenv("SAMANTHA_WIDGET_ENROLMENT_SECONDS")
+        monkeypatch.delenv("JARVIS_WIDGET_ENROLMENT_SECONDS")
         importlib.reload(remote)
 
     assert remote.ENROLMENT_SECONDS == 300.0

@@ -13,9 +13,9 @@ the player already did, available at the microphone's rate.
 
 import math
 
-from samantha_widget.audio import OUTPUT_RATE, SpectrumAnalyser
-from samantha_widget.bars_model import BAND_COUNT
-from samantha_widget.vad import INPUT_RATE
+from jarvis_widget.audio import OUTPUT_RATE, SpectrumAnalyser
+from jarvis_widget.bars_model import BAND_COUNT
+from jarvis_widget.vad import INPUT_RATE
 
 
 def _tone(hz: float, rate: int, samples: int = 4096) -> list[float]:

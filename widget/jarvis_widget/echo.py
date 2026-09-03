@@ -2,7 +2,7 @@
 
 The room has a speaker and a microphone in it, so the microphone hears
 him. Until 2026-08-26 the answer was to stop listening while he spoke
-(`SAMANTHA_WIDGET_MIC_GATE`), which works and costs the one thing the
+(`JARVIS_WIDGET_MIC_GATE`), which works and costs the one thing the
 user asked for: you cannot interrupt somebody who is not listening.
 
 Acoustic echo cancellation is the proper fix and it is configured

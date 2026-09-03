@@ -1,8 +1,8 @@
-# samantha-widget
+# jarvis-widget
 
 Samantha as a floating strip at the bottom of the screen. GTK4 on X11.
 
-Design: `docs/superpowers/specs/2026-08-23-samantha-widget-gtk4-design.md`
+Design: `docs/superpowers/specs/2026-08-23-jarvis-widget-gtk4-design.md`
 
 ## Setup
 
@@ -47,7 +47,7 @@ system packages), and it drags in two problems that both fail silently:
     DISPLAY=:0 \
     PYTHONNOUSERSITE=1 \
     PYTHONPATH=<repo> \
-    .venv/bin/python -m samantha_widget
+    .venv/bin/python -m jarvis_widget
 
 `PYTHONPATH` is how the voice plugin's `tts.py` (CosyVoice) and Hermes' `markers.py`
 are reached — the same mechanism `Hermes/run-gateway.sh` uses. Without
@@ -57,32 +57,32 @@ it she runs and is simply mute.
 
 | Variable | Effect |
 |---|---|
-| `SAMANTHA_WIDGET_STATE` | Freeze the wave in one state (`idle`, `listening`, `thinking`, `speaking`) and skip the voice loop. How each state gets photographed, since `xdotool` is not installed. |
-| `SAMANTHA_WIDGET_NO_MIC=1` | Do not open the microphone. On a box with none plugged in, this is the difference between "she cannot hear" and "the process is broken". |
+| `JARVIS_WIDGET_STATE` | Freeze the wave in one state (`idle`, `listening`, `thinking`, `speaking`) and skip the voice loop. How each state gets photographed, since `xdotool` is not installed. |
+| `JARVIS_WIDGET_NO_MIC=1` | Do not open the microphone. On a box with none plugged in, this is the difference between "she cannot hear" and "the process is broken". |
 | `SAMANTHA_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.samantha/models/`). |
-| `SAMANTHA_WIDGET_FAKE_MIC` | Speak this INTO the widget: it is synthesised, resampled to 16 kHz and pushed through the real microphone path. Everything downstream — VAD, Whisper, the gateway, her reply — is real. |
-| `SAMANTHA_WIDGET_SAY` | Say this once, three seconds after starting. The only way to hear her voice on a machine with no microphone. |
-| `SAMANTHA_WIDGET_MIC_GATE=1` | Deafen the microphone while he speaks. **Not needed since 2026-08-26**: `echo.py` cuts his own words out of the transcript instead, so the microphone stays open and he can be interrupted. Keep it for a box where that filter is not enough. Off by default since 2026-08-25: it is what made interrupting him impossible, because `detector.speaking` had to be true before a frame could reach the detector, and only his own voice through the room could open that latch. Set it on a box with no echo cancellation, or he answers himself. |
-| `SAMANTHA_WIDGET_DUMP` | Write every closed utterance to this directory as a WAV. When a transcription comes back as nonsense, nothing else tells you whether the audio was bad or the model was. |
-| `SAMANTHA_WIDGET_PHOTO` | Show these photos (comma-separated paths) two seconds after starting, exactly as if the gateway had pushed them. The counterpart of `SAMANTHA_WIDGET_SAY` for the half of him you can see: the band, the click and the fade without needing a live turn. |
-| `SAMANTHA_WIDGET_LIVE` | Feed the band this video file as if the gateway had pushed it. The counterpart of `SAMANTHA_WIDGET_PHOTO` for the half of him that moves — the decoder, the band and the input region, with no gateway and no camera. |
-| `SAMANTHA_WIDGET_WAKE_WORD` | The name he answers to. `jarvis` by default; **empty turns the wake word off entirely**, which is how he behaved before 2026-08-26 — everything heard is for him. Matching is deliberately loose: Whisper renders it as "Carbis", "Harvish", "Jervis" and "Harvies", all measured, and an exact match would ignore four of five. |
-| `SAMANTHA_WIDGET_STT_HINT` | What Whisper is told it has just heard, biasing what it hears next (`initial_prompt`). Defaults to his name plus the words this box says — git, Claude Code, commits, pytest. Set it to replace the sentence for a house that talks about other things; set it **empty** to turn the bias off. Measured 2026-08-27: without the vocabulary, «git» came back as «JIT», «JIP» and «Jeep», and two of three attempts to delegate a coding task died there. |
-| `SAMANTHA_WIDGET_WAKE_WINDOW` | Seconds after he answers during which the next sentence needs no name (default 30). Each answer pushes it out; sentences inside it do not. |
-| `SAMANTHA_WIDGET_BARGE_RMS` | How loud the room must be, while he is speaking, before a frame is looked at at all (default 0.01). Since 2026-09-01 this is a **silence floor and nothing else** — it separates sound from no sound, which any scalar can do. Whether a sound is a person or his own voice coming back is decided on WORDS, by `EchoFilter` against Vosk's live partial, and needs no calibration. It was 0.05 and was asked to make that distinction, which it cannot: with the speaker beside the microphone his echo measured 0.178, louder than the user's own voice at 0.054-0.088, and no value works — which is what «no se calla, sigue hablando» was. Raise it only if the room's own noise floor is above 0.01; `0` lets every frame through. |
-| `SAMANTHA_WIDGET_TRACE_MIC=1` | Log what the microphone hears while HE is speaking. The instrument for the number above. |
-| `SAMANTHA_WIDGET_SILENCE` | Seconds of quiet that end a turn (default 1.2). Lower cuts people off mid-sentence; higher makes him slower to answer. |
-| `SAMANTHA_WIDGET_CONSOLE_LINGER` | Seconds the console stays up after the work finishes, before it puts itself away (default 60). A press on it closes it sooner; `0` makes it go the moment the run ends. |
-| `SAMANTHA_WIDGET_CONSOLE_LINES` | How many lines the console keeps, and so how tall the strip gets while it is up (default 20 — about 430 px, the live camera's height). Ten until 2026-08-27, which was too short to read a tool's output in. |
-| `SAMANTHA_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
-| `SAMANTHA_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.samantha/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
-| `SAMANTHA_WIDGET_ASK_SILENCE` | Seconds of quiet after which he asks himself whether your sentence is finished (default 0.35). The 1.2 s of `SAMANTHA_WIDGET_SILENCE` remains the floor: this only ever closes a turn EARLIER, never later. |
-| `SAMANTHA_WIDGET_REMOTE_PORT` | Where the phone page listens (default 8443). The enrolment page is this plus one, over plain HTTP, because a certificate cannot be fetched over a connection that requires trusting it. |
-| `SAMANTHA_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
-| `SAMANTHA_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
-| `SAMANTHA_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
-| `SAMANTHA_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.samantha/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
-| `SAMANTHA_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
+| `JARVIS_WIDGET_FAKE_MIC` | Speak this INTO the widget: it is synthesised, resampled to 16 kHz and pushed through the real microphone path. Everything downstream — VAD, Whisper, the gateway, her reply — is real. |
+| `JARVIS_WIDGET_SAY` | Say this once, three seconds after starting. The only way to hear her voice on a machine with no microphone. |
+| `JARVIS_WIDGET_MIC_GATE=1` | Deafen the microphone while he speaks. **Not needed since 2026-08-26**: `echo.py` cuts his own words out of the transcript instead, so the microphone stays open and he can be interrupted. Keep it for a box where that filter is not enough. Off by default since 2026-08-25: it is what made interrupting him impossible, because `detector.speaking` had to be true before a frame could reach the detector, and only his own voice through the room could open that latch. Set it on a box with no echo cancellation, or he answers himself. |
+| `JARVIS_WIDGET_DUMP` | Write every closed utterance to this directory as a WAV. When a transcription comes back as nonsense, nothing else tells you whether the audio was bad or the model was. |
+| `JARVIS_WIDGET_PHOTO` | Show these photos (comma-separated paths) two seconds after starting, exactly as if the gateway had pushed them. The counterpart of `JARVIS_WIDGET_SAY` for the half of him you can see: the band, the click and the fade without needing a live turn. |
+| `JARVIS_WIDGET_LIVE` | Feed the band this video file as if the gateway had pushed it. The counterpart of `JARVIS_WIDGET_PHOTO` for the half of him that moves — the decoder, the band and the input region, with no gateway and no camera. |
+| `JARVIS_WIDGET_WAKE_WORD` | The name he answers to. `jarvis` by default; **empty turns the wake word off entirely**, which is how he behaved before 2026-08-26 — everything heard is for him. Matching is deliberately loose: Whisper renders it as "Carbis", "Harvish", "Jervis" and "Harvies", all measured, and an exact match would ignore four of five. |
+| `JARVIS_WIDGET_STT_HINT` | What Whisper is told it has just heard, biasing what it hears next (`initial_prompt`). Defaults to his name plus the words this box says — git, Claude Code, commits, pytest. Set it to replace the sentence for a house that talks about other things; set it **empty** to turn the bias off. Measured 2026-08-27: without the vocabulary, «git» came back as «JIT», «JIP» and «Jeep», and two of three attempts to delegate a coding task died there. |
+| `JARVIS_WIDGET_WAKE_WINDOW` | Seconds after he answers during which the next sentence needs no name (default 30). Each answer pushes it out; sentences inside it do not. |
+| `JARVIS_WIDGET_BARGE_RMS` | How loud the room must be, while he is speaking, before a frame is looked at at all (default 0.01). Since 2026-09-01 this is a **silence floor and nothing else** — it separates sound from no sound, which any scalar can do. Whether a sound is a person or his own voice coming back is decided on WORDS, by `EchoFilter` against Vosk's live partial, and needs no calibration. It was 0.05 and was asked to make that distinction, which it cannot: with the speaker beside the microphone his echo measured 0.178, louder than the user's own voice at 0.054-0.088, and no value works — which is what «no se calla, sigue hablando» was. Raise it only if the room's own noise floor is above 0.01; `0` lets every frame through. |
+| `JARVIS_WIDGET_TRACE_MIC=1` | Log what the microphone hears while HE is speaking. The instrument for the number above. |
+| `JARVIS_WIDGET_SILENCE` | Seconds of quiet that end a turn (default 1.2). Lower cuts people off mid-sentence; higher makes him slower to answer. |
+| `JARVIS_WIDGET_CONSOLE_LINGER` | Seconds the console stays up after the work finishes, before it puts itself away (default 60). A press on it closes it sooner; `0` makes it go the moment the run ends. |
+| `JARVIS_WIDGET_CONSOLE_LINES` | How many lines the console keeps, and so how tall the strip gets while it is up (default 20 — about 430 px, the live camera's height). Ten until 2026-08-27, which was too short to read a tool's output in. |
+| `JARVIS_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
+| `JARVIS_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.samantha/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
+| `JARVIS_WIDGET_ASK_SILENCE` | Seconds of quiet after which he asks himself whether your sentence is finished (default 0.35). The 1.2 s of `JARVIS_WIDGET_SILENCE` remains the floor: this only ever closes a turn EARLIER, never later. |
+| `JARVIS_WIDGET_REMOTE_PORT` | Where the phone page listens (default 8443). The enrolment page is this plus one, over plain HTTP, because a certificate cannot be fetched over a connection that requires trusting it. |
+| `JARVIS_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
+| `JARVIS_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
+| `JARVIS_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
+| `JARVIS_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.samantha/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
+| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
@@ -118,9 +118,9 @@ afterwards. Skipping the second step looks like it worked — the page
 loads — right up until the microphone or the WebSocket needs the
 connection actually trusted.
 
-1. Point the phone's camera at the QR (`SAMANTHA_WIDGET_SHOW_QR=1` at
+1. Point the phone's camera at the QR (`JARVIS_WIDGET_SHOW_QR=1` at
    start, or any time with
-   `systemctl --user kill -s USR1 samantha-widget.service` — no restart
+   `systemctl --user kill -s USR1 jarvis-widget.service` — no restart
    needed). **Open the link in Safari.**
 2. **1 · Instalar el certificado** → Settings shows "Profile Downloaded"
    → Install. This installs the profile. It does not yet trust it.
@@ -144,8 +144,8 @@ Two minutes, once per phone. The certificate is issued for ten years.
 ## The cameras are not here any more
 
 This program watched the house's cameras until 2026-08-24. It does not
-now: `vision.py`, the camera thread and the `SAMANTHA_WIDGET_CAMERA`,
-`SAMANTHA_WIDGET_CAMERA_RETRY` and `SAMANTHA_YOLO_MODEL` switches all
+now: `vision.py`, the camera thread and the `JARVIS_WIDGET_CAMERA`,
+`JARVIS_WIDGET_CAMERA_RETRY` and `SAMANTHA_YOLO_MODEL` switches all
 moved into the gateway, as the `samantha-vision` plugin.
 
 They went because the strip was the wrong owner. Watching has to survive
@@ -163,7 +163,7 @@ the package actually installed, not merely present:
     .venv/bin/pip install -e .
 
 Without it the service dies on every start with `No module named
-samantha_widget`, while running it by hand from this directory works
+jarvis_widget`, while running it by hand from this directory works
 fine, because then the current directory is on sys.path.
 
 ## The strip grows for a photo
@@ -206,7 +206,7 @@ floating in the middle of the desktop after a shrink.
 The JPEG itself is written by the gateway, in
 `Hermes/plugins/samantha_vision/`; the strip is only ever handed a path
 and opens it. To see all of this without a live turn — and without a
-camera — point `SAMANTHA_WIDGET_PHOTO` at one or more image files.
+camera — point `JARVIS_WIDGET_PHOTO` at one or more image files.
 
 ## Test
 
@@ -244,7 +244,7 @@ voice, and the door.
 | microphone | Stops listening. Frames are dropped rather than the stream closed — closing PortAudio from its own callback is the segfault §2.8 is written around. Press again to hear. |
 | speaker | Stops him talking, at once, mid-sentence. He still listens. Clauses are dropped rather than queued, so unmuting never says a minute-old answer out loud. |
 | line | Opens a line you type at him in. Enter sends and closes it, Escape closes it without sending. What it sends is a plain message — same session as the spoken path, minus the wake word and the echo filter. |
-| cross | Closes him. **Two presses within three seconds** — the first arms it and the cross lights up. He comes back only with `systemctl --user start samantha-widget`. |
+| cross | Closes him. **Two presses within three seconds** — the first arms it and the cross lights up. He comes back only with `systemctl --user start jarvis-widget`. |
 
 To press one from a script — the strip has no keyboard shortcut and
 `xdotool` is not installed here, but `libXtst` is:

@@ -47,7 +47,7 @@ CLOSE = "close"
 # Two presses rather than one because this is the only control on the
 # strip that cannot be undone from the strip: the microphone and the
 # voice come back with another press, and he comes back only from a
-# terminal (`systemctl --user start samantha-widget`). A brush against
+# terminal (`systemctl --user start jarvis-widget`). A brush against
 # the wrong pixel must not cost that.
 ARM_SECONDS = 3.0
 

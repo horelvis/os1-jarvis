@@ -262,10 +262,10 @@ class Microphone:
 # How long after the last block written his voice is still assumed to be
 # in the room. Must exceed the between-clause synthesis gap (~0.36 s
 # measured) plus PortAudio's output latency plus the acoustic trip.
-# `SAMANTHA_WIDGET_AUDIBLE_TAIL` moves it for a room with different
+# `JARVIS_WIDGET_AUDIBLE_TAIL` moves it for a room with different
 # speakers; too short reopens the feedback loop, too long only means an
 # interruption is judged on its words for a moment longer.
-TAIL_SECONDS = float(os.environ.get("SAMANTHA_WIDGET_AUDIBLE_TAIL", "1.2"))
+TAIL_SECONDS = float(os.environ.get("JARVIS_WIDGET_AUDIBLE_TAIL", "1.2"))
 
 
 class Player:

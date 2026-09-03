@@ -11,8 +11,8 @@ The strip is a fixed-width block centred on the bottom edge (user,
 working.
 """
 
-from samantha_widget import geometry, theme
-from samantha_widget.geometry import placement_is_wrong, strip_rect
+from jarvis_widget import geometry, theme
+from jarvis_widget.geometry import placement_is_wrong, strip_rect
 
 
 def test_it_is_a_fixed_width_block_centred_horizontally() -> None:

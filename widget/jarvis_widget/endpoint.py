@@ -160,7 +160,7 @@ class VoskPartials:
         from vosk import KaldiRecognizer, Model, SetLogLevel
 
         path = Path(
-            model_path or os.getenv("SAMANTHA_WIDGET_VOSK_MODEL") or DEFAULT_MODEL_PATH
+            model_path or os.getenv("JARVIS_WIDGET_VOSK_MODEL") or DEFAULT_MODEL_PATH
         )
         if not path.is_dir():
             raise FileNotFoundError(f"Vosk model not at {path} — see widget/README.md")

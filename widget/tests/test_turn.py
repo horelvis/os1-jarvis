@@ -12,8 +12,8 @@ its own system messages as token frames, each followed by its own
 last one.
 """
 
-from samantha_widget.turn import TurnMachine
-from samantha_widget.wave_model import WaveState
+from jarvis_widget.turn import TurnMachine
+from jarvis_widget.wave_model import WaveState
 
 
 def _machine() -> tuple[TurnMachine, list[WaveState]]:

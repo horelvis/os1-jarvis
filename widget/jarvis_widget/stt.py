@@ -34,10 +34,10 @@ DEFAULT_MODEL = "large-v3-turbo"
 # (CLAUDE.md §2.5), and the widget is the only process that can give any
 # up without giving up a capability.
 #
-# `SAMANTHA_WIDGET_STT_COMPUTE=float16` restores the old arithmetic
+# `JARVIS_WIDGET_STT_COMPUTE=float16` restores the old arithmetic
 # without a code change, for a box where the quantisation does cost
 # something this one could not measure.
-COMPUTE_TYPE = os.environ.get("SAMANTHA_WIDGET_STT_COMPUTE", "int8_float16")
+COMPUTE_TYPE = os.environ.get("JARVIS_WIDGET_STT_COMPUTE", "int8_float16")
 
 # The words this box says that Whisper does not expect a living room to
 # say. Handed to the decoder as part of its `initial_prompt`, which is
@@ -63,11 +63,11 @@ def build_hint(wake_word: str = "") -> str:
     """What Whisper is told it has just heard, to bias what it hears next.
 
     His name first, because being ignored is the one failure a wake word
-    cannot afford; then the vocabulary. `SAMANTHA_WIDGET_STT_HINT`
+    cannot afford; then the vocabulary. `JARVIS_WIDGET_STT_HINT`
     replaces the whole thing — a different house says different words,
     and an empty value turns the bias off entirely.
     """
-    override = os.environ.get("SAMANTHA_WIDGET_STT_HINT")
+    override = os.environ.get("JARVIS_WIDGET_STT_HINT")
     if override is not None:
         return override.strip()
     name = f"Hola {wake_word.capitalize()}. " if wake_word else ""

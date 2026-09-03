@@ -8,8 +8,8 @@ frame callback must not, because the result is indistinguishable from a
 healthy widget that has simply stopped hearing anybody.
 """
 
-from samantha_widget.audio import Microphone
-from samantha_widget.vad import FRAME_SAMPLES
+from jarvis_widget.audio import Microphone
+from jarvis_widget.vad import FRAME_SAMPLES
 
 
 class FakeStream:
@@ -82,7 +82,7 @@ def test_audible_covers_the_gap_between_clauses() -> None:
     `busy` cannot be widened: `say()` waits on it clause by clause, and a
     tail there would slow his speech. Hence a second property.
     """
-    from samantha_widget.audio import TAIL_SECONDS, Player
+    from jarvis_widget.audio import TAIL_SECONDS, Player
 
     player = Player()
     now = 1000.0
@@ -102,7 +102,7 @@ def test_audible_covers_the_gap_between_clauses() -> None:
 
 def test_audible_is_true_whenever_busy_is() -> None:
     """It widens the window; it never narrows it."""
-    from samantha_widget.audio import Player
+    from jarvis_widget.audio import Player
 
     player = Player()
     player.write(b"\x00\x00" * 10)

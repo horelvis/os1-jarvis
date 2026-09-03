@@ -1,6 +1,6 @@
 """The lines shown on the strip, as pure state. No GTK in here."""
 
-from samantha_widget.console import (
+from jarvis_widget.console import (
     HEIGHT,
     LINE_HEIGHT,
     MAX_LINE_CHARS,

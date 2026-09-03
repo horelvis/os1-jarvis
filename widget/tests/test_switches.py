@@ -1,6 +1,6 @@
 """The three switches, as pure state and geometry. No GTK in here."""
 
-from samantha_widget.switches import (
+from jarvis_widget.switches import (
     CLOSE,
     GAP,
     MARGIN,
