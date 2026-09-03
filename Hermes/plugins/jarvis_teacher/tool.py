@@ -53,6 +53,13 @@ class Aula:
         # restart should cost the question, not the course.
         self._candidatos: dict[int, list[str]] = {}
         self._abierta: dict[str, Any] | None = None
+        # What `explicar` last taught, so `preguntar` asks about THAT
+        # concept and not whatever `siguiente()` returns — by the time a
+        # concept has been explained it is no longer 'pendiente', so
+        # asking `siguiente()` again would return the ONE AFTER it, or
+        # nothing at all. Reset when a course is opened or resumed, so
+        # it can never leak from one course into another.
+        self._concepto_actual: str = ""
 
     # ── opening ───────────────────────────────────────────────────────
 
@@ -61,6 +68,7 @@ class Aula:
         try:
             tema = str((args or {}).get("tema") or "").strip()
             now = time.time()
+            self._concepto_actual = ""
             if not tema:
                 curso_id = self._curso.ultimo_abierto()
                 if curso_id is None:
@@ -182,3 +190,158 @@ class Aula:
     def _traer_imagen(self, url: str) -> bytes:
         """Overridden in `__init__.py` with the real fetcher; a seam for tests."""
         raise OSError("sin descargador de imágenes")
+
+    # ── a lesson ──────────────────────────────────────────────────────
+
+    async def explicar(self, args: dict) -> str:
+        """Find the passages for a concept, record it, draw the card."""
+        try:
+            curso_id = self._curso.ultimo_abierto()
+            if curso_id is None:
+                return "No hay curso abierto."
+            concepto = str((args or {}).get("concepto") or "").strip()
+            if not concepto:
+                concepto = self._curso.siguiente(curso_id) or ""
+            if not concepto:
+                return "No queda nada pendiente en el temario."
+
+            pasajes = self._base.pasajes(curso_id, concepto)
+            self._curso.marcar_dado(curso_id, concepto, now=time.time())
+            # Remembered so `preguntar` asks about what was just taught,
+            # not about whatever `siguiente()` returns next — a concept
+            # that has just been marked 'dado' is no longer 'pendiente'.
+            self._concepto_actual = concepto
+
+            ficha_md = str((args or {}).get("ficha") or "")
+            if ficha_md:
+                await self._dibujar(
+                    ficha_md, "explicacion", fuente=pasajes[0][0] if pasajes else ""
+                )
+            if not pasajes:
+                return (
+                    f"Concepto: {concepto}. No hay material guardado que lo cubra; "
+                    "dilo así en vez de rellenarlo."
+                )
+            texto = "\n\n".join(f"[{titulo}] {trozo}" for titulo, trozo in pasajes)
+            return f"Concepto: {concepto}.\n" + SOBRE.format(texto=texto)
+        except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
+            logger.warning(f"jarvis-teacher: explicar falló: {exc}")
+            return "No he podido preparar esa lección."
+
+    async def preguntar(self, args: dict) -> str:
+        """Store the card, draw it, and remember the right answer."""
+        try:
+            curso_id = self._curso.ultimo_abierto()
+            if curso_id is None:
+                return "No hay curso abierto."
+            md = str((args or {}).get("ficha") or "")
+            correcta = str((args or {}).get("correcta") or "").strip().lower()
+            opciones = lista(md)
+            if not opciones or not correcta:
+                return (
+                    "Repite la pregunta con las opciones en una lista "
+                    "y dime cuál es la correcta (a, b o c)."
+                )
+            concepto = self._concepto_actual or self._curso.siguiente(curso_id) or ""
+            self._abierta = {
+                "curso": curso_id,
+                "concepto": concepto,
+                "md": md,
+                "opciones": opciones,
+                "correcta": correcta,
+            }
+            with self._curso.conexion() as db:
+                db.execute(
+                    "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, hecha_en) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        curso_id,
+                        concepto,
+                        md,
+                        "\n".join(opciones),
+                        correcta,
+                        time.time(),
+                    ),
+                )
+            await self._dibujar(md, "pregunta")
+            return "Pregunta hecha. Espero su respuesta."
+        except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
+            logger.warning(f"jarvis-teacher: preguntar falló: {exc}")
+            return "No he podido plantear la pregunta."
+
+    async def responder(self, args: dict) -> str:
+        """Score the spoken answer against what was stored."""
+        try:
+            if not self._abierta:
+                return "No hay ninguna pregunta abierta ahora mismo."
+            dicho = str((args or {}).get("elegida") or "").strip().lower()
+            elegida = self._letra(dicho, self._abierta["opciones"])
+            if not elegida:
+                return "No he entendido cuál elige. Dígame la letra."
+            correcta = self._abierta["correcta"]
+            acierto = elegida == correcta
+            with self._curso.conexion() as db:
+                db.execute(
+                    "UPDATE pregunta SET elegida = ?, acierto = ? WHERE id = "
+                    "(SELECT MAX(id) FROM pregunta WHERE curso = ?)",
+                    (elegida, 1 if acierto else 0, self._abierta["curso"]),
+                )
+            if self._abierta["concepto"]:
+                self._curso.registrar_respuesta(
+                    self._abierta["curso"],
+                    self._abierta["concepto"],
+                    acierto=acierto,
+                    now=time.time(),
+                )
+            await self._dibujar(
+                self._abierta["md"], "pregunta", correcta=correcta, elegida=elegida
+            )
+            self._abierta = None
+            return (
+                "Respuesta correcta."
+                if acierto
+                else f"No: la correcta era la {correcta}."
+            )
+        except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
+            logger.warning(f"jarvis-teacher: responder falló: {exc}")
+            return "No he podido corregir esa respuesta."
+
+    async def terminar(self, args: dict) -> str:
+        """Close the session and hand back the summary."""
+        try:
+            curso_id = self._curso.ultimo_abierto()
+            if curso_id is None:
+                return "No hay clase que cerrar."
+            self._abierta = None
+            self._concepto_actual = ""
+            with self._curso.conexion() as db:
+                db.execute(
+                    "UPDATE sesion SET acabo_en = ? WHERE curso = ? AND acabo_en IS NULL",
+                    (time.time(), curso_id),
+                )
+            return self._curso.hoja(curso_id)
+        except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
+            logger.warning(f"jarvis-teacher: terminar falló: {exc}")
+            return "No he podido cerrar la clase."
+
+    @staticmethod
+    def _letra(dicho: str, opciones: list[str]) -> str:
+        """Turn "la b", "b" or the option's own words into a letter.
+
+        An explicit letter wins first, matched as a whole word so that a
+        letter sitting inside another word never counts. Failing that,
+        the option whose own words were said — and the LONGEST matching
+        option, so that one option's text being a substring of another's
+        ("yes" inside "yesterday") can never win by being checked first.
+        """
+        letras = [chr(97 + i) for i in range(len(opciones))]
+        palabras = dicho.split()
+        for letra in letras:
+            if letra in palabras:
+                return letra
+        mejor_longitud, mejor_letra = 0, ""
+        for indice, opcion in enumerate(opciones):
+            limpio = opcion.strip("*_` ").lower()
+            if limpio and limpio in dicho and len(limpio) > mejor_longitud:
+                mejor_longitud, mejor_letra = len(limpio), letras[indice]
+        return mejor_letra
