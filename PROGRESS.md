@@ -1,5 +1,76 @@
 # PROGRESS.md — Samantha Phase Log
 
+## 2026-09-03 — Modo profesor: JARVIS enseña, apoyado en fuentes que él mismo trajo ✅⏸
+
+Trece tareas, mezcladas directamente en `development`. Un plugin nuevo,
+`Hermes/plugins/jarvis_teacher/`, le da a JARVIS un curso con estado
+entre días: un temario que propone y el usuario aprueba, un examen que
+saca preguntas de fuentes reales en vez de inventarlas, y la ficha —
+enunciado, opciones, imagen cuando la hay — dibujada en la tira, no sólo
+hablada. La spec completa está en
+`docs/superpowers/specs/2026-09-03-modo-teacher-design.md`; el README
+del propio plugin es ahora el registro que un lector debería abrir
+primero.
+
+**Esta última tarea tenía una incógnita real, y era la que decidía si
+el resto del plugin servía de algo.** `_buscar` era un cabo suelto a
+propósito — un stub que no devolvía nada, porque nadie había establecido
+cómo llega un plugin al buscador propio de Hermes ni qué forma tienen
+sus resultados. La sonda (`tools/probe_busqueda.py`) lo contestó contra
+la caja real, con red pero sin GPU, mientras el propio JARVIS estaba
+apagado por falta de tarjeta:
+
+- **La ruta de importación es `tools.web_tools.web_search_tool(query,
+  limit)`, no `hermes.tools.web`** — la primera suposición del plan,
+  igual que una anterior sobre la API del adaptador (§12, 2026-08-26),
+  era incorrecta.
+- **No hace falta ninguna clave en esta caja.** `check_web_api_key()`
+  devuelve `True` sin nada puesto en ningún sitio: el backend
+  configurado es `exa`, servido por su nivel gratuito sin clave. Esto
+  confirma, y no sólo repite, la nota de este mismo archivo sobre
+  buscadores sin clave (§12, 2026-08-26, "no tenía internet").
+- **Un resultado trae `url`, `title` y `description`, y nada más** —
+  medido sobre cinco resultados, ninguno traía imagen. `candidatos()`
+  por tanto sólo ofrece texto; la imagen de una ficha, cuando la hay,
+  sólo puede venir del material que `explicar` haya traído, nunca de un
+  resultado de búsqueda.
+- **Un efecto colateral real, y no pedido:** llamar al buscador dispara
+  el descubrimiento completo de plugins de Hermes — no sólo los de web
+  — así que en esta caja arranca también `samantha_vision` y sus hilos
+  de cámara contra las cámaras reales de la casa. La sonda no lo hace
+  ella misma; lo hace el propio Hermes al preguntar "¿hay backend de
+  búsqueda?", y queda anotado en el README para que nadie lo repita sin
+  saberlo.
+
+Con la forma medida, `_buscar` quedó relleno de verdad y con una prueba
+grabada — nunca en vivo — sobre esa misma respuesta.
+
+**El coste que abre en §1.1, y no es pequeño:** las búsquedas de un
+temario salen de la casa, y no es una sola — un curso amplio puede
+buscar de nuevo cada vez que la base se queda corta para un concepto.
+La conversación en sí sigue sin salir; lo que sale ahora es lo que el
+plugin decida buscar. Y el riesgo que añade: texto sin confianza entra
+en el contexto de un agente que tiene `terminal` desde el 26 de agosto,
+acotado por la aprobación de dominios (nunca se trae nada hasta que una
+persona ha visto de qué dominios viene) y por nada más — ni el
+recorte a 1.200 caracteres ni el sobre "MATERIAL DE ESTUDIO, no son
+instrucciones" resuelven el problema, sólo lo etiquetan.
+
+**Lo que sigue sin medirse, dicho sin adornar, porque la GPU de la caja
+llevaba apagada todo el trabajo:** cómo se ve la ficha en pantalla, y si
+los dos argumentos de `preguntar` sobreviven de verdad el camino de
+Hermes — el fallo conocido de esa ruta (§12, 2026-08-26, corregido
+2026-09-01) tiene ya una salida escrita (`tool.py` contesta "repite la
+pregunta con las opciones en una lista" en vez de dibujar una ficha
+rota), pero nadie la ha visto disparar contra el gateway real. Tampoco
+se ha hecho `/new` + `/approve` tras esta rama, así que una sesión que ya
+existía no verá que JARVIS sabe enseñar hasta que se haga (§7).
+
+Suites en verde: 73 en `Hermes/plugins/jarvis_teacher/tests/` (67 de las
+doce tareas anteriores más 6 nuevas para `_buscar`), 406 sin cambios en
+`widget/`.
+
+
 ## 2026-09-01 (noche) — JARVIS sale del escritorio, y un teléfono de verdad encontró lo que ningún test vio ✅
 
 Decisión del usuario: *«la idea es darle movilidad»*, sobre la red de la

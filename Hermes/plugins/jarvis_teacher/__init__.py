@@ -179,16 +179,61 @@ async def _push_ficha(md: str, tipo: str, **kw) -> bool:
 def _buscar(ctx):
     """Hermes' own web search, wrapped into `list[Resultado]`.
 
-    THE SHAPE OF WHAT HERMES RETURNS IS NOT KNOWN YET — it is the check
-    named in the spec as the earliest one that can be run, and it needs
-    the network but not the GPU. Until it is run, this returns nothing
-    and `ensename` refuses to invent a syllabus, which is the correct
-    behaviour for a box with no search.
+    Measured against the live box on 2026-09-03
+    (`tools/probe_busqueda.py`), because the shape was not known before
+    that: the import is `tools.web_tools.web_search_tool(query, limit)`,
+    NOT `hermes.tools.web` — that guess, like the adapter-API guess
+    before it (§12, 2026-08-26), was wrong. It needs no key on this box:
+    the configured backend is `exa`, and `check_web_api_key()` returns
+    True from its keyless free tier alone, confirming this project's
+    notes about keyless providers (§12, 2026-08-26, "he had no
+    internet") rather than merely repeating them.
+
+    A result carries `url`, `title` and `description` and NOTHING else —
+    measured, not assumed: no result in a five-item probe carried an
+    image. `candidatos()` therefore only ever offers text; a card's
+    image, when there is one, always comes from `explicar`'s own
+    material, never from a search hit.
+
+    The import is lazy, inside the returned closure, for the reason
+    `_adaptador()` above resolves fresh on every call: `register()` runs
+    before plugin discovery has necessarily reached `tools.web_tools`'s
+    own dependencies, and a plugin that fails at import time is a
+    feature that is silently gone (`plugin.yaml`, failure 1).
     """
 
     def buscar(consulta: str) -> list[Resultado]:
-        logger.warning("jarvis-teacher: no hay buscador conectado todavía")
-        return []
+        try:
+            import json as _json
+
+            from tools.web_tools import web_search_tool
+        except Exception as exc:  # noqa: BLE001 — a missing backend must not break the plugin
+            logger.warning(f"jarvis-teacher: no se pudo importar el buscador: {exc}")
+            return []
+        try:
+            crudo = web_search_tool(consulta, limit=5)
+            datos = _json.loads(crudo)
+        except Exception as exc:  # noqa: BLE001 — a bad response must not crash the tool
+            logger.warning(f"jarvis-teacher: la búsqueda falló: {exc}")
+            return []
+        if not datos.get("success"):
+            logger.warning(
+                f"jarvis-teacher: búsqueda sin resultado: {datos.get('error')}"
+            )
+            return []
+        resultados: list[Resultado] = []
+        for item in datos.get("data", {}).get("web", []):
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            resultados.append(
+                Resultado(
+                    url=url,
+                    titulo=str(item.get("title") or url),
+                    resumen=str(item.get("description") or ""),
+                )
+            )
+        return resultados
 
     return buscar
 

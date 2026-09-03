@@ -13,10 +13,12 @@ author: Horelvis Castillo
 # ─────────────────────────────────────────────────────────────────────
 # How this plugin fails, and how it fails SILENTLY.
 #
-# 1. NO SEARCH BACKEND. Without something for `buscar`, `ensename` finds
-#    no candidates and refuses to invent a syllabus. That is correct and
-#    is indistinguishable from a subject nothing was written about. The
-#    line says which backend was tried.
+# 1. NO SEARCH BACKEND, OR `tools.web_tools` UNREACHABLE. `ensename`
+#    finds no candidates and refuses to invent a syllabus. That is
+#    correct and is indistinguishable from a subject nothing was written
+#    about. The warning line names the cause — an import failure, or
+#    Hermes' own "No web search provider configured" — because the two
+#    look identical from the strip.
 #
 # 2. THE STRIP IS NOT CONNECTED. `push_ficha` returns False and the
 #    question is still asked out loud. A multiple choice only heard is
