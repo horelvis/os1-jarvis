@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def resolver(md: str, *, traer: Callable[[str], bytes], now: float) -> str:
             continue
         try:
             datos = traer(referencia)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — catch ordinary errors, not cancellations
             logger.warning(f"jarvis-teacher: no se pudo traer una imagen: {exc}")
             salida = _quitar(salida, referencia)
             continue
@@ -79,10 +80,40 @@ def resolver(md: str, *, traer: Callable[[str], bytes], now: float) -> str:
 
 
 def _quitar(md: str, referencia: str) -> str:
-    """Drop one image reference, leaving the rest of the document alone."""
-    lineas = [
-        linea
-        for linea in md.splitlines()
-        if not (linea.strip().startswith("![") and referencia in linea)
-    ]
-    return "\n".join(lineas)
+    """Drop one image reference, leaving the rest of the document alone.
+
+    An inline reference is cut out mid-sentence. A reference alone on
+    its line takes the whole line with it, so no blank line is left.
+    References in code fences are not handed here (imagenes() filters them).
+    """
+    # Pattern to match the image syntax with this specific reference.
+    patron = rf"!\[[^\]]*\]\({re.escape(referencia)}\)"
+
+    lineas = md.splitlines(keepends=True)
+    result = []
+    i = 0
+    while i < len(lineas):
+        linea = lineas[i]
+        if referencia not in linea:
+            result.append(linea)
+            i += 1
+            continue
+
+        # Check if this line is JUST the image reference (own-line).
+        desnuda = linea.strip()
+        if re.match(rf"^!\[[^\]]*\]\({re.escape(referencia)}\)$", desnuda):
+            # Own-line reference; skip the entire line.
+            # Also skip the following blank line if there is one.
+            i += 1
+            if i < len(lineas) and lineas[i].strip() == "":
+                i += 1
+            continue
+
+        # Inline reference; remove just the image syntax.
+        modified = re.sub(patron, "", linea)
+        # Clean up double spaces left behind.
+        modified = re.sub(r" {2,}", " ", modified)
+        result.append(modified)
+        i += 1
+
+    return "".join(result)
