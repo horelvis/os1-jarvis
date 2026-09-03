@@ -65,7 +65,8 @@ can act on it. Not a window you open. Something that is there.
   gives the **moving** picture at 900x480, and a still only when a still
   is what was asked for.
 - **Memory:** Hermes' own (`memories/USER.md`, `state.db`). ChromaDB
-  (§2.7) still exists in `backend/` but the gateway path never uses it.
+  (§2.7) is gone with `backend/`, deleted 2026-09-03; the gateway path
+  never used it.
 - **Phones:** three iPhones on the house network reach him through
   `widget/samantha_widget/remote.py` — a page with one button, held to
   speak. The phone is a peripheral of the widget, not a platform: the
@@ -114,10 +115,10 @@ no unit does it for you: `samantha-llamacpp.service` does not know the
 widget exists, and nothing at all counts the desktop. Getting this wrong
 is silent — it left him deaf for three days in August (§12, 2026-08-30).
 
-**What is still here but unused:** `backend/` (FastAPI, `/chat`,
-`/speak`, ChromaDB) and `frontend/` (React, Vite, the OS1 ribbon). The
-widget replaced both. They stay until the widget has convinced; that was
-an explicit condition, and the removal is plan 3.
+**`backend/` and `frontend/` are gone**, deleted 2026-09-03 with the two
+systemd units that served them. The widget had replaced both in August;
+the condition for removing them was that it convince first, and it did.
+That was "plan 3", and it is closed.
 
 ---
 
@@ -363,6 +364,12 @@ GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 > runs. `127.0.0.1:7777` is now the **Hermes gateway**, not uvicorn, and
 > nothing serves a frontend because there is no browser to serve it to.
 >
+> **Deleted 2026-09-03.** And the reason recorded here for keeping it
+> had already stopped being true: the TTS library the widget imports is
+> `Hermes/plugins/samantha_voice/tts.py`, not `backend/samantha/tts.py`,
+> which did not exist. Nothing outside `backend/` imported it. The
+> paragraph below is what this section used to claim.
+>
 > **`backend/` is not entirely dead, and the distinction matters:**
 > `samantha.tts` is imported by the widget **as a library** to reach
 > CosyVoice. That is the whole reason `PYTHONPATH` includes `backend/`
@@ -511,8 +518,10 @@ nothing. One did, on 2026-08-27 — see the comment in
 
 **Piper was the v3 choice** (`es_ES-davefx-medium`, CPU, ~200 ms) and
 lost on identity, not on latency: a preset voice is somebody else's.
-XTTS-v2 was tried in between. `backend/samantha/tts.py` still dispatches
-across all three; CosyVoice is the default and the only one used.
+XTTS-v2 was tried in between. `Hermes/plugins/samantha_voice/tts.py`
+dispatches across all three; CosyVoice is the default and the only one
+used. (It lived in `backend/samantha/tts.py` until that tree was
+retired, and this line said so long after it had moved.)
 
 **A second lever, easy to miss:** CosyVoice takes a system prompt before
 `<|endofprompt|>` that conditions *delivery* — pace, poise — not words.
@@ -651,8 +660,8 @@ Spanish from Spain (peninsular).
 
 ### 2.10 Frontend Stack: React + Vite + TypeScript — SUPERSEDED
 
-> **Superseded 2026-08-23, kept for the history.** `frontend/` still
-> exists and nothing runs it. The four screens, the Zustand store and the
+> **Superseded 2026-08-23; the tree was deleted 2026-09-03.** What
+> follows is kept for the history. `frontend/` no longer exists. The four screens, the Zustand store and the
 > Three.js OS1 ribbon were the kiosk's UI; the widget draws its own in
 > GSK (§2.3). It stays until the widget has convinced — an explicit
 > condition of the 2026-08-22 decision — and its removal is plan 3.
@@ -724,20 +733,18 @@ os1-samantha/
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from
 ├── systemd/                ← user units: widget, hermes, hermes-serve,
-│                             llamacpp (+ backend/ui, dead with the kiosk)
+│                             llamacpp
 ├── docs/                   ← personality.md, designs, plans, decisions
 │
-├── backend/                ← FastAPI + ChromaDB. Only `samantha.tts` is
-│                             still imported, as a library (§2.4).
-└── frontend/               ← React + Vite. Nothing runs it (§2.10).
+
 ```
 
 **Rules:**
 - **MUST NOT** introduce Rust, Tauri, snap packaging, or a browser /
   webview of any kind (all rejected; see Decision Log §12)
 - **MUST NOT** add new top-level directories without asking
-- **MUST NOT** add code to `backend/` or `frontend/` — they are on their
-  way out (plan 3). New work goes in `widget/`.
+- **MUST NOT** recreate `backend/` or `frontend/`. They were deleted on
+  2026-09-03 after four months unused. New work goes in `widget/`.
 - **MAY** add files within existing directories following conventions
 
 ---
@@ -813,8 +820,9 @@ on every drop after.
   picture were not, because there is no way to send this window a click
   (no `xdotool`) and driving two sentences into one session is not
   something the fake microphone can do. Both want a human in the room.
-- **Plan 3 is unwritten:** removing the kiosk, `backend/` and
-  `frontend/`. Deliberately parked until the widget convinces.
+- ~~**Plan 3 is unwritten:** removing the kiosk, `backend/` and
+  `frontend/`.~~ **Done 2026-09-03**, folded into the rename: both trees
+  and their two dead units are deleted.
 - **The Hermes config is git-ignored**, so `tts:` must be re-applied by
   hand on any new box. Without it his words are synthesised by Edge TTS
   — which means they leave for Microsoft. `Hermes/apply-config.sh`.
@@ -863,10 +871,11 @@ python3 -m venv --system-site-packages .venv
 #   .venv/bin/pip install --ignore-installed -e ".[dev]"
 # and check with `pip list --local`, the only honest view of the venv.
 
-# Run him. PYTHONPATH reaches samantha.tts (CosyVoice) and Hermes'
-# markers.py; PYTHONNOUSERSITE keeps ~/.local out of the way (§2.8).
+# Run him. PYTHONPATH reaches the voice plugin's tts.py and markers.py;
+# PYTHONNOUSERSITE keeps ~/.local out of the way (§2.8). It named
+# `backend/` too until that tree was deleted on 2026-09-03.
 DISPLAY=:0 PYTHONNOUSERSITE=1 \
-  PYTHONPATH=$PWD/../backend:$PWD/.. \
+  PYTHONPATH=$PWD/.. \
   .venv/bin/python -m samantha_widget
 
 # Tests + lint
@@ -961,15 +970,8 @@ DISPLAY=:0 widget/.venv/bin/python widget/tools/click.py 1309 1032
 
 ### Legacy: backend and frontend
 
-Neither runs (§2.4, §2.10). `backend/` still holds `samantha.tts`, which
-the widget imports, so its tests are worth keeping green:
-
-```bash
-cd backend && ./.venv/bin/python -m pytest tests/ -q
-```
-
-The frontend build (`pnpm install && pnpm build`, never `npm`) produces
-`frontend/dist/`, which nothing loads any more.
+Both trees were deleted on 2026-09-03. Nothing to run, and nothing to
+keep green. `git log -- backend frontend` is where they went.
 
 ---
 

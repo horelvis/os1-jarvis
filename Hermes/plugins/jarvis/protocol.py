@@ -1,9 +1,12 @@
 """The jarvis WebSocket wire format.
 
-This is NOT a new protocol. It is the one the OS1 frontend already speaks,
-defined in `frontend/src/core/types.ts:37-45`, pinned here so that a change
-on either side fails a test instead of the strip. Field names are part of
-the contract: the frontend reads `msg.token`, `msg.thinking_ms`, `msg.error`.
+This was NOT a new protocol when it was written: it was the one the OS1
+frontend already spoke, pinned here so that a change on either side
+fails a test instead of the strip. **That frontend was deleted on
+2026-09-03**, so this file is now the only definition there is — the
+tests below are what the contract rests on, not a second implementation
+to agree with. Field names remain part of it: the strip reads
+`msg.token`, `msg.thinking_ms`, `msg.error`.
 
 Binary WebSocket frames arrive alongside these text ones: audio frames in
 plan 3b, and video frames (H.264 packets) immediately — with the `live`,

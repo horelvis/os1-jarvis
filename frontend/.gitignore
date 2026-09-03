@@ -1,9 +1,0 @@
-node_modules
-dist
-*.local
-.DS_Store
-
-# TypeScript composite-build artifacts (from `tsc -b`)
-*.tsbuildinfo
-vite.config.d.ts
-vite.config.js

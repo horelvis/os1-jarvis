@@ -1,8 +1,10 @@
 """Expression-marker safety check between Hermes and CosyVoice.
 
 Samantha's replies carry inline expression markers — `[laughter]`,
-`[breath]`, `[sigh]`, and `<laughter>palabras reales</laughter>` (see
-backend/samantha/personality.py:58-62), the last of which renders its
+`[breath]`, `[sigh]`, and `<laughter>palabras reales</laughter>` (they
+were declared in `backend/samantha/personality.py`, deleted on
+2026-09-03; `docs/personality.md` is where they live now), the last of
+which renders its
 enclosed words as smiled speech. Hermes' `SentenceChunker` knows
 nothing about them, so `<laughter>Ya. Claro</laughter>` can be cut at
 the period, handing CosyVoice a clause with an opening tag and no

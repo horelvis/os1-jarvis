@@ -46,10 +46,10 @@ system packages), and it drags in two problems that both fail silently:
 
     DISPLAY=:0 \
     PYTHONNOUSERSITE=1 \
-    PYTHONPATH=<repo>/backend:<repo> \
+    PYTHONPATH=<repo> \
     .venv/bin/python -m samantha_widget
 
-`PYTHONPATH` is how `samantha.tts` (CosyVoice) and Hermes' `markers.py`
+`PYTHONPATH` is how the voice plugin's `tts.py` (CosyVoice) and Hermes' `markers.py`
 are reached — the same mechanism `Hermes/run-gateway.sh` uses. Without
 it she runs and is simply mute.
 
