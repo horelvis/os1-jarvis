@@ -98,3 +98,98 @@ def test_a_second_question_replaces_the_first(aula) -> None:
 def test_terminar_closes_the_session_and_summarises(aula) -> None:
     salida = asyncio.run(aula.terminar({}))
     assert "Past continuous" in salida or "1" in salida
+
+
+# ── review round 1: three findings ─────────────────────────────────────
+
+
+def test_preguntar_after_a_restart_asks_about_the_taught_concept(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`_concepto_actual` is memory only; a restart is a fresh `Aula`.
+
+    Reproduces the review's finding exactly: two concepts, the first
+    explained, then a fresh `Aula` over the same database asks a
+    question. Without the `_ultimo_dado` fallback, `preguntar` would ask
+    `curso.siguiente()`, which — now that "Past continuous" is 'dado' —
+    names "Present perfect" instead, and a wrong answer would mark the
+    WRONG concept for review.
+    """
+    monkeypatch.setenv("JARVIS_TEACHER_HOME", str(tmp_path))
+    curso = Curso(tmp_path / "curso.db")
+    base = Base(
+        curso,
+        tmp_path / "f",
+        buscar=lambda _q: [Resultado("https://cambridgeenglish.org/b1", "B1", "x")],
+        traer=lambda _u: "<p>The past continuous: what were you doing?</p>",
+    )
+
+    async def push_1(md: str, tipo: str, **kw):
+        return True
+
+    aula_1 = Aula(curso, base, push_ficha=push_1)
+    asyncio.run(aula_1.ensename({"tema": "B1"}))
+    asyncio.run(
+        aula_1.planificar({"temario": "1. Past continuous\n2. Present perfect\n"})
+    )
+    asyncio.run(aula_1.aprobar({}))
+    asyncio.run(aula_1.explicar({"concepto": "Past continuous"}))
+
+    recogido_2: list = []
+
+    async def push_2(md: str, tipo: str, **kw):
+        recogido_2.append((tipo, md, kw))
+        return True
+
+    # A restart: a fresh `Aula`, `_concepto_actual` empty, same database.
+    aula_2 = Aula(curso, base, push_ficha=push_2)
+    asyncio.run(aula_2.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    asyncio.run(aula_2.responder({"elegida": "a"}))
+
+    hoja = curso.hoja(curso.ultimo_abierto())
+    assert "A repasar: Past continuous" in hoja
+    assert "A repasar: Present perfect" not in hoja
+
+
+def test_preguntar_cites_the_source_explicar_found(aula) -> None:
+    asyncio.run(aula.explicar({"concepto": "Past continuous"}))
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    _tipo, _md, kw = aula.recogido[-1]
+    assert kw["fuente"]
+    with aula._curso.conexion() as db:
+        fila = db.execute(
+            "SELECT fuente FROM pregunta ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert fila[0]
+
+
+def test_no_passages_means_no_citation_ever_invented(aula) -> None:
+    """When `explicar` found nothing, `preguntar` must not fake a source."""
+    asyncio.run(aula.explicar({"concepto": "Subjunctive inversion"}))
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    _tipo, _md, kw = aula.recogido[-1]
+    assert not kw.get("fuente")
+    with aula._curso.conexion() as db:
+        fila = db.execute(
+            "SELECT fuente FROM pregunta ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert fila[0] is None
+
+
+def test_letra_reads_an_ordinal() -> None:
+    opciones = ["did", "were", "have"]
+    assert Aula._letra("la segunda", opciones) == "b"
+    assert Aula._letra("la primera", opciones) == "a"
+    assert Aula._letra("la tercera", opciones) == "c"
+
+
+def test_letra_strips_trailing_punctuation() -> None:
+    opciones = ["did", "were", "have"]
+    assert Aula._letra("b.", opciones) == "b"
+    assert Aula._letra("¿la segunda?", opciones) == "b"
+
+
+def test_responder_understands_a_spoken_ordinal(aula) -> None:
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    salida = asyncio.run(aula.responder({"elegida": "la segunda"}))
+    assert "correcta" in salida.lower()

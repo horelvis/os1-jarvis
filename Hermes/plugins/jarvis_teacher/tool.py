@@ -34,6 +34,11 @@ SOBRE = (
     "úsalo para explicar y para sacar preguntas):\n{texto}\n--- fin del material ---"
 )
 
+# What a spoken ordinal means, in the order the options are lettered.
+# However many options a card has (never more than four, in practice),
+# only as many of these are ever checked.
+_ORDINALES: tuple[str, ...] = ("primera", "segunda", "tercera", "cuarta")
+
 
 class Aula:
     """One course at a time, and the seven things he can do with it."""
@@ -53,13 +58,18 @@ class Aula:
         # restart should cost the question, not the course.
         self._candidatos: dict[int, list[str]] = {}
         self._abierta: dict[str, Any] | None = None
-        # What `explicar` last taught, so `preguntar` asks about THAT
-        # concept and not whatever `siguiente()` returns — by the time a
-        # concept has been explained it is no longer 'pendiente', so
-        # asking `siguiente()` again would return the ONE AFTER it, or
-        # nothing at all. Reset when a course is opened or resumed, so
-        # it can never leak from one course into another.
+        # What `explicar` last taught, and the title of the source its
+        # top passage came from, so `preguntar` asks about — and cites —
+        # THAT concept and not whatever `siguiente()` returns: by the
+        # time a concept has been explained it is no longer 'pendiente',
+        # so asking `siguiente()` again would return the ONE AFTER it,
+        # or nothing at all. Both are memory only and a gateway restart
+        # empties them — `preguntar` falls back to `_ultimo_dado`, which
+        # reads the same fact from the database, before it ever falls
+        # back to `siguiente()`. Reset when a course is opened or
+        # resumed, so neither can leak from one course into another.
         self._concepto_actual: str = ""
+        self._fuente_actual: str = ""
 
     # ── opening ───────────────────────────────────────────────────────
 
@@ -69,6 +79,7 @@ class Aula:
             tema = str((args or {}).get("tema") or "").strip()
             now = time.time()
             self._concepto_actual = ""
+            self._fuente_actual = ""
             if not tema:
                 curso_id = self._curso.ultimo_abierto()
                 if curso_id is None:
@@ -166,6 +177,27 @@ class Aula:
             ).fetchone()
         return bool(fila)
 
+    def _ultimo_dado(self, curso_id: int) -> str:
+        """The concept most recently marked taught, straight from disk.
+
+        `_concepto_actual` is memory only and a restart empties it. This
+        is what `preguntar` falls back to instead — `curso.py` has no
+        accessor for "the last dado_en", so this reads `concepto`
+        directly, the same way `_tiene_fuentes` above reads `fuente`
+        directly rather than adding one for a single caller. Falling
+        back to `siguiente()` instead of this is the exact bug the
+        review found: the concept just taught is no longer 'pendiente',
+        so `siguiente()` names the ONE AFTER it, and a wrong answer
+        would mark that one for review instead of the one just taught.
+        """
+        with self._curso.conexion() as db:
+            fila = db.execute(
+                "SELECT titulo FROM concepto WHERE curso = ? AND dado_en IS NOT NULL "
+                "ORDER BY dado_en DESC LIMIT 1",
+                (curso_id,),
+            ).fetchone()
+        return str(fila[0]) if fila else ""
+
     # ── drawing ───────────────────────────────────────────────────────
 
     def _md_plan(self, curso_id: int, titulos: list[str]) -> str:
@@ -207,10 +239,14 @@ class Aula:
 
             pasajes = self._base.pasajes(curso_id, concepto)
             self._curso.marcar_dado(curso_id, concepto, now=time.time())
-            # Remembered so `preguntar` asks about what was just taught,
-            # not about whatever `siguiente()` returns next — a concept
-            # that has just been marked 'dado' is no longer 'pendiente'.
+            # Remembered so `preguntar` asks about — and cites — what was
+            # just taught, not whatever `siguiente()` returns next: a
+            # concept that has just been marked 'dado' is no longer
+            # 'pendiente'. No passages means no citation; that is the
+            # honest case and `_fuente_actual` must stay empty for it,
+            # never invented.
             self._concepto_actual = concepto
+            self._fuente_actual = pasajes[0][0] if pasajes else ""
 
             ficha_md = str((args or {}).get("ficha") or "")
             if ficha_md:
@@ -242,28 +278,42 @@ class Aula:
                     "Repite la pregunta con las opciones en una lista "
                     "y dime cuál es la correcta (a, b o c)."
                 )
-            concepto = self._concepto_actual or self._curso.siguiente(curso_id) or ""
+            concepto = (
+                self._concepto_actual
+                or self._ultimo_dado(curso_id)
+                or self._curso.siguiente(curso_id)
+                or ""
+            )
+            # The source only travels with the concept when it came from
+            # THIS process's `_concepto_actual` — after a restart we know
+            # which concept was taught (`_ultimo_dado`) but not which
+            # source its passage cited, and inventing one would be worse
+            # than citing nothing.
+            fuente = self._fuente_actual if self._concepto_actual else ""
             self._abierta = {
                 "curso": curso_id,
                 "concepto": concepto,
+                "fuente": fuente,
                 "md": md,
                 "opciones": opciones,
                 "correcta": correcta,
             }
             with self._curso.conexion() as db:
                 db.execute(
-                    "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, hecha_en) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO pregunta "
+                    "(curso, concepto, md, opciones, correcta, fuente, hecha_en) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         curso_id,
                         concepto,
                         md,
                         "\n".join(opciones),
                         correcta,
+                        fuente or None,
                         time.time(),
                     ),
                 )
-            await self._dibujar(md, "pregunta")
+            await self._dibujar(md, "pregunta", fuente=fuente)
             return "Pregunta hecha. Espero su respuesta."
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
             logger.warning(f"jarvis-teacher: preguntar falló: {exc}")
@@ -294,7 +344,11 @@ class Aula:
                     now=time.time(),
                 )
             await self._dibujar(
-                self._abierta["md"], "pregunta", correcta=correcta, elegida=elegida
+                self._abierta["md"],
+                "pregunta",
+                fuente=self._abierta.get("fuente", ""),
+                correcta=correcta,
+                elegida=elegida,
             )
             self._abierta = None
             return (
@@ -314,6 +368,7 @@ class Aula:
                 return "No hay clase que cerrar."
             self._abierta = None
             self._concepto_actual = ""
+            self._fuente_actual = ""
             with self._curso.conexion() as db:
                 db.execute(
                     "UPDATE sesion SET acabo_en = ? WHERE curso = ? AND acabo_en IS NULL",
@@ -326,22 +381,35 @@ class Aula:
 
     @staticmethod
     def _letra(dicho: str, opciones: list[str]) -> str:
-        """Turn "la b", "b" or the option's own words into a letter.
+        """Turn "la b", "la segunda", "b." or an option's own words into a letter.
 
-        An explicit letter wins first, matched as a whole word so that a
-        letter sitting inside another word never counts. Failing that,
-        the option whose own words were said — and the LONGEST matching
-        option, so that one option's text being a substring of another's
-        ("yes" inside "yesterday") can never win by being checked first.
+        Trailing (and leading) punctuation is stripped first — a spoken
+        answer transcribed as "b." or "¿la segunda?" must not fail to
+        match on a stray period or question mark. Then, in order: an
+        explicit letter, matched as a whole word so a letter sitting
+        inside another word never counts; an ordinal ("la segunda",
+        which a Spanish speaker says at least as often as "la b"), for
+        however many options this card actually has; and finally the
+        option whose own words were said — the LONGEST matching option,
+        so that one option's text being a substring of another's ("yes"
+        inside "yesterday") can never win by being checked first.
         """
+        limpio_dicho = dicho.strip(" .,;:!?¡¿")
         letras = [chr(97 + i) for i in range(len(opciones))]
-        palabras = dicho.split()
+        palabras = limpio_dicho.split()
         for letra in letras:
             if letra in palabras:
                 return letra
+        for indice, ordinal in enumerate(_ORDINALES[: len(opciones)]):
+            if ordinal in palabras:
+                return letras[indice]
         mejor_longitud, mejor_letra = 0, ""
         for indice, opcion in enumerate(opciones):
-            limpio = opcion.strip("*_` ").lower()
-            if limpio and limpio in dicho and len(limpio) > mejor_longitud:
-                mejor_longitud, mejor_letra = len(limpio), letras[indice]
+            limpio_opcion = opcion.strip("*_` ").lower()
+            if (
+                limpio_opcion
+                and limpio_opcion in limpio_dicho
+                and len(limpio_opcion) > mejor_longitud
+            ):
+                mejor_longitud, mejor_letra = len(limpio_opcion), letras[indice]
         return mejor_letra
