@@ -792,13 +792,11 @@ on every drop after.
   and is told only what YOLO labelled, so any visual detail beyond
   those eight labels is invented — and measured live, he invents it
   ("puerta cerrada, el porche vacío" against a tool that said only
-  "no hay nadie"). He also calls `mirar` with **no** camera 5 times out
-  of 5, even when one was named, so a question about one camera comes
-  back as a survey of all of them. **The second half of that is not the
-  model's fault** — corrected 2026-09-01: asked directly, llama-server
-  fills `mirar({"camara":"entrada"})` correctly, on both the current
-  model and the one before it. The defect is in the Hermes path, not the
-  weights. §12 (2026-08-26) carries the measurement. **Corrected 2026-08-26:** the "no
+  "no hay nadie"). ~~He also calls `mirar` with **no** camera 5 times
+  out of 5, even when one was named.~~ **Fixed 2026-09-03**: the cause
+  was our own schema shape, not the model and not Hermes — §12's
+  2026-08-26 entry carries it. Measured after the fix, a course opened
+  live received its `tema` and filed an eleven-point syllabus. §12 (2026-08-26) carries the measurement. **Corrected 2026-08-26:** the "no
   camera 5 times out of 5" was measured through `mirar`, whose handler
   reads the whole argument dict. `ver_en_vivo` named that parameter
   `camara` and crashed on it instead — `'dict' object has no attribute
@@ -1785,8 +1783,22 @@ and the reason is in the model rather than the code: **it calls a tool
 of ours with no arguments at all** — `args={}`, and Hermes' own
 `user_task` arriving as the string `"None"`, measured across six calls.
 
-> **Corrected 2026-09-01, and it moves where to look.** The blame here
-> lands on "the model", and that is wrong. Put the same tools to
+> **Found and fixed 2026-09-03, and it was ours.**
+> `register_tool(schema=…)` takes the OpenAI *function* object —
+> `{"description": …, "parameters": {…}}` — because Hermes' registry
+> builds `{**entry.schema, "name": entry.name}` and wraps THAT as the
+> function (`.hermes/src/tools/registry.py`, `get_definitions`). All of
+> our plugins passed the PARAMETERS object directly, so every tool
+> reached the model with no `parameters` key and no description at all,
+> and `{}` was the only call it could make. `register_tool`'s own
+> `description=` never reaches the model either — it feeds the plugin
+> listing. Neither the tool-search bridge nor the deferrable-tool
+> machinery nor the platform prompt had anything to do with it, and a
+> vision test asserting `schema["properties"]` had pinned the broken
+> shape in place since August.
+>
+> **Corrected 2026-09-01, and it moved where to look — half right.** The
+> blame in the paragraph below lands on "the model", and that is wrong. Put the same tools to
 > llama-server directly, as a plain OpenAI `tools` payload, and BOTH the
 > old Q3_K_XL and the current Heretic fill them correctly — 4 of 4 each,
 > `mirar({"camara":"entrada"})` included, which is the exact call this
