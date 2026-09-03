@@ -11,6 +11,7 @@ from Hermes.plugins.jarvis.protocol import (
     decode_client,
     done,
     error,
+    ficha,
     live,
     live_end,
     live_frame,
@@ -215,3 +216,27 @@ def test_asking_is_server_to_client_only():
     # never sends one of these.
     with pytest.raises(ProtocolError):
         decode_client(json.dumps({"type": "asking", "open": True}))
+
+
+def test_ficha_carries_its_kind_and_its_markdown() -> None:
+    frame = json.loads(ficha("## ¿Cuál?\n\n- a\n- b\n", "pregunta", fuente="Cambridge"))
+    assert frame["type"] == "ficha"
+    assert frame["tipo"] == "pregunta"
+    assert frame["fuente"] == "Cambridge"
+    assert frame["correcta"] is None
+    assert frame["elegida"] is None
+
+
+def test_a_corrected_ficha_carries_both_answers() -> None:
+    frame = json.loads(ficha("- a\n- b\n", "pregunta", correcta="b", elegida="a"))
+    assert (frame["correcta"], frame["elegida"]) == ("b", "a")
+
+
+def test_an_unknown_kind_is_refused_here_rather_than_on_the_strip() -> None:
+    with pytest.raises(ProtocolError):
+        ficha("x", "examen")
+
+
+def test_the_strip_still_never_sends_one() -> None:
+    with pytest.raises(ProtocolError):
+        decode_client(json.dumps({"type": "ficha", "md": "x", "tipo": "plan"}))

@@ -45,6 +45,7 @@ from .protocol import (
     decode_client,
     done,
     error,
+    ficha,
     live,
     live_end,
     live_frame,
@@ -525,6 +526,72 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.warning(f"jarvis: refusing photo outside the spool: {path!r}")
             return False
         return await self._push(photo(str(resolved), camera))
+
+    async def push_ficha(
+        self,
+        md: str,
+        tipo: str,
+        *,
+        fuente: str = "",
+        correcta: str = "",
+        elegida: str = "",
+    ) -> bool:
+        """Draw a card on the strip. False when it could not be drawn.
+
+        Every image reference in the document is validated against the
+        teacher's own spool before anything goes on the wire — NOT
+        against the cameras' snapshot directory. One holds pictures of
+        the inside of this house and the other a diagram of the present
+        perfect; sharing a spool is the path the 2026-08-25 decision
+        exists not to open.
+
+        A reference that does not resolve costs the reference, never the
+        card: it is dropped from the document and the question is still
+        asked. The teacher plugin is imported lazily for the same reason
+        `samantha_vision` is — a missing plugin must never be why the
+        strip goes mute.
+        """
+        try:
+            from Hermes.plugins.jarvis_teacher.imagen import spool_dir
+        except ImportError as exc:
+            logger.warning(f"jarvis: jarvis_teacher unavailable — {exc}")
+            return False
+
+        try:
+            from Hermes.plugins.jarvis_teacher.markdown import (
+                imagenes,
+                sustituir_imagen,
+            )
+        except ImportError as exc:
+            logger.warning(f"jarvis: jarvis_teacher unavailable — {exc}")
+            return False
+
+        limpio = md
+        for referencia in imagenes(md):
+            try:
+                resolved = Path(referencia).resolve(strict=True)
+                resolved.relative_to(spool_dir().resolve())
+            except (OSError, ValueError, RuntimeError):
+                # OSError: the file is gone. ValueError: it resolves
+                # outside the spool. RuntimeError: a symlink cycle. Each
+                # costs that one reference; the loop goes on, because a
+                # card with two images must not lose the good one to the
+                # bad one.
+                logger.warning(
+                    f"jarvis: refusing image outside the spool: {referencia!r}"
+                )
+                limpio = sustituir_imagen(limpio, referencia, "")
+        try:
+            frame = ficha(
+                limpio, tipo, fuente=fuente, correcta=correcta, elegida=elegida
+            )
+        except ProtocolError as exc:
+            # An unknown tipo is a bug in the caller, not in what the
+            # user asked for — same rule as everywhere else in this
+            # method: this method must never raise into a turn.
+            logger.warning(f"jarvis: refusing to draw a ficha — {exc}")
+            return False
+        return await self._push(frame)
 
     async def _push_bytes(self, payload: bytes) -> bool:
         """Write one binary frame to the strip. False means it did not land.

@@ -1001,3 +1001,109 @@ def test_the_new_variable_wins_over_the_old(monkeypatch):
     monkeypatch.setenv("JARVIS_PORT", "7803")
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "7804")
     assert JarvisAdapter(config={})._configured_port == 7803
+
+
+@pytest.fixture
+def teacher_spool(tmp_path, monkeypatch):
+    """A teacher image spool with one real file in it, isolated to tmp_path.
+
+    Mirrors the `spool` fixture above, but for `jarvis_teacher.imagen`,
+    which is configured by an environment variable rather than a module
+    attribute — `monkeypatch.setenv` is the equivalent of that fixture's
+    `monkeypatch.setattr(snapshot, "_ROOT", tmp_path)`.
+    """
+    monkeypatch.setenv("JARVIS_TEACHER_HOME", str(tmp_path))
+    from Hermes.plugins.jarvis_teacher.imagen import spool_dir
+
+    path = spool_dir() / "leccion.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_without_an_image_is_sent(connected_adapter):
+    ok = await connected_adapter.push_ficha("## Hola\n\n- a\n- b\n", "pregunta")
+    assert ok is True
+    assert connected_adapter._ws.sent
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_drops_an_image_outside_the_teacher_spool_but_still_sends_the_card(
+    connected_adapter, teacher_spool, tmp_path
+):
+    """The strip opens whatever it is handed, and this socket is local and
+    unauthenticated — the same trust boundary `push_photo` guards.
+
+    Unlike a photo, a bad reference here must not cost the whole card
+    (push_ficha's own docstring): it is dropped from the document and the
+    card is still drawn, so this asserts `ok is True` rather than False.
+    """
+    fuera = tmp_path / "fuera.png"
+    fuera.write_bytes(b"x")
+
+    ok = await connected_adapter.push_ficha(f"![]({fuera})", "pregunta")
+
+    assert ok is True
+    sent = json.loads(connected_adapter._ws.sent[0])
+    assert str(fuera) not in sent["md"]
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_keeps_an_image_inside_the_teacher_spool(
+    connected_adapter, teacher_spool
+):
+    ok = await connected_adapter.push_ficha(f"![]({teacher_spool})", "explicacion")
+
+    assert ok is True
+    sent = json.loads(connected_adapter._ws.sent[0])
+    assert str(teacher_spool) in sent["md"]
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_keeps_the_good_image_when_a_second_one_is_refused(
+    connected_adapter, teacher_spool, tmp_path
+):
+    """A card with two images must not lose the good one to the bad one."""
+    fuera = tmp_path / "fuera.png"
+    fuera.write_bytes(b"x")
+    md = f"![]({teacher_spool})\n\n![]({fuera})\n"
+
+    ok = await connected_adapter.push_ficha(md, "explicacion")
+
+    assert ok is True
+    sent = json.loads(connected_adapter._ws.sent[0])
+    assert str(teacher_spool) in sent["md"]
+    assert str(fuera) not in sent["md"]
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_refuses_a_symlink_that_escapes_the_teacher_spool(
+    connected_adapter, teacher_spool, tmp_path
+):
+    # A symlink INSIDE the spool that resolves to a file OUTSIDE it must be
+    # dropped too — proves the check follows realpath, not string matching.
+    outside = tmp_path.parent / "outside-secret.png"
+    outside.write_bytes(b"x")
+    escape = teacher_spool.parent / "escape.png"
+    escape.symlink_to(outside)
+
+    ok = await connected_adapter.push_ficha(f"![]({escape})", "explicacion")
+
+    assert ok is True
+    sent = json.loads(connected_adapter._ws.sent[0])
+    assert str(escape) not in sent["md"]
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_with_no_strip_connected_is_false_not_an_error(adapter):
+    ok = await adapter.push_ficha("## Hola\n\n- a\n- b\n", "pregunta")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_with_an_unknown_tipo_is_false_not_an_error(connected_adapter):
+    # ficha() raises ProtocolError on an unknown tipo — push_photo's rule
+    # applies here too: this method must never raise into a turn.
+    ok = await connected_adapter.push_ficha("## Hola\n\n- a\n- b\n", "examen")
+    assert ok is False
+    assert connected_adapter._ws.sent == []

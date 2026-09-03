@@ -92,6 +92,46 @@ def photo(path: str, camera: str) -> str:
     return json.dumps({"type": "photo", "path": path, "camera": camera})
 
 
+# What a card can be. `tipo` is the field, and it exists because a
+# syllabus and an exam are the same thing on the wire: both are a
+# Markdown list. A boolean "does it wait" could not tell them apart, and
+# the widget must never have to guess whether a list is an index or a
+# question.
+TIPOS_FICHA = frozenset({"pregunta", "plan", "explicacion"})
+
+
+def ficha(
+    md: str,
+    tipo: str,
+    *,
+    fuente: str = "",
+    correcta: str = "",
+    elegida: str = "",
+) -> str:
+    """A card for the strip, and only for the strip.
+
+    The fifth server-to-client frame, and it exists for the reason
+    `photo` does: what is drawn is not what he SAYS. An answer travels
+    wherever the turn travels; this stops at the strip.
+
+    `correcta` and `elegida` are empty until the question has been
+    answered, and travel as null so an older strip cannot mistake an
+    empty string for a chosen option.
+    """
+    if tipo not in TIPOS_FICHA:
+        raise ProtocolError(f"unknown ficha tipo: {tipo!r}")
+    return json.dumps(
+        {
+            "type": "ficha",
+            "tipo": tipo,
+            "md": md,
+            "fuente": fuente,
+            "correcta": correcta or None,
+            "elegida": elegida or None,
+        }
+    )
+
+
 def console(text: str, *, done: bool = False, reset: bool = False) -> str:
     """Lines for the strip's terminal, server to client.
 
