@@ -1,5 +1,6 @@
 """The course as stored facts, not as something the model remembers."""
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -276,3 +277,138 @@ def test_repaso_hueco_insufficient_gap_does_not_return_early(curso: Curso) -> No
         f"With only 2 genuine successes (less than REPASO_HUECO=3), "
         f"missed concepts should not be offered. Got '{siguiente}' instead of 'E'"
     )
+
+
+# ── final review: the fact sheet may not drift ─────────────────────────
+
+
+def test_a_readded_title_revives_its_row_instead_of_duplicating_it(
+    curso: Curso,
+) -> None:
+    """Taking a concept out and putting it back is one row, not two.
+
+    Without this, `existentes` was computed from the live rows only, so
+    the re-added title was INSERTed beside the discarded one and
+    `marcar_dado`'s `WHERE titulo = ?` updated both — a syllabus of
+    three reporting "Dados: 2 de 4".
+    """
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas", "Mareas", "Eclipses"], now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas", "Eclipses"], now=1001.0)
+    curso.proponer_plan(cid, ["Órbitas", "Mareas", "Eclipses"], now=1002.0)
+    curso.aprobar_plan(cid, now=1003.0)
+
+    with curso.conexion() as db:
+        cuantas = db.execute(
+            "SELECT COUNT(*) FROM concepto WHERE curso = ? AND titulo = 'Mareas'",
+            (cid,),
+        ).fetchone()[0]
+    assert cuantas == 1
+
+    curso.marcar_dado(cid, "Órbitas", now=1004.0)
+    curso.marcar_dado(cid, "Mareas", now=1005.0)
+    assert "Dados: 2 de 3" in curso.hoja(cid)
+
+
+def test_a_revived_concept_is_pending_again(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas", "Mareas"], now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas"], now=1001.0)
+    curso.proponer_plan(cid, ["Órbitas", "Mareas"], now=1002.0)
+    with curso.conexion() as db:
+        estado = db.execute(
+            "SELECT estado FROM concepto WHERE curso = ? AND titulo = 'Mareas'",
+            (cid,),
+        ).fetchone()[0]
+    assert estado == "pendiente"
+
+
+def test_the_fact_sheet_says_when_the_last_class_was(curso: Curso) -> None:
+    """ "Where we left off" is a reading, not a recollection.
+
+    2026-08-27 was a Thursday; the sheet has to say so, because a model
+    handed nothing invents it.
+    """
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.empezar_sesion(cid, now=1000.0)
+    jueves = datetime(2026, 8, 27, 19, 30).timestamp()  # noqa: DTZ001 — local, as the sheet is
+    with curso.conexion() as db:
+        db.execute("UPDATE sesion SET acabo_en = ? WHERE curso = ?", (jueves, cid))
+    assert "Última clase: jueves 27 de agosto." in curso.hoja(cid)
+
+
+def test_a_course_with_no_finished_class_says_nothing_about_one(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.empezar_sesion(cid, now=1000.0)
+    assert "Última clase" not in curso.hoja(cid)
+
+
+def test_a_dado_concept_comes_back_once_nothing_is_pending(curso: Curso) -> None:
+    """`dado` was terminal, which made `dominado` mean nothing."""
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas"], now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+    curso.marcar_dado(cid, "Órbitas", now=1001.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q', 'a,b', 'a', 1, 1001.0)",
+            (cid, "Órbitas"),
+        )
+    curso.registrar_respuesta(cid, "Órbitas", acierto=True, now=1001.0)
+    assert curso.siguiente(cid) == "Órbitas"
+
+
+def test_a_dominado_concept_never_comes_back(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas"], now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+    curso.marcar_dado(cid, "Órbitas", now=1001.0)
+    for marca in (1001.0, 1002.0):
+        with curso.conexion() as db:
+            db.execute(
+                "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+                "VALUES (?, ?, 'q', 'a,b', 'a', 1, ?)",
+                (cid, "Órbitas", marca),
+            )
+        curso.registrar_respuesta(cid, "Órbitas", acierto=True, now=marca)
+    assert curso.siguiente(cid) is None
+
+
+def test_a_discarded_concept_is_never_offered(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas", "Mareas"], now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+    curso.marcar_dado(cid, "Órbitas", now=1001.0)
+    curso.proponer_plan(cid, ["Órbitas"], now=1002.0)
+    curso.aprobar_plan(cid, now=1003.0)
+    assert curso.siguiente(cid) == "Órbitas"
+
+
+def test_a_course_with_no_concepts_has_no_plan(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    assert curso.tiene_plan(cid) is False
+    curso.proponer_plan(cid, ["Órbitas"], now=1000.0)
+    assert curso.tiene_plan(cid) is True
+    curso.proponer_plan(cid, [], now=1001.0)
+    assert curso.tiene_plan(cid) is False
+
+
+def test_an_unanswered_question_is_not_counted_as_practice(curso: Curso) -> None:
+    cid = curso.abrir("astronomía", now=1000.0)
+    curso.proponer_plan(cid, ["Órbitas"], now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, elegida, "
+            "acierto, fuente, abandonada, hecha_en) "
+            "VALUES (?, 'Órbitas', 'q', 'a,b', 'a', 'a', 1, 'B1', 0, 1001.0)",
+            (cid,),
+        )
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, fuente, "
+            "abandonada, hecha_en) "
+            "VALUES (?, 'Órbitas', 'q', 'a,b', 'a', 'B1', 1, 1002.0)",
+            (cid,),
+        )
+    assert "Practicado con material real: 1 preguntas de 1." in curso.hoja(cid)

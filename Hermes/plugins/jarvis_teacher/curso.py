@@ -12,7 +12,37 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
+
+# The day and the month, written out. Spelled here rather than taken
+# from the C locale: a systemd user service inherits whatever locale the
+# session happens to have, and "Thu" in the middle of a Spanish fact
+# sheet is exactly the kind of half-language the model repairs into
+# something else (§12, 2026-08-24, "en la fuera de casa").
+_DIAS = (
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+)
+_MESES = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
 
 # How many other concepts pass before a missed one comes round again.
 # Small on purpose: this is a lesson, not a spaced-repetition schedule,
@@ -48,7 +78,17 @@ CREATE TABLE IF NOT EXISTS pregunta (
   correcta TEXT NOT NULL,
   elegida TEXT,
   acierto INTEGER,
-  fuente INTEGER,
+  -- The title of the source the question came from, or NULL when the
+  -- model made it up. TEXT because that is what it has always held:
+  -- declared INTEGER until 2026-09-03, which SQLite does not enforce
+  -- but every reader of this schema was entitled to believe.
+  fuente TEXT,
+  -- A question replaced by another one, or left open when the class
+  -- ended. Not a wrong answer — an unanswered one, which is why it is
+  -- its own column and not `acierto = 0`: counting it as a miss would
+  -- poison the list of weak concepts, and counting it as practice
+  -- would inflate the denominator he reads out loud.
+  abandonada INTEGER NOT NULL DEFAULT 0,
   hecha_en REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sesion (
@@ -83,6 +123,19 @@ class Curso:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self.conexion() as db:
             db.executescript(_ESQUEMA)
+            # `CREATE TABLE IF NOT EXISTS` does nothing to a table that
+            # already exists, so a database written before `abandonada`
+            # existed would be missing the column and every INSERT would
+            # fail — a course silently unable to ask a question. One
+            # PRAGMA is cheaper than that risk.
+            columnas = {
+                str(fila[1]) for fila in db.execute("PRAGMA table_info(pregunta)")
+            }
+            if "abandonada" not in columnas:
+                db.execute(
+                    "ALTER TABLE pregunta ADD COLUMN abandonada "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
 
     @contextmanager
     def conexion(self) -> Iterator[sqlite3.Connection]:
@@ -128,35 +181,76 @@ class Curso:
     # ── the plan ──────────────────────────────────────────────────────
 
     def proponer_plan(self, curso_id: int, titulos: list[str], *, now: float) -> None:
-        """Store a syllabus. Anything it drops is discarded, not deleted."""
+        """Store a syllabus. Anything it drops is discarded, not deleted.
+
+        A title is matched against EVERY row of the course, discarded
+        ones included, and a discarded row is revived rather than
+        inserted beside. Matching only the live rows is what let a
+        syllabus amended twice — take "Mareas" out, put it back — end up
+        with two rows called "Mareas": `marcar_dado`'s `WHERE titulo = ?`
+        then updated both and resurrected the discarded one, and the
+        fact sheet counted a plan of three as a plan of four. The fact
+        sheet is the one datum "resume" rests on, so it may not drift.
+        """
         with self.conexion() as db:
             previos = db.execute(
-                "SELECT id, titulo FROM concepto WHERE curso = ? AND estado != 'descartada'",
+                "SELECT id, titulo, estado FROM concepto WHERE curso = ? ORDER BY id",
                 (curso_id,),
             ).fetchall()
             quedan = set(titulos)
-            for ident, titulo in previos:
-                if titulo not in quedan:
+            for ident, titulo, estado in previos:
+                if titulo not in quedan and estado != "descartada":
                     db.execute(
                         "UPDATE concepto SET estado = 'descartada' WHERE id = ?",
                         (ident,),
                     )
-            existentes = {t for _i, t in previos}
+            # By id, not by title: the row is addressed individually so
+            # that a database which already carries a duplicate from
+            # before this fix is not made worse by touching both.
+            por_titulo = {str(t): (int(i), str(e)) for i, t, e in previos}
             for orden, titulo in enumerate(titulos):
-                if titulo in existentes:
-                    db.execute(
-                        "UPDATE concepto SET orden = ? WHERE curso = ? AND titulo = ?",
-                        (orden, curso_id, titulo),
-                    )
-                else:
+                fila = por_titulo.get(titulo)
+                if fila is None:
                     db.execute(
                         "INSERT INTO concepto (curso, titulo, orden, estado) "
                         "VALUES (?, ?, ?, 'pendiente')",
                         (curso_id, titulo, orden),
                     )
+                    continue
+                ident, estado = fila
+                if estado == "descartada":
+                    # Back in the plan, and back at the start of it: the
+                    # row remembers it was once taught (`dado_en`), but a
+                    # concept the user took out and put back is one they
+                    # want gone through again.
+                    db.execute(
+                        "UPDATE concepto SET orden = ?, estado = 'pendiente' "
+                        "WHERE id = ?",
+                        (orden, ident),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE concepto SET orden = ? WHERE id = ?", (orden, ident)
+                    )
             db.execute(
                 "UPDATE curso SET plan_aprobado_en = NULL WHERE id = ?", (curso_id,)
             )
+
+    def tiene_plan(self, curso_id: int) -> bool:
+        """Whether this course has a syllabus a person could have seen.
+
+        `aprobar` asks before it fetches anything: the plan card is what
+        puts the domains in front of the user, and approving a course
+        with no concepts in it would fetch every candidate page with no
+        card ever drawn (design, "opening a course, in two steps").
+        """
+        with self.conexion() as db:
+            fila = db.execute(
+                "SELECT 1 FROM concepto WHERE curso = ? AND estado != 'descartada' "
+                "LIMIT 1",
+                (curso_id,),
+            ).fetchone()
+        return bool(fila)
 
     def aprobar_plan(self, curso_id: int, *, now: float) -> str | None:
         with self.conexion() as db:
@@ -217,7 +311,48 @@ class Curso:
                 "ORDER BY orden LIMIT 1",
                 (curso_id,),
             ).fetchone()
+            if fila:
+                return str(fila[0])
+
+            # And last, what has been taught once and answered right
+            # once. `dado` was terminal until 2026-09-03, which made it
+            # behaviourally identical to `dominado` and left the queue
+            # empty the moment the plan had been gone through — the spec
+            # says a `dominado` concept is not taught again, and that
+            # sentence only means anything if a `dado` one is.
+            fila = db.execute(
+                "SELECT titulo FROM concepto WHERE curso = ? AND estado = 'dado' "
+                "ORDER BY orden LIMIT 1",
+                (curso_id,),
+            ).fetchone()
         return str(fila[0]) if fila else None
+
+    def ultima_clase(self, curso_id: int) -> str:
+        """When the last finished class was, in words. Empty when there is none.
+
+        Written out — "jueves 28 de agosto" — rather than handed over as
+        a timestamp or as "hace 5 días": the model would have to do
+        arithmetic on either, and this project's record on a model doing
+        arithmetic it was not given is that it invents the answer (§12,
+        2026-09-01).
+        """
+        with self.conexion() as db:
+            fila = db.execute(
+                "SELECT MAX(acabo_en) FROM sesion WHERE curso = ? "
+                "AND acabo_en IS NOT NULL",
+                (curso_id,),
+            ).fetchone()
+        if not fila or fila[0] is None:
+            return ""
+        try:
+            # Local time deliberately: "jueves" has to be the day it
+            # was in the room, not in UTC.
+            momento = datetime.fromtimestamp(float(fila[0]))  # noqa: DTZ006
+        except (OSError, OverflowError, ValueError):
+            return ""
+        return (
+            f"{_DIAS[momento.weekday()]} {momento.day} de {_MESES[momento.month - 1]}"
+        )
 
     # ── a lesson ──────────────────────────────────────────────────────
 
@@ -306,17 +441,27 @@ class Curso:
             dominios = db.execute(
                 "SELECT COUNT(*) FROM dominio WHERE curso = ?", (curso_id,)
             ).fetchone()[0]
+            # Both counts skip the questions nobody answered — one
+            # replaced by another, or left open when the class ended.
+            # An unanswered question is not practice, and counting it
+            # inflated the denominator he reads out loud.
             reales = db.execute(
-                "SELECT COUNT(*) FROM pregunta WHERE curso = ? AND fuente IS NOT NULL",
+                "SELECT COUNT(*) FROM pregunta WHERE curso = ? AND fuente IS NOT NULL "
+                "AND abandonada = 0",
                 (curso_id,),
             ).fetchone()[0]
             preguntas = db.execute(
-                "SELECT COUNT(*) FROM pregunta WHERE curso = ?", (curso_id,)
+                "SELECT COUNT(*) FROM pregunta WHERE curso = ? AND abandonada = 0",
+                (curso_id,),
             ).fetchone()[0]
 
         plan = "aprobado" if self.plan_aprobado(curso_id) else "propuesto, sin aprobar"
+        ultima = self.ultima_clase(curso_id)
+        cabecera = f"Tema: {tema}."
+        if ultima:
+            cabecera += f" Última clase: {ultima}."
         lineas = [
-            f"Tema: {tema}. Plan: {plan}.",
+            f"{cabecera} Plan: {plan}.",
             f"Base: {fuentes} fuentes, {dominios} dominios.",
             f"Dados: {dados} de {total}.",
         ]
