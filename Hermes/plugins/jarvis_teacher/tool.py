@@ -109,7 +109,15 @@ class Aula:
             return "No he podido guardar el temario."
 
     async def aprobar(self, args: dict) -> str:
-        """Approve plan and domains, build the base, return the first concept."""
+        """Approve plan and domains, build the base, return the first concept.
+
+        Never approves a plan with no material behind it. `_candidatos`
+        lives in memory and a gateway restart empties it; if that has
+        happened AND nothing was fetched by an earlier approval either,
+        the honest answer is to ask for the proposal again — never to
+        search or fetch here to paper over it, and never to approve
+        while sounding as if material was found.
+        """
         try:
             curso_id = self._curso.ultimo_abierto()
             if curso_id is None:
@@ -120,6 +128,12 @@ class Aula:
                 self._base.aprobar_dominios(curso_id, urls, now=now)
                 traidas = self._base.construir(curso_id, urls, now=now)
                 logger.info(f"jarvis-teacher: base montada con {traidas} fuentes")
+            elif not self._tiene_fuentes(curso_id):
+                return (
+                    "No recuerdo qué fuentes había propuesto para este curso, "
+                    "así que no voy a darlo por bueno sin nada detrás. Dime otra "
+                    "vez de qué querías el curso y buscamos material de nuevo."
+                )
             primero = self._curso.aprobar_plan(curso_id, now=now)
             return (
                 f"Plan aprobado. Empezamos por: {primero}."
@@ -129,6 +143,20 @@ class Aula:
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
             logger.warning(f"jarvis-teacher: aprobar falló: {exc}")
             return "No he podido aprobar el plan."
+
+    def _tiene_fuentes(self, curso_id: int) -> bool:
+        """Whether this course already has a source on disk.
+
+        `Base` has no accessor for "any source at all" — only for one
+        host's approval — so this reads the `fuente` table directly,
+        the same way `fuentes.py` itself queries `curso.conexion()` for
+        `dominio` rather than adding an accessor for one caller.
+        """
+        with self._curso.conexion() as db:
+            fila = db.execute(
+                "SELECT 1 FROM fuente WHERE curso = ? LIMIT 1", (curso_id,)
+            ).fetchone()
+        return bool(fila)
 
     # ── drawing ───────────────────────────────────────────────────────
 
