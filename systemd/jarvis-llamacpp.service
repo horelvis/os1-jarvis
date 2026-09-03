@@ -85,7 +85,7 @@ Type=simple
 #   llama-server 17,354 + CosyVoice 5,080 + widget 1,529 + the DESKTOP 162
 #   (Xorg 99, gnome-shell 28, a browser tab 35 — §2.5's arithmetic never
 #   counted it) = 24,125 of 24,564.
-Environment=JARVIS_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-Heretic-GGUF/RVN-IQ4_XS-multilingual.gguf
+Environment=JARVIS_LLAMA_MODEL=%h/.jarvis/models/Qwen3.8-27B-Heretic-GGUF/RVN-IQ4_XS-multilingual.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.

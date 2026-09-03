@@ -18,7 +18,7 @@
 set -o pipefail
 
 REAL="${JARVIS_CLAUDE_REAL:-$HOME/.local/bin/claude}"
-LIVE="${JARVIS_CODE_LIVE:-$HOME/.samantha/code-live.log}"
+LIVE="${JARVIS_CODE_LIVE:-$HOME/.jarvis/code-live.log}"
 
 # A non-interactive run is the only one worth watching: an interactive
 # session has a terminal of its own, and teeing it would fight the TUI.

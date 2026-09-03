@@ -96,7 +96,7 @@ class Hotword:
         belongs to a later API and is silently forwarded into
         `AudioFeatures`, where it fails as an unexpected keyword. The
         models ship inside the package (`resources/models/`), so there
-        is nothing to download and nothing to keep in `~/.samantha`.
+        is nothing to download and nothing to keep in `~/.jarvis`.
         """
         import glob
         import os

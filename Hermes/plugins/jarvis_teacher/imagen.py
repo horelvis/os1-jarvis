@@ -25,7 +25,7 @@ MAX_BYTES = 4 * 1024 * 1024
 def spool_dir() -> Path:
     """The one directory lesson images live in. Created on use, 0700."""
     raiz = Path(
-        os.environ.get("JARVIS_TEACHER_HOME", Path.home() / ".samantha" / "teacher")
+        os.environ.get("JARVIS_TEACHER_HOME", Path.home() / ".jarvis" / "teacher")
     )
     destino = raiz / "img"
     destino.mkdir(parents=True, exist_ok=True)

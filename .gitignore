@@ -42,7 +42,7 @@ Thumbs.db
 *.pid
 
 # Local model cache (downloaded GGUFs — large, machine-specific)
-.samantha/
+.jarvis/
 .superpowers/
 
 # Frontend

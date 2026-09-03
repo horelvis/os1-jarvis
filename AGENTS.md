@@ -285,9 +285,9 @@ for streaming conversation.
 
 ### 2.7 Memory: ChromaDB + SQLite ring + facts (v2)
 
-**Decision:** ChromaDB at `~/.samantha/memory/chroma/` for long-term
+**Decision:** ChromaDB at `~/.jarvis/memory/chroma/` for long-term
 semantic memory, paired with a SQLite ring buffer at
-`~/.samantha/memory/state.db` for short-term (last N turns verbatim)
+`~/.jarvis/memory/state.db` for short-term (last N turns verbatim)
 memory. Embedder: fastembed (ONNX runtime) with
 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
 
@@ -325,7 +325,7 @@ with WAV bytes produced by Python (Piper) and served by /speak.
   was relaxed on 2026-05-13 so the simpler path wins.
 - TTS stays Python-side because Piper is local, deterministic, and
   the voice file (`es_ES-sharvard-medium`, ~73 MB) lives at
-  `~/.samantha/voices/`.
+  `~/.jarvis/voices/`.
 
 **Implications:**
 - Frontend calls `new webkitSpeechRecognition()` (AGENTS.md §6 marks

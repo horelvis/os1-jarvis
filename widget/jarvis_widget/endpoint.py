@@ -77,7 +77,7 @@ class CompletionRule:
         return words[-1] not in _CANNOT_END
 
 
-DEFAULT_MODEL_PATH = Path.home() / ".samantha" / "models" / "vosk-model-small-es-0.42"
+DEFAULT_MODEL_PATH = Path.home() / ".jarvis" / "models" / "vosk-model-small-es-0.42"
 
 
 class _Stream:

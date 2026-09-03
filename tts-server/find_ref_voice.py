@@ -4,7 +4,7 @@ Stream del dataset (sin descargar los 50 GB enteros): filtra a mujer +
 acento de España, duración 4-10 s, y guarda WAV + transcripción.
 
 Uso:
-    python find_ref_voice.py --count 10 --out ~/.samantha/ref-candidates
+    python find_ref_voice.py --count 10 --out ~/.jarvis/ref-candidates
 """
 
 from __future__ import annotations

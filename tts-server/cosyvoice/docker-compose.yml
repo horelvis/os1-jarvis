@@ -8,9 +8,9 @@
 #
 #      pip install -U huggingface_hub
 #      hf download FunAudioLLM/Fun-CosyVoice3-0.5B-2512 \
-#        --local-dir ~/.samantha/cosyvoice3
+#        --local-dir ~/.jarvis/cosyvoice3
 #
-#   2. The Inés reference WAV at ~/.samantha/voices/ref/samantha.wav
+#   2. The Inés reference WAV at ~/.jarvis/voices/ref/samantha.wav
 #      (same path XTTS uses).
 #
 #   3. nvidia-container-toolkit installed (verified by the XTTS
@@ -33,17 +33,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: samantha-cosyvoice
+    container_name: jarvis-cosyvoice
     ports:
       - "8093:50000"
     volumes:
       # Pre-downloaded CosyVoice 3 weights mounted read-only.
-      - ${HOME}/.samantha/cosyvoice3:/models/cosyvoice3:ro
+      - ${HOME}/.jarvis/cosyvoice3:/models/cosyvoice3:ro
       # Inés reference WAV. The FastAPI server accepts uploads per
       # request (multipart), so we don't strictly need this mount —
       # but it lets us curl-test the server without trips to the
       # Mac for the WAV file.
-      - ${HOME}/.samantha/voices/ref:/refs:ro
+      - ${HOME}/.jarvis/voices/ref:/refs:ro
       # Patched server.py — upstream pre-loads prompt_wav to a tensor
       # and CosyVoice 3's frontend then double-loads + crashes. Our
       # overlay saves to a tempfile and passes the path instead.

@@ -93,7 +93,7 @@ _DESCRIPCIONES = {
 
 def _home() -> Path:
     return Path(
-        os.environ.get("JARVIS_TEACHER_HOME", Path.home() / ".samantha" / "teacher")
+        os.environ.get("JARVIS_TEACHER_HOME", Path.home() / ".jarvis" / "teacher")
     )
 
 

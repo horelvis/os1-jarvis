@@ -10,12 +10,12 @@ Source assets for CosyVoice 3 zero-shot voice cloning (see
 
 ## Deploy
 
-The backend loads these from `~/.samantha/voices/ref/`, not from the
+The backend loads these from `~/.jarvis/voices/ref/`, not from the
 repo. Copy on each box that runs the backend:
 
 ```bash
-mkdir -p ~/.samantha/voices/ref
-cp voices/samantha.wav voices/samantha.txt ~/.samantha/voices/ref/
+mkdir -p ~/.jarvis/voices/ref
+cp voices/samantha.wav voices/samantha.txt ~/.jarvis/voices/ref/
 ```
 
 Override paths via `JARVIS_TTS_COSYVOICE_REF_WAV` /

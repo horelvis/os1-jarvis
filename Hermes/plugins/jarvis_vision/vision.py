@@ -30,7 +30,7 @@ from pathlib import Path
 _INPUT_SIZE = 320
 _COCO_PERSON = 0
 
-DEFAULT_MODEL_PATH = Path.home() / ".samantha" / "models" / "yolov9-t-320.onnx"
+DEFAULT_MODEL_PATH = Path.home() / ".jarvis" / "models" / "yolov9-t-320.onnx"
 
 # What a house cares about, out of the 80 COCO classes. Everything else
 # is noise on a driveway — she does not need to announce a potted plant.

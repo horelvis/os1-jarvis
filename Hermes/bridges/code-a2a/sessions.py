@@ -22,7 +22,7 @@ import os
 import tempfile
 from pathlib import Path
 
-DEFAULT_STORE = Path.home() / ".samantha" / "code-sessions.json"
+DEFAULT_STORE = Path.home() / ".jarvis" / "code-sessions.json"
 
 # A conversation nobody has continued in this long is not continued: it
 # is resumed into a context about something else entirely. Two days

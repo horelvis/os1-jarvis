@@ -29,8 +29,8 @@ cd "$REPO"
 These live outside git. Nothing rebuilds them.
 
 ```bash
-ls -l ~/.samantha/voices/ref/samantha.wav ~/.samantha/voices/ref/samantha.txt
-du -sh ~/.samantha/memory
+ls -l ~/.jarvis/voices/ref/samantha.wav ~/.jarvis/voices/ref/samantha.txt
+du -sh ~/.jarvis/memory
 ```
 
 Expect the WAV around 384 KB, the transcript 133 bytes, and memory a couple

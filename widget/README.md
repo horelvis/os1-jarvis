@@ -59,7 +59,7 @@ it she runs and is simply mute.
 |---|---|
 | `JARVIS_WIDGET_STATE` | Freeze the wave in one state (`idle`, `listening`, `thinking`, `speaking`) and skip the voice loop. How each state gets photographed, since `xdotool` is not installed. |
 | `JARVIS_WIDGET_NO_MIC=1` | Do not open the microphone. On a box with none plugged in, this is the difference between "she cannot hear" and "the process is broken". |
-| `JARVIS_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.samantha/models/`). |
+| `JARVIS_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.jarvis/models/`). |
 | `JARVIS_WIDGET_FAKE_MIC` | Speak this INTO the widget: it is synthesised, resampled to 16 kHz and pushed through the real microphone path. Everything downstream — VAD, Whisper, the gateway, her reply — is real. |
 | `JARVIS_WIDGET_SAY` | Say this once, three seconds after starting. The only way to hear her voice on a machine with no microphone. |
 | `JARVIS_WIDGET_MIC_GATE=1` | Deafen the microphone while he speaks. **Not needed since 2026-08-26**: `echo.py` cuts his own words out of the transcript instead, so the microphone stays open and he can be interrupted. Keep it for a box where that filter is not enough. Off by default since 2026-08-25: it is what made interrupting him impossible, because `detector.speaking` had to be true before a frame could reach the detector, and only his own voice through the room could open that latch. Set it on a box with no echo cancellation, or he answers himself. |
@@ -75,18 +75,18 @@ it she runs and is simply mute.
 | `JARVIS_WIDGET_CONSOLE_LINGER` | Seconds the console stays up after the work finishes, before it puts itself away (default 60). A press on it closes it sooner; `0` makes it go the moment the run ends. |
 | `JARVIS_WIDGET_CONSOLE_LINES` | How many lines the console keeps, and so how tall the strip gets while it is up (default 20 — about 430 px, the live camera's height). Ten until 2026-08-27, which was too short to read a tool's output in. |
 | `JARVIS_WIDGET_SWITCHES` | Start with these switches already off: `mic`, `voice`, or both. Handy for photographing the struck-through glyphs; a press can also be sent for real with `tools/click.py`. |
-| `JARVIS_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.samantha/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
+| `JARVIS_WIDGET_VOSK_MODEL` | Where the Vosk model lives (default `~/.jarvis/models/vosk-model-small-es-0.42`). This is the second STT engine, and it never produces a word anybody reads — it decides when you have stopped talking and whether a sound is his own echo. **Absent, everything still works**: he falls back to waiting the full 1.2 s of silence, and the log says so once. |
 | `JARVIS_WIDGET_ASK_SILENCE` | Seconds of quiet after which he asks himself whether your sentence is finished (default 0.35). The 1.2 s of `JARVIS_WIDGET_SILENCE` remains the floor: this only ever closes a turn EARLIER, never later. |
 | `JARVIS_WIDGET_REMOTE_PORT` | Where the phone page listens (default 8443). The enrolment page is this plus one, over plain HTTP, because a certificate cannot be fetched over a connection that requires trusting it. |
 | `JARVIS_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
 | `JARVIS_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
 | `JARVIS_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
-| `JARVIS_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.samantha/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
+| `JARVIS_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.jarvis/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
 | `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
-- **Silero VAD**: `~/.samantha/models/silero_vad_16k_op15.onnx`, ~1.2 MB.
+- **Silero VAD**: `~/.jarvis/models/silero_vad_16k_op15.onnx`, ~1.2 MB.
   Taken from the `silero-vad` wheel without installing it:
   `pip download silero-vad --no-deps` and unzip. The wheel ships four
   models; this is the 16 kHz one.
@@ -97,10 +97,10 @@ it she runs and is simply mute.
   endpointing model. Optional: without it he waits the full 1.2 s,
   exactly as he did before 2026-09-01.
 
-      mkdir -p ~/.samantha/models
+      mkdir -p ~/.jarvis/models
       curl -sL -o /tmp/vosk-es.zip \
         https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
-      unzip -q -d ~/.samantha/models /tmp/vosk-es.zip
+      unzip -q -d ~/.jarvis/models /tmp/vosk-es.zip
 
 ### Putting him on a phone
 

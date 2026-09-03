@@ -160,7 +160,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         The server does NOT crash on short text — it logs a warning
         ("... too short than prompt text ..., this may lead to bad
         performance") and still returns audio. Its actual reference
-        prompt, `prompt_text`, is `~/.samantha/voices/ref/samantha.txt`
+        prompt, `prompt_text`, is `~/.jarvis/voices/ref/samantha.txt`
         (130 chars once stripped) with
         `"You are a helpful assistant.<|endofprompt|>"` (44 chars)
         prepended before the length comparison — an effective ~173

@@ -42,13 +42,13 @@ services:
       # Cache the model + speaker latents on the host so a container
       # rebuild doesn't redownload 1.8 GB. The image stores its
       # weights under /root/.local/share/tts/.
-      - ${HOME}/.samantha/xtts-cache:/root/.local/share/tts
+      - ${HOME}/.jarvis/xtts-cache:/root/.local/share/tts
       # Voice clone reference: same WAV vllm-omni uses, mounted
       # read-only at /refs/samantha.wav. The /clone_speaker endpoint
       # takes a multipart upload so the backend will POST the bytes
       # rather than reference this mount — but having the file in
       # the container makes manual curl tests trivial.
-      - ${HOME}/.samantha/voices/ref:/refs:ro
+      - ${HOME}/.jarvis/voices/ref:/refs:ro
       # Our patched main.py that exposes temperature / top_p /
       # top_k / repetition_penalty / length_penalty / speed on
       # /tts_stream. Overrides the upstream binary's /app/main.py.

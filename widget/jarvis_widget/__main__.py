@@ -518,7 +518,7 @@ async def _serve_quietly(coro) -> None:
 
 class SamanthaApp(Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id="com.horelvis.samantha.widget")
+        super().__init__(application_id="com.horelvis.jarvis.widget")
         # asyncio holds only WEAK references to running tasks, so a task
         # nobody keeps can be garbage-collected mid-await and simply stop
         # — no error, no log. Anything spawned here is kept alive until
@@ -1015,7 +1015,7 @@ class SamanthaApp(Gtk.Application):
             # `serve()`'s startup, so the window is not open for however
             # long the widget has simply been running.
             enrolment.open_enrolment(time.monotonic())
-            band.show_photo(str(Path.home() / ".samantha" / "enrol-qr.png"), "alta")
+            band.show_photo(str(Path.home() / ".jarvis" / "enrol-qr.png"), "alta")
             return False  # GLib.SOURCE_REMOVE
 
         if os.getenv("JARVIS_WIDGET_SHOW_QR") == "1":

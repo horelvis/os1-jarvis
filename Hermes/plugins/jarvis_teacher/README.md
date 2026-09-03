@@ -100,7 +100,7 @@ One switch, found by grepping the plugin's own source rather than
 assumed:
 
 - **`JARVIS_TEACHER_HOME`** — where the course database, the fetched
-  sources and the image spool live. Defaults to `~/.samantha/teacher/`.
+  sources and the image spool live. Defaults to `~/.jarvis/teacher/`.
   `curso.db` sits directly under it; sources go to
   `<home>/fuentes/<curso_id>/`, images to `<home>/img/` (`imagen.py`,
   `spool_dir()`, created 0700).

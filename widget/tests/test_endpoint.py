@@ -116,7 +116,7 @@ def test_the_model_path_can_be_overridden(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.skipif(
-    not (Path.home() / ".samantha/models/vosk-model-small-es-0.42").is_dir(),
+    not (Path.home() / ".jarvis/models/vosk-model-small-es-0.42").is_dir(),
     reason="the Vosk model is not installed on this box",
 )
 def test_silence_transcribes_to_nothing() -> None:
@@ -130,7 +130,7 @@ def test_silence_transcribes_to_nothing() -> None:
 
 
 @pytest.mark.skipif(
-    not (Path.home() / ".samantha/models/vosk-model-small-es-0.42").is_dir(),
+    not (Path.home() / ".jarvis/models/vosk-model-small-es-0.42").is_dir(),
     reason="the Vosk model is not installed on this box",
 )
 def test_the_two_streams_do_not_hear_each_other() -> None:

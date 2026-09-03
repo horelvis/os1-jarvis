@@ -25,7 +25,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-DEFAULT_LIVE = Path.home() / ".samantha" / "code-live.log"
+DEFAULT_LIVE = Path.home() / ".jarvis" / "code-live.log"
 
 START = "\x1eSTART"
 END = "\x1eEND"

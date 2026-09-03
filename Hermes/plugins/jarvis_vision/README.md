@@ -20,7 +20,7 @@ you are looking for `JARVIS_WIDGET_CAMERA`, this is where it went.
 
 ## What it needs
 
-- **The model.** `~/.samantha/models/yolov9-t-320.onnx`, 8 MB, copied
+- **The model.** `~/.jarvis/models/yolov9-t-320.onnx`, 8 MB, copied
   from BarnDoor's `frigate-config/models/` (its
   `scripts/build-yolov9-onnx.sh` is what produced it). It is not in this
   repo. Without it no thread starts and the plugin is inert — and "he

@@ -21,7 +21,7 @@ from hmac import compare_digest
 from pathlib import Path
 from urllib.parse import urlsplit
 
-DEFAULT_SECRET_PATH = Path.home() / ".samantha" / "remote.token"
+DEFAULT_SECRET_PATH = Path.home() / ".jarvis" / "remote.token"
 
 # 32 URL-safe characters. It travels in a link that is added to a phone's
 # home screen, so it has to survive being a URL and being looked at.

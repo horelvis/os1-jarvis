@@ -154,7 +154,7 @@ class UtteranceDetector:
         return pcm
 
 
-DEFAULT_MODEL_PATH = Path.home() / ".samantha" / "models" / "silero_vad_16k_op15.onnx"
+DEFAULT_MODEL_PATH = Path.home() / ".jarvis" / "models" / "silero_vad_16k_op15.onnx"
 
 
 class SileroDetector:

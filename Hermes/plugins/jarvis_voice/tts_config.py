@@ -34,8 +34,8 @@ class TTSConfig:
     # exported it: not the unit, not run-gateway.sh, not .env. A voice
     # that depends on somebody remembering an environment variable is
     # not the voice he has; the default is.
-    ref_wav: str = "~/.samantha/voices/ref/jarvis.wav"
-    ref_transcript_path: str = "~/.samantha/voices/ref/jarvis.txt"
+    ref_wav: str = "~/.jarvis/voices/ref/jarvis.wav"
+    ref_transcript_path: str = "~/.jarvis/voices/ref/jarvis.txt"
     # Character given to the VOICE, not to the words: a system prompt
     # before <|endofprompt|> that conditions delivery. Empty keeps the
     # server's own "You are a helpful assistant."

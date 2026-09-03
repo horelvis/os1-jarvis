@@ -68,7 +68,7 @@ ANNOUNCEMENT_TEXT = (
 # the same audio path as any other clause with nothing to decode,
 # resample or re-wrap. A WAV here would put a 44-byte header in the
 # middle of the PCM stream and click.
-ANNOUNCEMENT_CLIP_PATH = "~/.samantha/voices/announcements/sin-voz.pcm"
+ANNOUNCEMENT_CLIP_PATH = "~/.jarvis/voices/announcements/sin-voz.pcm"
 
 
 def announcement_pcm() -> bytes:

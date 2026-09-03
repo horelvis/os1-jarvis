@@ -39,7 +39,7 @@ SILENCE_TIMEOUT = 900.0
 # unused while the assistant ran.
 LIVE_LOG = Path(
     os.environ.get("JARVIS_CODE_LIVE", "")
-    or (Path.home() / ".samantha" / "code-live.log")
+    or (Path.home() / ".jarvis" / "code-live.log")
 ).expanduser()
 
 START = "\x1eSTART"

@@ -29,7 +29,7 @@ from .remote_auth import Guard, load_or_create_secret
 
 PORT = int(os.getenv("JARVIS_WIDGET_REMOTE_PORT", "8443"))
 HOSTNAME = os.getenv("JARVIS_WIDGET_REMOTE_NAME", "brain.local")
-CERT_DIR = Path.home() / ".samantha" / "certs"
+CERT_DIR = Path.home() / ".jarvis" / "certs"
 
 # A held turn expires: a phone that presses and never releases — a
 # vanished network, an app killed mid-utterance — must not lock out
@@ -455,7 +455,7 @@ async def serve(
 
     qr = write_qr(
         f"http://{lan_address()}:{PORT + 1}/",
-        Path.home() / ".samantha" / "enrol-qr.png",
+        Path.home() / ".jarvis" / "enrol-qr.png",
     )
     print(
         f"móvil: alta (cerrada) en http://{lan_address()}:{PORT + 1}/ · QR {qr}",
