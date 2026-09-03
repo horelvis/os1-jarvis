@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from html import escape
 
+from . import theme
+
 _NEGRITA = re.compile(r"\*\*(.+?)\*\*")
 _CURSIVA = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 _CODIGO = re.compile(r"`([^`]+)`")
@@ -132,7 +134,7 @@ class FichaArea(Gtk.Box):
     """The card as a column of widgets, zero pixels tall until one lands."""
 
     def __init__(self, on_resize) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=9)
         self.add_css_class("samantha-ficha")
         self.set_visible(False)
         self._on_resize = on_resize
@@ -161,7 +163,11 @@ class FichaArea(Gtk.Box):
             etiqueta.set_xalign(0.0)
             etiqueta.set_wrap(True)
             if pieza["tipo"] == "opcion":
-                etiqueta.set_markup(f"<tt>{pieza['letra']}</tt>  {pieza['texto']}")
+                etiqueta.set_markup(
+                    f"<span foreground='{theme.TERRACOTTA}'>"
+                    f"<tt>{pieza['letra']}</tt></span>"
+                    f"   {pieza['texto']}"
+                )
                 etiqueta.add_css_class("samantha-ficha-opcion")
                 if pieza["estado"]:
                     etiqueta.add_css_class(f"samantha-ficha-{pieza['estado']}")
@@ -176,5 +182,14 @@ class FichaArea(Gtk.Box):
             pie.add_css_class("samantha-ficha-fuente")
             self.append(pie)
 
+        # Ask for the height ourselves, and not only from the window.
+        # `_on_resize` grows the TOPLEVEL; it says nothing about how the
+        # box inside it is allocated, and the wave below expands, so
+        # without this the strip grows and the card is given zero pixels
+        # of it. Measured on 2026-09-03 against a live strip: the window
+        # went to 900x254 and the band above the wave was empty desktop.
+        # `photo_area.py:276` and the console (`window.py:272`) each do
+        # the same thing for the same reason.
+        self.set_size_request(-1, alto if md else 0)
         self.set_visible(bool(md))
         self._on_resize(alto)

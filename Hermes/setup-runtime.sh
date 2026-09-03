@@ -87,7 +87,7 @@ say "4/6  HERMES_HOME at $HERMES_HOME"
 mkdir -p "$HERMES_HOME/plugins"
 # Symlinks, not copies: the plugins are versioned source in this repo and
 # must stay editable in place. Same pattern the plan documents use.
-for plugin in samantha_voice jarvis samantha_vision samantha_code; do
+for plugin in samantha_voice jarvis samantha_vision samantha_code jarvis_teacher; do
   ln -sfn "$REPO_ROOT/Hermes/plugins/$plugin" "$HERMES_HOME/plugins/$plugin"
   echo "    plugins/$plugin -> Hermes/plugins/$plugin"
 done
@@ -102,7 +102,7 @@ say "5/6  Enable them"
 # --no-allow-tool-override answers the capability prompt with "no", which is
 # what all four want (samantha_voice declares allow_tool_override: false)
 # and what makes this scriptable. None of them replaces a built-in tool.
-for plugin in samantha-voice jarvis samantha-vision samantha-code; do
+for plugin in samantha-voice jarvis samantha-vision samantha-code jarvis-teacher; do
   HERMES_HOME="$HERMES_HOME" "$HERMES_SRC/.venv/bin/hermes" plugins enable \
     "$plugin" --no-allow-tool-override >/dev/null 2>&1 || true
   echo "    $plugin"
