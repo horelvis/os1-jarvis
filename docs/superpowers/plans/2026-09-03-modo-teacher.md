@@ -54,6 +54,11 @@ steps.
 - **Widget tests:** `.venv/bin/python -m pytest -v` from `widget/`.
 - Commit after every task, on `development` directly (no branches).
 
+> **Execution order: 1, 2, 3, 5, 4, 6…13.** Task 4's `push_ficha`
+> imports `jarvis_teacher.imagen.spool_dir` and its own test asserts a
+> card is sent, which cannot pass before Task 5 exists. The numbering
+> stays as written; only the order they are done in changes.
+
 ---
 
 ### Task 1: The state — courses, the plan, and the fact sheet
@@ -1100,9 +1105,10 @@ def test_push_ficha_without_an_image_is_sent(adapter) -> None:
     assert adapter_push(adapter, "## Hola\n\n- a\n- b\n") is True
 ```
 
-`adapter` is whatever fixture that file already builds its adapter
-with — reuse it rather than making a second one. Add this helper at the
-top of `test_adapter.py`:
+That file has **no** `adapter` fixture — its tests build an adapter from
+`_cfg(tmp_path)`. Follow the nearest existing test (for example
+`test_send_returns_a_send_result_not_none`) to build one, and add this
+helper at the top of `test_adapter.py`:
 
 ```python
 import asyncio
@@ -2837,7 +2843,7 @@ git commit -m "feat(widget): the card drawn — text is widgets, because the ban
 
 **Files:**
 - Modify: `widget/samantha_widget/gateway.py` (`on_ficha`, and the
-  `ficha` branch of `_handle`, next to `photo` at `:269`)
+  `ficha` branch of `_dispatch`, next to `photo` at `:269`)
 - Modify: `widget/samantha_widget/window.py` (`set_ficha`,
   `_ficha_extra`, the tick, the press)
 - Modify: `widget/samantha_widget/__main__.py` (build `FichaArea`, wire
@@ -2861,7 +2867,7 @@ def test_a_ficha_frame_reaches_its_callback() -> None:
     cliente.on_ficha = lambda md, tipo, fuente, correcta, elegida: recogido.append(
         (md, tipo, fuente, correcta, elegida)
     )
-    cliente._handle(
+    cliente._dispatch(
         json.dumps(
             {
                 "type": "ficha",
@@ -2882,7 +2888,7 @@ def test_a_ficha_with_an_unknown_tipo_is_dropped_not_fatal() -> None:
     cliente = GatewayClient("ws://x")
     llamado: list = []
     cliente.on_ficha = lambda *a: llamado.append(a)
-    cliente._handle(json.dumps({"type": "ficha", "tipo": "examen", "md": "x"}))
+    cliente._dispatch(json.dumps({"type": "ficha", "tipo": "examen", "md": "x"}))
     assert llamado == []
 ```
 
@@ -2890,6 +2896,8 @@ def test_a_ficha_with_an_unknown_tipo_is_dropped_not_fatal() -> None:
 
 Run (from `widget/`): `.venv/bin/python -m pytest tests/test_gateway.py -q`
 Expected: FAIL — `AttributeError: 'GatewayClient' object has no attribute 'on_ficha'`
+
+Build the client in these tests the way `test_a_photo_frame_reaches_the_photo_handler` in that same file already does — `_dispatch` is the seam it uses, and it is the real one.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2904,7 +2912,7 @@ Expected: FAIL — `AttributeError: 'GatewayClient' object has no attribute 'on_
 ```
 
 ```python
-# widget/samantha_widget/gateway.py — in _handle, after the `photo` branch
+# widget/samantha_widget/gateway.py — in _dispatch, after the `photo` branch
         elif kind == "ficha":
             tipo = str(msg.get("tipo", ""))
             # Unknown kinds are dropped rather than drawn wrong. The
@@ -3005,7 +3013,7 @@ git commit -m "feat(widget): the card reaches the strip, and an unknown kind cos
 - Modify: `Hermes/plugins/jarvis/__init__.py` (the `platform_hint`)
 - Modify: `Hermes/samantha-config.yaml` (enable the toolset for this
   platform, and the plugin entry)
-- Test: `Hermes/plugins/jarvis/tests/test_plugin.py` (extend)
+- Test: `Hermes/plugins/jarvis/tests/test_hint.py` (extend)
 
 **Interfaces:**
 - Consumes: the toolset name `clases` (Task 6).
@@ -3014,7 +3022,7 @@ git commit -m "feat(widget): the card reaches the strip, and an unknown kind cos
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# appended to Hermes/plugins/jarvis/tests/test_plugin.py
+# appended to Hermes/plugins/jarvis/tests/test_hint.py
 def test_the_hint_says_he_can_teach_and_what_the_screen_does() -> None:
     """The hint has to move in the same change as the drawing.
 
@@ -3022,24 +3030,25 @@ def test_the_hint_says_he_can_teach_and_what_the_screen_does() -> None:
     being pushed, and he declined correctly for the wrong reason
     (§12, 2026-08-25). Remember §7: an existing session only sees this
     after `/new` and `/approve`."""
-    from Hermes.plugins.jarvis import PLATFORM_HINT
+    from Hermes.plugins.jarvis import _platform_hint
 
-    assert "clase" in PLATFORM_HINT.lower()
-    assert "temario" in PLATFORM_HINT.lower()
+    hint = _platform_hint()
+    assert "clase" in hint.lower()
+    assert "temario" in hint.lower()
     # He does not see the card. Saying he does is how he starts
     # describing what is on it.
-    assert "no ves" in PLATFORM_HINT.lower() or "no la ves" in PLATFORM_HINT.lower()
+    assert "no ves" in hint.lower() or "no la ves" in hint.lower()
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
 
-Run: `PYTHONNOUSERSITE=1 ./widget/.venv/bin/python -m pytest Hermes/plugins/jarvis/tests/test_plugin.py -q`
+Run: `PYTHONNOUSERSITE=1 ./widget/.venv/bin/python -m pytest Hermes/plugins/jarvis/tests/test_hint.py -q`
 Expected: FAIL on the assertions
 
 - [ ] **Step 3: Write the implementation**
 
-Append to the existing `PLATFORM_HINT` in
-`Hermes/plugins/jarvis/__init__.py`:
+Append to what `_platform_hint()` returns in
+`Hermes/plugins/jarvis/__init__.py:111`:
 
 ```
 Puedes dar clase. Si te piden aprender algo, abre un curso: propón un
