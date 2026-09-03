@@ -734,7 +734,7 @@ os1-jarvis/
 ├── voices/                 ← the reference clip his voice is cloned from
 ├── systemd/                ← user units: widget, hermes, hermes-serve,
 │                             llamacpp
-├── docs/                   ← personality.md, designs, plans, decisions
+├── docs/                   ← designs, plans, decisions
 │
 
 ```
@@ -1032,13 +1032,19 @@ keep green. `git log -- backend frontend` is where they went.
 
 ## 7. The Personality (The Soul)
 
-The full personality spec — core identity, linguistic style, forbidden
-patterns, examples, system-prompt status — lives in
-**[`docs/personality.md`](docs/personality.md)**.
+The persona is **[`Hermes/jarvis-soul.md`](Hermes/jarvis-soul.md)**, and
+it is the only one. Read it before writing any string he might say: it
+governs everything user-facing — replies, error messages, even the text
+that shows while something loads. Any reference to "§7" or "personality
+§7" elsewhere points there.
 
-It governs everything user-facing: chat replies, error messages, even
-loading text. Read it before writing any string he might say. Any
-reference to "§7" or "personality §7" elsewhere points to that file.
+**`docs/personality.md` was deleted on 2026-09-03**, at the user's
+instruction, and it had earned it: it described Samantha — warm,
+feminine, "she" — while `jarvis-soul.md` was what actually reached him
+through the `platform_hint`. Two persona documents, one of them
+delivered and the other merely cited, is how a project ends up with an
+assistant whose written character and spoken character disagree. The
+old text is in `git log -- docs/personality.md`.
 
 **Where the persona actually lives, and the trap in it.**
 `Hermes/jarvis-soul.md` is the identity, and it is delivered through the
@@ -2469,7 +2475,7 @@ alongside Yuanbao and Feishu.
 
 - **The personality spec now has to police behaviour, not just prose.**
   "No visible agent" is a rule about what she does, and `docs/
-  personality.md` was written for what she says.
+  personality spec was written for what he says.
 - **The voice turn does not fit an agentic turn.** It assumes you speak,
   she thinks for a few seconds, she answers. A real task takes minutes,
   emits intermediate chatter (`↪ Redirected current run`, already seen

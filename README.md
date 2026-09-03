@@ -100,7 +100,7 @@ See [PROGRESS.md](PROGRESS.md) for what each day cost and what it found.
   the models, the photo band, the environment switches.
 - **[Hermes/plugins/jarvis_vision/README.md](Hermes/plugins/jarvis_vision/README.md)**
   — the cameras: configuring them, the quiet rules, and `mirar`.
-- **[docs/personality.md](docs/personality.md)** — his voice, his style
+- **[Hermes/jarvis-soul.md](Hermes/jarvis-soul.md)** — his voice, his style
   and what he never does. Required before writing any user-facing string.
 - **[PROGRESS.md](PROGRESS.md)** — the log, newest first.
 - **[backend/README.md](backend/README.md)** — the unused FastAPI backend.

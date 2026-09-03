@@ -159,7 +159,7 @@ except ImportError:  # pragma: no cover - only without Hermes installed
             self.message_id = message_id
 
 
-# Spanish, in her voice — these reach the screen. See docs/personality.md:
+# Spanish, in his voice — these reach the screen. See Hermes/jarvis-soul.md:
 # short, spoken, no apology-for-being-software, no "ERROR:".
 _BAD_FRAME = "No te he entendido. ¿Me lo dices otra vez?"
 _TURN_LOST = "Algo se ha quedado a medias. ¿Me lo repites?"

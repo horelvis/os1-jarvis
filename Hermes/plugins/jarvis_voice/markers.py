@@ -3,7 +3,8 @@
 JARVIS' replies carry inline expression markers — `[laughter]`,
 `[breath]`, `[sigh]`, and `<laughter>palabras reales</laughter>` (they
 were declared in `backend/samantha/personality.py`, deleted on
-2026-09-03; `docs/personality.md` is where they live now), the last of
+2026-09-03, as was `docs/personality.md` that replaced it; `git log`
+is where they live now), the last of
 which renders its
 enclosed words as smiled speech. Hermes' `SentenceChunker` knows
 nothing about them, so `<laughter>Ya. Claro</laughter>` can be cut at
