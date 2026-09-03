@@ -15,7 +15,7 @@ TERRACOTTA = "#d1684e"
 LINE = TERRACOTTA
 
 # What the strip is filled with. Transparent (user, 2026-08-23), so the
-# desktop shows through and only the line is Samantha — she stops being
+# desktop shows through and only the line is JARVIS — she stops being
 # a panel and becomes something drawn on the screen.
 #
 # This needs a compositing window manager, which GNOME is. Without one

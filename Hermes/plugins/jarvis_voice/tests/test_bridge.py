@@ -58,8 +58,8 @@ def test_early_stop_joins_the_worker_thread():
         it.close()
         # it.close()'s finally already does thread.join(timeout=2.0)
         # synchronously, so the thread is gone (or truly leaked) by now.
-        leaked = [t for t in threading.enumerate() if t.name == "samantha-tts"]
-        assert not leaked, f"samantha-tts worker thread(s) still alive: {leaked}"
+        leaked = [t for t in threading.enumerate() if t.name == "jarvis-tts"]
+        assert not leaked, f"jarvis-tts worker thread(s) still alive: {leaked}"
 
 
 def test_hanging_aclose_does_not_leak_the_worker_thread():
@@ -91,8 +91,8 @@ def test_hanging_aclose_does_not_leak_the_worker_thread():
     elapsed = time.monotonic() - start
 
     assert elapsed < _ACLOSE_TIMEOUT_S + 0.5, f"close() took {elapsed:.2f}s"
-    leaked = [t for t in threading.enumerate() if t.name == "samantha-tts"]
-    assert not leaked, f"samantha-tts worker thread(s) still alive: {leaked}"
+    leaked = [t for t in threading.enumerate() if t.name == "jarvis-tts"]
+    assert not leaked, f"jarvis-tts worker thread(s) still alive: {leaked}"
 
 
 def test_event_loop_creation_failure_still_releases_the_consumer(monkeypatch):

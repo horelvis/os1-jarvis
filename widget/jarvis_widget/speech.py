@@ -34,7 +34,7 @@ _MIN_SOFT_CLAUSE_CHARS = 25
 # Hermes narrates itself through ordinary `token` frames — in English,
 # with emoji, to a person who has no keyboard. Measured verbatim:
 #
-#   📬 No home channel is set for Samantha_Kiosk … Type /sethome
+#   📬 No home channel is set for JARVIS_Kiosk … Type /sethome
 #   ↪ Redirected current run (iteration 1/9223372036854775807)
 #   💡 First-time tip — I redirected the current run…
 #   ⚠️ Couldn't deliver the audio attachment.

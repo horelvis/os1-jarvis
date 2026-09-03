@@ -64,12 +64,12 @@ class CosyVoiceSyncProvider(TTSProvider):
     def name(self) -> str:
         # Must match the streaming provider's registered name and the
         # user's `tts.provider`, or the two paths diverge and one
-        # of them is not Samantha's voice.
+        # of them is not JARVIS' voice.
         return "cosyvoice"
 
     @property
     def display_name(self) -> str:
-        return "Samantha (CosyVoice)"
+        return "JARVIS (CosyVoice)"
 
     def is_available(self) -> bool:
         # Same cheap on-disk probe the streamer uses. Must not raise.

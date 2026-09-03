@@ -5,7 +5,7 @@
 > doubt about scope, architecture, or style, this document overrides your
 > defaults. Update `PROGRESS.md` after completing each phase.
 >
-> **He is called JARVIS.** Until 2026-08-23 he was Samantha, and most
+> **He is called JARVIS.** Until 2026-08-23 he was JARVIS, and most
 > package names, environment variables and systemd units still carry that
 > name — `jarvis_widget`, `jarvis_vision`, `SAMANTHA_*`. Renaming them
 > is not worth the churn. In prose he is JARVIS; in code, mostly samantha
@@ -31,7 +31,7 @@
 > decisions that caused the drift are in §12; this section is now what
 > actually runs.
 
-JARVIS — until 2026-08-23, Samantha — is an **AI presence that lives on
+JARVIS — until 2026-08-23, JARVIS — is an **AI presence that lives on
 the desktop**: a strip along the bottom edge of the screen that listens
 all the time, speaks in a cloned voice, watches the house's cameras, and
 can act on it. Not a window you open. Something that is there.
@@ -126,7 +126,7 @@ That was "plan 3", and it is closed.
 
 ### What he is
 
-Samantha is **not** an assistant, a chatbot, an agent, or a tool. She is
+JARVIS is **not** an assistant, a chatbot, an agent, or a tool. She is
 a presence: a curious, warm, conversational AI that lives on a single
 mini-PC in the user's home, learns about the user over time, and
 behaves like a friend rather than a service.
@@ -163,7 +163,7 @@ as the primary interaction mode.
      `terminal`. The threat model is **whoever is on the wifi**, guests
      included.
 
-2. **Conversational first, and able to act.** Samantha is designed for
+2. **Conversational first, and able to act.** JARVIS is designed for
    the relationship. She remembers, she asks, she has opinions. She is
    NOT a Siri/Alexa replacement — but since 2026-08-23 she *can* do
    things in the house: control it, remember, remind, look something up
@@ -198,7 +198,7 @@ as the primary interaction mode.
    user service starts him; the desktop underneath stays the user's.
 
    Revised on 2026-08-23. This principle used to read "Appliance
-   experience — when the device boots, it boots into Samantha… enforced
+   experience — when the device boots, it boots into JARVIS… enforced
    by systemd + auto-login + Chromium kiosk mode". The appliance model
    went with the kiosk (§2.3, §12): the box is a desktop the user also
    works on, and taking the whole screen was the wrong trade.
@@ -371,7 +371,7 @@ GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 > paragraph below is what this section used to claim.
 >
 > **`backend/` is not entirely dead, and the distinction matters:**
-> `samantha.tts` is imported by the widget **as a library** to reach
+> `jarvis_voice.tts` is imported by the widget **as a library** to reach
 > CosyVoice. That is the whole reason `PYTHONPATH` includes `backend/`
 > when the widget runs. The FastAPI app, `/chat`, `/speak`, the
 > WebSocket and ChromaDB are what is unused. Removing them is plan 3.
@@ -447,7 +447,7 @@ choice: a build 2 GB larger fits its own arithmetic and leaves Whisper
 nothing. One did, on 2026-08-27 — see the comment in
 `systemd/jarvis-llamacpp.service` and §12.
 
-**Three things that each cost a round, now in `samantha-config.yaml`:**
+**Three things that each cost a round, now in `jarvis-config.yaml`:**
 - **`enable_thinking: false`.** Qwen3.8 reasons by default and puts
   everything into `reasoning_content`; `content` comes back empty and the
   strip sits in "thinking" without ever speaking.
@@ -537,7 +537,7 @@ semantic memory, paired with a SQLite ring buffer at
 memory. Embedder: fastembed (ONNX runtime) with
 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
 
-**Design principle:** **Samantha never forgets anything** (user
+**Design principle:** **JARVIS never forgets anything** (user
 directive 2026-05-12). The store is append-only from the user's
 perspective. `Memory.forget()` and `Memory.clear()` exist as admin/
 test tools but are NOT wired to user input. Short-term ring eviction
@@ -551,7 +551,7 @@ is a thin facade over Memory that synthesizes a profile view from
 the latest facts plus the 6 onboarding answer chunks.
 
 **Why fastembed:** ChromaDB's default ONNX MiniLM is English-leaning
-and Samantha is Spanish-first. fastembed runs the multilingual
+and JARVIS is Spanish-first. fastembed runs the multilingual
 MiniLM-L12-v2 model in-process (no extra daemon, no torch). Cost:
 ~130 MB deps + a one-time ~30s model download on first launch.
 
@@ -719,7 +719,7 @@ os1-jarvis/
 │
 ├── Hermes/                 ← the brain, pinned in-repo
 │   ├── jarvis-soul.md      ← the persona (and see the warning in §7)
-│   ├── samantha-config.yaml← model, provider, TTS. NOT the secrets.
+│   ├── jarvis-config.yaml← model, provider, TTS. NOT the secrets.
 │   ├── apply-config.sh
 │   └── plugins/
 │       ├── jarvis/          ← the surface he speaks through
@@ -926,7 +926,7 @@ reply ever came. Two causes, both silent, both operational:
   answers `⏳ Agent is running`.
 - **A new session eats its first turn.** With no home channel set, the
   first turn of a session comes back as `📬 No home channel is set for
-  Jarvis` (title-cased from the platform name; it read `Samantha_Kiosk`
+  Jarvis` (title-cased from the platform name; it read `JARVIS_Kiosk`
   before the 2026-08-28 rename, §12), which the strip correctly discards
   as a system message — so the question that triggered it is simply
   gone. Fixed for good with `/sethome` (`Home channel set to JARVIS`,
@@ -947,7 +947,7 @@ cd widget && PYTHONNOUSERSITE=1 ./.venv/bin/python tools/probe_gateway.py "¿Qu�
 ```bash
 ffmpeg -y -f x11grab -video_size 1920x1080 -i :0 -frames:v 1 /tmp/strip.png
 xwininfo -name "JARVIS"            # did you photograph the strip, or the lock screen?
-# The title is "JARVIS" — window.py:101 sets it (it was "Samantha"
+# The title is "JARVIS" — window.py:101 sets it (it was "JARVIS"
 # until 2026-08-28), and no code anywhere calls the window
 # "jarvis-widget"; that is only the unit's name. Asking for the wrong
 # one answers "No window with name ... exists!" with the strip on screen
@@ -983,7 +983,7 @@ keep green. `git log -- backend frontend` is where they went.
 - **Formatter:** `ruff format` (replaces black)
 - **Linter:** `ruff check`
 - **Type hints:** mandatory on all public functions
-- **Comments:** in English, but Samantha-facing strings (replies, system
+- **Comments:** in English, but JARVIS-facing strings (replies, system
   prompt content) in Spanish
 - **Imports:** sorted by isort/ruff convention (stdlib, third-party, local)
 - **Logging:** use `loguru` (already configured), never `print()`
@@ -1013,7 +1013,7 @@ keep green. `git log -- backend frontend` is where they went.
 
 ### Naming
 
-- **Files:** kebab-case for JS (`samantha-wave.js`), snake_case for
+- **Files:** kebab-case for JS (`jarvis-wave.js`), snake_case for
   Python (`mock_llm.py`)
 - **JS functions:** camelCase
 - **Python functions:** snake_case
@@ -1146,7 +1146,7 @@ If you encounter:
 | The card, drawn and as state | `widget/jarvis_widget/{ficha_area,ficha}.py` |
 | The surface Hermes speaks through | `Hermes/plugins/jarvis/` |
 | His identity | `Hermes/jarvis-soul.md` (and §7 — sessions!) |
-| Model, provider, TTS provider | `Hermes/samantha-config.yaml` |
+| Model, provider, TTS provider | `Hermes/jarvis-config.yaml` |
 | CosyVoice, and the voice prompt | `tts-server/cosyvoice/server.py`, `backend/samantha/tts.py` |
 | The reference clip | `voices/` |
 | Services | `systemd/*.service` |

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Merge samantha-config.yaml into the repo's Hermes config.
+# Merge jarvis-config.yaml into the repo's Hermes config.
 #
 # `.hermes/home/config.yaml` cannot be committed — it sits beside
-# auth.json, state.db and the session store. So the settings Samantha
-# needs live in samantha-config.yaml, and this puts them in place on a
+# auth.json, state.db and the session store. So the settings JARVIS
+# needs live in jarvis-config.yaml, and this puts them in place on a
 # machine that does not have them yet.
 #
 # Deep merge, not overwrite: anything Hermes itself wrote (onboarding
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE="$REPO_ROOT/Hermes/samantha-config.yaml"
+SOURCE="$REPO_ROOT/Hermes/jarvis-config.yaml"
 TARGET="${HERMES_HOME:-$REPO_ROOT/.hermes/home}/config.yaml"
 PYTHON="$REPO_ROOT/.hermes/src/.venv/bin/python"
 

@@ -1,11 +1,11 @@
 manifest_version: 2
 api_version: 1
 name: jarvis-voice
-label: Samantha (CosyVoice)
+label: JARVIS (CosyVoice)
 kind: standalone
 version: 1.0.0
 description: >
-  TTS for Samantha's cloned voice, on both of Hermes' paths: a streaming
+  TTS for JARVIS' cloned voice, on both of Hermes' paths: a streaming
   provider (clause by clause, 24 kHz mono int16 PCM) and a whole-file
   provider (WAV). Both synthesise via CosyVoice 3 zero-shot on the 4090.
   Synthesis never leaves the LAN WHEN THIS PLUGIN IS LOADED AND SERVING.
@@ -61,7 +61,7 @@ python_dependencies:
 # Not pip-installable and therefore not declarable above: the `samantha`
 # package (this repo's `backend/`) must be importable by Hermes' Python,
 # e.g. PYTHONPATH=<repo>/backend. It carries the CosyVoice client
-# (samantha.tts) both providers call.
+# (jarvis_voice.tts) both providers call.
 
 optional_env:
   - name: JARVIS_TTS_COSYVOICE_URL

@@ -10,7 +10,7 @@
 #      hf download FunAudioLLM/Fun-CosyVoice3-0.5B-2512 \
 #        --local-dir ~/.jarvis/cosyvoice3
 #
-#   2. The Inés reference WAV at ~/.jarvis/voices/ref/samantha.wav
+#   2. The Inés reference WAV at ~/.jarvis/voices/ref/jarvis-ref.wav
 #      (same path XTTS uses).
 #
 #   3. nvidia-container-toolkit installed (verified by the XTTS

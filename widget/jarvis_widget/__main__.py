@@ -516,7 +516,7 @@ async def _serve_quietly(coro) -> None:
         print(f"móvil: sin superficie ({exc!r})", file=sys.stderr, flush=True)
 
 
-class SamanthaApp(Gtk.Application):
+class JARVISApp(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id="com.horelvis.jarvis.widget")
         # asyncio holds only WEAK references to running tasks, so a task
@@ -1594,7 +1594,7 @@ def _preload() -> None:
 
 
 def main() -> int:
-    return SamanthaApp().run(sys.argv)
+    return JARVISApp().run(sys.argv)
 
 
 if __name__ == "__main__":

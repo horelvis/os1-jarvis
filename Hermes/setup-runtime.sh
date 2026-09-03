@@ -9,7 +9,7 @@
 # plugins is what makes "clone and start" reproducible.
 #
 # What this does NOT touch: ~/.hermes, ~/.local/bin/hermes, or any gateway
-# already running. Those belong to the machine's owner, not to Samantha.
+# already running. Those belong to the machine's owner, not to JARVIS.
 #
 # Idempotent: safe to re-run. Re-running after editing HERMES_COMMIT below
 # is how you move the pin.

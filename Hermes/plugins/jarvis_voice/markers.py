@@ -1,6 +1,6 @@
 """Expression-marker safety check between Hermes and CosyVoice.
 
-Samantha's replies carry inline expression markers — `[laughter]`,
+JARVIS' replies carry inline expression markers — `[laughter]`,
 `[breath]`, `[sigh]`, and `<laughter>palabras reales</laughter>` (they
 were declared in `backend/samantha/personality.py`, deleted on
 2026-09-03; `docs/personality.md` is where they live now), the last of

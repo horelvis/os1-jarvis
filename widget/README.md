@@ -1,6 +1,6 @@
 # jarvis-widget
 
-Samantha as a floating strip at the bottom of the screen. GTK4 on X11.
+JARVIS as a floating strip at the bottom of the screen. GTK4 on X11.
 
 Design: `docs/superpowers/specs/2026-08-23-jarvis-widget-gtk4-design.md`
 

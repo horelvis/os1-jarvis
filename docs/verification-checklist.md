@@ -1,6 +1,6 @@
 # Verification checklist
 
-Run this top to bottom after moving Samantha to a new machine, after
+Run this top to bottom after moving JARVIS to a new machine, after
 upgrading Hermes, or whenever something feels off. It takes a couple of
 minutes.
 
@@ -29,7 +29,7 @@ cd "$REPO"
 These live outside git. Nothing rebuilds them.
 
 ```bash
-ls -l ~/.jarvis/voices/ref/samantha.wav ~/.jarvis/voices/ref/samantha.txt
+ls -l ~/.jarvis/voices/ref/jarvis-ref.wav ~/.jarvis/voices/ref/jarvis-ref.txt
 du -sh ~/.jarvis/memory
 ```
 

@@ -1,4 +1,4 @@
-"""Pesca 10 candidatas de voz para clonar Samantha.
+"""Pesca 10 candidatas de voz para clonar JARVIS.
 
 Stream del dataset (sin descargar los 50 GB enteros): filtra a mujer +
 acento de España, duración 4-10 s, y guarda WAV + transcripción.

@@ -62,7 +62,7 @@ text as a password and never logs the URL.
 
 The camera addresses themselves are still local to this box, so they live
 **only** in the git-ignored `.hermes/home/config.yaml`.
-`Hermes/samantha-config.yaml` is tracked in git and carries the shape as
+`Hermes/jarvis-config.yaml` is tracked in git and carries the shape as
 a comment, nothing more.
 
 Write this under `plugins.entries.jarvis-vision` in
@@ -108,7 +108,7 @@ the `.env`.** Everything else is scripted — `Hermes/setup-runtime.sh`
 symlinks this directory into `$HERMES_HOME/plugins/`, installs `av`,
 `onnxruntime`, `numpy` and `pillow` (which `uv sync` does not), and
 enables the plugin; `Hermes/apply-config.sh` merges the tracked
-`Hermes/samantha-config.yaml`, which lists `jarvis-vision` and grants
+`Hermes/jarvis-config.yaml`, which lists `jarvis-vision` and grants
 it `allow_gateway_injection`. What no script can restore is the camera
 block above — `.hermes/home/config.yaml` is not in git and never will be
 — and the credential it names.

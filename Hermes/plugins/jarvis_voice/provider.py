@@ -85,7 +85,7 @@ _UNREACHABLE = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 _MIN_SILENT_CLAUSES = 2
 
 # Chunk size the announcement clip is handed out in — the same 4 KB
-# `samantha.tts.stream` reads the CosyVoice response with, so the
+# `jarvis_voice.tts.stream` reads the CosyVoice response with, so the
 # consumer sees the clip exactly as it sees a spoken clause.
 _CLIP_CHUNK_BYTES = 4096
 
@@ -94,7 +94,7 @@ class SilentTurnError(Exception):
     """No clause in an entire speaking turn produced any audio.
 
     Deliberately NOT a RuntimeError: `stream()` catches RuntimeError as
-    "one clause failed, keep going", and `samantha.tts` raises
+    "one clause failed, keep going", and `jarvis_voice.tts` raises
     RuntimeError for exactly that. A turn-level failure must never be
     mistaken for a clause-level one by a future edit to that handler.
     """
@@ -124,7 +124,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         # every turn. If a future Hermes version caches the streamer
         # across turns instead, this list keeps growing across turns,
         # the trim in Plan 3 walks stale entries from a previous reply,
-        # and Samantha's permanent memory gets corrupted with no
+        # and JARVIS' permanent memory gets corrupted with no
         # exception raised anywhere to catch it. Re-check that call site
         # before upgrading the pinned Hermes commit.
         self.bytes_yielded_per_clause: list[tuple[str, int]] = []
@@ -160,7 +160,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         The server does NOT crash on short text — it logs a warning
         ("... too short than prompt text ..., this may lead to bad
         performance") and still returns audio. Its actual reference
-        prompt, `prompt_text`, is `~/.jarvis/voices/ref/samantha.txt`
+        prompt, `prompt_text`, is `~/.jarvis/voices/ref/jarvis-ref.txt`
         (130 chars once stripped) with
         `"You are a helpful assistant.<|endofprompt|>"` (44 chars)
         prepended before the length comparison — an effective ~173
@@ -197,7 +197,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
         thinking. `_turn_is_dead` separates the two: one clause failing
         is ordinary, a whole turn producing no audio is not. When it
         fires, `_announce_dead_turn` plays a pre-recorded clip in
-        Samantha's voice and raises `SilentTurnError`. Read `announce.
+        JARVIS' voice and raises `SilentTurnError`. Read `announce.
         py` before touching that path — the clip being pre-recorded is a
         ruling, not an implementation detail.
 
@@ -319,7 +319,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
 
         The clip's bytes are NOT added to `bytes_yielded_per_clause`:
         that list maps clause text to the audio for that text, and the
-        announcement is not something Samantha said. Plan 3's trim
+        announcement is not something JARVIS said. Plan 3's trim
         therefore under-counts the audible bytes of a dead turn by the
         clip's length — harmless, since a dead turn has no spoken words
         to trim.
@@ -330,7 +330,7 @@ class CosyVoiceStreamingProvider(StreamingTTSProvider):
                 "jarvis-voice: no audio this turn — playing the "
                 f"pre-recorded announcement ({len(clip)} bytes of PCM)"
             )
-            # Same 4 KB chunk size `samantha.tts.stream` reads with, so
+            # Same 4 KB chunk size `jarvis_voice.tts.stream` reads with, so
             # the clip reaches the consumer the way a clause does
             # rather than as one large write.
             for start in range(0, len(clip), _CLIP_CHUNK_BYTES):

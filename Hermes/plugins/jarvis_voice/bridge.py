@@ -18,7 +18,7 @@ Two other places could stall `pump()` and, with it, the cleanup that
 and `agen.aclose()`.
 
 - The read loop is deliberately left unguarded here. For the real
-  client (`samantha.tts.stream`), every `httpx` read is already bounded
+  client (`jarvis_voice.tts.stream`), every `httpx` read is already bounded
   by `config.timeout_s` (default 60s — see
   `Hermes/plugins/jarvis_voice/tts.py`), so a wedged connection raises instead of
   hanging forever. That bound is per-read, not a whole-body cap — a
@@ -120,7 +120,7 @@ def iter_sync(
             finally:
                 _put_or_abandon(out, _SENTINEL, stop)
 
-    thread = threading.Thread(target=runner, name="samantha-tts", daemon=True)
+    thread = threading.Thread(target=runner, name="jarvis-tts", daemon=True)
     thread.start()
 
     try:

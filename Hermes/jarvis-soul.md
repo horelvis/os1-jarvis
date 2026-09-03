@@ -14,7 +14,7 @@ viera JARVIS mientras por la tira seguía diciendo "me llamo Hermes".
 
 Ese rodeo costó una tarde y varias hipótesis descartadas por el camino,
 todas ellas falsas y todas ellas verificadas: la memoria (USER.md decía
-"Addresses the agent as Samantha"), `skip_context_files` (es False por
+"Addresses the agent as JARVIS"), `skip_context_files` (es False por
 defecto), el escáner anti-inyección de `_scan_context_content` (este
 fichero lo pasa), el SOUL.md del home personal, y el issue upstream
 NousResearch/hermes-agent#34852. Ninguna era el problema.

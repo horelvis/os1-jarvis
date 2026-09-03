@@ -21,7 +21,7 @@ class _FakeTTS:
 
 def test_name_matches_the_streaming_registration():
     # Both registries must answer to the same name, or one Hermes path
-    # speaks in Samantha's voice and the other in Edge TTS's.
+    # speaks in JARVIS' voice and the other in Edge TTS's.
     from Hermes.plugins.jarvis_voice import provider as prov
 
     assert sync.CosyVoiceSyncProvider().name == "cosyvoice"
@@ -79,7 +79,7 @@ def test_no_audio_raises_instead_of_writing_an_empty_file(monkeypatch, tmp_path)
 def test_register_puts_a_cosyvoice_provider_in_hermes_whole_file_registry():
     # The whole-file path looks providers up in agent.tts_registry, which
     # only ctx.register_tts_provider populates. Registering nothing there
-    # is what routed Samantha's words through Microsoft's cloud.
+    # is what routed JARVIS' words through Microsoft's cloud.
     class _FakeCtx:
         def __init__(self):
             self.registered = []

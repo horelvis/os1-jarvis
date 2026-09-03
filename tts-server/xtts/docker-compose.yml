@@ -11,7 +11,7 @@
 #   1. POST /clone_speaker with the reference WAV (multipart) → returns
 #      {speaker_embedding, gpt_cond_latent} — pre-computed, cached.
 #   2. POST /tts_stream with text + language + the two embeddings.
-#      Response is streamed audio chunks. The Samantha backend caches
+#      Response is streamed audio chunks. The JARVIS backend caches
 #      the embeddings once at startup and reuses them on every turn.
 #
 # VRAM math on a 24 GB 4090:
@@ -44,7 +44,7 @@ services:
       # weights under /root/.local/share/tts/.
       - ${HOME}/.jarvis/xtts-cache:/root/.local/share/tts
       # Voice clone reference: same WAV vllm-omni uses, mounted
-      # read-only at /refs/samantha.wav. The /clone_speaker endpoint
+      # read-only at /refs/jarvis-ref.wav. The /clone_speaker endpoint
       # takes a multipart upload so the backend will POST the bytes
       # rather than reference this mount — but having the file in
       # the container makes manual curl tests trivial.

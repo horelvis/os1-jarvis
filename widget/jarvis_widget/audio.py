@@ -1,7 +1,7 @@
 """PortAudio in and out. Two rates, no resampling.
 
 In:  16 kHz mono int16, 512-sample frames — what Silero and Whisper want.
-Out: 24 kHz mono int16 — samantha.tts.OUTPUT_SAMPLE_RATE, exactly.
+Out: 24 kHz mono int16 — jarvis_voice.tts.OUTPUT_SAMPLE_RATE, exactly.
 
 PipeWire (with pipewire-pulse) is what is running on this box, so
 PortAudio reaches it through the Pulse compatibility layer. The device

@@ -5,7 +5,7 @@
 # Two exports are load-bearing:
 #
 #   HERMES_HOME  keeps config, SOUL.md, state.db and sessions inside the
-#                repo, so Samantha's Hermes and the machine owner's personal
+#                repo, so JARVIS' Hermes and the machine owner's personal
 #                ~/.hermes never share state or fight over a version.
 #   PYTHONPATH   makes the `Hermes` package importable as a package root from
 #                inside a plugin, and reaches `jarvis_voice.tts` and

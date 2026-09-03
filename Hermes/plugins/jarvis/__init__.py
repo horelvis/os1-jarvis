@@ -36,7 +36,7 @@ def check_requirements() -> bool:
 # False. So SOUL.md governs scheduled jobs and nothing else — a
 # conversation through the strip never sees it. Measured 2026-08-23:
 # with a full JARVIS SOUL.md in place, asked who she was, the reply was
-# still "Me llamo Hermes, aunque aquí me puedes llamar Samantha".
+# still "Me llamo Hermes, aunque aquí me puedes llamar JARVIS".
 #
 # `platform_hint` DOES reach every turn on this platform, so the persona
 # rides in on it. One source of truth on disk, `Hermes/jarvis-soul.md`,

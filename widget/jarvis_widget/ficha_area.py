@@ -135,7 +135,7 @@ class FichaArea(Gtk.Box):
 
     def __init__(self, on_resize) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=9)
-        self.add_css_class("samantha-ficha")
+        self.add_css_class("jarvis-ficha")
         self.set_visible(False)
         self._on_resize = on_resize
 
@@ -168,18 +168,18 @@ class FichaArea(Gtk.Box):
                     f"<tt>{pieza['letra']}</tt></span>"
                     f"   {pieza['texto']}"
                 )
-                etiqueta.add_css_class("samantha-ficha-opcion")
+                etiqueta.add_css_class("jarvis-ficha-opcion")
                 if pieza["estado"]:
-                    etiqueta.add_css_class(f"samantha-ficha-{pieza['estado']}")
+                    etiqueta.add_css_class(f"jarvis-ficha-{pieza['estado']}")
             else:
                 etiqueta.set_markup(pieza["texto"])
-                etiqueta.add_css_class(f"samantha-ficha-{pieza['tipo']}")
+                etiqueta.add_css_class(f"jarvis-ficha-{pieza['tipo']}")
             self.append(etiqueta)
 
         if fuente:
             pie = Gtk.Label(label=fuente)
             pie.set_xalign(0.0)
-            pie.add_css_class("samantha-ficha-fuente")
+            pie.add_css_class("jarvis-ficha-fuente")
             self.append(pie)
 
         # Ask for the height ourselves, and not only from the window.

@@ -5,7 +5,7 @@ of the screen that listens all the time, speaks in a cloned voice,
 watches the house's cameras, and can act on it. Not a window you open —
 something that is there.
 
-He was called Samantha until 2026-08-23, after the film *Her*, and most
+He was called JARVIS until 2026-08-23, after the film *Her*, and most
 package names, environment variables and systemd units still carry that
 name — except the platform he speaks through, `jarvis` since 2026-08-28.
 The full specification is in **[CLAUDE.md](CLAUDE.md)**; this file is

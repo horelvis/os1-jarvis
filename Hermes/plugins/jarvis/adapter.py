@@ -446,7 +446,7 @@ class JarvisAdapter(BasePlatformAdapter):
             # send() with turn already None, so it isn't caught by the
             # `turn.timed_out` guard above and gets pushed to the screen: a
             # stray, English "(Response formatting failed, plain text:)"
-            # message after the user already got Samantha's own apology.
+            # message after the user already got JARVIS' own apology.
             # Dropping the reply is still the right call — see the comment
             # above — this just keeps Hermes from working around the drop.
             return SendResult(

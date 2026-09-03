@@ -1,4 +1,4 @@
-"""TTS for Samantha — CosyVoice 3 (zero-shot voice cloning).
+"""TTS for JARVIS — CosyVoice 3 (zero-shot voice cloning).
 
 Emits 24 kHz mono int16 PCM chunks via
 /inference_zero_shot on the CosyVoice 3 server (4090, port 8093).

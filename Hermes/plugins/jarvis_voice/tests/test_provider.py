@@ -442,7 +442,7 @@ def test_a_server_that_answers_without_audio_needs_two_silent_clauses(monkeypatc
 
 def test_a_turn_that_was_partly_audible_is_not_declared_dead(monkeypatch):
     # Two failures in a turn that already spoke is a lost tail, not a
-    # dead server — the user heard Samantha, so telling her she has no
+    # dead server — the user heard JARVIS, so telling her she has no
     # voice would be a lie.
     class _FailsAfterFirstTTS(_FakeTTS):
         async def stream(self, text, *, client=None):
@@ -490,7 +490,7 @@ def test_the_announcement_plays_once_per_turn(monkeypatch):
 
 def test_silent_turn_error_is_not_caught_as_a_failed_clause():
     # stream() catches RuntimeError to skip a bad clause, and
-    # samantha.tts raises RuntimeError for exactly that. If the
+    # jarvis_voice.tts raises RuntimeError for exactly that. If the
     # turn-level error were a RuntimeError too, one edit to that
     # handler would silently swallow the loud path.
     assert not issubclass(prov.SilentTurnError, RuntimeError)

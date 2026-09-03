@@ -120,7 +120,7 @@ class StripWindow(Gtk.ApplicationWindow):
         self._ficha: Gtk.Widget | None = None
 
         self._frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self._frame.add_css_class("samantha-strip")
+        self._frame.add_css_class("jarvis-strip")
         self._frame.set_hexpand(True)
         self._frame.set_vexpand(True)
         self.set_child(self._frame)
@@ -129,7 +129,7 @@ class StripWindow(Gtk.ApplicationWindow):
         # kept hidden: it is the first child of this window that takes
         # keyboard focus, and it takes it only while it is open.
         self._prompt = Gtk.Entry()
-        self._prompt.add_css_class("samantha-prompt")
+        self._prompt.add_css_class("jarvis-prompt")
         self._prompt.set_placeholder_text("Escribe a JARVIS…")
         self._prompt.set_visible(False)
         self._prompt.connect("activate", self._on_prompt_activate)
@@ -169,11 +169,11 @@ class StripWindow(Gtk.ApplicationWindow):
         self._console_label.set_yalign(1.0)
         self._console_label.set_wrap(False)
         self._console_label.set_selectable(True)
-        self._console_label.add_css_class("samantha-console")
+        self._console_label.add_css_class("jarvis-console")
         self._console = Gtk.ScrolledWindow()
         self._console.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self._console.set_child(self._term or self._console_label)
-        self._console.add_css_class("samantha-console-frame")
+        self._console.add_css_class("jarvis-console-frame")
         # Pinned to the height the window grows by, minus its margins.
         # Without this the scroller takes its natural height — the label
         # asks for all its lines and gets a fraction of them, which is

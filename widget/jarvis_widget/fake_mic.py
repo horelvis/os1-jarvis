@@ -11,7 +11,7 @@ starts and stops, Whisper transcribes it, the text goes up the WebSocket
 to Hermes, and her reply comes back and is spoken. The only thing being
 faked is the air.
 
-The words are synthesised by CosyVoice — the same voice Samantha speaks
+The words are synthesised by CosyVoice — the same voice JARVIS speaks
 with — which is a slightly odd test in that she ends up transcribing
 herself. It is also the most convenient source of clean Spanish speech
 on this machine, and Whisper has no idea who is talking.

@@ -1,10 +1,10 @@
-"""The seam where Samantha says out loud that she has lost her voice.
+"""The seam where JARVIS says out loud that she has lost her voice.
 
 A turn where CosyVoice produced no audio at all is indistinguishable,
-from the sofa, from Samantha thinking — or from a dead appliance. The
+from the sofa, from JARVIS thinking — or from a dead appliance. The
 ruling of 2026-08-22 (decision record, finding 4) is that our plugins
 fail loudly, and that the announcement is a **pre-recorded clip in
-Samantha's own voice**. Two reasons, both load-bearing:
+JARVIS' own voice**. Two reasons, both load-bearing:
 
 - A voice plugin that cannot synthesise cannot announce its own
   failure by synthesising. Whatever says "me he quedado sin voz" has to
@@ -54,7 +54,7 @@ from loguru import logger
 
 # What the clip says, and the only text it may say. Kept here rather
 # than in the recording script so the sentence is reviewable in the
-# repo: it is user-facing, it is Samantha speaking, and it has to read
+# repo: it is user-facing, it is JARVIS speaking, and it has to read
 # like her (personality spec: tuteo, coloquial, one or two sentences,
 # no apology for being what she is). It also has to be actionable —
 # whoever hears it is the only person who can go and turn the machine

@@ -5,7 +5,7 @@ gateway actually does with a turn before writing code that assumes it.
 
 The question it exists to answer: does anything OTHER than the widget
 produce audio for a jarvis turn? If the gateway's auto-TTS fires too,
-Samantha says everything twice, and that is a confusing bug to meet for
+JARVIS says everything twice, and that is a confusing bug to meet for
 the first time with six other new modules in the room (spec §5.1).
 """
 

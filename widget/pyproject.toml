@@ -1,7 +1,7 @@
 [project]
 name = "jarvis-widget"
 version = "0.1.0"
-description = "Samantha as a floating desktop strip (GTK4/X11)"
+description = "JARVIS as a floating desktop strip (GTK4/X11)"
 requires-python = ">=3.12"
 # PyGObject is deliberately NOT listed: it comes from the system
 # packages python3-gi + gir1.2-gtk-4.0, reached through a venv created
@@ -19,7 +19,7 @@ dependencies = [
     # CLAUDE.md §2.6 and the design of 2026-09-01 say why it is not
     # Whisper doing this.
     "vosk>=0.3.45",
-    # samantha.tts reaches CosyVoice with these two; the samantha package
+    # jarvis_voice.tts reaches CosyVoice with these two; the samantha package
     # itself is not installable and arrives via PYTHONPATH instead.
     "httpx>=0.27",
     "loguru>=0.7",

@@ -26,8 +26,8 @@ class TTSConfig:
     # ~7 s of his voice, and the literal transcript of it. Zero-shot
     # needs both: cross_lingual discards prompt_text and sounds robotic.
     #
-    # This said `samantha.wav` until 2026-08-25, and that is why he spoke
-    # in Samantha's voice for two days after becoming JARVIS. The clip
+    # This said `jarvis-ref.wav` until 2026-08-25, and that is why he spoke
+    # in JARVIS' voice for two days after becoming JARVIS. The clip
     # beside it — `jarvis.wav`, recorded 2026-08-23 the day the persona
     # changed — was only ever reachable by exporting
     # JARVIS_TTS_COSYVOICE_REF_WAV by hand, and nothing on this box

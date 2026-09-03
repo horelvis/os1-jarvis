@@ -1,6 +1,6 @@
 """The line, as arithmetic.
 
-Samantha is a horizontal line, not an orb and not a spectrum
+JARVIS is a horizontal line, not an orb and not a spectrum
 (CLAUDE.md §12, 2026-05). This module turns (state, level, time) into a
 polyline; drawing it is Cairo's job and looking right is a screenshot's.
 

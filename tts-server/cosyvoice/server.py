@@ -74,7 +74,7 @@ def generate_data(model_output):
 #
 # The frontend's text_normalize() auto-disables splitting when `<|...|>`
 # appears in the input, so injecting the marker is safe for long text.
-# We do it here so the Samantha client can keep sending plain Spanish.
+# We do it here so the JARVIS client can keep sending plain Spanish.
 _EOP = "<|endofprompt|>"
 _SYS_PREFIX = "You are a helpful assistant." + _EOP
 

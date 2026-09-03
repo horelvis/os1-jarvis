@@ -78,8 +78,12 @@ def test_an_empty_word_turns_the_whole_thing_off():
 
 
 def test_the_word_can_be_something_else():
-    w = WakeWord(word="samantha")
-    assert w.heard("Samantha, ¿estás?", now=0.0) == "¿estás?"
+    # A word that is not his, and deliberately not the old name either:
+    # the 2026-09-03 rename swept "Samantha" out of the repo and turned
+    # this test's own utterance into "JARVIS", which quietly made it
+    # assert the opposite of what it is named for.
+    w = WakeWord(word="ordenador")
+    assert w.heard("Ordenador, ¿estás?", now=0.0) == "¿estás?"
     assert w.heard("Jarvis, ¿estás?", now=0.0) is None
 
 

@@ -92,7 +92,7 @@ def test_a_whole_message_arrives_as_one_token() -> None:
 def test_hermes_narrating_itself_is_not_said_out_loud() -> None:
     """Verbatim from the gateway probe. Spoken aloud these are gibberish."""
     for text in (
-        "📬 No home channel is set for Samantha_Kiosk. A home channel is where…",
+        "📬 No home channel is set for JARVIS_Kiosk. A home channel is where…",
         "↪ Redirected current run (iteration 1/9223372036854775807).",
         "💡 First-time tip — I redirected the current run using your message.",
         "⚠️ Couldn't deliver the audio attachment.",
