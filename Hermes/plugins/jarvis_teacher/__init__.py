@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -238,9 +239,23 @@ def _buscar(ctx):
     return buscar
 
 
+def _solo_web(url: str) -> None:
+    """Refuse anything that is not http(s), before urlopen sees it.
+
+    `urlopen` speaks `file:`, `ftp:` and `data:` as happily as it speaks
+    https, so a url the model wrote could read this disk. The domain
+    gate in `fuentes.py` and `tool.py` is the check that matters; this
+    is the floor underneath it, and it costs one comparison.
+    """
+    esquema = (urlparse(url).scheme or "").lower()
+    if esquema not in ("http", "https"):
+        raise ValueError(f"esquema no permitido: {esquema!r}")
+
+
 def _traer(url: str) -> str:
     import urllib.request
 
+    _solo_web(url)
     with urllib.request.urlopen(url, timeout=15) as respuesta:
         return respuesta.read(2_000_000).decode("utf-8", "replace")
 
@@ -248,5 +263,6 @@ def _traer(url: str) -> str:
 def _traer_bytes(url: str) -> bytes:
     import urllib.request
 
+    _solo_web(url)
     with urllib.request.urlopen(url, timeout=15) as respuesta:
         return respuesta.read(4 * 1024 * 1024)

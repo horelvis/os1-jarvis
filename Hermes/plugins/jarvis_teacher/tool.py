@@ -16,6 +16,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -127,7 +128,9 @@ class Aula:
                 return "Repite el temario con los puntos en una lista, uno por línea."
             self._curso.proponer_plan(curso_id, titulos, now=time.time())
             md = self._md_plan(curso_id, titulos)
-            await self._dibujar(md, "plan", fuente=self._fuente_prevista(curso_id))
+            await self._dibujar(
+                curso_id, md, "plan", fuente=self._fuente_prevista(curso_id)
+            )
             return f"Temario propuesto: {len(titulos)} puntos, a la espera de que lo apruebe."
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
             logger.warning(f"jarvis-teacher: planificar falló: {exc}")
@@ -258,13 +261,44 @@ class Aula:
         )
         return ("Me apoyaré en: " + " · ".join(hosts)) if hosts else ""
 
-    async def _dibujar(self, md: str, tipo: str, *, fuente: str = "", **kw) -> None:
+    async def _dibujar(
+        self, curso_id: int, md: str, tipo: str, *, fuente: str = "", **kw
+    ) -> None:
         """Resolve images and push. A card that cannot be drawn is not fatal."""
         try:
-            resuelto = imagen.resolver(md, traer=self._traer_imagen, now=time.time())
+            resuelto = imagen.resolver(
+                md, traer=self._descargador(curso_id), now=time.time()
+            )
             await self._push(resuelto, tipo, fuente=fuente, **kw)
         except Exception as exc:  # noqa: BLE001 — a card that fails to draw is not fatal
             logger.warning(f"jarvis-teacher: no se pudo dibujar la ficha: {exc}")
+
+    def _descargador(self, curso_id: int) -> Callable[[str], bytes]:
+        """The image fetcher, behind this course's own domain gate.
+
+        Page text has been gated since the first day and images were
+        not, which left `_traer_bytes` fetching whatever the model
+        wrote: `![](http://192.168.1.1/admin/…)` made the GATEWAY issue
+        that request from inside the house, and `file://` read local
+        files off this disk. An image reference is model output like any
+        other, so it goes through the same approval the pages do, and
+        only over http(s).
+
+        A reference that fails either check is dropped exactly as an
+        undownloadable one is — `imagen.resolver` catches this and the
+        card is still drawn, because the picture is a luxury and the
+        question is not.
+        """
+
+        def traer(url: str) -> bytes:
+            esquema = (urlparse(url).scheme or "").lower()
+            if esquema not in ("http", "https"):
+                raise ValueError(f"esquema no permitido para una imagen: {esquema!r}")
+            if not self._base.aprobado(curso_id, url):
+                raise PermissionError(f"dominio no aprobado: {host_de(url)}")
+            return self._traer_imagen(url)
+
+        return traer
 
     def _traer_imagen(self, url: str) -> bytes:
         """Overridden in `__init__.py` with the real fetcher; a seam for tests."""
@@ -298,7 +332,10 @@ class Aula:
             ficha_md = str((args or {}).get("ficha") or "")
             if ficha_md:
                 await self._dibujar(
-                    ficha_md, "explicacion", fuente=pasajes[0][0] if pasajes else ""
+                    curso_id,
+                    ficha_md,
+                    "explicacion",
+                    fuente=pasajes[0][0] if pasajes else "",
                 )
             if not pasajes:
                 return (
@@ -377,7 +414,7 @@ class Aula:
                 # the same row only while nothing else has been asked.
                 "id": fila_id,
             }
-            await self._dibujar(md, "pregunta", fuente=fuente)
+            await self._dibujar(curso_id, md, "pregunta", fuente=fuente)
             return "Pregunta hecha. Espero su respuesta."
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
             logger.warning(f"jarvis-teacher: preguntar falló: {exc}")
@@ -407,6 +444,7 @@ class Aula:
                     now=time.time(),
                 )
             await self._dibujar(
+                self._abierta["curso"],
                 self._abierta["md"],
                 "pregunta",
                 fuente=self._abierta.get("fuente", ""),

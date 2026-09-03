@@ -1107,3 +1107,28 @@ async def test_push_ficha_with_an_unknown_tipo_is_false_not_an_error(connected_a
     ok = await connected_adapter.push_ficha("## Hola\n\n- a\n- b\n", "examen")
     assert ok is False
     assert connected_adapter._ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_removes_a_refused_reference_rather_than_emptying_it(
+    connected_adapter, teacher_spool, tmp_path
+):
+    """A refused image leaves no `![alt]()` behind.
+
+    Pointing the reference at "" left the empty syntax in the document,
+    which the strip draws as literal text and charges a picture's height
+    for (`ficha.height` counts any line starting `![` as 169 px). The
+    one visible outcome of this security check looked like a bug.
+    """
+    fuera = tmp_path / "fuera.png"
+    fuera.write_bytes(b"x")
+
+    ok = await connected_adapter.push_ficha(
+        f"## Pregunta\n\n![un diagrama]({fuera})\n\n- a\n- b\n", "pregunta"
+    )
+
+    assert ok is True
+    sent = json.loads(connected_adapter._ws.sent[0])
+    assert "![" not in sent["md"]
+    assert "]()" not in sent["md"]
+    assert "- a" in sent["md"] and "## Pregunta" in sent["md"]

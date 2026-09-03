@@ -139,24 +139,44 @@ class Base:
                     )
         return hosts
 
-    def _aprobado(self, curso_id: int, url: str) -> bool:
+    def aprobado(self, curso_id: int, url: str) -> bool:
+        """Whether this course may fetch from this url's host.
+
+        Public because the domain gate is not only about page text: an
+        image reference the model wrote is fetched by the gateway too,
+        and it goes through the same approval (`tool.py`,
+        `_descargador`). A gate that only covered one of the two would
+        be a gate with a door beside it.
+        """
+        return host_de(url) in self.dominios(curso_id)
+
+    def dominios(self, curso_id: int) -> set[str]:
+        """The hosts approved for this course."""
         with self.curso.conexion() as db:
-            fila = db.execute(
-                "SELECT 1 FROM dominio WHERE curso = ? AND host = ?",
-                (curso_id, host_de(url)),
-            ).fetchone()
-        return bool(fila)
+            filas = db.execute(
+                "SELECT host FROM dominio WHERE curso = ?", (curso_id,)
+            ).fetchall()
+        return {str(f[0]) for f in filas}
 
     def construir(self, curso_id: int, urls: list[str], *, now: float) -> int:
         """Fetch the approved urls into the base. Returns how many landed.
 
         A source that will not fetch costs that source and never the
         class — the same rule `tool.py` applies to a picture.
+
+        A url this course already holds is skipped rather than fetched
+        again: amending a plan un-approves it, and approving it a second
+        time otherwise re-fetched every page, giving the course two
+        `fuente` rows per source, a doubled "Base: N fuentes" and the
+        same passage twice in front of the model.
         """
         directorio = self._raiz / str(curso_id)
+        ya_guardadas = self._urls(curso_id)
         traidas = 0
         for url in urls:
-            if not self._aprobado(curso_id, url):
+            if url in ya_guardadas:
+                continue
+            if not self.aprobado(curso_id, url):
                 logger.warning(
                     f"jarvis-teacher: dominio no aprobado, no se trae: {host_de(url)}"
                 )
@@ -181,8 +201,17 @@ class Base:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (curso_id, url, titulo, now, firma, str(destino)),
                 )
+            ya_guardadas.add(url)
             traidas += 1
         return traidas
+
+    def _urls(self, curso_id: int) -> set[str]:
+        """What this course already holds, so nothing is fetched twice."""
+        with self.curso.conexion() as db:
+            filas = db.execute(
+                "SELECT url FROM fuente WHERE curso = ?", (curso_id,)
+            ).fetchall()
+        return {str(f[0]) for f in filas}
 
     def pasajes(
         self, curso_id: int, concepto: str, *, maximo: int = 3

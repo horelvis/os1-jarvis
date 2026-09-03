@@ -58,3 +58,14 @@ def test_registration_writes_nothing_to_disk(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("JARVIS_TEACHER_HOME", str(tmp_path))
     jarvis_teacher.register(FakeCtx())
     assert not list(tmp_path.iterdir())
+
+
+def test_the_real_fetchers_speak_only_http(tmp_path) -> None:
+    """`urlopen` speaks `file:` too, and the model writes these urls."""
+    import pytest
+
+    trampa = tmp_path / "secreto.txt"
+    trampa.write_text("no", encoding="utf-8")
+    for fetcher in (jarvis_teacher._traer, jarvis_teacher._traer_bytes):
+        with pytest.raises(ValueError):
+            fetcher(f"file://{trampa}")

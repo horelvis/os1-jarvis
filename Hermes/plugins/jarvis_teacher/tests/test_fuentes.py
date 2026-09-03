@@ -167,3 +167,50 @@ def test_construir_remembers_the_real_title_from_candidatos(tmp_path: Path) -> N
     pasajes = base.pasajes(cid, "present perfect")
     assert pasajes
     assert pasajes[0][0] == "Cambridge B1 Preliminary, sample paper 2"
+
+
+def test_a_url_already_in_the_base_is_not_fetched_twice(tmp_path: Path) -> None:
+    """Amending a plan un-approves it; approving again re-ran `construir`.
+
+    Without this the course ended up with two `fuente` rows per source,
+    a doubled "Base: N fuentes" and the same passage twice in front of
+    the model.
+    """
+    curso = Curso(tmp_path / "curso.db")
+    traidas: list[str] = []
+
+    def traer(url: str) -> str:
+        traidas.append(url)
+        return "<p>El present perfect se usa para experiencias.</p>"
+
+    base = Base(curso, tmp_path / "fuentes", buscar=lambda _q: [], traer=traer)
+    cid = curso.abrir("B1", now=1000.0)
+    urls = ["https://cambridgeenglish.org/b1"]
+    base.aprobar_dominios(cid, urls, now=1000.0)
+
+    assert base.construir(cid, urls, now=1000.0) == 1
+    assert base.construir(cid, urls, now=1001.0) == 0
+    assert traidas == ["https://cambridgeenglish.org/b1"]
+    with base.curso.conexion() as db:
+        cuantas = db.execute(
+            "SELECT COUNT(*) FROM fuente WHERE curso = ?", (cid,)
+        ).fetchone()[0]
+    assert cuantas == 1
+    assert "Base: 1 fuentes" in curso.hoja(cid)
+
+
+def test_the_same_url_twice_in_one_call_lands_once(base: Base) -> None:
+    cid = base.curso.abrir("B1", now=1000.0)
+    urls = ["https://cambridgeenglish.org/b1", "https://cambridgeenglish.org/b1"]
+    base.aprobar_dominios(cid, urls, now=1000.0)
+    assert base.construir(cid, urls, now=1000.0) == 1
+
+
+def test_aprobado_answers_for_the_course_that_approved_it(base: Base) -> None:
+    """The domain gate is asked by the image fetcher too, so it is public."""
+    cid = base.curso.abrir("B1", now=1000.0)
+    otro = base.curso.abrir("otra cosa", now=1000.0)
+    base.aprobar_dominios(cid, ["https://cambridgeenglish.org/b1"], now=1000.0)
+    assert base.aprobado(cid, "https://cambridgeenglish.org/otra-pagina") is True
+    assert base.aprobado(cid, "http://192.168.1.1/admin") is False
+    assert base.aprobado(otro, "https://cambridgeenglish.org/b1") is False

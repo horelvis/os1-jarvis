@@ -560,7 +560,7 @@ class JarvisAdapter(BasePlatformAdapter):
         try:
             from Hermes.plugins.jarvis_teacher.markdown import (
                 imagenes,
-                sustituir_imagen,
+                quitar_imagen,
             )
         except ImportError as exc:
             logger.warning(f"jarvis: jarvis_teacher unavailable — {exc}")
@@ -580,7 +580,12 @@ class JarvisAdapter(BasePlatformAdapter):
                 logger.warning(
                     f"jarvis: refusing image outside the spool: {referencia!r}"
                 )
-                limpio = sustituir_imagen(limpio, referencia, "")
+                # The reference goes out of the document entirely, the
+                # way a download that failed does — pointing it at ""
+                # left `![alt]()` behind, which the strip draws as
+                # literal text and charges a picture's height for. The
+                # one visible outcome of this check looked like a bug.
+                limpio = quitar_imagen(limpio, referencia)
         try:
             frame = ficha(
                 limpio, tipo, fuente=fuente, correcta=correcta, elegida=elegida

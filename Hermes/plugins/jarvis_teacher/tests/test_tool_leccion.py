@@ -395,3 +395,92 @@ def test_he_speaks_to_the_user_as_usted(tmp_path: Path, monkeypatch) -> None:
     curso.proponer_plan(curso_id, ["Uno"], now=1000.0)
     olvidada = asyncio.run(Aula(curso, con_algo, push_ficha=push).aprobar({}))
     assert "Dígame otra vez" in olvidada
+
+
+# ── final review: an image reference is model output too ───────────────
+
+
+def _png() -> bytes:
+    import base64
+
+    return base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+
+def _con_descargas(aula) -> list[str]:
+    """Record what the image fetcher is actually asked for."""
+    pedidas: list[str] = []
+
+    def traer(url: str) -> bytes:
+        pedidas.append(url)
+        return _png()
+
+    aula._traer_imagen = traer
+    return pedidas
+
+
+def test_an_image_on_an_approved_domain_is_fetched_and_localised(aula) -> None:
+    from Hermes.plugins.jarvis_teacher.imagen import spool_dir
+
+    pedidas = _con_descargas(aula)
+    asyncio.run(
+        aula.explicar(
+            {
+                "concepto": "Past continuous",
+                "ficha": "## Mira\n\n![](https://cambridgeenglish.org/d.png)\n",
+            }
+        )
+    )
+    _tipo, md, _kw = aula.recogido[-1]
+    assert pedidas == ["https://cambridgeenglish.org/d.png"]
+    assert str(spool_dir()) in md
+
+
+def test_an_image_on_a_domain_nobody_approved_is_never_requested(aula) -> None:
+    """`![](http://192.168.1.1/admin/…)` made the GATEWAY issue that request."""
+    pedidas = _con_descargas(aula)
+    asyncio.run(
+        aula.explicar(
+            {
+                "concepto": "Past continuous",
+                "ficha": "## Mira\n\n![](http://192.168.1.1/admin/x.png)\n\n- sigue\n",
+            }
+        )
+    )
+    _tipo, md, _kw = aula.recogido[-1]
+    assert pedidas == []
+    assert "192.168.1.1" not in md
+    assert "- sigue" in md  # the card is still drawn
+
+
+def test_a_file_reference_never_reads_the_disk(aula) -> None:
+    pedidas = _con_descargas(aula)
+    asyncio.run(
+        aula.explicar(
+            {
+                "concepto": "Past continuous",
+                "ficha": "## Mira\n\n![](file:///etc/passwd)\n\n- sigue\n",
+            }
+        )
+    )
+    _tipo, md, _kw = aula.recogido[-1]
+    assert pedidas == []
+    assert "/etc/passwd" not in md
+    assert "- sigue" in md
+
+
+def test_the_gate_applies_to_a_question_card_too(aula) -> None:
+    pedidas = _con_descargas(aula)
+    asyncio.run(
+        aula.preguntar(
+            {
+                "ficha": "![](https://ejemplo.net/x.png)\n\n- did\n- were\n",
+                "correcta": "b",
+            }
+        )
+    )
+    _tipo, md, _kw = aula.recogido[-1]
+    assert pedidas == []
+    assert "ejemplo.net" not in md
+    assert "were" in md
