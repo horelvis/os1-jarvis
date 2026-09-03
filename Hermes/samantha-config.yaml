@@ -13,13 +13,18 @@
 # ── Plugins ───────────────────────────────────────────────────────────
 # `kind: platform` and `kind: standalone` plugins are opt-in. Without
 # jarvis the strip has nothing to talk to; without
-# samantha-voice, TTS falls through to Edge — Microsoft's cloud.
+# samantha-voice, TTS falls through to Edge — Microsoft's cloud. Without
+# jarvis-teacher listed here he never registers the `clases` tools at
+# all: `entries.<id>.enabled` below is not a load gate — nothing in the
+# pinned Hermes reads it — only `plugins.enabled` (`_get_enabled_plugins`
+# in `hermes_cli/plugins.py`) decides what loads.
 plugins:
   enabled:
     - jarvis
     - samantha-voice
     - samantha-vision
     - samantha-code
+    - jarvis-teacher
   entries:
     samantha-voice:
       allow_tool_override: false
@@ -76,6 +81,8 @@ plugins:
       # 2026-08-27 on the first live end-to-end: the work was done and
       # verified, and he never said a word about it.
       allow_gateway_injection: true
+    jarvis-teacher:
+      enabled: true
 
 # ── TTS ───────────────────────────────────────────────────────────────
 # Hermes' default provider is `edge` — Microsoft's cloud. Measured
@@ -256,6 +263,7 @@ platform_toolsets:
     - a2a
     - codigo
     - terminal
+    - clases
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron

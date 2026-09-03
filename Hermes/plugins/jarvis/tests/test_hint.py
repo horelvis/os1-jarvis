@@ -68,3 +68,18 @@ def test_the_hint_says_how_to_delegate_coding():
     assert "a2a_call" in hint
     assert "'codigo'" in hint
     assert "no respondas tú en su lugar" in hint
+
+
+def test_the_hint_says_he_can_teach_and_what_the_screen_does() -> None:
+    """The hint has to move in the same change as the drawing.
+
+    In August it said there was no screen while the photo was already
+    being pushed, and he declined correctly for the wrong reason
+    (§12, 2026-08-25). Remember §7: an existing session only sees this
+    after `/new` and `/approve`."""
+    hint = _platform_hint()
+    assert "clase" in hint.lower()
+    assert "temario" in hint.lower()
+    # He does not see the card. Saying he does is how he starts
+    # describing what is on it.
+    assert "no ves" in hint.lower() or "no la ves" in hint.lower()
