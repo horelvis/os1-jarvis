@@ -191,6 +191,40 @@ of parser in `markdown.py`, pure and testable without a display. A full
 CommonMark library would be asking permission (§8) to render what we
 have decided not to render.
 
+### How it is laid out, and why
+
+Four mockups were drawn against `theme.py`'s real values and the layout
+was chosen from them on 2026-09-03: **the image on the left, the
+statement and its options on the right.** The user's reason, which is
+better than the one the mockup was argued with: it uses the 900 px the
+strip already occupies, and a person takes in the picture and the
+question in one look instead of two.
+
+The rejected alternative was the image across the full width above the
+text. It reads a diagram better and costs 402 px of band — a strip of
+900x498, half the desktop covered every time a question is asked.
+
+The card extends the console's vocabulary rather than inventing one:
+the same `rgba(20,12,14,0.92)` panel, the same
+`rgba(209,104,78,0.35)` border, 8 px radius, `0 16px 6px` margins.
+The typography is §1.3's pair — Cormorant Garamond for the statement,
+Inter Tight for the options — which until now was written in the spec
+and drawn nowhere.
+
+**The options are lettered.** The list in the Markdown is a plain
+bullet list; the card draws `a.` `b.` `c.` in front of the items,
+because "la b" has to have something to refer to.
+
+**The correction uses one colour, not two.** §1.3 allows one, so there
+is no green and no red: the right answer is marked in terracotta with a
+check, and a wrong choice of yours goes dim and struck through. It was
+the most arguable of the four decisions and it was put to the user
+before being written here.
+
+Measured off the mockups: the card is **214 px** of band with an image
+and **178 px** without one — a strip of 900x310 or 900x274, against the
+900x480 a live camera already takes.
+
 ### How it behaves
 
 - **An explanation goes after a minute; a question does not.** The
@@ -297,8 +331,9 @@ gateway.
 
 **What no test settles**, listed as such per §2.3:
 
-- **The appearance.** `ffmpeg -f x11grab`, confirmed with `xwininfo
-  -name JARVIS` so that what was photographed is the strip.
+- **The appearance.** Mockups settled the layout (above); they are not
+  the thing. `ffmpeg -f x11grab`, confirmed with `xwininfo -name
+  JARVIS` so that what was photographed is the strip.
 - **`preguntar`'s two arguments against the real gateway.** Waits for
   the GPU.
 - **Whether Hermes' web search returns images.** Needs the network.
