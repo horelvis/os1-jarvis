@@ -11,7 +11,7 @@ The strip is a fixed-width block centred on the bottom edge (user,
 working.
 """
 
-from samantha_widget import theme
+from samantha_widget import geometry, theme
 from samantha_widget.geometry import placement_is_wrong, strip_rect
 
 
@@ -95,3 +95,35 @@ def test_a_geometry_that_could_not_be_read_is_not_wrong():
     # gone, or the window is. Re-placing a window that may not exist
     # buys nothing and would loop forever against a dead server.
     assert placement_is_wrong(None, (510, 984, 900, 96)) is False
+
+
+# ── the input region, while a live camera is up ────────────────────────
+
+
+def test_no_live_view_leaves_the_whole_window_taking_clicks() -> None:
+    assert (
+        geometry.input_region(None, extra=210, band_extra=0, width=900, height=96) == []
+    )
+
+
+def test_a_live_view_keeps_the_picture_and_everything_under_the_band() -> None:
+    rects = geometry.input_region(
+        (10.0, 20.0, 654.0, 368.0), extra=384, band_extra=384, width=900, height=96
+    )
+    assert rects == [(10, 20, 654, 368), (0, 384, 900, 96)]
+
+
+def test_a_card_under_a_live_view_still_takes_its_press() -> None:
+    """Press-to-dismiss stopped working in exactly this combination.
+
+    With a camera up (384 px of band) and a question drawn under it
+    (210 px of card), the region was the picture plus the wave only, so
+    a press on the card went to the desktop and the card could not be
+    dismissed until its five minutes ran out.
+    """
+    rects = geometry.input_region(
+        (0.0, 0.0, 900.0, 384.0), extra=594, band_extra=384, width=900, height=96
+    )
+    assert rects == [(0, 0, 900, 384), (0, 384, 900, 306)]
+    _x, y, _w, alto = rects[1]
+    assert y <= 384 and y + alto == 594 + 96  # the card, and the wave below it

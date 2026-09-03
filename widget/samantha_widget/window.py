@@ -19,7 +19,7 @@ from . import theme  # noqa: E402
 from .ewmh import Ewmh  # noqa: E402
 from . import console as console_mod  # noqa: E402
 from .console import Console  # noqa: E402
-from .geometry import placement_is_wrong, strip_rect  # noqa: E402
+from .geometry import input_region, placement_is_wrong, strip_rect  # noqa: E402
 
 # How much taller the strip gets while the typed line is open. One line
 # of text with room to breathe — it is an entry, not a message box.
@@ -476,22 +476,26 @@ class StripWindow(Gtk.ApplicationWindow):
         padding in `theme.CSS` (`samantha_widget/theme.py`), so its
         top-left sits exactly on the window's — confirmed against the
         drawing itself, `photo_area.py`'s `do_snapshot`, which paints
-        `live_rect()` with no offset either. The wave's own strip sits
-        below the band, at `y = extra`, `height = h` — the two numbers
-        that describe where the band ends and the strip at rest begins.
+        `live_rect()` with no offset either. Everything below the photo
+        band — the card, the console, the typed line and the wave —
+        keeps taking clicks, which is `self._band_extra` down to the
+        bottom edge. It used to be only the wave (`y = extra`,
+        `height = h`), and a question drawn while a camera was open
+        could not be dismissed by pressing it: the press went to the
+        desktop. The rectangles themselves are `geometry.input_region`,
+        which has no GTK in it and can therefore be tested.
         """
         if self._ewmh is None:
             return
-        live_rect = self._current_live_rect()
-        if live_rect is None:
-            self._ewmh.set_input_region([])
-            return
-        lx, ly, lw, lh = live_rect
-        rects = [
-            (round(lx), round(ly), round(lw), round(lh)),
-            (0, extra, w, h),
-        ]
-        self._ewmh.set_input_region(rects)
+        self._ewmh.set_input_region(
+            input_region(
+                self._current_live_rect(),
+                extra=extra,
+                band_extra=self._band_extra,
+                width=w,
+                height=h,
+            )
+        )
 
     def _place(self, x: int, y: int, w: int, h: int) -> bool:
         if self._ewmh is None or self._xid is None:

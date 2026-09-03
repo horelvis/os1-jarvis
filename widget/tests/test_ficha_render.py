@@ -57,3 +57,52 @@ def test_inline_bold_becomes_pango_markup() -> None:
 def test_markup_characters_in_the_source_are_escaped() -> None:
     piezas = bloques_a_widgets("a < b & c", "explicacion", None, None)
     assert "&lt;" in piezas[0]["texto"] and "&amp;" in piezas[0]["texto"]
+
+
+# ── final review: only the first list is the question ──────────────────
+
+
+def test_only_the_first_list_is_lettered() -> None:
+    """A trailing note-list drew options `d.` and `e.` nobody could pick.
+
+    `markdown.lista()` — what `tool.py` scores the spoken answer
+    against — reads the first list and stops, so anything lettered
+    after it is an option `_letra` can never match.
+    """
+    md = (
+        "## ¿Cuál?\n\n"
+        "- do\n- are\n- have\n\n"
+        "Recuerde:\n\n"
+        "- el auxiliar concuerda\n"
+        "- la forma -ing no cambia\n"
+    )
+    piezas = bloques_a_widgets(md, "pregunta", None, None)
+    assert [p["letra"] for p in piezas if p["tipo"] == "opcion"] == ["a.", "b.", "c."]
+    assert [p["texto"] for p in piezas if p["tipo"] == "opcion"] == [
+        "do",
+        "are",
+        "have",
+    ]
+    assert any("auxiliar" in p["texto"] for p in piezas if p["tipo"] == "parrafo")
+
+
+def test_a_heading_closes_the_first_list_too() -> None:
+    md = "- do\n- are\n\n## Nota\n\n- otra cosa\n"
+    piezas = bloques_a_widgets(md, "pregunta", None, None)
+    assert [p["letra"] for p in piezas if p["tipo"] == "opcion"] == ["a.", "b."]
+
+
+def test_a_plan_numbers_only_its_own_list() -> None:
+    md = "## Temario\n\n1. Uno\n2. Dos\n\nY además:\n\n- una nota\n"
+    piezas = bloques_a_widgets(md, "plan", None, None)
+    assert [p["letra"] for p in piezas if p["tipo"] == "opcion"] == ["1.", "2."]
+
+
+def test_the_correction_never_reaches_a_later_list() -> None:
+    """Marking is by option index; a later list must not be marked at all."""
+    md = "- do\n- are\n\nNota:\n\n- algo más\n"
+    piezas = bloques_a_widgets(md, "pregunta", "b", "a")
+    assert [p["estado"] for p in piezas if p["tipo"] == "opcion"] == [
+        "fallada",
+        "correcta",
+    ]

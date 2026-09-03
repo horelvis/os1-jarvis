@@ -40,16 +40,39 @@ def _inline(texto: str) -> str:
 def bloques_a_widgets(
     md: str, tipo: str, correcta: str | None, elegida: str | None
 ) -> list[dict]:
-    """Describe the card as pieces. GTK is built from this, and tests read it."""
+    """Describe the card as pieces. GTK is built from this, and tests read it.
+
+    Only the FIRST list is lettered, and that is not a detail of the
+    drawing: `markdown.lista()` — which is what `tool.py` scores an
+    answer against — reads the first list and nothing else. Lettering
+    every list drew options `d.` and `e.` for a trailing note-list that
+    `_letra` can never match, so a card offered the user something that
+    could not be chosen.
+
+    A list is closed by a blank line or by anything that is not a list
+    item, exactly as `markdown.parsear` closes one. Later lists draw as
+    plain items, the way an explanation's list already does.
+    """
     piezas: list[dict] = []
     indice = 0
+    en_lista = False
+    lista_hecha = False
+
+    def cerrar_lista() -> None:
+        nonlocal en_lista, lista_hecha
+        if en_lista:
+            en_lista = False
+            lista_hecha = True
+
     for linea in (md or "").splitlines():
         desnuda = linea.strip()
         if not desnuda:
+            cerrar_lista()
             continue
 
         imagen = _IMAGEN.match(desnuda)
         if imagen:
+            cerrar_lista()
             piezas.append(
                 {"tipo": "imagen", "texto": imagen.group(1), "letra": "", "estado": ""}
             )
@@ -57,6 +80,7 @@ def bloques_a_widgets(
 
         encabezado = _ENCABEZADO.match(desnuda)
         if encabezado:
+            cerrar_lista()
             piezas.append(
                 {
                     "tipo": "encabezado",
@@ -68,7 +92,8 @@ def bloques_a_widgets(
             continue
 
         punto = _PUNTO.match(desnuda)
-        if punto and tipo in {"pregunta", "plan"}:
+        if punto and tipo in {"pregunta", "plan"} and not lista_hecha:
+            en_lista = True
             letra = f"{indice + 1}." if tipo == "plan" else f"{chr(97 + indice)}."
             estado = ""
             if correcta is not None:
@@ -90,6 +115,7 @@ def bloques_a_widgets(
             indice += 1
             continue
 
+        cerrar_lista()
         piezas.append(
             {"tipo": "parrafo", "texto": _inline(desnuda), "letra": "", "estado": ""}
         )

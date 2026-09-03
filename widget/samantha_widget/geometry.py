@@ -44,3 +44,37 @@ def placement_is_wrong(
     exist, forever.
     """
     return actual is not None and actual != wanted
+
+
+def input_region(
+    live_rect: tuple[float, float, float, float] | None,
+    *,
+    extra: int,
+    band_extra: int,
+    width: int,
+    height: int,
+) -> list[tuple[int, int, int, int]]:
+    """Which parts of the strip take the pointer while a live view is up.
+
+    An empty list means "the whole window", which is what the strip is
+    when there is nothing to see through: the caller hands that straight
+    to `XShapeCombineRectangles` (`ewmh.py`), where an empty region
+    restores the default.
+
+    `live_rect` is the moving picture, in window coordinates — the band
+    is the first child of the frame and has no margin, so its own
+    coordinates ARE the window's. Everything BELOW the photo band is
+    ours and must keep taking clicks: the card, the console, the typed
+    line and the wave. Until 2026-09-03 only the wave did, so a press on
+    a question went through to the desktop and press-to-dismiss silently
+    stopped working while a camera was open — the one combination
+    nobody had put together.
+    """
+    if live_rect is None:
+        return []
+    lx, ly, lw, lh = live_rect
+    debajo = height + extra - band_extra
+    rects = [(round(lx), round(ly), round(lw), round(lh))]
+    if debajo > 0:
+        rects.append((0, band_extra, width, debajo))
+    return rects
