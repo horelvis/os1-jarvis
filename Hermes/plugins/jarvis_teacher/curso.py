@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS concepto (
   titulo TEXT NOT NULL,
   orden INTEGER NOT NULL,
   estado TEXT NOT NULL,
-  dado_en REAL
+  dado_en REAL,
+  fallado_tras INTEGER
 );
 CREATE TABLE IF NOT EXISTS pregunta (
   id INTEGER PRIMARY KEY,
@@ -176,9 +177,44 @@ class Curso:
         if not self.plan_aprobado(curso_id):
             return None
         with self.conexion() as db:
+            # Count how many concepts have been taught (including those being reviewed)
+            taught = db.execute(
+                "SELECT COUNT(*) FROM concepto WHERE curso = ? AND estado IN "
+                "('dado', 'dominado', 'a repasar')",
+                (curso_id,),
+            ).fetchone()[0]
+
+            # Get next pending concept
+            pending = db.execute(
+                "SELECT titulo, orden FROM concepto WHERE curso = ? AND estado = 'pendiente' "
+                "ORDER BY orden LIMIT 1",
+                (curso_id,),
+            ).fetchone()
+
+            # Get next 'a repasar' concept that is ready (gap satisfied)
+            ready_review = db.execute(
+                "SELECT titulo, orden FROM concepto WHERE curso = ? AND estado = 'a repasar' "
+                "AND (fallado_tras IS NULL OR fallado_tras + ? <= ?) "
+                "ORDER BY orden LIMIT 1",
+                (curso_id, REPASO_HUECO, taught),
+            ).fetchone()
+
+            # Return whichever comes first by orden, preferring ready_review if both have same orden
+            if pending and ready_review:
+                return (
+                    str(ready_review[0])
+                    if ready_review[1] <= pending[1]
+                    else str(pending[0])
+                )
+            if ready_review:
+                return str(ready_review[0])
+            if pending:
+                return str(pending[0])
+
+            # No ready concepts. Return any 'a repasar' as fallback (for when nothing pending).
             fila = db.execute(
-                "SELECT titulo FROM concepto WHERE curso = ? AND estado IN "
-                "('a repasar', 'pendiente') ORDER BY estado = 'pendiente', orden LIMIT 1",
+                "SELECT titulo FROM concepto WHERE curso = ? AND estado = 'a repasar' "
+                "ORDER BY orden LIMIT 1",
                 (curso_id,),
             ).fetchone()
         return str(fila[0]) if fila else None
@@ -198,9 +234,15 @@ class Curso:
     ) -> None:
         with self.conexion() as db:
             if not acierto:
+                fallado_tras = db.execute(
+                    "SELECT COUNT(*) FROM concepto WHERE curso = ? AND estado IN "
+                    "('dado', 'dominado', 'a repasar')",
+                    (curso_id,),
+                ).fetchone()[0]
                 db.execute(
-                    "UPDATE concepto SET estado = 'a repasar' WHERE curso = ? AND titulo = ?",
-                    (curso_id, titulo),
+                    "UPDATE concepto SET estado = 'a repasar', fallado_tras = ? "
+                    "WHERE curso = ? AND titulo = ?",
+                    (fallado_tras, curso_id, titulo),
                 )
                 return
             aciertos = db.execute(
