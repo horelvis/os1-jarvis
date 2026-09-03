@@ -540,16 +540,18 @@ class SamanthaApp(Gtk.Application):
         window = StripWindow(self)
         wave = WaveArea()
         window.set_content(wave)
-        # The band drives the window's size directly: it is the only
-        # thing that knows how tall it wants to be, and `resize_to` is
-        # the only thing that can move the top edge up to make room.
-        band = PhotoArea(on_resize=window.resize_to)
-        window.set_band(band)
 
         # The lesson's card: a question, a syllabus or something being
         # explained. It needs no wiring to `client` to be dismissed — a
         # press is decided entirely by the model and the area, so it is
-        # wired here rather than inside `_start_voice_loop`.
+        # wired here rather than inside `_start_voice_loop`. Set BEFORE
+        # the band, below: `set_band`/`set_ficha` both prepend, so
+        # whichever is called second ends up outermost, and the band
+        # belongs there — a photo or a live view is a transient
+        # interruption that arrives unbidden and leaves on its own,
+        # while the card is the content of something the user
+        # deliberately started and stays while they read it, so it
+        # belongs nearer the wave.
         ficha_model = FichaModel()
         ficha_area = FichaArea(on_resize=window.resize_ficha)
         window.set_ficha(ficha_area)
@@ -558,6 +560,12 @@ class SamanthaApp(Gtk.Application):
             _apply_ficha_click(ficha_model, ficha_area, time.monotonic())
 
         window.on_ficha_click = on_ficha_click
+
+        # The band drives the window's size directly: it is the only
+        # thing that knows how tall it wants to be, and `resize_to` is
+        # the only thing that can move the top edge up to make room.
+        band = PhotoArea(on_resize=window.resize_to)
+        window.set_band(band)
 
         self._add_demo_keys(window, wave)
         window.present()
