@@ -177,10 +177,10 @@ class Curso:
         if not self.plan_aprobado(curso_id):
             return None
         with self.conexion() as db:
-            # Count how many concepts have been taught (including those being reviewed)
+            # Count how many concepts have been genuinely taught (not including those being reviewed)
             taught = db.execute(
                 "SELECT COUNT(*) FROM concepto WHERE curso = ? AND estado IN "
-                "('dado', 'dominado', 'a repasar')",
+                "('dado', 'dominado')",
                 (curso_id,),
             ).fetchone()[0]
 
@@ -234,10 +234,11 @@ class Curso:
     ) -> None:
         with self.conexion() as db:
             if not acierto:
+                # Count OTHER concepts already taught, not including this one
                 fallado_tras = db.execute(
                     "SELECT COUNT(*) FROM concepto WHERE curso = ? AND estado IN "
-                    "('dado', 'dominado', 'a repasar')",
-                    (curso_id,),
+                    "('dado', 'dominado') AND titulo != ?",
+                    (curso_id, titulo),
                 ).fetchone()[0]
                 db.execute(
                     "UPDATE concepto SET estado = 'a repasar', fallado_tras = ? "

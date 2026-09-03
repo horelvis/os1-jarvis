@@ -42,8 +42,14 @@ def test_two_hits_retire_a_concept(curso: Curso) -> None:
     curso.proponer_plan(cid, ["Órbitas", "Mareas"], now=1000.0)
     curso.aprobar_plan(cid, now=1000.0)
     curso.marcar_dado(cid, "Órbitas", now=1001.0)
-    # Insert one correct pregunta before first registrar_respuesta
+    # Insert one incorrect and one correct pregunta before first registrar_respuesta
+    # The incorrect one ensures the filter acierto=1 actually matters
     with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q0', 'a,b', 'a', 0, 1001.5)",
+            (cid, "Órbitas"),
+        )
         db.execute(
             "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
             "VALUES (?, ?, 'q1', 'a,b', 'a', 1, 1002.0)",
@@ -56,11 +62,16 @@ def test_two_hits_retire_a_concept(curso: Curso) -> None:
             (cid, "Órbitas"),
         ).fetchone()[0]
     assert estado == "dado", f"After 1 correct, estado should be 'dado', got '{estado}'"
-    # Insert second correct pregunta before second registrar_respuesta
+    # Insert one incorrect and one correct pregunta before second registrar_respuesta
     with curso.conexion() as db:
         db.execute(
             "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
-            "VALUES (?, ?, 'q2', 'a,b', 'a', 1, 1003.0)",
+            "VALUES (?, ?, 'q2', 'a,b', 'a', 0, 1002.5)",
+            (cid, "Órbitas"),
+        )
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q3', 'a,b', 'a', 1, 1003.0)",
             (cid, "Órbitas"),
         )
     curso.registrar_respuesta(cid, "Órbitas", acierto=True, now=1003.0)
@@ -175,3 +186,93 @@ def test_repaso_hueco_fallback_when_nothing_pending(curso: Curso) -> None:
 
     # Nothing pending left, so X should be offered despite the gap
     assert curso.siguiente(cid) == "X"
+
+
+def test_two_simultaneous_misses_maintain_independent_gaps(curso: Curso) -> None:
+    """Two missed concepts maintain independent gaps, not affected by each other."""
+    cid = curso.abrir("cinco temas", now=1000.0)
+    conceptos = ["A", "B", "C", "D", "E"]
+    curso.proponer_plan(cid, conceptos, now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+
+    # Teach and miss A
+    curso.marcar_dado(cid, "A", now=1001.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q', 'a,b', 'a', 0, 1001.0)",
+            (cid, "A"),
+        )
+    curso.registrar_respuesta(cid, "A", acierto=False, now=1001.0)
+
+    # Teach and miss B
+    curso.marcar_dado(cid, "B", now=1002.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q', 'a,b', 'a', 0, 1002.0)",
+            (cid, "B"),
+        )
+    curso.registrar_respuesta(cid, "B", acierto=False, now=1002.0)
+
+    # Teach C, D, E (3 genuine successes, satisfies both gaps)
+    for i, titulo in enumerate(["C", "D", "E"], start=1):
+        curso.marcar_dado(cid, titulo, now=1003.0 + i)
+        with curso.conexion() as db:
+            db.execute(
+                "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+                "VALUES (?, ?, 'q', 'a,b', 'a', 1, ?)",
+                (cid, titulo, 1003.0 + i),
+            )
+        curso.registrar_respuesta(cid, titulo, acierto=True, now=1003.0 + i)
+
+    # Both A and B should be ready (they both have fallado_tras = 0)
+    # A comes first in order
+    assert curso.siguiente(cid) == "A"
+
+
+def test_repaso_hueco_insufficient_gap_does_not_return_early(curso: Curso) -> None:
+    """Missed concepts must wait for REPASO_HUECO, not coming back early due to 'a repasar' counting."""
+    cid = curso.abrir("seis temas", now=1000.0)
+    conceptos = ["A", "B", "C", "D", "E", "F"]
+    curso.proponer_plan(cid, conceptos, now=1000.0)
+    curso.aprobar_plan(cid, now=1000.0)
+
+    # Teach and miss A
+    curso.marcar_dado(cid, "A", now=1001.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q', 'a,b', 'a', 0, 1001.0)",
+            (cid, "A"),
+        )
+    curso.registrar_respuesta(cid, "A", acierto=False, now=1001.0)
+
+    # Teach and miss B
+    curso.marcar_dado(cid, "B", now=1002.0)
+    with curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+            "VALUES (?, ?, 'q', 'a,b', 'a', 0, 1002.0)",
+            (cid, "B"),
+        )
+    curso.registrar_respuesta(cid, "B", acierto=False, now=1002.0)
+
+    # Teach C and D successfully (only 2 genuine successes, less than REPASO_HUECO=3)
+    for i, titulo in enumerate(["C", "D"], start=1):
+        curso.marcar_dado(cid, titulo, now=1003.0 + i)
+        with curso.conexion() as db:
+            db.execute(
+                "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, acierto, hecha_en) "
+                "VALUES (?, ?, 'q', 'a,b', 'a', 1, ?)",
+                (cid, titulo, 1003.0 + i),
+            )
+        curso.registrar_respuesta(cid, titulo, acierto=True, now=1003.0 + i)
+
+    # Neither A nor B should be ready yet (gap not satisfied)
+    # Next should be a pending concept (E), not a missed one (A or B)
+    siguiente = curso.siguiente(cid)
+    assert siguiente == "E", (
+        f"With only 2 genuine successes (less than REPASO_HUECO=3), "
+        f"missed concepts should not be offered. Got '{siguiente}' instead of 'E'"
+    )
