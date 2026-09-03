@@ -36,6 +36,11 @@ dependencies = [
     # succeeds if Pillow happens to be installed for an unrelated reason
     # (it is, here — the apt package python3-pil).
     "qrcode[png]>=8",
+    # The card is a Markdown document rendered by WebKitGTK (§12,
+    # 2026-09-03). This turns the model's Markdown into HTML, with
+    # `html: False` so raw HTML in a card — which may carry text taken
+    # from a web page — is escaped rather than passed through.
+    "markdown-it-py>=3,<4",
 ]
 
 [project.optional-dependencies]

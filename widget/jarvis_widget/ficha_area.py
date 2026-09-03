@@ -1,143 +1,75 @@
-"""The card, drawn. Text is widgets, because the band has no text.
+"""The card, drawn by WebKitGTK. The pure half is `ficha_html.py`.
 
-`photo_area.py` draws with GSK, which has no text primitive — that is
-why the console is a widget in the box rather than something painted
-(window.py:148). A card is mostly text, so it is a `Gtk.Box` of labels
-and pictures, and it joins the strip the way the console does: its own
-child, its own contribution to the height.
+**This file reverses CLAUDE.md §3 and §2.3's hardest rule** — "MUST NOT
+introduce a browser / webview of any kind" — at the user's instruction
+on 2026-09-03, after the previous approach had proved his point. That
+one rendered a hand-written Markdown subset into GTK labels and
+estimated the strip's height with pixel arithmetic that had to track
+`theme.CSS` by hand. It drifted the first time the CSS changed: the
+estimate came out at half the truth, an eleven-point syllabus asked for
+334 px of a 430 px window, and the wave — which is what he IS — was
+squeezed out of the strip entirely.
 
-`bloques_a_widgets` is the half that decides WHAT to build, and it is
-pure so it can be tested on a box with no display — which is every box
-this repo's tests run on.
+Three things this file does NOT do, and each is deliberate:
+
+- **No JavaScript.** A card can carry text taken from a web page, which
+  is the whole point of the teacher's documentary base. `ficha_html`
+  escapes HTML on the way in; this switches the engine off as well,
+  because one guard is not a guarantee.
+- **No network, of any kind.** The document is self-contained — CSS
+  inlined, images as `data:` URIs — and every navigation after the
+  first load is refused. A renderer that fetches is a renderer that can
+  be told what to fetch.
+- **No measuring.** WebKit cannot report its content height without
+  JavaScript, and JavaScript is exactly what is switched off. So the
+  band takes one of two sizes and the content scrolls inside it, which
+  is also what makes it impossible for a card to take the wave's
+  pixels — the defect that caused all of this.
 """
 
 from __future__ import annotations
 
-import re
-from html import escape
-
-from . import theme
-
-_NEGRITA = re.compile(r"\*\*(.+?)\*\*")
-_CURSIVA = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
-_CODIGO = re.compile(r"`([^`]+)`")
-_ENCABEZADO = re.compile(r"^#{1,3}\s+(.*)$")
-_PUNTO = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
-_IMAGEN = re.compile(r"^!\[[^\]]*\]\(([^)]+)\)$")
-
-
-def _inline(texto: str) -> str:
-    """Markdown emphasis into Pango markup, everything else escaped.
-
-    Escaping FIRST is what keeps a `<` in somebody's source text from
-    becoming half a tag: Pango is strict and an unbalanced one makes the
-    whole label fail to parse, which shows as an empty card.
-    """
-    seguro = escape(texto)
-    seguro = _NEGRITA.sub(r"<b>\1</b>", seguro)
-    seguro = _CURSIVA.sub(r"<i>\1</i>", seguro)
-    return _CODIGO.sub(r"<tt>\1</tt>", seguro)
-
-
-def bloques_a_widgets(
-    md: str, tipo: str, correcta: str | None, elegida: str | None
-) -> list[dict]:
-    """Describe the card as pieces. GTK is built from this, and tests read it.
-
-    Only the FIRST list is lettered, and that is not a detail of the
-    drawing: `markdown.lista()` — which is what `tool.py` scores an
-    answer against — reads the first list and nothing else. Lettering
-    every list drew options `d.` and `e.` for a trailing note-list that
-    `_letra` can never match, so a card offered the user something that
-    could not be chosen.
-
-    A list is closed by a blank line or by anything that is not a list
-    item, exactly as `markdown.parsear` closes one. Later lists draw as
-    plain items, the way an explanation's list already does.
-    """
-    piezas: list[dict] = []
-    indice = 0
-    en_lista = False
-    lista_hecha = False
-
-    def cerrar_lista() -> None:
-        nonlocal en_lista, lista_hecha
-        if en_lista:
-            en_lista = False
-            lista_hecha = True
-
-    for linea in (md or "").splitlines():
-        desnuda = linea.strip()
-        if not desnuda:
-            cerrar_lista()
-            continue
-
-        imagen = _IMAGEN.match(desnuda)
-        if imagen:
-            cerrar_lista()
-            piezas.append(
-                {"tipo": "imagen", "texto": imagen.group(1), "letra": "", "estado": ""}
-            )
-            continue
-
-        encabezado = _ENCABEZADO.match(desnuda)
-        if encabezado:
-            cerrar_lista()
-            piezas.append(
-                {
-                    "tipo": "encabezado",
-                    "texto": _inline(encabezado.group(1)),
-                    "letra": "",
-                    "estado": "",
-                }
-            )
-            continue
-
-        punto = _PUNTO.match(desnuda)
-        if punto and tipo in {"pregunta", "plan"} and not lista_hecha:
-            en_lista = True
-            letra = f"{indice + 1}." if tipo == "plan" else f"{chr(97 + indice)}."
-            estado = ""
-            if correcta is not None:
-                mia = chr(97 + indice)
-                if mia == correcta:
-                    estado = "correcta"
-                elif mia == elegida:
-                    estado = "fallada"
-                else:
-                    estado = "apagada"
-            piezas.append(
-                {
-                    "tipo": "opcion",
-                    "texto": _inline(punto.group(1)),
-                    "letra": letra,
-                    "estado": estado,
-                }
-            )
-            indice += 1
-            continue
-
-        cerrar_lista()
-        piezas.append(
-            {"tipo": "parrafo", "texto": _inline(desnuda), "letra": "", "estado": ""}
-        )
-    return piezas
-
-
-import gi  # noqa: E402
+import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+gi.require_version("WebKit", "6.0")
+from gi.repository import Gtk, WebKit  # noqa: E402
+
+from . import theme  # noqa: E402
+from .ficha_html import a_html  # noqa: E402
 
 
 class FichaArea(Gtk.Box):
-    """The card as a column of widgets, zero pixels tall until one lands."""
+    """A webview in a box, zero pixels tall until a card lands."""
 
     def __init__(self, on_resize) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=9)
-        self.add_css_class("jarvis-ficha")
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.set_vexpand(False)
         self.set_visible(False)
         self._on_resize = on_resize
+
+        ajustes = WebKit.Settings()
+        ajustes.set_enable_javascript(False)
+        for apagar in (
+            "set_enable_javascript_markup",
+            "set_enable_webgl",
+            "set_enable_media",
+            "set_enable_webaudio",
+            "set_enable_html5_database",
+            "set_enable_html5_local_storage",
+        ):
+            # Not every one of these exists on every WebKitGTK; a missing
+            # switch must not stop the card being drawn.
+            if hasattr(ajustes, apagar):
+                getattr(ajustes, apagar)(False)
+
+        self._vista = WebKit.WebView(settings=ajustes)
+        self._vista.set_background_color(_TRANSPARENTE)
+        self._vista.set_vexpand(True)
+        # Everything after the first `load_html` is refused: with JS off
+        # and images inlined there is nothing legitimate left to load.
+        self._vista.connect("decide-policy", _refuse_everything_else)
+        self.append(self._vista)
 
     def mostrar(
         self,
@@ -148,48 +80,42 @@ class FichaArea(Gtk.Box):
         elegida: str | None,
         alto: int,
     ) -> None:
-        """Rebuild the card. Called for the question and again for its correction."""
-        while (hijo := self.get_first_child()) is not None:
-            self.remove(hijo)
-
-        for pieza in bloques_a_widgets(md, tipo, correcta, elegida):
-            if pieza["tipo"] == "imagen":
-                imagen = Gtk.Picture.new_for_filename(pieza["texto"])
-                imagen.set_content_fit(Gtk.ContentFit.CONTAIN)
-                imagen.set_size_request(300, 169)
-                self.append(imagen)
-                continue
-            etiqueta = Gtk.Label()
-            etiqueta.set_xalign(0.0)
-            etiqueta.set_wrap(True)
-            if pieza["tipo"] == "opcion":
-                etiqueta.set_markup(
-                    f"<span foreground='{theme.TERRACOTTA}'>"
-                    f"<tt>{pieza['letra']}</tt></span>"
-                    f"   {pieza['texto']}"
-                )
-                etiqueta.add_css_class("jarvis-ficha-opcion")
-                if pieza["estado"]:
-                    etiqueta.add_css_class(f"jarvis-ficha-{pieza['estado']}")
-            else:
-                etiqueta.set_markup(pieza["texto"])
-                etiqueta.add_css_class(f"jarvis-ficha-{pieza['tipo']}")
-            self.append(etiqueta)
-
-        if fuente:
-            pie = Gtk.Label(label=fuente)
-            pie.set_xalign(0.0)
-            pie.add_css_class("jarvis-ficha-fuente")
-            self.append(pie)
-
-        # Ask for the height ourselves, and not only from the window.
-        # `_on_resize` grows the TOPLEVEL; it says nothing about how the
-        # box inside it is allocated, and the wave below expands, so
-        # without this the strip grows and the card is given zero pixels
-        # of it. Measured on 2026-09-03 against a live strip: the window
-        # went to 900x254 and the band above the wave was empty desktop.
-        # `photo_area.py:276` and the console (`window.py:272`) each do
-        # the same thing for the same reason.
+        """Draw a card, or take it away when `md` is empty."""
+        if md:
+            self._vista.load_html(
+                a_html(md, tipo, fuente, correcta, elegida, css=theme.FICHA_CSS),
+                None,
+            )
         self.set_size_request(-1, alto if md else 0)
         self.set_visible(bool(md))
         self._on_resize(alto)
+
+
+def _refuse_everything_else(_vista, decision, tipo) -> bool:
+    """Allow the document we handed over; refuse every other load.
+
+    `load_html` itself arrives as a navigation, so the first one has to
+    pass. Anything after it — a link, a redirect, a subresource — is a
+    fetch this card has no business making.
+    """
+    if tipo == WebKit.PolicyDecisionType.NAVIGATION_ACTION:
+        accion = decision.get_navigation_action()
+        uri = accion.get_request().get_uri() or ""
+        if uri.startswith(("about:", "data:")):
+            decision.use()
+        else:
+            decision.ignore()
+        return True
+    decision.ignore()
+    return True
+
+
+def _transparente():
+    from gi.repository import Gdk
+
+    color = Gdk.RGBA()
+    color.parse("rgba(0,0,0,0)")
+    return color
+
+
+_TRANSPARENTE = _transparente()

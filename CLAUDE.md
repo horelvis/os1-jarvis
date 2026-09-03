@@ -298,8 +298,14 @@ mean either a compositor-specific protocol or losing the placement.
 **Decision (2026-08-22, implemented 2026-08-23):** the surface is
 `widget/` — a GTK4 window along the bottom edge of the screen.
 Borderless, transparent, always above, drawn with GSK on the frame
-clock, started by a systemd **user** service. **No browser and no
-webview anywhere in the running system.**
+clock, started by a systemd **user** service.
+
+**Amended 2026-09-03:** "no browser and no webview anywhere in the
+running system" held for four months and no longer does. The teacher's
+card is a Markdown document rendered by WebKitGTK — one webview, inside
+the strip, for content the strip cannot draw. §12 carries what forced
+it and what it is fenced with. Everything else is still GSK: the wave,
+the photo band, the live camera.
 
 **This replaced the Chromium kiosk**, which was v3's answer and is now
 gone from the running system. §12 carries the decision and its cost; the
@@ -740,8 +746,15 @@ os1-jarvis/
 ```
 
 **Rules:**
-- **MUST NOT** introduce Rust, Tauri, snap packaging, or a browser /
-  webview of any kind (all rejected; see Decision Log §12)
+- **MUST NOT** introduce Rust, Tauri or snap packaging (all rejected;
+  see Decision Log §12)
+- **A webview exists now, in exactly one place**: the card, drawn by
+  WebKitGTK (`widget/jarvis_widget/ficha_area.py`), since 2026-09-03.
+  That reversed this line's "or a browser / webview of any kind" at the
+  user's instruction, and it is a carve-out rather than an opening: it
+  renders one self-contained document, with JavaScript off and every
+  network load refused. **MUST NOT** put a second one anywhere, and
+  MUST NOT give this one JavaScript, a network or a `file://` base.
 - **MUST NOT** add new top-level directories without asking
 - **MUST NOT** recreate `backend/` or `frontend/`. They were deleted on
   2026-09-03 after four months unused. New work goes in `widget/`.
@@ -1202,6 +1215,58 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-09-03 — The card gets a webview, and the estimate goes
+
+**Decision (the user's):** the teacher's card is rendered by WebKitGTK.
+This reverses §3's "MUST NOT introduce a browser / webview of any kind"
+and §2.3's "no browser and no webview anywhere in the running system" —
+the hardest rule this project had, which survived Tauri, Ubuntu Frame,
+the Chromium kiosk, Electron and the avatar.
+
+**What forced it was not the rendering; it was the measuring.** The card
+was GTK labels built from a hand-written Markdown subset, and the strip
+grew by a height this repo ESTIMATED: characters divided by a
+characters-per-line constant, multiplied by per-kind pixel constants
+that had to track `theme.CSS` by hand. It drifted the first time the CSS
+changed. The readability pass took an option to 18 px on a padded row —
+about forty — while the estimate still counted twenty-two, so an
+eleven-point syllabus asked for 334 px of a 430 px window, `set_size_request`
+being a floor rather than a ceiling let the box take its natural height,
+and the wave — which is what he IS — was squeezed out of the strip
+entirely. The user's words: *"no es una buena práctica el cálculo que
+haces, debes buscar un componente visor de markdown"*.
+
+**Measured before choosing.** There is no Markdown viewer widget for
+GTK4 on this box; the only viewer is WebKitGTK, and its typelib was
+already installed. `markdown-it-py` was already present too.
+
+**What it costs, and the fence around it:**
+- **JavaScript is off.** A card can carry text taken from a web page —
+  that is what the teacher's documentary base is — so the renderer must
+  not execute anything. `markdown-it-py` escapes raw HTML on the way in
+  as well; one guard is not a guarantee.
+- **No network of any kind.** The document is self-contained: CSS
+  inlined, images as `data:` URIs read from the teacher's own spool.
+  Every navigation after the first `load_html` is refused.
+- **And therefore no measuring.** WebKit cannot report its content
+  height without JavaScript. So the band takes one of two sizes —
+  200 or 380, ceiling 480 — and the content scrolls inside it. That is
+  the point rather than a concession: a band that cannot exceed its own
+  size cannot take the wave's pixels, which is the whole defect.
+- **A second process.** WebKitGTK runs a web process of its own.
+- **A dependency**, `markdown-it-py`, declared in `widget/pyproject.toml`.
+
+**What it buys beyond the fix:** real CommonMark instead of a
+hundred-line subset, and the card's style becomes ordinary CSS in
+`theme.FICHA_CSS` — the same panel colour, border and radius as the
+console, so it still reads as part of the strip.
+
+**The pure/GTK split survives**, which is why this is a carve-out and
+not a door: `ficha_html.py` builds the document and is testable with no
+display, and `ficha.py` still owns the three lifetimes. The tests moved
+with it — twelve of them now assert the escaping, the lettering, the
+correction and the inlining, none of which needs a screen.
 
 ### 2026-09-03 — He teaches, grounded in sources he went and fetched
 

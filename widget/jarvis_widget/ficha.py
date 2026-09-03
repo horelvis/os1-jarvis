@@ -11,7 +11,6 @@ the user, and an explanation is not.
 
 from __future__ import annotations
 
-import math
 
 # A question or a plan waits this long and then gives up. There has to
 # be a way out that costs nothing: a strip left at four times its height
@@ -26,22 +25,24 @@ EXPLICACION_S = 60.0
 CORREGIDA_S = 6.0
 
 # Room above the wave, in pixels: the frame, and one line.
-PADDING = 36
-LINEA = 22
-ENCABEZADO = 34
-IMAGEN = 169
-# The same ceiling the live camera takes. Beyond this the strip stops
-# being a strip.
+# How tall the band is, and it is a product decision rather than a
+# measurement now. WebKitGTK cannot report its content height without
+# JavaScript, and JavaScript is switched off (`ficha_area.py`), so the
+# card takes one of two sizes and scrolls inside it.
+#
+# That is the point, not a limitation grudgingly accepted: the estimate
+# this replaced was pixel arithmetic that tracked `theme.CSS` by hand,
+# it drifted the first time the CSS changed, and an eleven-point
+# syllabus asked for 334 px of a 430 px window — squeezing the wave,
+# which is what he IS, out of the strip. A band that cannot exceed its
+# own size cannot do that.
+COMPACTA = 200
+AMPLIA = 380
+# Beyond this the strip stops being a strip. The live camera's ceiling.
 MAX_ALTO = 480
-
-# Characters that fit on one line of body text in the card.
-# Estimated from the strip's 900 px width, minus side margins and padding,
-# at the card's body font size. This is an estimate: this file has no GTK
-# in it and cannot measure text. Headings are counted at this rate too and
-# are therefore slightly under-measured (they are bigger, so fewer characters
-# fit). The trade-off keeps the code simple and the underestimate is small
-# relative to the full card height.
-CHARS_PER_LINEA = 90
+# Blocks above which a card gets the taller band. Counted, not measured:
+# a heading, a paragraph, a list item, an image.
+BLOQUES_COMPACTOS = 5
 
 
 class FichaModel:
@@ -61,26 +62,17 @@ class FichaModel:
 
     @property
     def height(self) -> int:
-        """Extra pixels the strip needs for this card, right now."""
+        """Extra pixels the strip needs for this card, right now.
+
+        Two sizes, chosen by counting the card's blocks. Nothing here
+        knows what the CSS says, which is the whole improvement: the
+        previous version multiplied characters by hand-tuned constants
+        and had to be re-calibrated every time the card was restyled.
+        """
         if not self.md:
             return 0
-        alto = PADDING
-        for linea in self.md.splitlines():
-            desnuda = linea.strip()
-            if not desnuda:
-                continue
-            if desnuda.startswith("!["):
-                alto += IMAGEN
-            elif desnuda.startswith("#"):
-                # Headings: count wrapped lines at the body text rate.
-                wrapped_lines = max(1, math.ceil(len(desnuda) / CHARS_PER_LINEA))
-                alto += wrapped_lines * ENCABEZADO
-            else:
-                # Body text: account for wrapping over multiple lines.
-                wrapped_lines = max(1, math.ceil(len(desnuda) / CHARS_PER_LINEA))
-                alto += wrapped_lines * LINEA
-        if self.fuente:
-            alto += LINEA
+        bloques = sum(1 for linea in self.md.splitlines() if linea.strip())
+        alto = COMPACTA if bloques <= BLOQUES_COMPACTOS else AMPLIA
         return min(MAX_ALTO, alto)
 
     def mostrar(

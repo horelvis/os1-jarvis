@@ -137,45 +137,6 @@ window decoration {{
   opacity: 0.35;
 }}
 
-.jarvis-ficha {{
-  background-color: rgba(26, 17, 19, 0.97);
-  margin: 0 16px 6px 16px;
-  border-radius: 10px;
-  border: 1px solid rgba(209, 104, 78, 0.45);
-  padding: 18px 20px;
-}}
-
-.jarvis-ficha-encabezado {{
-  font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: 24px;
-  color: #f7f2ef;
-  padding-bottom: 6px;
-}}
-
-.jarvis-ficha-parrafo {{
-  font-family: "Inter Tight", sans-serif;
-  font-size: 15px;
-  color: #e0d6d1;
-}}
-
-.jarvis-ficha-opcion {{
-  font-family: "Inter Tight", sans-serif;
-  font-size: 18px;
-  color: #f7f2ef;
-  background-color: rgba(209, 104, 78, 0.10);
-  border-radius: 6px;
-  padding: 8px 12px;
-}}
-
-.jarvis-ficha-correcta {{ color: #d1684e; font-weight: 600; }}
-.jarvis-ficha-fallada {{ color: #97847d; text-decoration: line-through; }}
-.jarvis-ficha-apagada {{ color: #7b6a64; }}
-
-.jarvis-ficha-fuente {{
-  font-family: "Inter Tight", sans-serif;
-  font-size: 12px;
-  color: #8d7c75;
-}}
 
 """
 
@@ -189,3 +150,63 @@ CONSOLE_FONT = "monospace 10"
 # Point size and line spacing, applied over whatever font is chosen.
 CONSOLE_FONT_POINTS = 10.5
 CONSOLE_LINE_SCALE = 1.15
+
+
+# The card's stylesheet, and it is WEB css rather than GTK's: since
+# 2026-09-03 the card is drawn by WebKitGTK (§12), so this is what goes
+# inside the document `ficha_html.a_html` builds. It carries the same
+# values the console's GTK panel does — the same panel colour, the same
+# terracotta border, the same radius — because a card that looked like
+# something else would read as a different application landing on the
+# strip.
+FICHA_CSS = f"""
+  html, body {{ margin: 0; padding: 0; background: transparent; }}
+  body {{
+    font-family: "Inter Tight", system-ui, sans-serif;
+    font-size: 18px; color: #f7f2ef;
+    background: rgba(26, 17, 19, 0.97);
+    border: 1px solid rgba(209, 104, 78, 0.45);
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-sizing: border-box;
+  }}
+  h1, h2, h3 {{
+    font-family: "Cormorant Garamond", Georgia, serif;
+    font-weight: 600; font-size: 24px; color: #f7f2ef;
+    margin: 0 0 10px 0; line-height: 1.15;
+  }}
+  p {{ font-size: 15px; color: #e0d6d1; margin: 0 0 10px 0; }}
+  code {{ font-family: "JetBrains Mono", monospace; font-size: 14px;
+          color: #e8b6a5; background: rgba(209,104,78,0.12);
+          padding: 1px 5px; border-radius: 3px; }}
+  img {{ max-width: 100%; border-radius: 6px; display: block;
+         margin: 0 0 10px 0; }}
+  ul, ol {{ margin: 0; padding: 0; list-style: none; }}
+  li {{ margin: 0 0 9px 0; }}
+
+  /* The answer set. Lettered for a question — "la b" spoken out loud
+     needs something on screen to point at — and numbered for a
+     syllabus, where the order is the content. */
+  .opciones li, .plan li {{
+    background: rgba(209, 104, 78, 0.10);
+    border-radius: 6px; padding: 8px 12px;
+    counter-increment: opcion;
+  }}
+  .opciones li::before, .plan li::before {{
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; color: {TERRACOTTA};
+    margin-right: 10px;
+  }}
+  .opciones li::before {{ content: counter(opcion, lower-alpha) ". "; }}
+  .plan li::before {{ content: counter(opcion, decimal) ". "; }}
+  body {{ counter-reset: opcion; }}
+
+  /* One colour, not two (§1.3): the right answer is terracotta, a wrong
+     one is dimmer and struck through. Green and red would be a second
+     and a third. */
+  .correcta {{ color: {TERRACOTTA}; font-weight: 600; }}
+  .fallada {{ color: #97847d; text-decoration: line-through; }}
+  .apagada {{ color: #7b6a64; }}
+
+  .fuente {{ font-size: 12px; color: #8d7c75; margin: 4px 0 0 0; }}
+"""

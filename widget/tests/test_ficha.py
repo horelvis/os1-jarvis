@@ -4,11 +4,11 @@ No GTK in here, the way `photo.py` sits under `photo_area.py`.
 """
 
 from jarvis_widget.ficha import (
-    CHARS_PER_LINEA,
+    AMPLIA,
+    COMPACTA,
     CORREGIDA_S,
     ESPERA_S,
     EXPLICACION_S,
-    LINEA,
     MAX_ALTO,
     FichaModel,
 )
@@ -66,68 +66,30 @@ def test_a_press_puts_it_away() -> None:
     assert not m.visible
 
 
-def test_height_follows_the_content_and_is_capped() -> None:
-    m = FichaModel()
-    m.mostrar("## T\n\n- a\n", "pregunta", "", None, None, now=0.0)
-    corto = m.height
-    m.mostrar(
-        "## T\n\n" + "\n".join(f"- opción {i}" for i in range(40)),
-        "pregunta",
-        "",
-        None,
-        None,
-        now=1.0,
-    )
-    assert m.height > corto
-    assert m.height <= MAX_ALTO
-
-
 def test_a_press_with_nothing_up_changes_nothing() -> None:
     assert FichaModel().click(now=1.0) is False
 
 
-def test_long_paragraph_reserves_more_height_than_short_one() -> None:
-    """Text wrapping: a long paragraph should reserve more lines than a short one."""
+def test_a_short_card_takes_the_compact_band():
     m = FichaModel()
-    short = "Brief."
-    m.mostrar(f"## Title\n\n{short}", "pregunta", "", None, None, now=0.0)
-    short_height = m.height
-
-    long = "a" * (CHARS_PER_LINEA + 50)  # Force wrapping
-    m.mostrar(f"## Title\n\n{long}", "pregunta", "", None, None, now=1.0)
-    long_height = m.height
-
-    assert long_height > short_height
+    m.mostrar("## ¿Cuál?\n\n- a\n- b\n", "pregunta", "", None, None, now=0.0)
+    assert m.height == COMPACTA
 
 
-def test_paragraph_at_wrap_boundary_wraps_correctly() -> None:
-    """Text at wrap boundary: exactly at limit wraps to 1 line, one char past wraps to 2."""
+def test_a_long_card_takes_the_wide_band_and_scrolls_inside_it():
+    # Eleven points is the real syllabus that broke the previous
+    # approach: it asked for 334 px of a 430 px window and squeezed the
+    # wave out of the strip. A band that cannot exceed its own size
+    # cannot do that, whatever the content.
+    md = "## Temario\n\n" + "\n".join(f"{i + 1}. Punto {i + 1}" for i in range(11))
     m = FichaModel()
-
-    # Exactly at the boundary should be 1 line
-    at_boundary = "x" * CHARS_PER_LINEA
-    m.mostrar(f"## Title\n\n{at_boundary}", "pregunta", "", None, None, now=0.0)
-    boundary_height = m.height
-
-    # One char past should wrap to 2 lines and be taller
-    past_boundary = "x" * (CHARS_PER_LINEA + 1)
-    m.mostrar(f"## Title\n\n{past_boundary}", "pregunta", "", None, None, now=1.0)
-    wrapped_height = m.height
-
-    assert wrapped_height > boundary_height
-    # One extra line of text = one extra LINEA
-    assert wrapped_height == boundary_height + LINEA
+    m.mostrar(md, "plan", "", None, None, now=0.0)
+    assert m.height == AMPLIA
+    assert m.height <= MAX_ALTO
 
 
-def test_forty_line_card_still_clamps_to_max_alto() -> None:
-    """The 40-line card test still respects MAX_ALTO ceiling."""
+def test_no_card_however_long_can_exceed_the_ceiling():
+    md = "\n".join(f"- opción {i}" for i in range(200))
     m = FichaModel()
-    m.mostrar(
-        "## T\n\n" + "\n".join(f"- opción {i}" for i in range(40)),
-        "pregunta",
-        "",
-        None,
-        None,
-        now=0.0,
-    )
+    m.mostrar(md, "pregunta", "", None, None, now=0.0)
     assert m.height <= MAX_ALTO
