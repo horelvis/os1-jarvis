@@ -146,8 +146,16 @@ def test_register_declares_mirar_as_an_async_tool():
     # `vision_analyze`, and sharing the name would have offered him an
     # image-analysis tool this box cannot serve.
     assert tool["toolset"] == "camaras"
-    assert "camara" in tool["schema"]["properties"]
-    assert tool["schema"]["required"] == []
+    # The schema registered IS the OpenAI function object, so the
+    # parameters live under `parameters` — this asserted
+    # `schema["properties"]` until 2026-09-03, which is precisely the
+    # shape that made the model call `mirar` with no camera five times
+    # out of five: Hermes wraps `{**schema, "name": name}` as the
+    # function, so a top-level `properties` is a function with no
+    # parameters at all.
+    assert "camara" in tool["schema"]["parameters"]["properties"]
+    assert tool["schema"]["parameters"]["required"] == []
+    assert tool["schema"]["description"].strip()
 
 
 def test_the_tool_is_hidden_until_a_camera_is_actually_watched():

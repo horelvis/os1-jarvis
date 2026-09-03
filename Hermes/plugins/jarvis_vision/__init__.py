@@ -78,7 +78,11 @@ def register(ctx):
         toolset=TOOLSET,
         description=DESCRIPTION,
         emoji=EMOJI,
-        schema=SCHEMA,
+        # The function object, not its parameters — see the note in
+        # jarvis_teacher/__init__.py. Passing SCHEMA directly is what
+        # made him call this tool with no argument, five times out of
+        # five, on 2026-08-25.
+        schema={"description": DESCRIPTION, "parameters": SCHEMA},
         handler=make_mirar(fleet, names, push_photo),
         check_fn=lambda: bool(names),
         # Ruling 1. `grab` blocks for up to two seconds and `push_photo`
@@ -99,7 +103,11 @@ def register(ctx):
         toolset=TOOLSET,
         description=OPEN_DESCRIPTION,
         emoji=LIVE_EMOJI,
-        schema=OPEN_SCHEMA,
+        # The function object, not its parameters — see the note in
+        # jarvis_teacher/__init__.py. Passing OPEN_SCHEMA directly is what
+        # made him call this tool with no argument, five times out of
+        # five, on 2026-08-25.
+        schema={"description": OPEN_DESCRIPTION, "parameters": OPEN_SCHEMA},
         handler=make_open_handler(session, fleet, names),
         check_fn=lambda: bool(names),
         is_async=True,
@@ -109,7 +117,11 @@ def register(ctx):
         toolset=TOOLSET,
         description=CLOSE_DESCRIPTION,
         emoji=LIVE_EMOJI,
-        schema=CLOSE_SCHEMA,
+        # The function object, not its parameters — see the note in
+        # jarvis_teacher/__init__.py. Passing CLOSE_SCHEMA directly is what
+        # made him call this tool with no argument, five times out of
+        # five, on 2026-08-25.
+        schema={"description": CLOSE_DESCRIPTION, "parameters": CLOSE_SCHEMA},
         handler=make_close_handler(session),
         check_fn=lambda: bool(names),
         is_async=True,

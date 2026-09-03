@@ -123,7 +123,15 @@ def register(ctx) -> None:
             toolset=TOOLSET,
             description=_DESCRIPCIONES[nombre],
             emoji="📚",
-            schema=esquema,
+            # `schema` IS the OpenAI *function* object, not its parameters.
+            # Hermes' registry builds `{**entry.schema, "name": entry.name}`
+            # and wraps THAT as the function, so passing the parameters
+            # object directly — which this did until 2026-09-03 — showed the
+            # model a tool with no `parameters` and no description at all,
+            # and calling it with `{}` was the only thing it could do.
+            # `description=` above reaches the plugin listing and never the
+            # model, which is why it appears in both places.
+            schema={"description": _DESCRIPCIONES[nombre], "parameters": esquema},
             handler=_handler(_aula, nombre),
             is_async=True,
         )
