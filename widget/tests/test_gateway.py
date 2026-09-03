@@ -159,6 +159,37 @@ def test_a_photo_with_no_path_is_dropped() -> None:
     assert seen == []
 
 
+def test_a_ficha_frame_reaches_its_callback() -> None:
+    cliente = GatewayClient("ws://x")
+    recogido: list = []
+    cliente.on_ficha = lambda md, tipo, fuente, correcta, elegida: recogido.append(
+        (md, tipo, fuente, correcta, elegida)
+    )
+    cliente._dispatch(
+        json.dumps(
+            {
+                "type": "ficha",
+                "tipo": "pregunta",
+                "md": "- a\n- b\n",
+                "fuente": "Cambridge",
+                "correcta": None,
+                "elegida": None,
+            }
+        )
+    )
+    assert recogido == [("- a\n- b\n", "pregunta", "Cambridge", None, None)]
+
+
+def test_a_ficha_with_an_unknown_tipo_is_dropped_not_fatal() -> None:
+    """The gateway and the widget are versioned separately and always
+    will be: an unknown kind must cost the card, not the turn."""
+    cliente = GatewayClient("ws://x")
+    llamado: list = []
+    cliente.on_ficha = lambda *a: llamado.append(a)
+    cliente._dispatch(json.dumps({"type": "ficha", "tipo": "examen", "md": "x"}))
+    assert llamado == []
+
+
 def test_malformed_json_is_still_an_error() -> None:
     with pytest.raises(ProtocolError):
         decode_server("{not json")

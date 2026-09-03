@@ -34,6 +34,7 @@ _SERVER_TYPES = {
     "error",
     "transcription",
     "photo",
+    "ficha",
     "live",
     "live_end",
     "console",
@@ -123,6 +124,12 @@ class GatewayClient:
         # own and never a token: an answer travels wherever the turn is
         # routed, and a path in one would be read aloud.
         self.on_photo: Callable[[str, str], None] = lambda _p, _c: None
+        # A card for the strip: a question, a syllabus or something being
+        # explained. Server to client only, like `on_photo`, and for the
+        # same reason — what is drawn is not what he says.
+        self.on_ficha: Callable[[str, str, str, str | None, str | None], None] = (
+            lambda _md, _t, _f, _c, _e: None
+        )
         # A live view: opened, fed packets, and closed. The picture never
         # travels as a token either — see on_photo above for why.
         self.on_live_open: Callable[[str, int, bytes, int, int], None] = (
@@ -270,6 +277,20 @@ class GatewayClient:
             path = msg.get("path", "")
             if isinstance(path, str) and path:
                 self.on_photo(path, str(msg.get("camera", "")))
+        elif kind == "ficha":
+            tipo = str(msg.get("tipo", ""))
+            # Unknown kinds are dropped rather than drawn wrong. The
+            # strip and the gateway are versioned separately (§12,
+            # 2026-08-25), and this is the branch that keeps a newer
+            # gateway from killing an older strip's turn.
+            if tipo in {"pregunta", "plan", "explicacion"}:
+                self.on_ficha(
+                    str(msg.get("md", "")),
+                    tipo,
+                    str(msg.get("fuente", "")),
+                    msg.get("correcta"),
+                    msg.get("elegida"),
+                )
         elif kind == "live":
             try:
                 extradata = base64.b64decode(msg.get("extradata", "") or "")

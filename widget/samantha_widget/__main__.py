@@ -32,6 +32,7 @@ from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
 if TYPE_CHECKING:
+    from .ficha import FichaModel
     from .photo_area import PhotoArea
 
 # Set to any of the four state names to freeze the wave there and skip
@@ -209,6 +210,48 @@ def _apply_asking_to_wake(wake: WakeWord, open_: bool, now: float) -> None:
         wake.hold(now)
     else:
         wake.release()
+
+
+def _apply_ficha_frame(
+    model: "FichaModel",
+    area,
+    md: str,
+    tipo: str,
+    fuente: str,
+    correcta: str | None,
+    elegida: str | None,
+    now: float,
+) -> None:
+    """A card frame arrived from the gateway: update the state, then draw it.
+
+    Pulled out of the closure `on_ficha` builds so the whole decision —
+    not just `FichaModel.mostrar`'s predicate — can be driven from a
+    test with a real `FichaModel` and a fake area, the way
+    `_apply_asking_to_wake` does for the wake window. `area` is not
+    typed as `FichaArea`: a test hands it a plain object recording
+    calls, and the real one is imported lazily (it carries `gi`).
+    """
+    model.mostrar(md, tipo, fuente, correcta, elegida, now=now)
+    area.mostrar(md, tipo, fuente, correcta, elegida, model.height)
+
+
+def _apply_ficha_tick(model: "FichaModel", area, now: float) -> None:
+    """One second passing on the card's clock.
+
+    Redraws only when `FichaModel.tick` says the strip's height actually
+    has to change — the same convention `PhotoModel` set. Skipping the
+    redraw otherwise is not an optimisation here: it is what keeps this
+    from fighting `_apply_ficha_frame` over a card that just arrived in
+    the same tick.
+    """
+    if model.tick(now=now):
+        area.mostrar("", "", "", None, None, 0)
+
+
+def _apply_ficha_click(model: "FichaModel", area, now: float) -> None:
+    """A press on the card. The gesture a photo has had since August."""
+    if model.click(now=now):
+        area.mostrar("", "", "", None, None, 0)
 
 
 class VoskSwitch:
@@ -488,6 +531,8 @@ class SamanthaApp(Gtk.Application):
         task.add_done_callback(self._tasks.discard)
 
     def do_activate(self) -> None:
+        from .ficha import FichaModel
+        from .ficha_area import FichaArea
         from .photo_area import PhotoArea
         from .wave import WaveArea
         from .window import StripWindow
@@ -500,6 +545,20 @@ class SamanthaApp(Gtk.Application):
         # the only thing that can move the top edge up to make room.
         band = PhotoArea(on_resize=window.resize_to)
         window.set_band(band)
+
+        # The lesson's card: a question, a syllabus or something being
+        # explained. It needs no wiring to `client` to be dismissed — a
+        # press is decided entirely by the model and the area, so it is
+        # wired here rather than inside `_start_voice_loop`.
+        ficha_model = FichaModel()
+        ficha_area = FichaArea(on_resize=window.resize_ficha)
+        window.set_ficha(ficha_area)
+
+        def on_ficha_click() -> None:
+            _apply_ficha_click(ficha_model, ficha_area, time.monotonic())
+
+        window.on_ficha_click = on_ficha_click
+
         self._add_demo_keys(window, wave)
         window.present()
 
@@ -545,7 +604,7 @@ class SamanthaApp(Gtk.Application):
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 
-        self._start_voice_loop(wave, band, window)
+        self._start_voice_loop(wave, band, window, ficha_model, ficha_area)
 
     # ── the demo half ─────────────────────────────────────────────────
 
@@ -578,7 +637,7 @@ class SamanthaApp(Gtk.Application):
 
     # ── the real half ─────────────────────────────────────────────────
 
-    def _start_voice_loop(self, wave, band, window) -> None:
+    def _start_voice_loop(self, wave, band, window, ficha_model, ficha_area) -> None:
         import numpy as np
 
         from .audio import Microphone, Player, SpectrumAnalyser, describe_devices
@@ -902,6 +961,32 @@ class SamanthaApp(Gtk.Application):
             print(f"foto: {camera} -> {path}", file=sys.stderr, flush=True)
             GLib.idle_add(band.show_photo, path, camera)
 
+        def on_ficha(
+            md: str, tipo: str, fuente: str, correcta: str | None, elegida: str | None
+        ) -> None:
+            # Like `on_photo`: this does not go through the turn machine.
+            # A card is not something he said.
+            def dibujar() -> bool:
+                _apply_ficha_frame(
+                    ficha_model,
+                    ficha_area,
+                    md,
+                    tipo,
+                    fuente,
+                    correcta,
+                    elegida,
+                    time.monotonic(),
+                )
+                return False  # GLib.SOURCE_REMOVE
+
+            GLib.idle_add(dibujar)
+
+        def _ficha_tick() -> bool:
+            _apply_ficha_tick(ficha_model, ficha_area, time.monotonic())
+            return True  # GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add_seconds(1, _ficha_tick)
+
         from pathlib import Path
 
         def _show_qr() -> bool:
@@ -1021,6 +1106,7 @@ class SamanthaApp(Gtk.Application):
 
         client.on_asking = on_asking
         client.on_photo = on_photo
+        client.on_ficha = on_ficha
         client.on_live_open = on_live_open
         client.on_live_frame = on_live_frame
         client.on_live_end = on_live_end

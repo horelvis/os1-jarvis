@@ -13,10 +13,14 @@ from samantha_widget.__main__ import (
     TurnOrigin,
     _apply_asking_to_wake,
     _apply_error_to_wake_window,
+    _apply_ficha_click,
+    _apply_ficha_frame,
+    _apply_ficha_tick,
     _serve_quietly,
     settle_turn,
     spoken_text,
 )
+from samantha_widget.ficha import ESPERA_S, FichaModel
 from samantha_widget.remote import RemoteDesk
 from samantha_widget.wake import WakeWord
 
@@ -567,3 +571,86 @@ async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):
     await _serve_quietly(refuses())
 
     assert "sin superficie" in capsys.readouterr().err
+
+
+# ── the card, wired ─────────────────────────────────────────────────────
+#
+# `FichaArea` carries `gi` and cannot be imported into this suite (see the
+# module docstring), so these drive a real `FichaModel` — the state a
+# card actually has — against a plain fake standing in for the widget,
+# recording exactly what it was told to draw. That is also the specific
+# thing Task 11 is required to get right: the model deciding a card is
+# gone is not, on its own, what shrinks the strip — the AREA has to be
+# told, with `alto=0`, because `resize_ficha` (and `_resize`'s sum) only
+# ever hears from `FichaArea.mostrar`'s own `on_resize` call. A test that
+# only asked the model would pass even if that second step were missing.
+
+
+class FakeFichaArea:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def mostrar(self, md, tipo, fuente, correcta, elegida, alto) -> None:
+        self.calls.append((md, tipo, fuente, correcta, elegida, alto))
+
+
+def test_a_ficha_frame_updates_the_model_and_draws_it() -> None:
+    model = FichaModel()
+    area = FakeFichaArea()
+
+    _apply_ficha_frame(
+        model, area, "- a\n- b\n", "pregunta", "Cambridge", None, None, now=0.0
+    )
+
+    assert model.md == "- a\n- b\n" and model.tipo == "pregunta"
+    assert area.calls == [
+        ("- a\n- b\n", "pregunta", "Cambridge", None, None, model.height)
+    ]
+
+
+def test_the_cards_clock_leaves_it_alone_before_the_limit() -> None:
+    model = FichaModel()
+    area = FakeFichaArea()
+    model.mostrar("## T\n\n- a\n", "pregunta", "", None, None, now=0.0)
+
+    _apply_ficha_tick(model, area, now=1.0)
+
+    assert area.calls == []
+    assert model.visible
+
+
+def test_the_cards_clock_collapses_the_strip_when_it_gives_up() -> None:
+    """The failure this pins would be invisible to every other test and
+    very visible on the desktop: `FichaModel.tick` clearing its own state
+    is not the whole of what has to happen — the area must be told the
+    new height is zero, or the window (which only ever hears from the
+    area's `on_resize`) stays grown around a card that is no longer
+    there."""
+    model = FichaModel()
+    area = FakeFichaArea()
+    model.mostrar("## T\n\n- a\n", "pregunta", "", None, None, now=0.0)
+
+    _apply_ficha_tick(model, area, now=ESPERA_S + 1)
+
+    assert not model.visible
+    assert area.calls == [("", "", "", None, None, 0)]
+
+
+def test_a_press_puts_the_card_away_and_tells_the_area() -> None:
+    model = FichaModel()
+    area = FakeFichaArea()
+    model.mostrar("## T\n\n- a\n", "pregunta", "", None, None, now=0.0)
+
+    _apply_ficha_click(model, area, now=1.0)
+
+    assert not model.visible
+    assert area.calls == [("", "", "", None, None, 0)]
+
+
+def test_a_press_with_nothing_up_touches_the_area_not_at_all() -> None:
+    model = FichaModel()
+    area = FakeFichaArea()
+
+    _apply_ficha_click(model, area, now=1.0)
+
+    assert area.calls == []

@@ -116,6 +116,8 @@ class StripWindow(Gtk.ApplicationWindow):
         self._band_extra = 0
         self._prompt_extra = 0
         self._console_extra = 0
+        self._ficha_extra = 0
+        self._ficha: Gtk.Widget | None = None
 
         self._frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._frame.add_css_class("samantha-strip")
@@ -142,6 +144,11 @@ class StripWindow(Gtk.ApplicationWindow):
         self._prompt.add_controller(focus)
         self._frame.prepend(self._prompt)
         self.on_prompt: Callable[[str], None] = lambda _text: None
+        # A press on the card puts it away — the gesture a photo has had
+        # since August. `FichaModel` lives in `__main__.py`, not here, so
+        # the decision crosses through a callback the same way a typed
+        # line does (`on_prompt` above).
+        self.on_ficha_click: Callable[[], None] = lambda: None
 
         # What something working is saying, shown on the strip rather
         # than in a terminal (user, 2026-08-26). A label in a scroller:
@@ -220,6 +227,30 @@ class StripWindow(Gtk.ApplicationWindow):
         widget.set_vexpand(False)
         self._frame.prepend(widget)
         self._band = widget
+
+    def set_ficha(self, widget: Gtk.Widget) -> None:
+        """The lesson's card: above the console, below the photo band.
+
+        A fourth contributor to the height, and it needs no coordination
+        with the other three: `_resize` has summed them since August, so
+        a photo landing during a question grows the strip by both and
+        neither knows about the other.
+        """
+        if self._ficha is not None:
+            self._frame.remove(self._ficha)
+        self._ficha = widget
+        self._frame.prepend(widget)
+        # CAPTURE, matching the console's own dismiss gesture: a press
+        # anywhere on the card puts it away, and nothing inside it (a
+        # label, a picture) should be able to claim the event first.
+        dismiss = Gtk.GestureClick()
+        dismiss.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        dismiss.connect("pressed", lambda *_a: self.on_ficha_click())
+        widget.add_controller(dismiss)
+
+    def resize_ficha(self, extra: int) -> None:
+        self._ficha_extra = max(0, extra)
+        self._resize()
 
     # ── the lines something working is writing ────────────────────────
 
@@ -396,7 +427,12 @@ class StripWindow(Gtk.ApplicationWindow):
         if self._ewmh is None or self._xid is None or self._rect is None:
             return
         x, y, w, h = self._rect
-        extra = self._band_extra + self._prompt_extra + self._console_extra
+        extra = (
+            self._band_extra
+            + self._prompt_extra
+            + self._console_extra
+            + self._ficha_extra
+        )
         wanted = (x, y - extra, w, h + extra)
         # What the strip is currently trying to be. A verify still in
         # flight for an older size must not fight a newer one.
