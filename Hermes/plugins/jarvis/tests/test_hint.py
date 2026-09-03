@@ -13,6 +13,7 @@ tests are what keeps the two from drifting apart again.
 from Hermes.plugins.jarvis import (
     _FALLBACK_HINT,
     _PERSONA_FILE,
+    _TEACHING,
     _platform_hint,
 )
 
@@ -76,10 +77,20 @@ def test_the_hint_says_he_can_teach_and_what_the_screen_does() -> None:
     In August it said there was no screen while the photo was already
     being pushed, and he declined correctly for the wrong reason
     (§12, 2026-08-25). Remember §7: an existing session only sees this
-    after `/new` and `/approve`."""
-    hint = _platform_hint()
-    assert "clase" in hint.lower()
-    assert "temario" in hint.lower()
+    after `/new` and `/approve`.
+
+    Asserted against `_TEACHING` itself, not the whole hint. `_SCREEN`
+    already ends "...tú no la ves: solo sabes lo que la cámara te ha
+    contado" — about the cameras, nothing to do with teaching — and a
+    hint-wide check for "no ves"/"no la ves" would pass on that alone,
+    even with the teaching paragraph's own version of the same rule
+    deleted. Checking `_TEACHING` in isolation is what keeps this test
+    honest about which paragraph it is covering."""
+    teaching = _TEACHING.lower()
+    assert "clase" in teaching
+    assert "temario" in teaching
     # He does not see the card. Saying he does is how he starts
     # describing what is on it.
-    assert "no ves" in hint.lower() or "no la ves" in hint.lower()
+    assert "no ves" in teaching
+    # And the paragraph actually has to reach the model, not just exist.
+    assert _TEACHING in _platform_hint()
