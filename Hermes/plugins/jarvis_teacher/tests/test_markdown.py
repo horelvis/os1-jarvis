@@ -57,3 +57,15 @@ def test_substituting_an_image_keeps_the_rest() -> None:
 
 def test_a_list_that_is_not_there_is_empty_not_an_error() -> None:
     assert lista("Sólo un párrafo.") == []
+
+
+def test_imagenes_ignores_references_inside_code_fences() -> None:
+    md = "![](real.png)\n\n```\n![](example.png)\n```\n"
+    assert imagenes(md) == ["real.png"]
+
+
+def test_sustituir_imagen_does_not_rewrite_inside_code_fences() -> None:
+    md = "![](real.png)\n\n```\n![](real.png)\n```\n"
+    fuera = sustituir_imagen(md, "real.png", "new.png")
+    assert "![](new.png)" in fuera
+    assert "![](real.png)" in fuera  # The one inside the fence unchanged

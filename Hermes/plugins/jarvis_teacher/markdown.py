@@ -111,10 +111,37 @@ def lista(md: str) -> list[str]:
 
 
 def imagenes(md: str) -> list[str]:
-    """Every image reference, in order, block-level or inline."""
-    return [m.strip() for m in _IMAGEN_INLINE.findall(md or "")]
+    """Every image reference, in order, block-level or inline.
+
+    Skips references inside code fences (they are literal, not images).
+    """
+    referencias: list[str] = []
+    for bloque in parsear(md):
+        if bloque.tipo == "imagen":
+            referencias.append(bloque.texto)
+        elif bloque.tipo in ("encabezado", "parrafo"):
+            referencias.extend(m.strip() for m in _IMAGEN_INLINE.findall(bloque.texto))
+        elif bloque.tipo == "lista":
+            for item in bloque.items:
+                referencias.extend(m.strip() for m in _IMAGEN_INLINE.findall(item))
+    return referencias
 
 
 def sustituir_imagen(md: str, origen: str, destino: str) -> str:
-    """Point one reference somewhere else, leaving everything else alone."""
-    return (md or "").replace(f"]({origen})", f"]({destino})")
+    """Point one reference somewhere else, leaving everything else alone.
+
+    Preserves references inside code fences as literal text.
+    """
+    if not md:
+        return md
+    result: list[str] = []
+    en_codigo = False
+    for linea in md.splitlines(keepends=True):
+        if _CERCA.match(linea.strip()):
+            en_codigo = not en_codigo
+            result.append(linea)
+        elif en_codigo:
+            result.append(linea)
+        else:
+            result.append(linea.replace(f"]({origen})", f"]({destino})"))
+    return "".join(result)
