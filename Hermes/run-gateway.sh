@@ -8,8 +8,8 @@
 #                repo, so Samantha's Hermes and the machine owner's personal
 #                ~/.hermes never share state or fight over a version.
 #   PYTHONPATH   makes the `Hermes` package importable as a package root from
-#                inside a plugin, and reaches `samantha_voice.tts` and
-#                `samantha_voice.markers`. Without this both TTS providers
+#                inside a plugin, and reaches `jarvis_voice.tts` and
+#                `jarvis_voice.markers`. Without this both TTS providers
 #                fail at import — which Hermes logs as a warning and carries
 #                on from, leaving the whole-file path falling through to
 #                Edge TTS.
@@ -56,7 +56,7 @@ export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 # `Hermes/bin` first, so the `claude` the assistant skills run is our
 # wrapper: it passes stdout through untouched and tees a copy into
-# ~/.samantha/code-live.log, which `samantha_code` follows and puts on
+# ~/.samantha/code-live.log, which `jarvis_code` follows and puts on
 # the strip. Without this the work is invisible until `terminal`
 # returns, which for a real task is minutes of nothing on screen.
 export PATH="$REPO_ROOT/Hermes/bin:$PATH"

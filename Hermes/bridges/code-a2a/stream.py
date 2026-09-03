@@ -7,7 +7,7 @@ This turns those into two streams with very different destinations:
   there to be glanced at;
 - **his voice** gets only what needs the user's judgement, which is the
   whole product decision of the design (`docs/superpowers/specs/
-  2026-08-26-samantha-code-design.md`, point 3): *"quizás solo audio las
+  2026-08-26-jarvis-code-design.md`, point 3): *"quizás solo audio las
   sugerencias o preguntas del asistente de código."*
 
 The shape below is not guessed. It was recorded from a real task on

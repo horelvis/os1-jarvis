@@ -25,7 +25,7 @@ def build(url: str, assistant: str, projects_root: str) -> dict:
     it changes when the machine changes.
     """
     return {
-        "id": "samantha-code-bridge",
+        "id": "jarvis-code-bridge",
         "name": "Asistente de código",
         "description": (
             f"Trabaja en los proyectos de {projects_root} con {assistant}: "

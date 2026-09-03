@@ -28,7 +28,7 @@ from stream import CONSOLE, VOICE, Event, classify, parse
 SILENCE_TIMEOUT = 900.0
 
 # A copy of what the assistant says, for whoever is watching. The
-# gateway's `samantha_code` plugin follows this file and puts each line
+# gateway's `jarvis_code` plugin follows this file and puts each line
 # on the strip; nothing else reads it, and a failure to write it costs
 # the view and never the work.
 #
@@ -38,7 +38,7 @@ SILENCE_TIMEOUT = 900.0
 # skills that shell out to `claude`, so a wrapper around the binary sat
 # unused while the assistant ran.
 LIVE_LOG = Path(
-    os.environ.get("SAMANTHA_CODE_LIVE", "")
+    os.environ.get("JARVIS_CODE_LIVE", "")
     or (Path.home() / ".samantha" / "code-live.log")
 ).expanduser()
 

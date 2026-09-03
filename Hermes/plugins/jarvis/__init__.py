@@ -175,7 +175,7 @@ def register(ctx):
     Both env vars are read by authz_mixin.py through a bare `os.getenv` on
     the exact name given to `allowed_users_env=`/`allow_all_env=` below —
     it never calls `_env()`, so a value that only exists under the OLD
-    `SAMANTHA_KIOSK_*` name is invisible to it. This function is therefore
+    `JARVIS_KIOSK_*` name is invisible to it. This function is therefore
     where the legacy value is copied onto the new name in the process
     environment, once, before `register_platform` hands the new name to
     Hermes.
@@ -193,7 +193,7 @@ def register(ctx):
     # by the literal new name via `register_platform`'s own bare os.getenv
     # (`allowed_users_env=`/`allow_all_env=` below), so the legacy value
     # must be COPIED onto the new name here, in process environment, or a
-    # box that still carries SAMANTHA_KIOSK_ALLOWED_USERS/_ALLOW_ALL_USERS
+    # box that still carries JARVIS_KIOSK_ALLOWED_USERS/_ALLOW_ALL_USERS
     # goes unauthorized the instant this file is renamed — the "eyes open"
     # failure the manifest warns about (plugin.yaml, "AUTHORIZATION").
     #

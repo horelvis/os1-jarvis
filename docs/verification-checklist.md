@@ -66,7 +66,7 @@ Hermes/run-gateway.sh plugins list | grep -iE 'samantha|jarvis'
 ```
 
 Expect `v0.20.5 (2026.8.19)`, an install directory inside the repo, and both
-`samantha-voice` and `jarvis` reading `enabled`. If the version is
+`jarvis-voice` and `jarvis` reading `enabled`. If the version is
 older, or the install directory is under `$HOME`, you are talking to a
 different Hermes — re-run `Hermes/setup-runtime.sh`.
 
@@ -77,17 +77,17 @@ the next check exists separately.
 ## 4. The plugins actually import
 
 **Use the snake_case directory name here, not the kebab-case manifest name**
-— `doctor` resolves a path or a directory id, so `samantha-voice` answers
-`Plugin 'samantha-voice' was not found` while the plugin is loading fine.
+— `doctor` resolves a path or a directory id, so `jarvis-voice` answers
+`Plugin 'jarvis-voice' was not found` while the plugin is loading fine.
 Measured 2026-08-22; the two commands take different names and always have.
 
 ```bash
-Hermes/run-gateway.sh plugins doctor samantha_voice
+Hermes/run-gateway.sh plugins doctor jarvis_voice
 Hermes/run-gateway.sh plugins doctor jarvis
 ```
 
 Expect discovery, manifest parsing, import and registration all passing.
-`samantha_voice` printing a `samantha.config` log line on the way is the
+`jarvis_voice` printing a `samantha.config` log line on the way is the
 proof that PYTHONPATH reached it — that import is the whole point.
 
 **If import fails:** it is almost always a missing dependency. Hermes
@@ -156,7 +156,7 @@ a miss that the gateway would not have.
 Expect `CosyVoiceStreamingProvider` and `CosyVoiceSyncProvider`.
 
 **Anything else — `None`, or an ElevenLabs/OpenAI/Edge class — means audio is
-leaving the house.** `Hermes/plugins/samantha_voice/plugin.yaml` lists the
+leaving the house.** `Hermes/plugins/jarvis_voice/plugin.yaml` lists the
 four configuration routes that can still cause this even when the plugin
 loads correctly.
 
@@ -233,7 +233,7 @@ Then reconnect twice and send again. It must still answer.
 
 ```bash
 cd "$REPO" && backend/.venv/bin/python -m pytest \
-  Hermes/plugins/samantha_voice/tests Hermes/plugins/jarvis/tests -q
+  Hermes/plugins/jarvis_voice/tests Hermes/plugins/jarvis/tests -q
 ```
 
 Expect all green — 34 and 38 respectively as of 2026-08-22.

@@ -95,7 +95,7 @@ class SdkRun:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client = None
         self._ready = threading.Event()
-        self.patterns = gates.load_patterns(os.environ.get("SAMANTHA_CODE_GATES"))
+        self.patterns = gates.load_patterns(os.environ.get("JARVIS_CODE_GATES"))
         self.gate_timeout = GATE_TIMEOUT
         self.pending: str | None = None
         self.pending_text: str = ""

@@ -19,7 +19,7 @@ MAX_CHARS = 160
 
 
 def load_patterns(value: str | None) -> tuple[str, ...]:
-    """The policy from `SAMANTHA_CODE_GATES`, or the default.
+    """The policy from `JARVIS_CODE_GATES`, or the default.
 
     Set, the variable IS the policy (comma-separated), so an entry can
     be removed as well as added without touching code.

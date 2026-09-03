@@ -103,7 +103,7 @@ Two consequences worth knowing, because both surprise people:
   starts the conversation over. A session carrying a bad assumption is
   worse than no session, because nothing about it is visible from
   outside. Sessions also expire on their own after two days
-  (`SAMANTHA_CODE_SESSION_MAX_AGE`).
+  (`JARVIS_CODE_SESSION_MAX_AGE`).
 
 An interrupted run keeps its session: stopping something is not a
 reason to forget what it was doing.

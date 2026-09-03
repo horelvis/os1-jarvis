@@ -13,7 +13,7 @@
 # ── Plugins ───────────────────────────────────────────────────────────
 # `kind: platform` and `kind: standalone` plugins are opt-in. Without
 # jarvis the strip has nothing to talk to; without
-# samantha-voice, TTS falls through to Edge — Microsoft's cloud. Without
+# jarvis-voice, TTS falls through to Edge — Microsoft's cloud. Without
 # jarvis-teacher listed here he never registers the `clases` tools at
 # all: `entries.<id>.enabled` below is not a load gate — nothing in the
 # pinned Hermes reads it — only `plugins.enabled` (`_get_enabled_plugins`
@@ -21,16 +21,16 @@
 plugins:
   enabled:
     - jarvis
-    - samantha-voice
-    - samantha-vision
-    - samantha-code
+    - jarvis-voice
+    - jarvis-vision
+    - jarvis-code
     - jarvis-teacher
   entries:
-    samantha-voice:
+    jarvis-voice:
       allow_tool_override: false
     jarvis:
       allow_tool_override: false
-    samantha-vision:
+    jarvis-vision:
       allow_tool_override: false
       # Starting a turn nobody asked for is a per-plugin permission, and
       # it is default-off. Without it `ctx.inject_message()` returns
@@ -69,8 +69,8 @@ plugins:
       # the next run and blind him silently. A comment cannot.
       #
       # Which cameras exist, which stream, and how to write the URL:
-      # Hermes/plugins/samantha_vision/README.md.
-    samantha-code:
+      # Hermes/plugins/jarvis_vision/README.md.
+    jarvis-code:
       allow_tool_override: false
       # Same permission, and the same failure when it is missing: this is
       # the switch that lets him ASK. Without it the coding assistant's
@@ -247,7 +247,7 @@ a2a_agents:
     timeout: 900
     capabilities: [code, development, tests]
 
-# plugins.entries.samantha-code.settings.bridge:
+# plugins.entries.jarvis-code.settings.bridge:
 #   The code bridge's URL (default http://127.0.0.1:9910). Empty string
 #   selects the legacy tee-file follower (a box without the bridge).
 

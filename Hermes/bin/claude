@@ -6,7 +6,7 @@
 # command ends — so the work is invisible until it is finished. This
 # wrapper is what makes it visible: it is first on the gateway's PATH,
 # so every `claude` JARVIS runs goes through it, and it tees the output
-# into a file that `samantha_code` follows and pushes onto the strip.
+# into a file that `jarvis_code` follows and pushes onto the strip.
 #
 # Doing it here rather than asking the model to redirect: the model does
 # not reliably fill in a tool's arguments (measured 2026-08-26, six
@@ -17,8 +17,8 @@
 # `terminal` hands that back to Hermes as the tool result.
 set -o pipefail
 
-REAL="${SAMANTHA_CLAUDE_REAL:-$HOME/.local/bin/claude}"
-LIVE="${SAMANTHA_CODE_LIVE:-$HOME/.samantha/code-live.log}"
+REAL="${JARVIS_CLAUDE_REAL:-$HOME/.local/bin/claude}"
+LIVE="${JARVIS_CODE_LIVE:-$HOME/.samantha/code-live.log}"
 
 # A non-interactive run is the only one worth watching: an interactive
 # session has a terminal of its own, and teeing it would fight the TUI.

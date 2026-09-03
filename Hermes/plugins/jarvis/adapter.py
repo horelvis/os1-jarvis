@@ -176,36 +176,35 @@ _ENV_TURN_TIMEOUT = "JARVIS_TURN_TIMEOUT"
 ENV_ALLOWED_USERS = "JARVIS_ALLOWED_USERS"
 ENV_ALLOW_ALL_USERS = "JARVIS_ALLOW_ALL_USERS"
 
-# The names these four had while the platform was called samantha_kiosk.
-# Nothing on the box that made this change set any of them — verified
-# 2026-08-28 across every unit and drop-in — so this map protects a
-# machine we cannot see. Losing an allowlist silently is the same class
-# of failure as the session key in samantha_vision/alert.py: it does not
-# raise, it just stops answering.
-_LEGACY_ENV = {
-    _ENV_PORT: "SAMANTHA_KIOSK_PORT",
-    _ENV_TURN_TIMEOUT: "SAMANTHA_KIOSK_TURN_TIMEOUT",
-    ENV_ALLOWED_USERS: "SAMANTHA_KIOSK_ALLOWED_USERS",
-    ENV_ALLOW_ALL_USERS: "SAMANTHA_KIOSK_ALLOW_ALL_USERS",
-}
+# There WAS a `_LEGACY_ENV` map here until 2026-09-03, translating the
+# four names these variables had while the platform was called
+# samantha_kiosk. It went with the clean cut: the old names stop working
+# the same day, by the user's decision. Nothing on this box ever set
+# them — verified 2026-08-28 across every unit and drop-in — and the
+# failure mode if some unseen machine did is the safe one: a missing
+# allowlist stops him answering rather than opening him up.
 
 
 def _env(name: str) -> str | None:
-    """The new variable, or the one it replaced. Never raises.
+    """The variable, or None. Never raises.
 
-    Uses `or`, not presence: a variable explicitly set to `""` reads as
-    unset and falls through to the legacy name. Harmless for a port or a
-    timeout, where an empty string was never a valid value anyway — but
-    __init__.py's `register()` also drives authorization through this
-    function, so an operator who sets JARVIS_ALLOWED_USERS="" expecting to
-    blank it out gets the SAMANTHA_KIOSK_ALLOWED_USERS value instead.
+    A thin wrapper now that there is no legacy name to fall through to,
+    and kept rather than inlined because `register()` drives
+    authorization through it: one place to read an environment variable
+    is one place to change when that stops being true.
+
+    `or None` preserves the old behaviour for the empty string: a
+    variable set to `""` reads as unset. That was load-bearing when it
+    chose between two names and is merely consistent now.
     """
-    return os.getenv(name) or os.getenv(_LEGACY_ENV.get(name, ""), None)
+    return os.getenv(name) or None
 
 
-# The user id the OS1 frontend sends. Pinned by `frontend/src/net/wsClient.ts:80`
-# (`userId = "primary"`); if that default ever changes, this must change with
-# it or every turn is dropped by the authorization gate.
+# The user id the strip sends. It was pinned by the OS1 frontend's
+# `wsClient.ts` until that tree was deleted on 2026-09-03; the strip
+# (`gateway.py`) is the only sender now, and if its default ever changes
+# this must change with it or every turn is dropped by the
+# authorization gate.
 DEFAULT_USER_ID = "primary"
 
 # How long a turn may stay open before the strip apologises for it.
@@ -301,7 +300,7 @@ class JarvisAdapter(BasePlatformAdapter):
         # One slot, one task — nothing here grows with uptime.
         self._turn: Optional[_Turn] = None
 
-        # While the code assistant waits for an answer, samantha_code
+        # While the code assistant waits for an answer, jarvis_code
         # sets this; the next unnamed input is the answer and goes to
         # the bridge instead of opening a turn. Deterministic on
         # purpose: the model that fills tool args with {} (§12,
@@ -502,14 +501,14 @@ class JarvisAdapter(BasePlatformAdapter):
         sent: the strip opens whatever it is handed, and this socket is an
         unauthenticated local listener. The vision plugin is imported here,
         lazily, rather than at module load: `jarvis` is the strip's
-        platform and must keep working on a box where `samantha_vision` is
+        platform and must keep working on a box where `jarvis_vision` is
         absent, broken, or simply not installed — a missing camera plugin
         must never be the reason the strip goes mute.
         """
         try:
-            from Hermes.plugins.samantha_vision.snapshot import snapshot_dir
+            from Hermes.plugins.jarvis_vision.snapshot import snapshot_dir
         except ImportError as exc:
-            logger.warning(f"jarvis: samantha_vision unavailable — {exc}")
+            logger.warning(f"jarvis: jarvis_vision unavailable — {exc}")
             return False
 
         try:
@@ -548,7 +547,7 @@ class JarvisAdapter(BasePlatformAdapter):
         A reference that does not resolve costs the reference, never the
         card: it is dropped from the document and the question is still
         asked. The teacher plugin is imported lazily for the same reason
-        `samantha_vision` is — a missing plugin must never be why the
+        `jarvis_vision` is — a missing plugin must never be why the
         strip goes mute.
         """
         try:
@@ -764,7 +763,7 @@ class JarvisAdapter(BasePlatformAdapter):
         # carries the full mechanism.
         # The loop this handler runs on is the gateway's own, and it
         # keeps running between turns — unlike the loop a turn brings
-        # with it. `samantha_vision` schedules live frames from the
+        # with it. `jarvis_vision` schedules live frames from the
         # watcher thread and needs one that will still be alive when it
         # does; see `LiveSession.open`.
         self.loop = asyncio.get_running_loop()

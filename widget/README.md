@@ -59,7 +59,7 @@ it she runs and is simply mute.
 |---|---|
 | `JARVIS_WIDGET_STATE` | Freeze the wave in one state (`idle`, `listening`, `thinking`, `speaking`) and skip the voice loop. How each state gets photographed, since `xdotool` is not installed. |
 | `JARVIS_WIDGET_NO_MIC=1` | Do not open the microphone. On a box with none plugged in, this is the difference between "she cannot hear" and "the process is broken". |
-| `SAMANTHA_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.samantha/models/`). |
+| `JARVIS_VAD_MODEL` | Path to `silero_vad_16k_op15.onnx` (default `~/.samantha/models/`). |
 | `JARVIS_WIDGET_FAKE_MIC` | Speak this INTO the widget: it is synthesised, resampled to 16 kHz and pushed through the real microphone path. Everything downstream — VAD, Whisper, the gateway, her reply — is real. |
 | `JARVIS_WIDGET_SAY` | Say this once, three seconds after starting. The only way to hear her voice on a machine with no microphone. |
 | `JARVIS_WIDGET_MIC_GATE=1` | Deafen the microphone while he speaks. **Not needed since 2026-08-26**: `echo.py` cuts his own words out of the transcript instead, so the microphone stays open and he can be interrupted. Keep it for a box where that filter is not enough. Off by default since 2026-08-25: it is what made interrupting him impossible, because `detector.speaking` had to be true before a frame could reach the detector, and only his own voice through the room could open that latch. Set it on a box with no echo cancellation, or he answers himself. |
@@ -145,8 +145,8 @@ Two minutes, once per phone. The certificate is issued for ten years.
 
 This program watched the house's cameras until 2026-08-24. It does not
 now: `vision.py`, the camera thread and the `JARVIS_WIDGET_CAMERA`,
-`JARVIS_WIDGET_CAMERA_RETRY` and `SAMANTHA_YOLO_MODEL` switches all
-moved into the gateway, as the `samantha-vision` plugin.
+`JARVIS_WIDGET_CAMERA_RETRY` and `JARVIS_YOLO_MODEL` switches all
+moved into the gateway, as the `jarvis-vision` plugin.
 
 They went because the strip was the wrong owner. Watching has to survive
 the widget being restarted, and a camera that sees somebody wants to
@@ -154,7 +154,7 @@ start a turn on its own — which is a thing the gateway can do and a
 window on the desktop cannot.
 
 Configuring them, the model file, and what the journal says when one is
-off: **`Hermes/plugins/samantha_vision/README.md`**. Nothing in this
+off: **`Hermes/plugins/jarvis_vision/README.md`**. Nothing in this
 directory needs to change to point a camera anywhere.
 
 Running it from another directory — which is what systemd does — needs
@@ -204,7 +204,7 @@ size it still believes the window to be, which once left the strip
 floating in the middle of the desktop after a shrink.
 
 The JPEG itself is written by the gateway, in
-`Hermes/plugins/samantha_vision/`; the strip is only ever handed a path
+`Hermes/plugins/jarvis_vision/`; the strip is only ever handed a path
 and opens it. To see all of this without a live turn — and without a
 camera — point `JARVIS_WIDGET_PHOTO` at one or more image files.
 

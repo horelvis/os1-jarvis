@@ -101,7 +101,7 @@ def register(ctx) -> None:
     """Declare the tools. Nothing here touches disk or the network.
 
     The `Aula` is built lazily, on the first tool call, for exactly the
-    reason `samantha_vision` starts its threads outside `register`: a
+    reason `jarvis_vision` starts its threads outside `register`: a
     registration that raises is reported by Hermes as a retry-forever
     loop at DEBUG level, and a plugin that never loads costs the whole
     feature silently.
@@ -143,7 +143,7 @@ def _handler(fabrica, nombre: str):
 async def _adaptador():
     """The strip's adapter, or None. Resolved at call time, every time.
 
-    Mirrors `samantha_vision._adapter()` exactly, because that is the
+    Mirrors `jarvis_vision._adapter()` exactly, because that is the
     ONLY verified way a plugin reaches the `jarvis` platform adapter on
     this pinned Hermes — `PluginContext` has no `get_platform_adapter`
     (checked against `.hermes/src/hermes_cli/plugins.py`). `register()`

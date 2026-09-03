@@ -185,7 +185,7 @@ class SileroDetector:
         import onnxruntime as ort
 
         self._np = np
-        path = Path(model_path or os.getenv("SAMANTHA_VAD_MODEL") or DEFAULT_MODEL_PATH)
+        path = Path(model_path or os.getenv("JARVIS_VAD_MODEL") or DEFAULT_MODEL_PATH)
         if not path.is_file():
             raise FileNotFoundError(
                 f"Silero VAD model not at {path} — see widget/README.md"

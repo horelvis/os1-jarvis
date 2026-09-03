@@ -2,7 +2,7 @@
   "_why": [
     "The firehose payload contract, written down once and read by BOTH",
     "suites: the bridge that emits these (tests/test_contract.py here)",
-    "and the plugin that renders them (Hermes/plugins/samantha_code/",
+    "and the plugin that renders them (Hermes/plugins/jarvis_code/",
     "tests/test_contract.py). Before this each side hand-wrote its own",
     "copy of the keys, so a rename on the bridge broke only the",
     "bridge's tests and the plugin stayed green against a shape nothing",

@@ -18,5 +18,5 @@ mkdir -p ~/.samantha/voices/ref
 cp voices/samantha.wav voices/samantha.txt ~/.samantha/voices/ref/
 ```
 
-Override paths via `SAMANTHA_TTS_COSYVOICE_REF_WAV` /
-`SAMANTHA_TTS_COSYVOICE_REF_TRANSCRIPT_PATH` if they live elsewhere.
+Override paths via `JARVIS_TTS_COSYVOICE_REF_WAV` /
+`JARVIS_TTS_COSYVOICE_REF_TRANSCRIPT_PATH` if they live elsewhere.

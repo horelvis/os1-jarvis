@@ -194,7 +194,7 @@ export PYTHONPATH="$PWD"
   twice:** `web_search_tool` calls Hermes' own
   `_ensure_web_plugins_loaded()`, which triggers full plugin discovery —
   not only the web providers. On this box that starts
-  `samantha_vision`'s camera watcher threads against the real house
+  `jarvis_vision`'s camera watcher threads against the real house
   cameras, using whatever credentials `.env` provides. The probe does
   not do this itself; asking "is a search backend configured" does, as
   a property of the pinned Hermes.

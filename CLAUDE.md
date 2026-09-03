@@ -7,7 +7,7 @@
 >
 > **He is called JARVIS.** Until 2026-08-23 he was Samantha, and most
 > package names, environment variables and systemd units still carry that
-> name — `jarvis_widget`, `samantha_vision`, `SAMANTHA_*`. Renaming them
+> name — `jarvis_widget`, `jarvis_vision`, `SAMANTHA_*`. Renaming them
 > is not worth the churn. In prose he is JARVIS; in code, mostly samantha
 > — except the platform he speaks through, `jarvis` since 2026-08-28
 > (§10, §12).
@@ -58,7 +58,7 @@ can act on it. Not a window you open. Something that is there.
   is heard and dropped.
 - **Vision:** YOLOv9 over onnxruntime against the house's RTSP cameras,
   borrowed from BarnDoor. Since 2026-08-24 it runs **inside the
-  gateway**, as the plugin `samantha_vision` — one thread per named
+  gateway**, as the plugin `jarvis_vision` — one thread per named
   camera. The widget no longer opens a camera. Since 2026-08-25 he can
   also be **asked** (`mirar`), and the still he takes appears above the
   strip and nowhere else (§12). Since 2026-08-26 asking to see a camera
@@ -87,8 +87,8 @@ can act on it. Not a window you open. Something that is there.
 ┌───────────────▼──────────────┐  ┌───────▼────────────────┐
 │  Hermes gateway              │  │  CosyVoice 3 (Docker)  │
 │   + jarvis (surface)         │  └────────────────────────┘
-│   + samantha_voice (TTS)     │
-│   + samantha_vision (cameras)│
+│   + jarvis_voice (TTS)     │
+│   + jarvis_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
 └───────────────┬──────────────┘       (Qwen3.8-27B, local)
                 └──────────────────────────────┘
@@ -366,7 +366,7 @@ GTK4 window  →  EWMH: _NET_WM_STATE above + skip taskbar, XMoveResizeWindow
 >
 > **Deleted 2026-09-03.** And the reason recorded here for keeping it
 > had already stopped being true: the TTS library the widget imports is
-> `Hermes/plugins/samantha_voice/tts.py`, not `backend/samantha/tts.py`,
+> `Hermes/plugins/jarvis_voice/tts.py`, not `backend/samantha/tts.py`,
 > which did not exist. Nothing outside `backend/` imported it. The
 > paragraph below is what this section used to claim.
 >
@@ -518,7 +518,7 @@ nothing. One did, on 2026-08-27 — see the comment in
 
 **Piper was the v3 choice** (`es_ES-davefx-medium`, CPU, ~200 ms) and
 lost on identity, not on latency: a preset voice is somebody else's.
-XTTS-v2 was tried in between. `Hermes/plugins/samantha_voice/tts.py`
+XTTS-v2 was tried in between. `Hermes/plugins/jarvis_voice/tts.py`
 dispatches across all three; CosyVoice is the default and the only one
 used. (It lived in `backend/samantha/tts.py` until that tree was
 retired, and this line said so long after it had moved.)
@@ -527,7 +527,7 @@ retired, and this line said so long after it had moved.)
 `<|endofprompt|>` that conditions *delivery* — pace, poise — not words.
 The server injected a fixed "You are a helpful assistant." for months,
 which is a personality too, just nobody's. Set it with
-`SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT`.
+`JARVIS_TTS_COSYVOICE_VOICE_PROMPT`.
 
 ### 2.7 Memory: ChromaDB + SQLite ring + facts (v2)
 
@@ -723,8 +723,8 @@ os1-samantha/
 │   ├── apply-config.sh
 │   └── plugins/
 │       ├── jarvis/          ← the surface he speaks through
-│       ├── samantha_voice/  ← CosyVoice, from inside the gateway
-│       ├── samantha_vision/ ← the cameras: YOLO, the quiet rules, the
+│       ├── jarvis_voice/  ← CosyVoice, from inside the gateway
+│       ├── jarvis_vision/ ← the cameras: YOLO, the quiet rules, the
 │       │                      alert, and `mirar`. Its own README.
 │       └── jarvis_teacher/  ← he teaches a subject: the course's state,
 │                              the sources and the domain gate, the card
@@ -765,15 +765,15 @@ the LLM local on this box at 57 tok/s.
 
 **Delegating code runs through the BRIDGE by default, since 2026-08-27.**
 §12 records the decision; this is the section that says what runs.
-`samantha_code` follows the A2A bridge's firehose on :9910 unless
-`plugins.entries.samantha-code.settings.bridge` is emptied, which selects
+`jarvis_code` follows the A2A bridge's firehose on :9910 unless
+`plugins.entries.jarvis-code.settings.bridge` is emptied, which selects
 the v1 tee-file follower instead. What bridge mode buys is the console
 showing milestones rather than raw lines, and three moments reaching the
 user by voice — the assistant's own `AskUserQuestion`, a gate before
 anything irreversible, and a closing checkpoint. The answer is routed by
 the kiosk adapter straight to the bridge and never through the local
 model, which fills its own tools with `args={}`. **So a box with no
-`samantha-code-a2a.service` on it is in bridge mode too**: it reconnects
+`jarvis-code-a2a.service` on it is in bridge mode too**: it reconnects
 forever, at a 30 s ceiling, and says so in the journal the first time and
 on every drop after.
 
@@ -844,7 +844,7 @@ by the widget — the LLM, TTS and Hermes work carried straight over.
 - **2026-08-23** — JARVIS: the persona, the cloned voice ✅
 - **2026-08-23** — vision: the cameras speak ✅
 - **2026-08-23** — the LLM comes home: Qwen3.8-27B local, 57 tok/s ✅
-- **2026-08-24** — vision moves into the gateway: the `samantha_vision`
+- **2026-08-24** — vision moves into the gateway: the `jarvis_vision`
   plugin, cameras plural and named ✅
 - **2026-08-25** — the photo on demand: `mirar`, and a band above the
   strip that grows for it ✅ (the detections table: plan 2)
@@ -887,7 +887,7 @@ DISPLAY=:0 PYTHONNOUSERSITE=1 \
 wave for a screenshot, running with no microphone, speaking INTO him,
 dumping utterances to WAV. Read it before the first run. The cameras are
 not among them any more — they are in
-`Hermes/plugins/samantha_vision/README.md`.
+`Hermes/plugins/jarvis_vision/README.md`.
 
 ### The services around him
 
@@ -1130,14 +1130,14 @@ If you encounter:
 | The clock that asks, and the one that decides | `widget/jarvis_widget/vad.py` |
 | Speaking: clauses and playback | `widget/jarvis_widget/{speech,audio}.py` |
 | The link to the brain | `widget/jarvis_widget/gateway.py` |
-| Vision, and what is worth saying | `Hermes/plugins/samantha_vision/{vision,cameras}.py` |
-| Being asked to look, and the JPEG it leaves | `Hermes/plugins/samantha_vision/{tool,snapshot}.py` |
+| Vision, and what is worth saying | `Hermes/plugins/jarvis_vision/{vision,cameras}.py` |
+| Being asked to look, and the JPEG it leaves | `Hermes/plugins/jarvis_vision/{tool,snapshot}.py` |
 | The `photo` frame, and the path it refuses | `Hermes/plugins/jarvis/{protocol,adapter}.py` |
-| A sighting becomes a turn, not a sentence | `Hermes/plugins/samantha_vision/alert.py` |
-| The cameras, and where the password goes | `Hermes/plugins/samantha_vision/README.md` |
+| A sighting becomes a turn, not a sentence | `Hermes/plugins/jarvis_vision/alert.py` |
+| The cameras, and where the password goes | `Hermes/plugins/jarvis_vision/README.md` |
 | Whether he was being spoken to | `widget/jarvis_widget/wake.py` |
 | The two switches (drawing / pure model) | `widget/jarvis_widget/{wave,switches}.py` |
-| The live view: session, tools, decoding | `Hermes/plugins/samantha_vision/{live,live_tool}.py`, `widget/jarvis_widget/live_decode.py` |
+| The live view: session, tools, decoding | `Hermes/plugins/jarvis_vision/{live,live_tool}.py`, `widget/jarvis_widget/live_decode.py` |
 | Testing without a microphone | `widget/jarvis_widget/fake_mic.py` |
 | The phone: socket, auth, audio, enrolment | `widget/jarvis_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
 | The page it serves | `widget/jarvis_widget/static/movil.html` |

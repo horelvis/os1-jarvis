@@ -85,23 +85,23 @@ Type=simple
 #   llama-server 17,354 + CosyVoice 5,080 + widget 1,529 + the DESKTOP 162
 #   (Xorg 99, gnome-shell 28, a browser tab 35 — §2.5's arithmetic never
 #   counted it) = 24,125 of 24,564.
-Environment=SAMANTHA_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-Heretic-GGUF/RVN-IQ4_XS-multilingual.gguf
+Environment=JARVIS_LLAMA_MODEL=%h/.samantha/models/Qwen3.8-27B-Heretic-GGUF/RVN-IQ4_XS-multilingual.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.
-Environment=SAMANTHA_LLAMA_HOST=127.0.0.1
-Environment=SAMANTHA_LLAMA_PORT=8000
+Environment=JARVIS_LLAMA_HOST=127.0.0.1
+Environment=JARVIS_LLAMA_PORT=8000
 
 # Offload as many transformer layers to GPU as fit. 99 = "all of them";
 # llama.cpp clamps automatically if the model has fewer.
-Environment=SAMANTHA_LLAMA_NGL=99
+Environment=JARVIS_LLAMA_NGL=99
 
 # Context window. Qwen3 supports up to 40K natively; generous headroom
 # for Phase 6 memory injection.
 # 64K is a HARD FLOOR, not a preference: Hermes refuses any model whose
 # context window is under 64,000 and the turn dies with
 # "below the minimum 64,000 required by Hermes Agent".
-Environment=SAMANTHA_LLAMA_CTX=65536
+Environment=JARVIS_LLAMA_CTX=65536
 
 # The build in ~/git/llama.cpp, not whatever llama-server is on PATH.
 # Qwen3.8's hybrid Gated DeltaNet needs a recent build: b9115 failed to
@@ -109,13 +109,13 @@ Environment=SAMANTHA_LLAMA_CTX=65536
 # where b10603 loads it and runs it FOUR TIMES faster — 57 tok/s against
 # 13.7 for the Q4_K_M on the old build.
 ExecStart=%h/git/llama.cpp/build/bin/llama-server \
-    -m ${SAMANTHA_LLAMA_MODEL} \
-    --host ${SAMANTHA_LLAMA_HOST} \
-    --port ${SAMANTHA_LLAMA_PORT} \
-    --n-gpu-layers ${SAMANTHA_LLAMA_NGL} \
+    -m ${JARVIS_LLAMA_MODEL} \
+    --host ${JARVIS_LLAMA_HOST} \
+    --port ${JARVIS_LLAMA_PORT} \
+    --n-gpu-layers ${JARVIS_LLAMA_NGL} \
     --cache-type-k q4_0 \
     --cache-type-v q4_0 \
-    --ctx-size ${SAMANTHA_LLAMA_CTX} \
+    --ctx-size ${JARVIS_LLAMA_CTX} \
     --jinja \
     --flash-attn on \
 # NOT --split-mode row: it splits tensors across several GPUs and this

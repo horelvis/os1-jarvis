@@ -1,11 +1,11 @@
-"""Unit tests for Hermes/plugins/samantha_voice/tts.py (CosyVoice 3 backend)."""
+"""Unit tests for Hermes/plugins/jarvis_voice/tts.py (CosyVoice 3 backend)."""
 
 from __future__ import annotations
 
 import pytest
 
-from Hermes.plugins.samantha_voice import tts
-from Hermes.plugins.samantha_voice.tts_config import TTSConfig
+from Hermes.plugins.jarvis_voice import tts
+from Hermes.plugins.jarvis_voice.tts_config import TTSConfig
 
 
 def test_is_available_reflects_disk_state():

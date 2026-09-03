@@ -13,14 +13,14 @@ author: Horelvis Castillo
 # How this plugin fails, and how it fails SILENTLY.
 #
 # The house failure mode of this whole project is a turn that reaches
-# nothing and says nothing. The convention (same as samantha-voice's
+# nothing and says nothing. The convention (same as jarvis-voice's
 # manifest) is that the manifest names those ways, because the manifest is
 # the first file an operator opens.
 #
 # 1. AUTHORIZATION. Hermes default-denies a platform it has no allowlist
 #    for; a denied JARVIS turn is a log warning and nothing on the screen.
 #    register() declares JARVIS_ALLOWED_USERS (falling back to the old
-#    SAMANTHA_KIOSK_ALLOWED_USERS) and defaults it to
+#    JARVIS_KIOSK_ALLOWED_USERS) and defaults it to
 #    "primary" — the user id frontend/src/net/wsClient.ts:80 sends. Change
 #    one without the other and every turn is dropped. With NO allowlist at
 #    all the default is worse than silence: Hermes greets the owner in
@@ -29,7 +29,7 @@ author: Horelvis Castillo
 # 2. A TURN THAT NEVER COMES BACK. The gateway answers asynchronously, so
 #    nothing downstream guarantees a reply. The adapter arms a watchdog per
 #    accepted `chat` frame (JARVIS_TURN_TIMEOUT, falling back to the old
-#    SAMANTHA_KIOSK_TURN_TIMEOUT, default 90 s) and
+#    JARVIS_KIOSK_TURN_TIMEOUT, default 90 s) and
 #    pushes an `error` frame if nothing closed the turn. Without it the
 #    strip hangs forever — `busy` never clears, and because the STT
 #    commit is gated on `busy`, VOICE input dies with it.
@@ -53,27 +53,27 @@ optional_env:
   - name: JARVIS_PORT
     description: >
       Puerto donde se sirve el WebSocket de JARVIS (por defecto 7777).
-      Nombre antiguo, todavía válido: SAMANTHA_KIOSK_PORT
+      Nombre antiguo, todavía válido: JARVIS_KIOSK_PORT
     prompt: "Puerto de JARVIS"
     password: false
   - name: JARVIS_ALLOWED_USERS
     description: >
       Quién puede hablar con JARVIS (por defecto "primary", que es el
       user_id que envía la interfaz). Nombre antiguo, todavía válido:
-      SAMANTHA_KIOSK_ALLOWED_USERS
+      JARVIS_KIOSK_ALLOWED_USERS
     prompt: "user_id autorizado"
     password: false
   - name: JARVIS_ALLOW_ALL_USERS
     description: >
       Deja pasar a cualquiera para hablar con JARVIS. No hace falta en un
       aparato de una sola persona; existe para depurar. Nombre antiguo,
-      todavía válido: SAMANTHA_KIOSK_ALLOW_ALL_USERS
+      todavía válido: JARVIS_KIOSK_ALLOW_ALL_USERS
     prompt: "¿Permitir a cualquiera? (true/false)"
     password: false
   - name: JARVIS_TURN_TIMEOUT
     description: >
       Segundos que espera antes de decir que algo se ha quedado a medias
       (por defecto 90). Nombre antiguo, todavía válido:
-      SAMANTHA_KIOSK_TURN_TIMEOUT
+      JARVIS_KIOSK_TURN_TIMEOUT
     prompt: "Segundos de espera por respuesta"
     password: false

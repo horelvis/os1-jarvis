@@ -1,0 +1,66 @@
+manifest_version: 2
+api_version: 1
+name: jarvis-vision
+label: Samantha (vision)
+kind: standalone
+version: 1.0.0
+description: >
+  Owns the house cameras. Watches them and says something when one of
+  them sees something worth saying, and answers when he is asked to look.
+author: Horelvis Castillo
+
+# ─────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# 1. NO CAMERAS CONFIGURED. With an empty `cameras` list the plugin
+#    registers, starts nothing, and logs one line. That is correct on a
+#    box with no cameras and indistinguishable from a typo in the config
+#    key. The line says which key it read and that it was empty.
+#
+# 2. A CAMERA THAT NEVER CONNECTS. One WARNING, then DEBUG per retry,
+#    on a backoff: a camera off for a week would otherwise fill the
+#    journal at a level anybody reads.
+#
+# 3. THE MODEL FILE IS MISSING. yolov9-t-320.onnx (~8 MB) is not in the
+#    repo. Without it no thread starts and the plugin is inert. Named
+#    here because "he stopped noticing people" has no other symptom.
+#
+# 4. A CAMERA THAT CONNECTS AND YIELDS NOTHING. RTSP answers, the stream
+#    opens, and no frame ever arrives — a wrong sub-stream path, a camera
+#    in a boot loop, a recording that has already ended. Nothing raises,
+#    so nothing else here notices: it looks exactly like a camera with an
+#    empty driveway in front of it. One WARNING, then DEBUG per retry,
+#    same discipline as #2.
+#
+# 5. THE SNAPSHOT DIRECTORY STOPS BEING PRUNED. Every `mirar` writes a
+#    JPEG into $HERMES_HOME/cache/images/vision/ (the directory 0700, the
+#    files 0600), and pruning runs on that same write: the newest 20 are
+#    kept, nothing older than an hour survives. What is in there is
+#    pictures of the inside and the outside of this house, so a directory
+#    that stops being pruned is a privacy leak as much as a disk leak.
+#    Nothing announces its size, and nothing announces its age. A prune
+#    that cannot list or unlink logs one WARNING per file and the picture
+#    the user asked for still appears, so the visible behaviour of a
+#    directory growing without limit is: everything working.
+#
+# #2 and #4 keep SEPARATE once-per-camera flags. A camera that stays in
+# one state costs exactly one WARNING; a camera flipping between the two
+# announces each, rather than leaving a stale WARNING describing the
+# state it is no longer in.
+
+# Declared so the failure has a name at load time. Hermes never installs
+# these — `_warn_python_dependencies` (hermes_cli/plugins.py:4679) is "a
+# declaration seam ONLY", says its own docstring — but it probes each
+# distribution and logs a WARNING naming the missing ones with an install
+# hint. That turns failure mode #3's worst variant, a plugin that loads
+# and quietly watches nothing, into a line at startup. Upper bounds are
+# Hermes' dependency policy; `plugins doctor` warns without them.
+#
+# `Hermes/setup-runtime.sh` is what actually installs them: `uv sync` does
+# not, because Hermes moved that extra to lazy install.
+python_dependencies:
+  - "loguru>=0.7,<1"
+  - "av>=12,<19"
+  - "onnxruntime>=1.17,<2"
+  - "numpy>=1.26,<3"
+  - "pillow>=10,<13"

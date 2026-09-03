@@ -2,7 +2,7 @@
 
 Waiting for `done` before speaking makes her feel dead; synthesising
 every token makes CosyVoice stutter. The rule in between comes from
-what samantha-voice measured against the live server.
+what jarvis-voice measured against the live server.
 
 The widget synthesises rather than waiting for the gateway to send
 audio (spec §5.1). It is a Python process on the same machine as
@@ -17,7 +17,7 @@ import re
 import unicodedata
 
 try:
-    from Hermes.plugins.samantha_voice.markers import has_unclosed_tag
+    from Hermes.plugins.jarvis_voice.markers import has_unclosed_tag
 except ImportError:  # repo root not on PYTHONPATH
 
     def has_unclosed_tag(text: str) -> bool:
@@ -215,7 +215,7 @@ class Speaker:
         not necessarily `self.sink` right now — see `enqueue`'s
         docstring for why the two can differ by the time this runs.
         """
-        from Hermes.plugins.samantha_voice import tts
+        from Hermes.plugins.jarvis_voice import tts
 
         if self._client is None:
             # An httpx.AsyncClient may only be used on the loop that

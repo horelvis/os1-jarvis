@@ -1,0 +1,86 @@
+"""What gets injected, and how stubbornly."""
+
+import pytest
+
+from Hermes.plugins.jarvis_code import voz
+
+
+def test_each_kind_has_a_prompt_that_carries_the_text_as_a_labelled_value():
+    for kind in ("question", "gate", "checkpoint"):
+        prompt = voz.prompt_for(kind, "¿A o B?")
+        assert "«¿A o B?»" in prompt
+        assert "asistente de código" in prompt
+
+
+def test_an_unknown_kind_falls_back_to_the_question_wording():
+    assert voz.prompt_for("nonsense", "algo") == voz.prompt_for("question", "algo")
+
+
+@pytest.fixture
+def _no_waiting(monkeypatch):
+    """Bound this test's time: the real delays are 1+3+5 seconds."""
+    monkeypatch.setattr(voz, "RETRY_DELAYS", (0.0, 0.0, 0.0))
+
+
+def test_deliver_retries_on_false_and_stops_on_true(_no_waiting):
+    calls = []
+
+    def inject(text, **kwargs):
+        calls.append(kwargs.get("session_key"))
+        return len(calls) >= 2
+
+    assert voz.deliver(inject, "hola") is True
+    assert len(calls) == 2
+    assert calls[0] == voz.JARVIS_SESSION_KEY
+
+
+def test_deliver_gives_up_after_the_last_delay(_no_waiting):
+    calls = []
+
+    def inject(text, **kwargs):
+        calls.append(text)
+        return False
+
+    assert voz.deliver(inject, "hola") is False
+    assert len(calls) == len(voz.RETRY_DELAYS)
+
+
+def test_an_injection_that_raises_costs_the_prompt_and_nothing_else(_no_waiting):
+    def inject(text, **kwargs):
+        raise RuntimeError("gateway going down")
+
+    assert voz.deliver(inject, "hola") is False
+
+
+def test_an_injection_that_raises_keeps_its_traceback(_no_waiting, capture_logs):
+    def inject(text, **kwargs):
+        raise TypeError("inject_message() got an unexpected keyword")
+
+    voz.deliver(inject, "hola")
+    logged = capture_logs.getvalue()
+    assert "la inyección falló" in logged
+    assert "Traceback (most recent call last)" in logged
+
+
+def test_the_closing_statement_asks_for_nothing():
+    """The bounded chain's ending is told, not asked.
+
+    A prompt that ended in a question would have JARVIS reopen a
+    conversation the bridge has already closed, and the user's answer
+    would reach nobody — the divert is not armed for it.
+    """
+    said = voz.prompt_for("closed", "Quitados los prints.")
+    assert "«Quitados los prints.»" in said
+    assert "no le preguntes nada" in said
+    assert said != voz.prompt_for("checkpoint", "Quitados los prints.")
+
+
+def test_the_voice_path_targets_the_jarvis_session():
+    """The other hand-written copy of the session key.
+
+    jarvis_vision/alert.py has had a test since it was written;
+    voz.py has not, and it injects on exactly the same key.
+    """
+    from Hermes.plugins.jarvis_code.voz import JARVIS_SESSION_KEY
+
+    assert JARVIS_SESSION_KEY == "agent:main:jarvis:dm:jarvis"

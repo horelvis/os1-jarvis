@@ -26,7 +26,7 @@ Run:
 **Observed side effect, worth knowing before you run this twice.**
 `web_search_tool` calls `_ensure_web_plugins_loaded()`, which triggers
 Hermes' own plugin discovery — ALL of it, not only the web providers.
-On this box that means `samantha_vision`'s `register()` runs too, which
+On this box that means `jarvis_vision`'s `register()` runs too, which
 starts its camera watcher threads against the house's real RTSP
 cameras, using whatever credentials `.env` provides. This script does
 not open a camera itself; discovery does, as a side effect of asking

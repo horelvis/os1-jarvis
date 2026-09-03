@@ -1,0 +1,351 @@
+"""The live session: one at a time, one way out, and a ceiling.
+
+Nothing here needs a camera, a gateway or a GPU. The fleet and the three
+pushes arrive as callables, the way `tool.py`'s tests already do it.
+
+One wrinkle, and it is the point of the class under test: the tap runs
+on the watcher thread and schedules onto the gateway's loop rather than
+awaiting directly (`live.py`'s docstring explains why). Most of these
+tests call the tap from OUTSIDE any running loop — the loop `open()`
+captured has already been closed by the time `asyncio.run()` returns —
+so `_schedule` finds a closed loop and returns without ever running the
+push. That is fine for tests that only check the synchronous side
+effects (`session.camera`, `session.expired`, `fleet.taps`). But
+`test_nothing_is_sent_before_the_first_keyframe` claims to prove frames
+actually arrive, so it drives the whole scenario — open, tap calls, and
+the assertions — inside one `asyncio.run()`, with `asyncio.sleep(0)`
+yields to let the scheduled coroutines actually run on the still-live
+loop. Anything less would be asserting on a push that was never given a
+chance to fire.
+"""
+
+import asyncio
+
+from Hermes.plugins.jarvis_vision.live import CEILING_SECONDS, LiveSession
+
+
+class _Fleet:
+    def __init__(self) -> None:
+        self.taps: dict[str, object] = {}
+
+    def set_tap(self, camera, tap):
+        self.taps[camera] = tap
+
+    def clear_tap(self, camera):
+        self.taps.pop(camera, None)
+
+
+class _Pushes:
+    def __init__(self, ok: bool = True) -> None:
+        self.ok = ok
+        self.opened: list[tuple] = []
+        self.frames: list[tuple] = []
+        self.closed: list[tuple] = []
+
+    async def open(self, camera, epoch, extradata, width, height):
+        self.opened.append((camera, epoch, extradata, width, height))
+        return self.ok
+
+    async def frame(self, epoch, packet):
+        self.frames.append((epoch, packet))
+        return self.ok
+
+    async def close(self, epoch, reason):
+        self.closed.append((epoch, reason))
+        return self.ok
+
+
+def _session(clock=None, ok=True):
+    fleet, pushes = _Fleet(), _Pushes(ok)
+    now = clock or (lambda: 0.0)
+    return (
+        LiveSession(fleet, pushes.open, pushes.frame, pushes.close, now=now),
+        fleet,
+        pushes,
+    )
+
+
+async def _drain() -> None:
+    """Let the loop actually run whatever `_schedule` just handed it.
+
+    `run_coroutine_threadsafe` queues a callback that creates a Task,
+    and the Task's first step is itself queued rather than run inline —
+    two separate round trips through the ready queue. One `sleep(0)`
+    only covers the first, so this yields a few times to be sure a
+    push that was scheduled has actually executed by the time we look.
+    """
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+def test_opening_installs_a_tap_and_announces_the_view():
+    session, fleet, pushes = _session()
+
+    assert asyncio.run(session.open("entrada", extradata=b"sps", size=(704, 480)))
+
+    assert session.camera == "entrada"
+    assert "entrada" in fleet.taps
+    assert pushes.opened == [("entrada", 1, b"sps", 704, 480)]
+
+
+def test_nothing_is_sent_before_the_first_keyframe():
+    async def scenario():
+        session, fleet, pushes = _session()
+        await session.open("entrada", extradata=b"", size=(704, 480))
+
+        fleet.taps["entrada"](b"delta-one", False)
+        fleet.taps["entrada"](b"delta-two", False)
+        await _drain()
+        assert pushes.frames == []
+
+        fleet.taps["entrada"](b"key", True)
+        fleet.taps["entrada"](b"delta-three", False)
+        await _drain()
+        assert [packet for _epoch, packet in pushes.frames] == [
+            b"key",
+            b"delta-three",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_closing_removes_the_tap_and_says_why():
+    session, fleet, pushes = _session()
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+
+    assert asyncio.run(session.close("asked"))
+
+    assert fleet.taps == {}
+    assert pushes.closed == [(1, "asked")]
+    assert session.camera is None
+
+
+def test_closing_twice_is_quiet_not_an_error():
+    session, _fleet, pushes = _session()
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+    asyncio.run(session.close("asked"))
+
+    assert asyncio.run(session.close("timeout")) is False
+    assert pushes.closed == [(1, "asked")]
+
+
+def test_the_epoch_never_repeats():
+    session, _fleet, pushes = _session()
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+    asyncio.run(session.close("asked"))
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+
+    assert [epoch for _c, epoch, *_rest in pushes.opened] == [1, 2]
+
+
+def test_opening_a_second_view_closes_the_first():
+    session, fleet, pushes = _session()
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+    asyncio.run(session.open("fuera", extradata=b"", size=(704, 480)))
+
+    assert pushes.closed == [(1, "asked")]
+    assert list(fleet.taps) == ["fuera"]
+
+
+def test_the_ceiling_closes_it():
+    clock = {"t": 0.0}
+    session, fleet, _pushes = _session(clock=lambda: clock["t"])
+    asyncio.run(session.open("entrada", extradata=b"", size=(704, 480)))
+    fleet.taps["entrada"](b"key", True)
+
+    clock["t"] = CEILING_SECONDS + 0.1
+    fleet.taps["entrada"](b"another", False)
+
+    assert session.expired is True
+
+
+def test_the_ceiling_actually_closes_the_session_on_a_live_loop():
+    """The synchronous flag is only half the claim — prove the close too.
+
+    `test_the_ceiling_closes_it` above calls the tap with no running
+    loop, so `_schedule` never gets to run `close("timeout")`; it only
+    proves the flag flips. Here the whole thing runs on one live loop,
+    with `_drain()` giving the scheduled close a chance to execute, so
+    this is the test that would fail if the ceiling stopped actually
+    closing anything.
+    """
+    clock = {"t": 0.0}
+
+    async def scenario():
+        session, fleet, pushes = _session(clock=lambda: clock["t"])
+        await session.open("entrada", extradata=b"", size=(704, 480))
+        fleet.taps["entrada"](b"key", True)
+        await _drain()
+
+        clock["t"] = CEILING_SECONDS + 0.1
+        fleet.taps["entrada"](b"another", False)
+        await _drain()
+
+        assert session.expired is True
+        assert session.camera is None
+        assert fleet.taps == {}
+        assert pushes.closed == [(1, "timeout")]
+
+    asyncio.run(scenario())
+
+
+def test_a_failed_open_leaves_no_session_behind():
+    session, fleet, _pushes = _session(ok=False)
+
+    assert asyncio.run(session.open("entrada", extradata=b"", size=(704, 480))) is False
+    assert session.camera is None
+    assert fleet.taps == {}
+
+
+def test_a_stale_camera_packet_is_dropped_after_a_switch():
+    """A tap is bound to the camera it was opened for — checked in
+    `_on_packet`, not read from `self.camera` at call time.
+
+    This is defence in depth on top of the `cameras.py` fix (Task 4 fix
+    round 1) that makes `set_tap`/`clear_tap` reach an already-running
+    stream immediately: even with that fixed, a packet from the OLD
+    camera can already be past the point in `_watch`'s demux loop where
+    it reads `self._taps`, so it can still call this tap after the
+    switch. Before the fix, `_on_packet` only checked `self.camera is
+    None` — nothing tied a packet to the camera it actually came from —
+    so a stale "entrada" packet arriving after switching to "fuera"
+    would be stamped with "fuera"'s epoch and pushed as if it belonged
+    to it.
+    """
+
+    async def scenario():
+        session, fleet, pushes = _session()
+        await session.open("entrada", extradata=b"", size=(704, 480))
+        stale_tap = fleet.taps["entrada"]
+
+        await session.open("fuera", extradata=b"", size=(704, 480))
+
+        # Simulate a packet from "entrada" that was already in flight
+        # when the switch happened, arriving on the OLD tap after
+        # "fuera" is current.
+        stale_tap(b"leftover-from-entrada", True)
+        await _drain()
+
+        assert pushes.frames == []
+
+    asyncio.run(scenario())
+
+
+def test_a_raising_open_is_swallowed_not_propagated():
+    """`open()` never raises at its caller — a view is never worth a turn.
+
+    `close()` already wraps its push in try/except (this module's own
+    docstring quotes the reason); `open()`'s push is awaited directly,
+    with nothing between it and whoever called `open()`. If that guard
+    were ever removed, this coroutine's exception would propagate
+    straight out of `session.open()` instead of coming back as `False`.
+    """
+
+    class _RaisingFleet(_Fleet):
+        pass
+
+    class _RaisingPushes(_Pushes):
+        async def open(self, camera, epoch, extradata, width, height):
+            raise RuntimeError("adapter socket gone")
+
+    fleet, pushes = _RaisingFleet(), _RaisingPushes()
+    session = LiveSession(fleet, pushes.open, pushes.frame, pushes.close)
+
+    assert asyncio.run(session.open("entrada", extradata=b"", size=(704, 480))) is False
+    assert session.camera is None
+    assert fleet.taps == {}
+
+
+# ── whose loop the frames are delivered on ────────────────────────────
+#
+# Measured on the live gateway, 2026-08-26: `open()` captured the loop
+# with `asyncio.get_running_loop()`, which is the loop of the TURN. That
+# loop stops running the moment the turn ends, so every frame after it
+# was queued onto a dead loop and never sent — the band opened at
+# 900x480, stayed empty, and never closed, because the ceiling is only
+# ever checked on a packet that arrives. The log line that found it read
+# `delivering on loop 7498a1292050 (running=False)`.
+#
+# The fix is that the session asks for the gateway's own loop, the one
+# the jarvis websocket handler runs on, and falls back to the running
+# one only when there is nobody to ask.
+
+
+def _loop_in_a_thread():
+    """A loop that keeps running after the 'turn' ends, like the gateway's."""
+    import threading
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    return loop, thread
+
+
+def test_frames_are_delivered_on_the_gateways_loop_not_the_turns():
+    import time as _time
+
+    sent: list[tuple[int, bytes]] = []
+
+    async def push_open(camera, epoch, extradata, width, height):
+        return True
+
+    async def push_frame(epoch, packet):
+        sent.append((epoch, packet))
+        return True
+
+    async def push_close(epoch, reason):
+        return True
+
+    gateway_loop, _thread = _loop_in_a_thread()
+    fleet = _Fleet()
+    session = LiveSession(
+        fleet,
+        push_open,
+        push_frame,
+        push_close,
+        loop_provider=lambda: gateway_loop,
+    )
+
+    # The turn: its own loop, which ends here and never runs again.
+    asyncio.run(session.open("entrada", extradata=b"sps", size=(640, 360)))
+
+    # The watcher thread, afterwards. This is the case production is in.
+    fleet.taps["entrada"](b"keyframe", True)
+    fleet.taps["entrada"](b"more", False)
+
+    deadline = _time.monotonic() + 2.0
+    while len(sent) < 2 and _time.monotonic() < deadline:
+        _time.sleep(0.01)
+
+    gateway_loop.call_soon_threadsafe(gateway_loop.stop)
+    assert [packet for _epoch, packet in sent] == [b"keyframe", b"more"]
+
+
+def test_with_nobody_to_ask_it_still_uses_the_running_loop():
+    # The provider returning None must not be worse than the old
+    # behaviour — a gateway that has not accepted a strip connection yet
+    # has no loop to offer, and the turn's is better than nothing.
+    async def scenario():
+        sent = []
+
+        async def push_open(camera, epoch, extradata, width, height):
+            return True
+
+        async def push_frame(epoch, packet):
+            sent.append(packet)
+            return True
+
+        async def push_close(epoch, reason):
+            return True
+
+        fleet = _Fleet()
+        session = LiveSession(
+            fleet, push_open, push_frame, push_close, loop_provider=lambda: None
+        )
+        await session.open("entrada", extradata=b"sps", size=(640, 360))
+        fleet.taps["entrada"](b"keyframe", True)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return sent
+
+    assert asyncio.run(scenario()) == [b"keyframe"]

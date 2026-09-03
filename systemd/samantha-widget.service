@@ -34,7 +34,7 @@ Environment=PYTHONNOUSERSITE=1
 
 # NO voice prompt here, and it cost a measurement to learn why.
 #
-# §2.6 describes `SAMANTHA_TTS_COSYVOICE_VOICE_PROMPT` as conditioning
+# §2.6 describes `JARVIS_TTS_COSYVOICE_VOICE_PROMPT` as conditioning
 # delivery, and the server does prepend it before <|endofprompt|>. But
 # the call is `inference_zero_shot`, where `prompt_text` must be the
 # TRANSCRIPT OF THE REFERENCE CLIP — that pairing is what the voice is

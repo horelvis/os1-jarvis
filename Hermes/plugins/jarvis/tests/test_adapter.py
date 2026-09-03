@@ -262,13 +262,11 @@ def test_fatal_error_survives_disconnect(tmp_path):
 
 
 def test_environment_variable_overrides_the_config_dict(tmp_path, monkeypatch):
-    # SAMANTHA_KIOSK_PORT is no longer what the manifest declares — that is
-    # JARVIS_PORT now (plugin.yaml). This test keeps SAMANTHA_KIOSK_PORT on
-    # purpose: it is the legacy fallback _env() still honours (adapter.py's
-    # _LEGACY_ENV) for a box nobody has re-exported the new name on yet, and
-    # it must still win over the config dict.
+    # JARVIS_PORT is what the manifest declares (plugin.yaml) and, since
+    # the clean cut of 2026-09-03, the only name there is. It must win
+    # over the config dict.
     del tmp_path
-    monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "0")
+    monkeypatch.setenv("JARVIS_PORT", "0")
 
     a = JarvisAdapter({"port": 9999})
 
@@ -563,8 +561,8 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
     # wire to explain it. Only the exported env vars were hiding this.
     monkeypatch.delenv("JARVIS_PORT", raising=False)
     monkeypatch.delenv("JARVIS_TURN_TIMEOUT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
+    monkeypatch.delenv("JARVIS_KIOSK_PORT", raising=False)
+    monkeypatch.delenv("JARVIS_KIOSK_TURN_TIMEOUT", raising=False)
 
     class FakePlatformConfig:
         """Shaped like gateway.config.PlatformConfig: settings live in .extra."""
@@ -580,8 +578,8 @@ def test_construction_survives_a_real_platform_config(tmp_path, monkeypatch):
 def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
     monkeypatch.delenv("JARVIS_PORT", raising=False)
     monkeypatch.delenv("JARVIS_TURN_TIMEOUT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_PORT", raising=False)
-    monkeypatch.delenv("SAMANTHA_KIOSK_TURN_TIMEOUT", raising=False)
+    monkeypatch.delenv("JARVIS_KIOSK_PORT", raising=False)
+    monkeypatch.delenv("JARVIS_KIOSK_TURN_TIMEOUT", raising=False)
 
     class Bare:
         enabled = True
@@ -594,7 +592,7 @@ def test_construction_survives_a_config_with_no_extra_at_all(monkeypatch):
 @pytest.fixture
 def spool(tmp_path, monkeypatch):
     """A snapshot directory with one real file in it."""
-    from Hermes.plugins.samantha_vision import snapshot
+    from Hermes.plugins.jarvis_vision import snapshot
 
     monkeypatch.setattr(snapshot, "_ROOT", tmp_path)
     path = tmp_path / "entrada-1000.jpg"
@@ -699,7 +697,7 @@ async def test_push_photo_refuses_a_symlink_loop_rather_than_raising(
     # symlink cycle on CPython. A cycle reachable inside the spool is our
     # own bug, not an attacker's input, but push_photo must never raise —
     # the gateway owns the cameras, and an exception here reaches it.
-    from Hermes.plugins.samantha_vision import snapshot
+    from Hermes.plugins.jarvis_vision import snapshot
 
     monkeypatch.setattr(snapshot, "_ROOT", tmp_path)
     loop_a = tmp_path / "loop_a"
@@ -985,19 +983,20 @@ def test_the_port_comes_from_the_new_variable(monkeypatch):
     assert JarvisAdapter(config={})._configured_port == 7801
 
 
-def test_the_old_variable_still_works(monkeypatch):
-    """A box that set SAMANTHA_KIOSK_PORT before 2026-08-28 keeps it.
+def test_the_old_variable_no_longer_works(monkeypatch):
+    """The clean cut of 2026-09-03: SAMANTHA_KIOSK_PORT is just a string now.
 
-    Nothing on this machine sets any of the four (verified 2026-08-28:
-    no unit, no drop-in), so this protects a box we cannot see rather
-    than this one.
+    It was honoured until then, to protect a box we could not see —
+    nothing on this machine ever set it (verified 2026-08-28: no unit,
+    no drop-in). The user chose a clean cut, so the old name falls
+    through to the default rather than being translated.
     """
     monkeypatch.delenv("JARVIS_PORT", raising=False)
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "7802")
-    assert JarvisAdapter(config={})._configured_port == 7802
+    assert JarvisAdapter(config={})._configured_port != 7802
 
 
-def test_the_new_variable_wins_over_the_old(monkeypatch):
+def test_the_new_variable_is_the_one_that_is_read(monkeypatch):
     monkeypatch.setenv("JARVIS_PORT", "7803")
     monkeypatch.setenv("SAMANTHA_KIOSK_PORT", "7804")
     assert JarvisAdapter(config={})._configured_port == 7803

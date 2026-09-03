@@ -62,7 +62,7 @@ def _resample_to_16k(pcm24: bytes) -> bytes:
 
 
 async def _synthesise(text: str) -> bytes:
-    from Hermes.plugins.samantha_voice import tts
+    from Hermes.plugins.jarvis_voice import tts
 
     client = tts.new_client()
     try:

@@ -1,7 +1,7 @@
 """The firehose payload shapes, against the fixture both sides read.
 
 The seam this closes: the bridge emits these payloads and the plugin
-(`Hermes/plugins/samantha_code`) renders them, in two processes with no
+(`Hermes/plugins/jarvis_code`) renders them, in two processes with no
 import across the gap and two test suites that each hand-wrote their own
 copy of the keys. A rename here broke only the tests here; the plugin
 stayed green against a shape nothing sent any more.

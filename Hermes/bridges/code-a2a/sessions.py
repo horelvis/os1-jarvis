@@ -27,7 +27,7 @@ DEFAULT_STORE = Path.home() / ".samantha" / "code-sessions.json"
 # A conversation nobody has continued in this long is not continued: it
 # is resumed into a context about something else entirely. Two days
 # keeps yesterday's work reachable and lets last month's go.
-MAX_AGE_SECONDS = float(os.environ.get("SAMANTHA_CODE_SESSION_MAX_AGE", "172800"))
+MAX_AGE_SECONDS = float(os.environ.get("JARVIS_CODE_SESSION_MAX_AGE", "172800"))
 
 
 class Sessions:

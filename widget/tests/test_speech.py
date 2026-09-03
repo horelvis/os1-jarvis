@@ -1,7 +1,7 @@
 """Where to cut her reply so CosyVoice sounds like a person, and what
 never to say out loud at all.
 
-The chunk sizes come from what samantha-voice already measured against
+The chunk sizes come from what jarvis-voice already measured against
 the live server (docs/…-samantha-on-hermes-design.md §3.1): very short
 clauses are synthesised badly, and a clause cut inside an expression
 marker hands CosyVoice an opening tag with no close.
@@ -234,7 +234,7 @@ async def test_a_clause_still_reaches_the_phone_once_route_home_fires_first(
     """
     import asyncio
 
-    from Hermes.plugins.samantha_voice import tts
+    from Hermes.plugins.jarvis_voice import tts
 
     from jarvis_widget.speech import Speaker
 
