@@ -4,9 +4,11 @@ No GTK in here, the way `photo.py` sits under `photo_area.py`.
 """
 
 from samantha_widget.ficha import (
+    CHARS_PER_LINEA,
     CORREGIDA_S,
     ESPERA_S,
     EXPLICACION_S,
+    LINEA,
     MAX_ALTO,
     FichaModel,
 )
@@ -82,3 +84,50 @@ def test_height_follows_the_content_and_is_capped() -> None:
 
 def test_a_press_with_nothing_up_changes_nothing() -> None:
     assert FichaModel().click(now=1.0) is False
+
+
+def test_long_paragraph_reserves_more_height_than_short_one() -> None:
+    """Text wrapping: a long paragraph should reserve more lines than a short one."""
+    m = FichaModel()
+    short = "Brief."
+    m.mostrar(f"## Title\n\n{short}", "pregunta", "", None, None, now=0.0)
+    short_height = m.height
+
+    long = "a" * (CHARS_PER_LINEA + 50)  # Force wrapping
+    m.mostrar(f"## Title\n\n{long}", "pregunta", "", None, None, now=1.0)
+    long_height = m.height
+
+    assert long_height > short_height
+
+
+def test_paragraph_at_wrap_boundary_wraps_correctly() -> None:
+    """Text at wrap boundary: exactly at limit wraps to 1 line, one char past wraps to 2."""
+    m = FichaModel()
+
+    # Exactly at the boundary should be 1 line
+    at_boundary = "x" * CHARS_PER_LINEA
+    m.mostrar(f"## Title\n\n{at_boundary}", "pregunta", "", None, None, now=0.0)
+    boundary_height = m.height
+
+    # One char past should wrap to 2 lines and be taller
+    past_boundary = "x" * (CHARS_PER_LINEA + 1)
+    m.mostrar(f"## Title\n\n{past_boundary}", "pregunta", "", None, None, now=1.0)
+    wrapped_height = m.height
+
+    assert wrapped_height > boundary_height
+    # One extra line of text = one extra LINEA
+    assert wrapped_height == boundary_height + LINEA
+
+
+def test_forty_line_card_still_clamps_to_max_alto() -> None:
+    """The 40-line card test still respects MAX_ALTO ceiling."""
+    m = FichaModel()
+    m.mostrar(
+        "## T\n\n" + "\n".join(f"- opción {i}" for i in range(40)),
+        "pregunta",
+        "",
+        None,
+        None,
+        now=0.0,
+    )
+    assert m.height <= MAX_ALTO

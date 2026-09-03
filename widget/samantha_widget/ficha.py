@@ -11,6 +11,8 @@ the user, and an explanation is not.
 
 from __future__ import annotations
 
+import math
+
 # A question or a plan waits this long and then gives up. There has to
 # be a way out that costs nothing: a strip left at four times its height
 # because nobody answered is worse than one that closes while you were
@@ -31,6 +33,15 @@ IMAGEN = 169
 # The same ceiling the live camera takes. Beyond this the strip stops
 # being a strip.
 MAX_ALTO = 480
+
+# Characters that fit on one line of body text in the card.
+# Estimated from the strip's 900 px width, minus side margins and padding,
+# at the card's body font size. This is an estimate: this file has no GTK
+# in it and cannot measure text. Headings are counted at this rate too and
+# are therefore slightly under-measured (they are bigger, so fewer characters
+# fit). The trade-off keeps the code simple and the underestimate is small
+# relative to the full card height.
+CHARS_PER_LINEA = 90
 
 
 class FichaModel:
@@ -61,9 +72,13 @@ class FichaModel:
             if desnuda.startswith("!["):
                 alto += IMAGEN
             elif desnuda.startswith("#"):
-                alto += ENCABEZADO
+                # Headings: count wrapped lines at the body text rate.
+                wrapped_lines = max(1, math.ceil(len(desnuda) / CHARS_PER_LINEA))
+                alto += wrapped_lines * ENCABEZADO
             else:
-                alto += LINEA
+                # Body text: account for wrapping over multiple lines.
+                wrapped_lines = max(1, math.ceil(len(desnuda) / CHARS_PER_LINEA))
+                alto += wrapped_lines * LINEA
         if self.fuente:
             alto += LINEA
         return min(MAX_ALTO, alto)
