@@ -232,7 +232,21 @@ def _apply_ficha_frame(
     calls, and the real one is imported lazily (it carries `gi`).
     """
     model.mostrar(md, tipo, fuente, correcta, elegida, now=now)
-    area.mostrar(md, tipo, fuente, correcta, elegida, model.height)
+    _dibujar_ficha(model, area)
+
+
+def _dibujar_ficha(model: "FichaModel", area) -> None:
+    """Draw whatever page the model is on, or nothing when it is empty."""
+    area.mostrar(
+        model.md_pagina,
+        model.tipo,
+        model.fuente,
+        model.correcta,
+        model.elegida,
+        model.height,
+        pagina=model.pagina,
+        paginas=model.paginas,
+    )
 
 
 def _apply_ficha_tick(model: "FichaModel", area, now: float) -> None:
@@ -245,13 +259,23 @@ def _apply_ficha_tick(model: "FichaModel", area, now: float) -> None:
     the same tick.
     """
     if model.tick(now=now):
-        area.mostrar("", "", "", None, None, 0)
+        _dibujar_ficha(model, area)
 
 
 def _apply_ficha_click(model: "FichaModel", area, now: float) -> None:
-    """A press on the card. The gesture a photo has had since August."""
-    if model.click(now=now):
-        area.mostrar("", "", "", None, None, 0)
+    """A press on the card: the next page, or away on the last one.
+
+    Redraws ALWAYS, unlike the tick. `FichaModel.click` returns whether
+    the strip's HEIGHT changed, which is what the window needs — but a
+    page turn changes the CONTENT whether or not the band resizes, and
+    two pages of the same length would otherwise leave the first one on
+    screen forever.
+    """
+    if not model.visible:
+        # Nothing up: a press on empty air is not a gesture at all.
+        return
+    model.click(now=now)
+    _dibujar_ficha(model, area)
 
 
 class VoskSwitch:

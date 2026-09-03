@@ -36,7 +36,7 @@ gi.require_version("WebKit", "6.0")
 from gi.repository import Gtk, WebKit  # noqa: E402
 
 from . import theme  # noqa: E402
-from .ficha_html import a_html  # noqa: E402
+from .ficha_html import POR_PAGINA, a_html  # noqa: E402
 
 
 class FichaArea(Gtk.Box):
@@ -79,11 +79,23 @@ class FichaArea(Gtk.Box):
         correcta: str | None,
         elegida: str | None,
         alto: int,
+        pagina: int = 0,
+        paginas: int = 1,
     ) -> None:
-        """Draw a card, or take it away when `md` is empty."""
+        """Draw one page of a card, or take it away when `md` is empty."""
         if md:
             self._vista.load_html(
-                a_html(md, tipo, fuente, correcta, elegida, css=theme.FICHA_CSS),
+                a_html(
+                    md,
+                    tipo,
+                    fuente,
+                    correcta,
+                    elegida,
+                    css=theme.FICHA_CSS,
+                    pagina=pagina,
+                    paginas=paginas,
+                    inicio=pagina * POR_PAGINA,
+                ),
                 None,
             )
         self.set_size_request(-1, alto if md else 0)

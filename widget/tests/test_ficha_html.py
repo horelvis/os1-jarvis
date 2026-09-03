@@ -92,3 +92,48 @@ def test_only_the_first_list_is_the_answer_set():
     # nobody can choose — the defect the previous renderer was fixed for.
     html = a_html("## ¿Cuál?\n\n- did\n- were\n\nY además:\n\n- una nota\n", "pregunta")
     assert html.count('class="opciones"') == 1
+
+
+def test_a_short_card_is_one_page():
+    from jarvis_widget.ficha_html import paginar
+
+    assert len(paginar("## ¿Cuál?\n\n- did\n- were\n- have\n")) == 1
+
+
+def test_eleven_points_become_three_pages_each_keeping_the_heading():
+    from jarvis_widget.ficha_html import paginar
+
+    md = "## Temario\n\n" + "\n".join(f"{i + 1}. Punto {i + 1}" for i in range(11))
+    paginas = paginar(md)
+    assert len(paginas) == 3
+    # A page that opens mid-list with no idea what the list is about is
+    # worse than one that spends a line saying so.
+    assert all(p.startswith("## Temario") for p in paginas)
+
+
+def test_no_point_is_split_between_two_pages():
+    from jarvis_widget.ficha_html import paginar
+
+    md = "## Temario\n\n" + "\n".join(f"{i + 1}. Punto {i + 1}" for i in range(11))
+    puntos = [
+        linea
+        for pagina in paginar(md)
+        for linea in pagina.splitlines()
+        if linea.strip() and not linea.startswith("#")
+    ]
+    assert puntos == [f"{i + 1}. Punto {i + 1}" for i in range(11)]
+
+
+def test_the_counter_only_appears_when_there_is_somewhere_to_go():
+    assert "1/1" not in a_html("x", "explicacion", paginas=1)
+    assert "2/3" in a_html("x", "explicacion", pagina=1, paginas=3)
+
+
+def test_the_numbering_carries_across_pages():
+    # Each page is its own document, so without an offset the second
+    # page of a syllabus numbers its sixth point "1." — the card telling
+    # the reader something untrue about where they are.
+    assert "counter-reset: opcion 5" in a_html(
+        "- x", "plan", pagina=1, paginas=3, inicio=5
+    )
+    assert "counter-reset: opcion 0" in a_html("- x", "plan")

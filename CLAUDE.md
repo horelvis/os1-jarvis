@@ -1250,10 +1250,16 @@ already installed. `markdown-it-py` was already present too.
   inlined, images as `data:` URIs read from the teacher's own spool.
   Every navigation after the first `load_html` is refused.
 - **And therefore no measuring.** WebKit cannot report its content
-  height without JavaScript. So the band takes one of two sizes —
-  200 or 380, ceiling 480 — and the content scrolls inside it. That is
-  the point rather than a concession: a band that cannot exceed its own
-  size cannot take the wave's pixels, which is the whole defect.
+  height without JavaScript. So the band takes one of two sizes — 200,
+  or 336 for a full page — and a card too long for that **pages**
+  rather than scrolling (the user, the same day: scrolling inside a
+  strip is something nobody discovers). A press turns the page and the
+  last one puts the card away, which is the gesture a photo has had
+  since August; the footer says `2/3` only when there is somewhere to
+  go, and the numbering carries across pages, because a second page
+  that renumbers its sixth point "1." is the card telling the reader
+  something untrue. 336 is measured off the strip, not derived: five
+  points, a heading and a footer.
 - **A second process.** WebKitGTK runs a web process of its own.
 - **A dependency**, `markdown-it-py`, declared in `widget/pyproject.toml`.
 

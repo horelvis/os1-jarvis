@@ -120,6 +120,46 @@ def _marcar_opciones(
     return "".join(salida)
 
 
+# Blocks per page, beyond the heading that every page repeats. Five is
+# what fits the band without scrolling, measured against the card's own
+# CSS: an option row is about forty pixels and the compact band is two
+# hundred. Paging exists because a syllabus of eleven points does not
+# fit and scrolling inside a strip is something nobody discovers.
+POR_PAGINA = 5
+
+
+def _bloques(md: str) -> list[str]:
+    """The card's Markdown, split into blocks a page can be built from.
+
+    A block is a heading, an image, a list item or a paragraph — one
+    line each, because that is what this card's Markdown is. A list item
+    is never split, which falls out of splitting by line rather than by
+    length.
+    """
+    return [linea for linea in (md or "").splitlines() if linea.strip()]
+
+
+def paginar(md: str, por_pagina: int = POR_PAGINA) -> list[str]:
+    """One card into its pages. Always at least one, even for nothing.
+
+    The heading is repeated on every page: a page that opens mid-list
+    with no idea what the list is about is worse than a page that costs
+    a line to say so.
+    """
+    bloques = _bloques(md)
+    if not bloques:
+        return [md or ""]
+    encabezado = bloques[0] if bloques[0].lstrip().startswith("#") else ""
+    cuerpo = bloques[1:] if encabezado else bloques
+    if len(cuerpo) <= por_pagina:
+        return [md]
+    paginas = []
+    for inicio in range(0, len(cuerpo), por_pagina):
+        trozo = cuerpo[inicio : inicio + por_pagina]
+        paginas.append("\n\n".join(([encabezado] if encabezado else []) + trozo))
+    return paginas
+
+
 def a_html(
     md: str,
     tipo: str,
@@ -128,6 +168,9 @@ def a_html(
     elegida: str | None = None,
     *,
     css: str = "",
+    pagina: int = 0,
+    paginas: int = 1,
+    inicio: int = 0,
 ) -> str:
     """One self-contained document. Never raises."""
     try:
@@ -137,9 +180,20 @@ def a_html(
         cuerpo = f"<pre>{escape(md or '')}</pre>"
     cuerpo = _inline_images(cuerpo)
     cuerpo = _marcar_opciones(cuerpo, tipo, correcta, elegida)
-    pie = f'<p class="fuente">{escape(fuente)}</p>' if fuente else ""
+    partes = []
+    if fuente:
+        partes.append(escape(fuente))
+    if paginas > 1:
+        # Only when there is somewhere to go: a "1/1" is noise.
+        partes.append(f"{pagina + 1}/{paginas}")
+    pie = f'<p class="fuente">{" · ".join(partes)}</p>' if partes else ""
+    # The counter has to carry across pages: each page is its own
+    # document, so without this the second page of a syllabus numbers
+    # its sixth point "1." — which is not a cosmetic slip, it is the
+    # card telling the reader something untrue about where they are.
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<style>{css}</style></head>"
-        f"<body class='{escape(tipo)}'>{cuerpo}{pie}</body></html>"
+        f"<body class='{escape(tipo)}' style='counter-reset: opcion {inicio}'>"
+        f"{cuerpo}{pie}</body></html>"
     )

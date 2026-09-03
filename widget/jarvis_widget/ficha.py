@@ -37,7 +37,11 @@ CORREGIDA_S = 6.0
 # which is what he IS, out of the strip. A band that cannot exceed its
 # own size cannot do that.
 COMPACTA = 200
-AMPLIA = 380
+# A full page — a heading, five points and the footer — measured on the
+# strip at 334 px. Rounded up by two, because a band two pixels too tall
+# shows a sliver of desktop and a band two pixels too short clips the
+# footer, and only one of those is recoverable by looking again.
+AMPLIA = 336
 # Beyond this the strip stops being a strip. The live camera's ceiling.
 MAX_ALTO = 480
 # Blocks above which a card gets the taller band. Counted, not measured:
@@ -55,10 +59,27 @@ class FichaModel:
         self.correcta: str | None = None
         self.elegida: str | None = None
         self._since = 0.0
+        # Which page is up, and how many there are. A card of eleven
+        # syllabus points does not fit the band, and scrolling inside a
+        # strip is something nobody discovers, so it pages instead: a
+        # press advances, the last one puts it away.
+        self.pagina = 0
+        self._paginas: list[str] = []
 
     @property
     def visible(self) -> bool:
         return bool(self.md)
+
+    @property
+    def paginas(self) -> int:
+        return max(1, len(self._paginas))
+
+    @property
+    def md_pagina(self) -> str:
+        """The Markdown of the page that is up. What gets drawn."""
+        if not self._paginas:
+            return self.md
+        return self._paginas[min(self.pagina, len(self._paginas) - 1)]
 
     @property
     def height(self) -> int:
@@ -71,7 +92,7 @@ class FichaModel:
         """
         if not self.md:
             return 0
-        bloques = sum(1 for linea in self.md.splitlines() if linea.strip())
+        bloques = sum(1 for linea in self.md_pagina.splitlines() if linea.strip())
         alto = COMPACTA if bloques <= BLOQUES_COMPACTOS else AMPLIA
         return min(MAX_ALTO, alto)
 
@@ -86,8 +107,14 @@ class FichaModel:
         now: float,
     ) -> bool:
         """A card arrived. True when the strip has to change size."""
+        from .ficha_html import paginar
+
         before = self.height
         self.md = md
+        # A correction goes back to the first page: the options are
+        # there, and only a syllabus is long enough to page at all.
+        self._paginas = paginar(md) if md else []
+        self.pagina = 0
         self.tipo = tipo
         self.fuente = fuente
         self.correcta = correcta
@@ -96,9 +123,20 @@ class FichaModel:
         return self.height != before
 
     def click(self, *, now: float) -> bool:
-        """A press puts it away — the gesture a photo has had since August."""
+        """A press: the next page, or away if this was the last one.
+
+        True when the strip has to change size — which a page turn can
+        do, since a short last page needs a smaller band than a full
+        one. Turning a page restarts the clock: reading is interest,
+        and a card should not expire under somebody's eyes.
+        """
         if not self.md:
             return False
+        if self.pagina + 1 < self.paginas:
+            before = self.height
+            self.pagina += 1
+            self._since = now
+            return self.height != before
         return self._cerrar()
 
     def tick(self, *, now: float) -> bool:
@@ -117,6 +155,8 @@ class FichaModel:
 
     def _cerrar(self) -> bool:
         before = self.height
+        self._paginas = []
+        self.pagina = 0
         self.md = ""
         self.tipo = ""
         self.fuente = ""

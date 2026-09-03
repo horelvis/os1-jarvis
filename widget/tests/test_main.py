@@ -589,9 +589,13 @@ async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):
 class FakeFichaArea:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.pages: list[tuple[int, int]] = []
 
-    def mostrar(self, md, tipo, fuente, correcta, elegida, alto) -> None:
+    def mostrar(
+        self, md, tipo, fuente, correcta, elegida, alto, pagina=0, paginas=1
+    ) -> None:
         self.calls.append((md, tipo, fuente, correcta, elegida, alto))
+        self.pages.append((pagina, paginas))
 
 
 def test_a_ficha_frame_updates_the_model_and_draws_it() -> None:
@@ -654,3 +658,34 @@ def test_a_press_with_nothing_up_touches_the_area_not_at_all() -> None:
     _apply_ficha_click(model, area, now=1.0)
 
     assert area.calls == []
+
+
+def test_a_press_on_a_long_card_turns_the_page_instead_of_closing_it() -> None:
+    # Eleven syllabus points: three pages. The first two presses have to
+    # advance and redraw — a page turn changes the CONTENT even when the
+    # band is the same height, and `FichaModel.click` reports only
+    # whether the HEIGHT changed.
+    model = FichaModel()
+    area = FakeFichaArea()
+    md = "## Temario\n\n" + "\n".join(f"{i + 1}. Punto {i + 1}" for i in range(11))
+    model.mostrar(md, "plan", "", None, None, now=0.0)
+
+    _apply_ficha_click(model, area, now=1.0)
+
+    assert model.visible
+    assert model.pagina == 1
+    assert area.pages[-1] == (1, 3)
+    assert "Punto 6" in area.calls[-1][0]
+
+
+def test_the_last_press_is_the_one_that_puts_it_away() -> None:
+    model = FichaModel()
+    area = FakeFichaArea()
+    md = "## Temario\n\n" + "\n".join(f"{i + 1}. Punto {i + 1}" for i in range(11))
+    model.mostrar(md, "plan", "", None, None, now=0.0)
+
+    for instante in (1.0, 2.0, 3.0):
+        _apply_ficha_click(model, area, now=instante)
+
+    assert not model.visible
+    assert area.calls[-1] == ("", "", "", None, None, 0)

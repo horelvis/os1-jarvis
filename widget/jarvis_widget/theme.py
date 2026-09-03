@@ -183,6 +183,10 @@ FICHA_CSS = f"""
          margin: 0 0 10px 0; }}
   ul, ol {{ margin: 0; padding: 0; list-style: none; }}
   li {{ margin: 0 0 9px 0; }}
+  /* markdown-it wraps a list item in <p> when the list is "loose" —
+     items separated by blank lines, which is what a paginated card
+     produces. A block there puts the counter on its own line. */
+  li p {{ display: inline; margin: 0; }}
 
   /* The answer set. Lettered for a question — "la b" spoken out loud
      needs something on screen to point at — and numbered for a
