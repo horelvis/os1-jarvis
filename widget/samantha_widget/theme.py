@@ -137,6 +137,45 @@ window decoration {{
   opacity: 0.35;
 }}
 
+.samantha-ficha {{
+  background-color: rgba(20, 12, 14, 0.92);
+  margin: 0 16px 6px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(209, 104, 78, 0.35);
+  padding: 18px;
+}}
+
+.samantha-ficha-encabezado {{
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 27px;
+  color: #f2ece9;
+}}
+
+.samantha-ficha-parrafo {{
+  font-family: "Inter Tight", sans-serif;
+  font-size: 14px;
+  color: #d8ccc6;
+}}
+
+.samantha-ficha-opcion {{
+  font-family: "Inter Tight", sans-serif;
+  font-size: 15px;
+  color: #e6dcd7;
+}}
+
+/* One colour, not two: §1.3 allows one, so a right answer is terracotta
+   and a wrong one is simply dimmer. Green and red would be a second and
+   a third. */
+.samantha-ficha-correcta {{ color: {TERRACOTTA}; font-weight: 600; }}
+.samantha-ficha-fallada {{ color: #8b7a74; text-decoration: line-through; }}
+.samantha-ficha-apagada {{ color: #6f605b; }}
+
+.samantha-ficha-fuente {{
+  font-family: "Inter Tight", sans-serif;
+  font-size: 11px;
+  color: #7d6b65;
+}}
+
 """
 
 
