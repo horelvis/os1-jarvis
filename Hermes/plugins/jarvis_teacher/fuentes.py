@@ -27,8 +27,11 @@ from loguru import logger
 
 from .curso import Curso
 
-# What one source contributes at most. A cap on what enters the model's
-# context, not a cap on the file: the whole text is kept on disk.
+# What one source contributes at most, applied BEFORE the text is
+# written to disk. Anything past this point is never stored, so it is
+# not merely kept out of the model's context — it cannot be found by
+# `pasajes` either. The hash taken below is of the truncated text, so
+# the file and its hash always agree on what the source actually held.
 MAX_CARACTERES = 20_000
 # A passage handed back for one concept.
 PASAJE = 1_200
@@ -102,14 +105,21 @@ class Base:
         self._raiz = Path(raiz)
         self._buscar = buscar
         self._traer = traer
+        # A search result's real title, remembered by url so `construir`
+        # can cite it later instead of a bare host — the whole payoff
+        # of "the material came from Cambridge B1, sample paper 2"
+        # rather than from a model's memory.
+        self._titulos: dict[str, str] = {}
 
     def candidatos(self, curso_id: int, tema: str) -> list[Resultado]:
         """Search, and keep only titles and links. Nothing is downloaded."""
         try:
-            return list(self._buscar(tema))
+            resultados = list(self._buscar(tema))
         except Exception as exc:  # noqa: BLE001 — a search must not crash the tool
             logger.warning(f"jarvis-teacher: la búsqueda falló: {exc}")
             return []
+        self._titulos.update({r.url: r.titulo for r in resultados})
+        return resultados
 
     def aprobar_dominios(
         self, curso_id: int, urls: list[str], *, now: float
@@ -164,11 +174,12 @@ class Base:
             firma = hashlib.sha256(texto.encode("utf-8")).hexdigest()
             destino = directorio / f"{firma[:16]}.txt"
             destino.write_text(texto, encoding="utf-8")
+            titulo = self._titulos.get(url, host_de(url))
             with self.curso.conexion() as db:
                 db.execute(
                     "INSERT INTO fuente (curso, url, titulo, traida_en, hash, archivo) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (curso_id, url, host_de(url), now, firma, str(destino)),
+                    (curso_id, url, titulo, now, firma, str(destino)),
                 )
             traidas += 1
         return traidas
@@ -183,7 +194,15 @@ class Base:
         does not need one — the base is a handful of pages, not a
         corpus.
         """
-        terminos = [t for t in re.split(r"\W+", concepto.lower()) if len(t) > 2]
+        # Longer than two characters, OR carrying a digit — the second
+        # clause is what admits CEFR levels ("B1", "A2", "C1") without
+        # readmitting Spanish two-letter stopwords ("de", "la", "el"),
+        # which would otherwise outscore the concept they surround.
+        terminos = [
+            t
+            for t in re.split(r"\W+", concepto.lower())
+            if len(t) > 2 or any(c.isdigit() for c in t)
+        ]
         with self.curso.conexion() as db:
             filas = db.execute(
                 "SELECT titulo, archivo FROM fuente WHERE curso = ?", (curso_id,)

@@ -98,3 +98,65 @@ def test_html_is_reduced_to_text() -> None:
 
 def test_the_host_is_what_is_approved() -> None:
     assert host_de("https://www.cambridgeenglish.org/b1?x=1") == "cambridgeenglish.org"
+
+
+def test_pasajes_finds_a_cefr_level_by_its_two_character_code(tmp_path: Path) -> None:
+    """B1, A2, C1 are the driving example of the whole plan — they must not
+    be filtered out as if they were noise."""
+    curso = Curso(tmp_path / "curso.db")
+
+    def traer(url: str) -> str:
+        return "<p>Prepárate para el examen B1 Preliminary de Cambridge.</p>"
+
+    base = Base(curso, tmp_path / "f", buscar=lambda _q: [], traer=traer)
+    cid = curso.abrir("t", now=1.0)
+    urls = ["https://a.com/x"]
+    base.aprobar_dominios(cid, urls, now=1.0)
+    base.construir(cid, urls, now=1.0)
+    pasajes = base.pasajes(cid, "B1 Preliminary")
+    assert pasajes
+    assert "b1" in pasajes[0][1].lower()
+
+
+def test_pasajes_a_stopword_only_concept_scores_nothing(tmp_path: Path) -> None:
+    """ "de", "la", "el" are two letters too, but they are noise, not levels."""
+    curso = Curso(tmp_path / "curso.db")
+
+    def traer(url: str) -> str:
+        return "<p>Prepárate para el examen B1 Preliminary de Cambridge.</p>"
+
+    base = Base(curso, tmp_path / "f", buscar=lambda _q: [], traer=traer)
+    cid = curso.abrir("t", now=1.0)
+    urls = ["https://a.com/x"]
+    base.aprobar_dominios(cid, urls, now=1.0)
+    base.construir(cid, urls, now=1.0)
+    assert base.pasajes(cid, "de la el") == []
+
+
+def test_construir_remembers_the_real_title_from_candidatos(tmp_path: Path) -> None:
+    """The card cites its source at the foot — that citation is the payoff
+    of this feature, and a bare hostname is a weaker claim than the real
+    title `candidatos` already had and threw away."""
+    curso = Curso(tmp_path / "curso.db")
+
+    def buscar(consulta: str) -> list[Resultado]:
+        return [
+            Resultado(
+                "https://cambridgeenglish.org/b1",
+                "Cambridge B1 Preliminary, sample paper 2",
+                "resumen",
+            )
+        ]
+
+    def traer(url: str) -> str:
+        return "<p>The present perfect is used for experience.</p>"
+
+    base = Base(curso, tmp_path / "f", buscar=buscar, traer=traer)
+    cid = curso.abrir("t", now=1.0)
+    base.candidatos(cid, "B1")
+    urls = ["https://cambridgeenglish.org/b1"]
+    base.aprobar_dominios(cid, urls, now=1.0)
+    base.construir(cid, urls, now=1.0)
+    pasajes = base.pasajes(cid, "present perfect")
+    assert pasajes
+    assert pasajes[0][0] == "Cambridge B1 Preliminary, sample paper 2"
