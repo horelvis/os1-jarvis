@@ -12,6 +12,7 @@ that goes quiet.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -83,7 +84,7 @@ class Aula:
             if not tema:
                 curso_id = self._curso.ultimo_abierto()
                 if curso_id is None:
-                    return "No hay ningún curso abierto. Dime qué quieres estudiar."
+                    return "No hay ningún curso abierto. Dígame qué quiere estudiar."
                 self._curso.empezar_sesion(curso_id, now=now)
                 return self._curso.hoja(curso_id)
 
@@ -96,14 +97,19 @@ class Aula:
             if not candidatos:
                 return (
                     "No he encontrado material con el que montar el temario, "
-                    "así que no me lo invento. Prueba a decírmelo de otra manera."
+                    "así que no me lo invento. Pruebe a decírmelo de otra manera."
                 )
             self._candidatos[curso_id] = [c.url for c in candidatos]
             listado = "\n".join(f"- {c.titulo} ({c.url})" for c in candidatos)
+            # What the model is told to do next says what to DO and
+            # never names the tool that does it: this text can be
+            # relayed out loud, and §1 says he never performs using his
+            # tools.
             return (
                 f"Curso nuevo: {tema}.\nFuentes candidatas:\n{listado}\n"
-                "Propón un temario en una lista y llama a planificar; "
-                "las fuentes se descargan sólo cuando él apruebe."
+                "Propón un temario en una lista, un punto por línea, y guárdalo "
+                "para que él lo vea; las fuentes no se descargan hasta que él lo "
+                "apruebe."
             )
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
             logger.warning(f"jarvis-teacher: ensename falló: {exc}")
@@ -136,11 +142,25 @@ class Aula:
         the honest answer is to ask for the proposal again — never to
         search or fetch here to paper over it, and never to approve
         while sounding as if material was found.
+
+        And never a plan the user has not seen. The plan card is what
+        puts the candidate domains in front of a person, and that is the
+        whole of what the two-step opening buys: `ensename(...)` then
+        `aprobar()` inside one model turn would otherwise fetch every
+        candidate page — into the context of an agent holding
+        `terminal` — with no card ever drawn and nobody having said a
+        word in between. The check comes BEFORE anything is fetched, or
+        it would be a check of nothing.
         """
         try:
             curso_id = self._curso.ultimo_abierto()
             if curso_id is None:
                 return "No hay curso abierto que aprobar."
+            if not self._curso.tiene_plan(curso_id):
+                return (
+                    "Todavía no hay temario que aprobar, señor. Le propongo uno "
+                    "primero y, cuando lo tenga delante, lo damos por bueno."
+                )
             now = time.time()
             urls = self._candidatos.get(curso_id, [])
             if urls:
@@ -150,8 +170,8 @@ class Aula:
             elif not self._tiene_fuentes(curso_id):
                 return (
                     "No recuerdo qué fuentes había propuesto para este curso, "
-                    "así que no voy a darlo por bueno sin nada detrás. Dime otra "
-                    "vez de qué querías el curso y buscamos material de nuevo."
+                    "así que no voy a darlo por bueno sin nada detrás. Dígame otra "
+                    "vez de qué quería el curso y buscamos material de nuevo."
                 )
             primero = self._curso.aprobar_plan(curso_id, now=now)
             return (
@@ -176,6 +196,33 @@ class Aula:
                 "SELECT 1 FROM fuente WHERE curso = ? LIMIT 1", (curso_id,)
             ).fetchone()
         return bool(fila)
+
+    def _abandonar_abierta(self) -> None:
+        """Settle the question on screen as unanswered, and forget it.
+
+        A second `preguntar` while one is open replaces it (the design's
+        own rule), and `terminar` closes the class with whatever was up.
+        Either way that row would otherwise keep `elegida` and `acierto`
+        NULL for ever — an open question that can never be answered,
+        counted as practice in the fact sheet he reads out loud.
+
+        Unanswered, NOT wrong: the row is marked `abandonada` rather
+        than scored 0, because counting it as a miss would poison the
+        list of weak concepts, which is what everything else rests on.
+        """
+        abierta = self._abierta
+        self._abierta = None
+        if not abierta or not abierta.get("id"):
+            return
+        try:
+            with self._curso.conexion() as db:
+                db.execute(
+                    "UPDATE pregunta SET abandonada = 1 WHERE id = ? "
+                    "AND elegida IS NULL",
+                    (abierta["id"],),
+                )
+        except Exception as exc:  # noqa: BLE001 — bookkeeping must not cost the turn
+            logger.warning(f"jarvis-teacher: no se pudo cerrar la pregunta: {exc}")
 
     def _ultimo_dado(self, curso_id: int) -> str:
         """The concept most recently marked taught, straight from disk.
@@ -271,8 +318,16 @@ class Aula:
             if curso_id is None:
                 return "No hay curso abierto."
             md = str((args or {}).get("ficha") or "")
-            correcta = str((args or {}).get("correcta") or "").strip().lower()
+            dicha = str((args or {}).get("correcta") or "").strip().lower()
             opciones = lista(md)
+            # The stored answer goes through exactly the same
+            # normalisation the spoken one does, and it is normalised
+            # HERE so that what is on disk is already a bare letter.
+            # Without this, a model writing "b.", "opción b" or the
+            # option's own words made every answer score wrong: he said
+            # "No: la correcta era la b." out loud, the card marked
+            # nothing right, and the concept was filed 'a repasar'.
+            correcta = self._letra(dicha, opciones) if opciones else ""
             if not opciones or not correcta:
                 return (
                     "Repite la pregunta con las opciones en una lista "
@@ -290,16 +345,12 @@ class Aula:
             # source its passage cited, and inventing one would be worse
             # than citing nothing.
             fuente = self._fuente_actual if self._concepto_actual else ""
-            self._abierta = {
-                "curso": curso_id,
-                "concepto": concepto,
-                "fuente": fuente,
-                "md": md,
-                "opciones": opciones,
-                "correcta": correcta,
-            }
+            # A question this one replaces is settled as unanswered
+            # BEFORE the new row exists, so the two can never be
+            # confused for one another.
+            self._abandonar_abierta()
             with self._curso.conexion() as db:
-                db.execute(
+                cursor = db.execute(
                     "INSERT INTO pregunta "
                     "(curso, concepto, md, opciones, correcta, fuente, hecha_en) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -313,6 +364,19 @@ class Aula:
                         time.time(),
                     ),
                 )
+                fila_id = int(cursor.lastrowid or 0)
+            self._abierta = {
+                "curso": curso_id,
+                "concepto": concepto,
+                "fuente": fuente,
+                "md": md,
+                "opciones": opciones,
+                "correcta": correcta,
+                # The row this question is, captured at insert.
+                # `responder` used to update `MAX(id)` instead, which is
+                # the same row only while nothing else has been asked.
+                "id": fila_id,
+            }
             await self._dibujar(md, "pregunta", fuente=fuente)
             return "Pregunta hecha. Espero su respuesta."
         except Exception as exc:  # noqa: BLE001 — a handler must not cost the turn
@@ -332,9 +396,8 @@ class Aula:
             acierto = elegida == correcta
             with self._curso.conexion() as db:
                 db.execute(
-                    "UPDATE pregunta SET elegida = ?, acierto = ? WHERE id = "
-                    "(SELECT MAX(id) FROM pregunta WHERE curso = ?)",
-                    (elegida, 1 if acierto else 0, self._abierta["curso"]),
+                    "UPDATE pregunta SET elegida = ?, acierto = ? WHERE id = ?",
+                    (elegida, 1 if acierto else 0, self._abierta["id"]),
                 )
             if self._abierta["concepto"]:
                 self._curso.registrar_respuesta(
@@ -366,7 +429,7 @@ class Aula:
             curso_id = self._curso.ultimo_abierto()
             if curso_id is None:
                 return "No hay clase que cerrar."
-            self._abierta = None
+            self._abandonar_abierta()
             self._concepto_actual = ""
             self._fuente_actual = ""
             with self._curso.conexion() as db:
@@ -398,6 +461,12 @@ class Aula:
         option can itself contain an ordinal word ("la segunda
         derivada"), and naming that option by its own words must not be
         read as the bare ordinal for a different option.
+
+        And it matches on WHOLE WORDS, never on a bare substring. The
+        case that forced it is the archetypal B1 article question,
+        options `a` / `an` / `the`: "la tercera" contains the letters of
+        option `a` inside "tercera", so a substring match answered 'a'
+        to a person who had clearly said the third one.
         """
         limpio_dicho = dicho.strip(" .,;:!?¡¿")
         letras = [chr(97 + i) for i in range(len(opciones))]
@@ -408,11 +477,13 @@ class Aula:
         mejor_longitud, mejor_letra = 0, ""
         for indice, opcion in enumerate(opciones):
             limpio_opcion = opcion.strip("*_` ").lower()
-            if (
-                limpio_opcion
-                and limpio_opcion in limpio_dicho
-                and len(limpio_opcion) > mejor_longitud
-            ):
+            if not limpio_opcion or len(limpio_opcion) <= mejor_longitud:
+                continue
+            # Lookarounds rather than `\b`, because an option may begin
+            # or end with something that is not a word character ("¿qué?",
+            # "'ll") and `\b` then anchors against the wrong side.
+            patron = rf"(?<!\w){re.escape(limpio_opcion)}(?!\w)"
+            if re.search(patron, limpio_dicho):
                 mejor_longitud, mejor_letra = len(limpio_opcion), letras[indice]
         if mejor_letra:
             return mejor_letra

@@ -206,3 +206,192 @@ def test_responder_understands_a_spoken_ordinal(aula) -> None:
     asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
     salida = asyncio.run(aula.responder({"elegida": "la segunda"}))
     assert "correcta" in salida.lower()
+
+
+# ── final review: scoring, and what a card is worth if it scores wrong ──
+
+
+def test_the_stored_answer_is_normalised_the_way_the_spoken_one_is(aula) -> None:
+    """The model writes "b."; the person says "la b". Both are 'b'.
+
+    Untouched, `correcta` was compared raw against a normalised
+    `elegida`, so EVERY answer scored wrong: he said "No: la correcta
+    era la b." out loud, the card marked nothing right, and the concept
+    was filed 'a repasar'.
+    """
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b."}))
+    salida = asyncio.run(aula.responder({"elegida": "la b"}))
+    assert salida == "Respuesta correcta."
+    _tipo, _md, kw = aula.recogido[-1]
+    assert (kw["correcta"], kw["elegida"]) == ("b", "b")
+
+
+def test_the_stored_answer_may_be_the_options_own_words(aula) -> None:
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "were"}))
+    salida = asyncio.run(aula.responder({"elegida": "la segunda"}))
+    assert salida == "Respuesta correcta."
+    with aula._curso.conexion() as db:
+        guardada = db.execute(
+            "SELECT correcta FROM pregunta ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
+    assert guardada == "b"
+
+
+def test_a_correct_answer_nobody_can_read_asks_for_the_card_again(aula) -> None:
+    antes = len(aula.recogido)
+    salida = asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "ninguna"}))
+    assert len(aula.recogido) == antes
+    assert "lista" in salida.lower()
+
+
+def test_an_option_that_is_a_word_inside_another_never_matches(aula) -> None:
+    """The archetypal B1 article question: options `a` / `an` / `the`.
+
+    "la tercera" contains the letters of option `a` inside "tercera",
+    and a bare substring match answered 'a' to somebody who had said
+    the third one.
+    """
+    opciones = ["a", "an", "the"]
+    assert Aula._letra("la tercera", opciones) == "c"
+    assert Aula._letra("la segunda", opciones) == "b"
+
+
+def test_an_options_own_words_still_win_inside_a_longer_sentence(aula) -> None:
+    """Whole words, not whole utterances: he answers in a sentence."""
+    opciones = ["did", "were", "have"]
+    assert Aula._letra("pues yo diría que were, señor", opciones) == "b"
+
+
+def test_aprobar_refuses_a_course_that_has_no_plan_and_fetches_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`ensename` then `aprobar` inside one model turn, with no plan.
+
+    The plan card is what puts the candidate domains in front of a
+    person; without one, approving would fetch every page into the
+    context of an agent holding `terminal` with nobody having seen a
+    thing.
+    """
+    monkeypatch.setenv("JARVIS_TEACHER_HOME", str(tmp_path))
+    curso = Curso(tmp_path / "curso.db")
+    traidas: list[str] = []
+
+    def traer(url: str) -> str:
+        traidas.append(url)
+        return "<p>lo que sea</p>"
+
+    base = Base(
+        curso,
+        tmp_path / "f",
+        buscar=lambda _q: [Resultado("https://x.org/a", "A", "r")],
+        traer=traer,
+    )
+
+    async def push(md: str, tipo: str, **kw):
+        return True
+
+    aula = Aula(curso, base, push_ficha=push)
+    asyncio.run(aula.ensename({"tema": "B1"}))
+    salida = asyncio.run(aula.aprobar({}))
+
+    curso_id = curso.ultimo_abierto()
+    assert curso_id is not None
+    assert not curso.plan_aprobado(curso_id)
+    assert traidas == []
+    assert "aprobado" not in salida.lower()
+
+
+def test_a_replaced_question_is_settled_as_unanswered(aula) -> None:
+    """A second `preguntar` while one is open orphaned the first row.
+
+    `elegida` and `acierto` stayed NULL for ever, and the fact sheet
+    counted it as practice — the denominator he reads out loud.
+    """
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "a"}))
+    asyncio.run(aula.responder({"elegida": "a"}))
+
+    with aula._curso.conexion() as db:
+        filas = db.execute(
+            "SELECT abandonada, elegida, acierto FROM pregunta ORDER BY id"
+        ).fetchall()
+    assert filas[0] == (1, None, None)
+    assert filas[1] == (0, "a", 1)
+    assert "Practicado con material real: 0 preguntas de 1." in aula._curso.hoja(
+        aula._curso.ultimo_abierto()
+    )
+
+
+def test_responder_corrects_its_own_row_not_the_newest_one(aula) -> None:
+    """The row is captured at insert, not looked up as `MAX(id)`."""
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    abierta = dict(aula._abierta or {})
+    # Something else lands in the table after the open question.
+    with aula._curso.conexion() as db:
+        db.execute(
+            "INSERT INTO pregunta (curso, concepto, md, opciones, correcta, hecha_en) "
+            "VALUES (?, 'otro', 'q', 'a,b', 'a', 9999.0)",
+            (abierta["curso"],),
+        )
+    asyncio.run(aula.responder({"elegida": "la b"}))
+    with aula._curso.conexion() as db:
+        elegida_suya = db.execute(
+            "SELECT elegida FROM pregunta WHERE id = ?", (abierta["id"],)
+        ).fetchone()[0]
+        elegida_ajena = db.execute(
+            "SELECT elegida FROM pregunta WHERE concepto = 'otro'"
+        ).fetchone()[0]
+    assert elegida_suya == "b"
+    assert elegida_ajena is None
+
+
+def test_terminar_settles_a_question_left_open(aula) -> None:
+    asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
+    asyncio.run(aula.terminar({}))
+    with aula._curso.conexion() as db:
+        abandonada = db.execute(
+            "SELECT abandonada FROM pregunta ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
+    assert abandonada == 1
+
+
+def test_he_speaks_to_the_user_as_usted(tmp_path: Path, monkeypatch) -> None:
+    """`jarvis-soul.md` is usted and "señor"; three of these tuteaban.
+
+    And what `ensename` hands the model must not name a tool: the text
+    can be relayed out loud, and §1 says he never performs using his
+    tools.
+    """
+    monkeypatch.setenv("JARVIS_TEACHER_HOME", str(tmp_path))
+    curso = Curso(tmp_path / "curso.db")
+    sin_nada = Base(curso, tmp_path / "f", buscar=lambda _q: [], traer=lambda _u: "")
+    con_algo = Base(
+        curso,
+        tmp_path / "f",
+        buscar=lambda _q: [Resultado("https://x.org/a", "A", "r")],
+        traer=lambda _u: "<p>x</p>",
+    )
+
+    async def push(md: str, tipo: str, **kw):
+        return True
+
+    # No course open at all.
+    vacia = asyncio.run(Aula(curso, sin_nada, push_ficha=push).ensename({}))
+    assert "Dígame qué quiere estudiar" in vacia
+
+    # A search that brings nothing back.
+    nada = asyncio.run(Aula(curso, sin_nada, push_ficha=push).ensename({"tema": "x"}))
+    assert "Pruebe a decírmelo" in nada
+
+    # The candidates, and the instruction that goes with them.
+    ofrecidas = asyncio.run(
+        Aula(curso, con_algo, push_ficha=push).ensename({"tema": "y"})
+    )
+    assert "planificar" not in ofrecidas
+
+    # A plan whose candidates the process has forgotten.
+    curso_id = curso.ultimo_abierto()
+    assert curso_id is not None
+    curso.proponer_plan(curso_id, ["Uno"], now=1000.0)
+    olvidada = asyncio.run(Aula(curso, con_algo, push_ficha=push).aprobar({}))
+    assert "Dígame otra vez" in olvidada
