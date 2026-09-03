@@ -1,0 +1,34 @@
+manifest_version: 2
+api_version: 1
+name: jarvis-teacher
+label: JARVIS (clases)
+kind: standalone
+version: 1.0.0
+description: >
+  Da clase: un plan de estudio que propone y el usuario aprueba, apoyado
+  en fuentes que él mismo busca, con la lección y el examen dibujados en
+  la tira.
+author: Horelvis Castillo
+
+# ─────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# 1. NO SEARCH BACKEND. Without something for `buscar`, `ensename` finds
+#    no candidates and refuses to invent a syllabus. That is correct and
+#    is indistinguishable from a subject nothing was written about. The
+#    line says which backend was tried.
+#
+# 2. THE STRIP IS NOT CONNECTED. `push_ficha` returns False and the
+#    question is still asked out loud. A multiple choice only heard is
+#    worse than one seen and infinitely better than a mute turn.
+#
+# 3. PILLOW IS MISSING. Lesson images stop being verifiable and are
+#    dropped from the document; every card still draws. Named here
+#    because "las fichas salen sin imagen" has no other symptom.
+#
+# 4. THE DATABASE IS LOCKED OR CORRUPT. Every handler catches it and
+#    answers a sentence, so the class stops and the conversation does
+#    not.
+python_dependencies:
+  - "loguru>=0.7,<1"
+  - "pillow>=10,<13"
