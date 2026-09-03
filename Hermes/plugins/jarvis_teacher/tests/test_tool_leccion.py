@@ -189,6 +189,19 @@ def test_letra_strips_trailing_punctuation() -> None:
     assert Aula._letra("¿la segunda?", opciones) == "b"
 
 
+def test_letra_prefers_an_options_own_text_over_an_ordinal_inside_it() -> None:
+    """An option can itself contain an ordinal word ("la segunda derivada").
+
+    Naming that option by its own words must win over reading the
+    ordinal it happens to contain as if it named a DIFFERENT option —
+    the exact collision review round 1's ordinal fix introduced.
+    """
+    opciones = ["la derivada primera", "la integral", "la segunda derivada"]
+    assert Aula._letra("la segunda derivada", opciones) == "c"
+    # A bare ordinal, naming nothing's own text, still reads as an ordinal.
+    assert Aula._letra("la segunda", opciones) == "b"
+
+
 def test_responder_understands_a_spoken_ordinal(aula) -> None:
     asyncio.run(aula.preguntar({"ficha": PREGUNTA, "correcta": "b"}))
     salida = asyncio.run(aula.responder({"elegida": "la segunda"}))

@@ -387,12 +387,17 @@ class Aula:
         answer transcribed as "b." or "¿la segunda?" must not fail to
         match on a stray period or question mark. Then, in order: an
         explicit letter, matched as a whole word so a letter sitting
-        inside another word never counts; an ordinal ("la segunda",
-        which a Spanish speaker says at least as often as "la b"), for
-        however many options this card actually has; and finally the
-        option whose own words were said — the LONGEST matching option,
-        so that one option's text being a substring of another's ("yes"
-        inside "yesterday") can never win by being checked first.
+        inside another word never counts; the option whose own words
+        were said — the LONGEST matching option, so that one option's
+        text being a substring of another's ("yes" inside "yesterday")
+        can never win by being checked first; and only then an ordinal
+        ("la segunda", which a Spanish speaker says at least as often as
+        "la b"), for however many options this card actually has.
+
+        The option-text check MUST come before the ordinal one: an
+        option can itself contain an ordinal word ("la segunda
+        derivada"), and naming that option by its own words must not be
+        read as the bare ordinal for a different option.
         """
         limpio_dicho = dicho.strip(" .,;:!?¡¿")
         letras = [chr(97 + i) for i in range(len(opciones))]
@@ -400,9 +405,6 @@ class Aula:
         for letra in letras:
             if letra in palabras:
                 return letra
-        for indice, ordinal in enumerate(_ORDINALES[: len(opciones)]):
-            if ordinal in palabras:
-                return letras[indice]
         mejor_longitud, mejor_letra = 0, ""
         for indice, opcion in enumerate(opciones):
             limpio_opcion = opcion.strip("*_` ").lower()
@@ -412,4 +414,9 @@ class Aula:
                 and len(limpio_opcion) > mejor_longitud
             ):
                 mejor_longitud, mejor_letra = len(limpio_opcion), letras[indice]
-        return mejor_letra
+        if mejor_letra:
+            return mejor_letra
+        for indice, ordinal in enumerate(_ORDINALES[: len(opciones)]):
+            if ordinal in palabras:
+                return letras[indice]
+        return ""
