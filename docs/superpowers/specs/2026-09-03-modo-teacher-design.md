@@ -340,13 +340,24 @@ and **178 px** without one — a strip of 900x310 or 900x274, against the
   swallowing the desktop's clicks (§12, 2026-09-01 — CLAUDE.md's
   2026-08-25 entry still calls this deferred, and it is not).
 
-### The band conflict, decided here
+### The band conflict, and why there is not one
 
-The band is one. The user's rule is that during a class everything
-still comes in and the lesson waits. So when a camera pushes a photo
-over an open question, **the card is covered, not cleared**. When the
-photo or the live view goes, the question comes back exactly as it was.
-That is "la clase espera" made literal.
+An earlier draft of this section said the band was one thing, so a
+photo arriving over an open question would have to cover the card and
+restore it afterwards. **Reading `window.py` before planning showed
+that is already false.** The strip stacks its extras and adds them —
+`_band_extra + _prompt_extra + _console_extra` in `_resize` — so the
+photo band and the console have coexisted since August without either
+knowing about the other.
+
+The card is a fourth of those. A camera pushing a photo during a
+question grows the strip by both; when the photo fades, the strip
+shrinks back by its share and the question is untouched. "La clase
+espera" comes out of the mechanism that is there, and covering and
+restoring would have been code written to produce a worse result.
+
+Each contributor caps its own height (the card at 480 px of band);
+nothing caps the sum, exactly as nothing caps band-plus-console today.
 
 ## Images arrive through the Markdown
 
