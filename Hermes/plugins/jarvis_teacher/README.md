@@ -3,10 +3,15 @@
 JARVIS teaches a subject across days. The user says what they want to
 learn; he searches, proposes a syllabus and the sources behind it, and
 only after the user approves does he fetch anything. From there he
-teaches concept by concept, asks multiple-choice questions drawn from
-what he actually fetched, scores the spoken answer against what was
-stored (never against an opinion), and remembers — on disk, not in a
-model's memory — where the two of you left off. The full design is
+teaches concept by concept and asks multiple-choice questions with the
+fetched passages in front of him. **The model writes the question**;
+what the plugin guarantees is narrower and worth stating exactly: the
+passages it hands over come from the stored sources, and `pregunta.fuente`
+records which source was on the table when the question was written —
+not that the question was copied out of it. The scoring is the
+plugin's, against the option stored when the card was made, never
+against an opinion; and where the two of you left off is read off disk
+rather than remembered by a model. The full design is
 `docs/superpowers/specs/2026-09-03-modo-teacher-design.md`; this file
 is the plugin's own record.
 
@@ -57,12 +62,37 @@ too, and smaller only because there is less of them.
 Before this feature, nothing left the house except the conversation
 itself (with the LLM's remote-fallback switch as the one exception,
 §2.5/§12). This plugin's searches are a new, standing exception:
-**every syllabus, every "explain this again" that finds the stored base
-thin, sends a query to Hermes' configured web-search backend** — on this
-box, Exa, keyless. That is considerably more than one search: a course
-on a broad subject can search repeatedly as the base grows. The
-conversation's content still does not travel; what travels now is
-whatever the plugin decides to look up.
+**opening a course sends its queries to Hermes' configured web-search
+backend** — on this box, Exa, keyless — and `aprobar` then fetches the
+pages the user approved.
+
+**Nothing else searches, today.** `explicar` reads the stored base and
+only the stored base: the design's "a lesson whose concept the base
+covers badly may search again" is intent, not code, and until it is
+written a thin base comes back as "no hay material guardado que lo
+cubra" rather than as a second search. The conversation's content still
+does not travel; what travels is the syllabus's own queries, once per
+course.
+
+## The gate covers images too
+
+An image reference is model output like any other. `![](…)` is resolved
+by the plugin — never by the strip, which would be a connection opened
+from the process that draws — and the fetch goes through **this
+course's approved domains**, over http(s) and nothing else. Until
+2026-09-03 only page text was gated, so a card carrying
+`![](http://192.168.1.1/admin/…)` made the gateway issue that request
+from inside the house, and a `file://` reference read this disk.
+
+A reference that fails the check is dropped from the document exactly
+as one that will not download is: the card is still drawn and the
+question is still asked (Ruling 7, the cameras' `tool.py`).
+
+`aprobar` obeys the same principle from the other end: it refuses a
+course with no syllabus in it, before it fetches anything. The plan
+card is what puts the candidate domains in front of a person, and
+`ensename(...)` followed by `aprobar()` inside one model turn would
+otherwise fetch every page with nobody having seen a thing.
 
 ## Environment
 
@@ -168,6 +198,12 @@ export PYTHONPATH="$PWD"
   cameras, using whatever credentials `.env` provides. The probe does
   not do this itself; asking "is a search backend configured" does, as
   a property of the pinned Hermes.
+  **It is a property of running it from a bare process, though, and not
+  of a course.** In the gateway, discovery has already happened at boot:
+  the cameras are watching before anybody opens a course, and by the
+  time `ensename` searches there is nothing left for
+  `_ensure_web_plugins_loaded()` to start. Opening a course does not
+  start a camera.
 
 The probe script's own docstring carries the recorded output in full.
 

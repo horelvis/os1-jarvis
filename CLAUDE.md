@@ -1222,11 +1222,15 @@ instrucciones" envelope around every passage (`tool.py`'s `SOBRE`) are
 named as partial mitigations in the design and are not claimed to be
 more than that.
 
-**§1.1's aperture widens by a whole subsystem, not by one query.** Every
-new course, and every later "explain this again" that finds the stored
-base too thin, sends a search to Hermes' configured web-search backend.
-The conversation's content still does not travel; what now travels
-routinely is whatever the plugin decides is worth looking up.
+**§1.1's aperture widens, and by exactly one opening.** Opening a new
+course sends its queries to Hermes' configured web-search backend, and
+`aprobar` then fetches the pages the user approved. **Nothing else
+searches:** `explicar` reads only what is already on disk, so the
+design's "the base goes on growing" is intent and not yet code — a
+concept the base covers badly comes back as "no hay material guardado
+que lo cubra" rather than as a second search. The conversation's
+content still does not travel; what travels is the syllabus's own
+queries, once per course.
 
 **The one thing this plan could not finish without a live measurement,
 and the box's GPU was down for the whole of it:** whether a plugin can
@@ -1251,7 +1255,11 @@ GPU, so it ran anyway, against the live box, 2026-09-03:
   discovery, which on this box starts `samantha_vision`'s camera
   threads against the real house cameras. The probe does not do this
   itself; asking "is a search backend configured" does, as a property
-  of the pinned Hermes.
+  of the pinned Hermes. **It does not happen in the running gateway**,
+  and that is the reassuring half: discovery has already run at boot,
+  so by the time a course is opened the cameras are watching anyway and
+  `_ensure_web_plugins_loaded()` finds nothing left to load. What the
+  probe met is the cost of asking that question from a bare process.
 
 With the shape measured, `_buscar` was filled in for real and a test
 was added against a recording of that exact response — no test in this
