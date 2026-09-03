@@ -53,7 +53,7 @@ def build(url: str, assistant: str, projects_root: str) -> dict:
                 ),
                 "tags": ["code", "development", "tests"],
                 "examples": [
-                    "En os1-samantha, arregla el test de vad que falla",
+                    "En os1-jarvis, arregla el test de vad que falla",
                     "En barndoor, añade un log cuando la cámara se caiga",
                 ],
             },
@@ -62,7 +62,7 @@ def build(url: str, assistant: str, projects_root: str) -> dict:
                 "name": "Explicar código",
                 "description": "Leer un repositorio y responder sobre él.",
                 "tags": ["code", "research"],
-                "examples": ["¿Por qué falla el test de vad en os1-samantha?"],
+                "examples": ["¿Por qué falla el test de vad en os1-jarvis?"],
             },
         ],
         # Both spellings: v1.0 calls this `interfaces`, and Hermes'

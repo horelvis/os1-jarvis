@@ -17,7 +17,7 @@ exactly this reason; this script needs the same two things and the same
 interpreter.
 
 Run:
-    cd /home/nexus/git/os1-samantha
+    cd /home/nexus/git/os1-jarvis
     export HERMES_HOME="$PWD/.hermes/home"
     [ -f .env ] && { set -a; . .env; set +a; }
     .hermes/src/.venv/bin/python3 \

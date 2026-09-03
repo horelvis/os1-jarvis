@@ -6,7 +6,7 @@ to maintain, and the root doubles as the boundary of where the assistant
 may work.
 
 Naming one is the same problem the wake word had. The name arrives
-through speech recognition on its way here: `os1-samantha` comes back as
+through speech recognition on its way here: `os1-jarvis` comes back as
 "OS uno Samanta", `lejepa-difusion` as anything at all. So matching is a
 similarity ratio, as in the widget's `wake.py` — with one difference
 that matters. The wake word guesses generously because being ignored is
@@ -105,7 +105,7 @@ def resolve(wanted: str, root: Path = DEFAULT_ROOT) -> Project | None:
 def find_in(text: str, root: Path = DEFAULT_ROOT) -> Project | None:
     """The project mentioned anywhere in a sentence, or None.
 
-    "En os1-samantha, arregla el test" — the project is a word inside a
+    "En os1-jarvis, arregla el test" — the project is a word inside a
     request, not the whole of it. Every project name is looked for in the
     text directly first, longest first so `jarvis-os` wins over `jarvis`;
     only then does the fuzzy path run, on the words that are left.

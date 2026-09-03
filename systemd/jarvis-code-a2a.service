@@ -18,8 +18,8 @@ Type=simple
 #   python3 -m venv .venv && .venv/bin/pip install claude-agent-sdk
 # Without it the bridge still works: it falls back to driving the CLI,
 # and loses exactly those two abilities.
-ExecStart=%h/git/os1-samantha/Hermes/bridges/code-a2a/.venv/bin/python %h/git/os1-samantha/Hermes/bridges/code-a2a/server.py --port 9910 --root %h/git
-WorkingDirectory=%h/git/os1-samantha/Hermes/bridges/code-a2a
+ExecStart=%h/git/os1-jarvis/Hermes/bridges/code-a2a/.venv/bin/python %h/git/os1-jarvis/Hermes/bridges/code-a2a/server.py --port 9910 --root %h/git
+WorkingDirectory=%h/git/os1-jarvis/Hermes/bridges/code-a2a
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONNOUSERSITE=1
 

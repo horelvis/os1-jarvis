@@ -688,7 +688,7 @@ Spanish from Spain (peninsular).
 ## 3. Project Structure (Authoritative)
 
 ```
-os1-samantha/
+os1-jarvis/
 ├── CLAUDE.md               ← This file. Read first.
 ├── PROGRESS.md             ← The log, newest first (you append to this)
 ├── README.md               ← The short version, for humans

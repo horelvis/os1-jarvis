@@ -53,8 +53,8 @@ Environment=PYTHONNOUSERSITE=1
 # Hermes' markers.py and tts.py, the same way Hermes/run-gateway.sh
 # reaches them. Without this she runs and is mute: speech.py falls back
 # to a local copy of has_unclosed_tag, so the only symptom is silence.
-Environment=PYTHONPATH=%h/git/os1-samantha
-ExecStart=%h/git/os1-samantha/widget/.venv/bin/python -m jarvis_widget
+Environment=PYTHONPATH=%h/git/os1-jarvis
+ExecStart=%h/git/os1-jarvis/widget/.venv/bin/python -m jarvis_widget
 Restart=on-failure
 RestartSec=3
 

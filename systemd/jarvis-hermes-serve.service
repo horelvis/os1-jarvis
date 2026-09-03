@@ -33,7 +33,7 @@ Type=simple
 # Relative defaults inside Hermes resolve against the working directory,
 # and systemd would otherwise start this in %h — the same trap that kept
 # jarvis-hermes.service from starting at all.
-WorkingDirectory=%h/git/os1-samantha
+WorkingDirectory=%h/git/os1-jarvis
 
 # HERMES_DASHBOARD_SESSION_TOKEN intentionally NOT set here — this file is
 # committed. Without it, `serve` generates a random token in memory at
@@ -50,7 +50,7 @@ WorkingDirectory=%h/git/os1-samantha
 #
 # The token is a password to a backend that can dispatch agents. The socket
 # below is loopback-only; keep it that way.
-ExecStart=%h/git/os1-samantha/Hermes/run-gateway.sh serve --port 9119 --host 127.0.0.1
+ExecStart=%h/git/os1-jarvis/Hermes/run-gateway.sh serve --port 9119 --host 127.0.0.1
 
 Restart=on-failure
 RestartSec=5

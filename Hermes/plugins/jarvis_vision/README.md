@@ -345,7 +345,7 @@ journalctl --user -u jarvis-hermes.service -f | grep jarvis-vision
 ## Tests
 
 ```bash
-cd /home/nexus/git/os1-samantha
+cd /home/nexus/git/os1-jarvis
 PYTHONNOUSERSITE=1 ./widget/.venv/bin/python -m pytest \
   Hermes/plugins/jarvis_vision/tests/ -q
 ```

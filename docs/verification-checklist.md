@@ -18,7 +18,7 @@ entry point that exports the right environment. A bare `hermes` on PATH is
 somebody else's install, on a version these plugins are not written against.
 
 ```bash
-export REPO="$HOME/git/os1-samantha"      # adjust
+export REPO="$HOME/git/os1-jarvis"      # adjust
 cd "$REPO"
 ```
 

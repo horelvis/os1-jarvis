@@ -108,7 +108,7 @@ See [PROGRESS.md](PROGRESS.md) for what each day cost and what it found.
 ## Project structure
 
 ```
-os1-samantha/
+os1-jarvis/
 ├── CLAUDE.md           ← the spec (read first)
 ├── PROGRESS.md         ← the log
 ├── widget/             ← the strip: GTK4, VAD, STT, TTS, the photo band

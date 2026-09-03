@@ -30,7 +30,7 @@ Type=simple
 # to serve (CLAUDE.md §12, 2026-08-22) — but the working directory stays,
 # rather than risk another plugin's relative default breaking the
 # same way.
-WorkingDirectory=%h/git/os1-samantha
+WorkingDirectory=%h/git/os1-jarvis
 
 # API Server configuration. Environment variables override the config.yaml and
 # .env inside the repo's own HERMES_HOME (.hermes/home/), which run-gateway.sh
@@ -48,7 +48,7 @@ Environment=API_SERVER_HOST=127.0.0.1
 # hermes is on PATH — on a machine with a personal install, that is a
 # different version with a different HERMES_HOME. The wrapper pins both, and
 # exports the PYTHONPATH the plugins need to import `samantha`.
-ExecStart=%h/git/os1-samantha/Hermes/run-gateway.sh
+ExecStart=%h/git/os1-jarvis/Hermes/run-gateway.sh
 
 Restart=on-failure
 RestartSec=5

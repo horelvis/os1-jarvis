@@ -14,7 +14,7 @@ import projects
 
 @pytest.fixture()
 def root(tmp_path):
-    for name in ("os1-samantha", "barndoor", "jarvis", "jarvis-os", "LightRAG"):
+    for name in ("os1-jarvis", "barndoor", "jarvis", "jarvis-os", "LightRAG"):
         (tmp_path / name).mkdir()
     (tmp_path / ".hidden").mkdir()
     (tmp_path / "loose.txt").write_text("not a project")
@@ -27,7 +27,7 @@ def test_the_projects_are_the_directories(root):
         "jarvis",
         "jarvis-os",
         "LightRAG",
-        "os1-samantha",
+        "os1-jarvis",
     ]
 
 
@@ -37,12 +37,12 @@ def test_an_exact_name_resolves(root):
 
 def test_case_and_punctuation_do_not_matter(root):
     assert projects.resolve("LIGHTRAG", root).name == "LightRAG"
-    assert projects.resolve("os1 samantha", root).name == "os1-samantha"
+    assert projects.resolve("os1 samantha", root).name == "os1-jarvis"
 
 
 def test_something_whisper_mangled_still_resolves(root):
-    # "os1-samantha" spoken and transcribed.
-    assert projects.resolve("os uno samantha", root).name == "os1-samantha"
+    # "os1-jarvis" spoken and transcribed.
+    assert projects.resolve("os uno samantha", root).name == "os1-jarvis"
 
 
 def test_a_name_that_is_nothing_like_a_project_is_none(root):
