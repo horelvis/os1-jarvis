@@ -182,9 +182,9 @@ systemd: getty@tty1 auto-login as user `samantha`
   ↓
 ~/.bash_profile: if tty1, run `startx`
   ↓
-~/.xinitrc: launch openbox + samantha-ui.service
+~/.xinitrc: launch openbox + jarvis-ui.service
   ↓
-samantha-ui.service: chromium --kiosk http://localhost:7777/
+jarvis-ui.service: chromium --kiosk http://localhost:7777/
 ```
 
 **Implications:**
@@ -401,10 +401,10 @@ samantha/
 │       └── test_api.py
 │
 ├── systemd/                    ← Service files for kiosk deployment
-│   ├── samantha-backend.service    ← Python backend
-│   ├── samantha-llamacpp.service   ← llama-server (Phase 4)
-│   ├── samantha-hermes.service     ← Hermes-Agent gateway (Phase 9 / v3)
-│   └── samantha-ui.service         ← Chromium kiosk launcher
+│   ├── jarvis-backend.service    ← Python backend
+│   ├── jarvis-llamacpp.service   ← llama-server (Phase 4)
+│   ├── jarvis-hermes.service     ← Hermes-Agent gateway (Phase 9 / v3)
+│   └── jarvis-ui.service         ← Chromium kiosk launcher
 │
 └── docs/
     ├── 01-setup-ubuntu.md      ← Full setup guide for the mini-PC
@@ -571,9 +571,9 @@ cd ../frontend && pnpm install && pnpm approve-builds esbuild --all && pnpm buil
 
 # 4. Install systemd services
 cp systemd/*.service ~/.config/systemd/user/
-systemctl --user enable samantha-llamacpp.service
-systemctl --user enable samantha-backend.service
-systemctl --user enable samantha-ui.service
+systemctl --user enable jarvis-llamacpp.service
+systemctl --user enable jarvis-backend.service
+systemctl --user enable jarvis-ui.service
 loginctl enable-linger samantha    # Services start without login
 
 # 4. Enable auto-login on tty1
@@ -888,7 +888,7 @@ llama.cpp runs natively on Mac (Metal) and Linux (CUDA) with the same
 model file and the same OpenAI-compatible HTTP API, so the Python
 client is runtime-agnostic.
 **Cost:** None (Phase 4 not yet implemented when changed). Phase 7
-systemd unit becomes `samantha-llamacpp.service` instead of
+systemd unit becomes `jarvis-llamacpp.service` instead of
 `samantha-vllm.service`. Pydeps lose `vllm`; gain only `httpx`.
 **Lessons:** Pick the runtime that's cheapest to develop against;
 optimize for production throughput only when there's a real workload.

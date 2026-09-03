@@ -1,7 +1,7 @@
 # Hermes backend for the desktop app — the monitoring surface.
 #
 # `hermes serve` is the JSON-RPC/WebSocket backend that Hermes Desktop and
-# remote clients connect to. It is NOT the gateway: samantha-hermes.service
+# remote clients connect to. It is NOT the gateway: jarvis-hermes.service
 # is what actually answers the strip on :7777. This one exists so the
 # desktop app can look INTO that gateway's world — its sessions, its
 # memories, its cron jobs — rather than starting a private Hermes of its
@@ -9,30 +9,30 @@
 # would collide with the running gateway over the same profile.
 #
 # Both processes share HERMES_HOME (run-gateway.sh sets it to the repo's
-# .hermes/home), which is the whole point: what you monitor is Samantha,
+# .hermes/home), which is the whole point: what you monitor is JARVIS,
 # not a second installation that happens to look like her.
 #
 # Install:
-#   cp systemd/samantha-hermes-serve.service ~/.config/systemd/user/
+#   cp systemd/jarvis-hermes-serve.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now samantha-hermes-serve.service
+#   systemctl --user enable --now jarvis-hermes-serve.service
 #
 # Then in Hermes Desktop choose "Remote gateway" and point it at
 # http://127.0.0.1:9119.
 
 [Unit]
-Description=Samantha monitoring backend (hermes serve, for Hermes Desktop)
-After=network.target samantha-hermes.service
+Description=JARVIS monitoring backend (hermes serve, for Hermes Desktop)
+After=network.target jarvis-hermes.service
 # Only a viewer: if the gateway goes down this can keep running and simply
 # has less to show, so this is deliberately not PartOf/BindsTo.
-Wants=samantha-hermes.service
+Wants=jarvis-hermes.service
 
 [Service]
 Type=simple
 
 # Relative defaults inside Hermes resolve against the working directory,
 # and systemd would otherwise start this in %h — the same trap that kept
-# samantha-hermes.service from starting at all.
+# jarvis-hermes.service from starting at all.
 WorkingDirectory=%h/git/os1-samantha
 
 # HERMES_DASHBOARD_SESSION_TOKEN intentionally NOT set here — this file is
@@ -41,7 +41,7 @@ WorkingDirectory=%h/git/os1-samantha
 # protected route answers 401 and the desktop cannot connect.
 #
 # Set a real one in a local drop-in on this machine:
-#   systemctl --user edit samantha-hermes-serve
+#   systemctl --user edit jarvis-hermes-serve
 #   [Service]
 #   Environment=HERMES_DASHBOARD_SESSION_TOKEN=<token>
 #

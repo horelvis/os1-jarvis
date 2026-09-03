@@ -1,5 +1,5 @@
 [Unit]
-Description=Samantha (desktop strip, GTK4)
+Description=JARVIS (desktop strip, GTK4)
 # The strip is furniture in a graphical session, not a boot service:
 # without a display server it exits immediately and systemd restarts it
 # forever. PartOf ties it to the session's lifetime.
@@ -19,7 +19,7 @@ Type=simple
 # wrong: this box's session is `:0`. The unit could never start — it
 # died in `Gtk couldn't be initialized` before any of our code ran, and
 # the strip was absent with the rest of the stack perfectly healthy.
-# Found 2026-08-30. `samantha-ui.service`, the dead kiosk unit, had `:0`
+# Found 2026-08-30. `jarvis-ui.service`, the dead kiosk unit, had `:0`
 # all along.
 # Unbuffered, so `journalctl --user -u jarvis-widget -f` shows a
 # traceback at the moment it happens rather than at exit.

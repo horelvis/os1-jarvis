@@ -1,4 +1,4 @@
-# Samantha LLM runtime — llama-server (llama.cpp)
+# JARVIS LLM runtime — llama-server (llama.cpp)
 #
 # Install (production):
 #   1. Build/install llama.cpp so `llama-server` is in PATH.
@@ -6,10 +6,10 @@
 #      (cached under ~/.cache/llama.cpp/).
 #   2. Copy this file to ~/.config/systemd/user/, then:
 #        systemctl --user daemon-reload
-#        systemctl --user enable --now samantha-llamacpp.service
+#        systemctl --user enable --now jarvis-llamacpp.service
 #
 # Override defaults without editing this file:
-#   systemctl --user edit samantha-llamacpp.service
+#   systemctl --user edit jarvis-llamacpp.service
 # and set Environment= lines in the override.
 #
 # **A model override must budget for WHISPER, and one did not.** The
@@ -34,11 +34,11 @@
 # out of it before the model gets a byte.
 #
 # Sampling defaults are Qwen3-recommended (temp 0.6, top-k 20, top-p 0.95,
-# min-p 0, presence-penalty 1.5). Backend (Samantha) never overrides them,
+# min-p 0, presence-penalty 1.5). Backend (JARVIS) never overrides them,
 # so this file is the single source of truth for model behavior.
 
 [Unit]
-Description=Samantha LLM runtime (llama-server, llama.cpp)
+Description=JARVIS LLM runtime (llama-server, llama.cpp)
 After=network.target
 # No rate limit on restarts. The default (5 starts in 10 s) is a loop
 # guard written for services that fail instantly and forever; this one

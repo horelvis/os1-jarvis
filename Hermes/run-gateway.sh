@@ -37,7 +37,7 @@ HERMES_BIN="$REPO_ROOT/.hermes/src/.venv/bin/hermes"
 # is git-ignored and holds RTSP_PASSWORD, which `.hermes/home/config.yaml`
 # references from inside each camera URL as `${RTSP_PASSWORD}`. This is the
 # one chokepoint worth teaching: both units that start a Hermes process
-# (samantha-hermes.service, samantha-hermes-serve.service) and every manual
+# (jarvis-hermes.service, jarvis-hermes-serve.service) and every manual
 # invocation come through here, so nothing else has to know.
 # jarvis-widget.service does not — it needs no credential.
 #

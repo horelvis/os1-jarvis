@@ -2,7 +2,7 @@
 
 Run ONCE, with the gateway stopped, after the rename lands:
 
-    systemctl --user stop samantha-hermes.service
+    systemctl --user stop jarvis-hermes.service
     cp .hermes/home/state.db .hermes/home/state.db.bak-20260828
     python Hermes/migrate-kiosk-to-jarvis.py .hermes/home/state.db
 

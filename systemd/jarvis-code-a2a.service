@@ -1,5 +1,5 @@
 [Unit]
-Description=Samantha code bridge (A2A) — the coding assistant, callable
+Description=JARVIS code bridge (A2A) — the coding assistant, callable
 # Not PartOf=graphical-session: this has nothing to do with the strip and
 # should be reachable whether or not anybody has logged in.
 After=network.target

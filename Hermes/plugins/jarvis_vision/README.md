@@ -52,7 +52,7 @@ RTSP_PASSWORD=…
 
 `Hermes/run-gateway.sh` sources that file if it is there, which is the
 single chokepoint: both units that start a Hermes process
-(`samantha-hermes.service`, `samantha-hermes-serve.service`) and every
+(`jarvis-hermes.service`, `jarvis-hermes-serve.service`) and every
 manual invocation go through it, so nothing else has to be taught.
 `.env.example` is tracked and carries the key names with no values, so a
 fresh box knows what is missing. The plugin expands `${RTSP_PASSWORD}` when it builds a `Camera`,
@@ -86,7 +86,7 @@ itself reads it — and the plugin loads, starts no threads, and logs `no
 cameras configured (config key 'cameras' empty)`. Measured 2026-08-24;
 it is the one mistake this config invites.
 
-then `systemctl --user restart samantha-hermes.service`.
+then `systemctl --user restart jarvis-hermes.service`.
 
 The house's two cameras, as of 2026-08-24. Addresses are placeholders:
 this file is pushed to GitHub, and the real ones live next to the URLs
@@ -294,7 +294,7 @@ Both names are passed on purpose; the tidy version is the one that hangs.
 ## Reading the journal
 
 ```bash
-journalctl --user -u samantha-hermes.service -f | grep jarvis-vision
+journalctl --user -u jarvis-hermes.service -f | grep jarvis-vision
 ```
 
 - `registered` — the plugin loaded.

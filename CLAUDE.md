@@ -111,7 +111,7 @@ CPU: 13.7 tok/s that way against 57 when it fits (§12, 2026-08-23).
 §1's "latency over correctness" is what decides the quantisation.
 
 **Every claimant must be subtracted before changing any of them**, and
-no unit does it for you: `samantha-llamacpp.service` does not know the
+no unit does it for you: `jarvis-llamacpp.service` does not know the
 widget exists, and nothing at all counts the desktop. Getting this wrong
 is silent — it left him deaf for three days in August (§12, 2026-08-30).
 
@@ -445,7 +445,7 @@ llama-server 15,296 MiB + CosyVoice 4,950 + the widget (Whisper inside)
 number that matters, and it is why a model override is not a free
 choice: a build 2 GB larger fits its own arithmetic and leaves Whisper
 nothing. One did, on 2026-08-27 — see the comment in
-`systemd/samantha-llamacpp.service` and §12.
+`systemd/jarvis-llamacpp.service` and §12.
 
 **Three things that each cost a round, now in `samantha-config.yaml`:**
 - **`enable_thinking: false`.** Qwen3.8 reasons by default and puts
@@ -896,8 +896,8 @@ not among them any more — they are in
 cp systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 
-systemctl --user enable --now samantha-llamacpp.service   # the LLM, :8000
-systemctl --user enable --now samantha-hermes.service     # the gateway, :7777
+systemctl --user enable --now jarvis-llamacpp.service   # the LLM, :8000
+systemctl --user enable --now jarvis-hermes.service     # the gateway, :7777
 systemctl --user enable --now jarvis-widget.service     # him
 loginctl enable-linger $USER    # so they survive without a login
 

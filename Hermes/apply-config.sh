@@ -89,5 +89,5 @@ target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text(yaml.safe_dump(merged, sort_keys=False, allow_unicode=True))
 print(f"Escrito {target}")
 print("\nReinicia el gateway para que surta efecto:")
-print("  systemctl --user restart samantha-hermes.service")
+print("  systemctl --user restart jarvis-hermes.service")
 PY
