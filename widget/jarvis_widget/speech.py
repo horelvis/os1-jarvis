@@ -132,6 +132,56 @@ class ClauseChunker:
         return False
 
 
+class TurnChunkers:
+    """One `ClauseChunker` per conversation, not one for the house.
+
+    Until 2026-09-06 `on_token`/`on_done` fed a SINGLE `ClauseChunker`
+    regardless of whose turn a token belonged to — workable while only
+    one turn ever ran. With two people mid-turn together, the gateway
+    can (and, measured against the real adapter, does) deliver
+    `token(marta)`, `token(lucía)`, `done(marta)`, `done(lucía)` in any
+    order, and a shared buffer closes a clause holding whatever both of
+    them had written into it so far — half of one person's sentence
+    fused to half of the other's, or, worse, one person's leftover
+    buffered text released under the OTHER's `done` (CLAUDE.md, task
+    13). Routing already resolves the destination fresh per batch of
+    clauses (`destino_de`); this does the same for the BUFFER the
+    clauses are cut from, so nothing upstream of `destino_de` can mix
+    two conversations' words in the first place.
+
+    Keyed on the same value `destino_de` already treats as identity —
+    `chat_id`, normalised so an empty string and `None` (both "the
+    desk") share one buffer instead of starting two.
+    """
+
+    def __init__(self) -> None:
+        self._by_chat: dict[str | None, ClauseChunker] = {}
+
+    def for_chat(self, chat_id: str | None) -> ClauseChunker:
+        """The buffer for this conversation, created on first use."""
+        key = chat_id or None
+        chunker = self._by_chat.get(key)
+        if chunker is None:
+            chunker = ClauseChunker()
+            self._by_chat[key] = chunker
+        return chunker
+
+    def drop(self, chat_id: str | None) -> None:
+        """Forget this conversation's buffer.
+
+        Called on every way a turn can end — `on_done`, `on_error` —
+        and, as the backstop for one that ends neither way (the
+        gateway's socket drops mid-answer), from a phone claim's own
+        expiry. Without this the dict would hold one entry per
+        `chat_id` for as long as the process runs: harmless in the
+        handful a household's phones reach, but a dead turn's
+        half-built clause has no business surviving into that
+        `chat_id`'s NEXT one, which is exactly what reusing a stale
+        entry would do.
+        """
+        self._by_chat.pop(chat_id or None, None)
+
+
 class Speaker:
     """Synthesise clauses and hand the PCM to whichever endpoint they
     are for. One clause at a time, globally — not because a sink is
@@ -155,6 +205,17 @@ class Speaker:
     there is no shared destination left to race on at all: `say` takes
     it explicitly, an `Endpoint` or `None` for the room, and it rides
     in the queue with the clause.
+
+    `interrupt()` is scoped the same way, since 2026-09-06 (CLAUDE.md,
+    task 13). It used to bump ONE counter and stop THE player — correct
+    while `_player` was the only place any voice went, and measurably
+    wrong the moment a phone's answer could be queued at the same time:
+    somebody clearing their throat in the room silently deleted a
+    phone's entire pending reply, with nobody ever told. A phone is
+    push-to-talk and cannot itself barge in, but the room's barge-in
+    must not reach past the room either — so the generation that
+    invalidates queued clauses, and the player that gets told to stop,
+    are both per-destination now.
     """
 
     # How many clauses may be IN SYNTHESIS at once. A parameter, not a
@@ -162,17 +223,34 @@ class Speaker:
     # only thing using the GPU for speech, and because interleaving two
     # clauses' chunks in the SAME sink garbles them (§2.8) — a hazard
     # that only exists between clauses sharing a destination, not
-    # between two different people's. A box where the constraint
-    # loosens (CLAUDE.md §12, the Ryzen AI Halo note: unified memory,
-    # no VRAM ceiling to share) may raise `workers` without anything
-    # here having assumed otherwise.
+    # between two different people's.
+    #
+    # Raising it is NOT free even so, and this used to claim otherwise
+    # ("without anything here having assumed otherwise") — measured
+    # false (CLAUDE.md, task 13): nothing serialises clauses within one
+    # destination once more than one worker exists, so a later clause
+    # of the SAME reply can be synthesised faster and overtake an
+    # earlier one — `workers=1` gave `['uno', 'dos', 'tres']` for the
+    # same three clauses that `workers=3` played back as
+    # `['dos', 'tres', 'uno']`. `test_raising_workers_does_not_preserve_
+    # clause_order` in `tests/test_speech.py` pins that fact rather
+    # than leaving the next person to discover it live. A box where the
+    # VRAM constraint loosens (CLAUDE.md §12, the Ryzen AI Halo note)
+    # can still raise `workers` for THROUGHPUT — several people's
+    # replies synthesised at once — but needs per-destination
+    # serialisation added first if it wants each person's OWN clauses
+    # to keep arriving in the order they were said.
     _DEFAULT_WORKERS = 1
 
     def __init__(self, player, workers: int = _DEFAULT_WORKERS) -> None:
         self._player = player
         self._client = None
-        self._generation = 0
-        self._queue: asyncio.Queue[tuple[int, str, object | None]] = asyncio.Queue()
+        # One generation per DESTINATION, not one for the house. `None`
+        # is a real key here — the room — never "nobody interrupted
+        # yet"; `_generation_for` is what supplies the default of 0 for
+        # a destination nothing has ever invalidated.
+        self._generations: dict[object | None, int] = {}
+        self._queue: asyncio.Queue[tuple[object | None, int, str]] = asyncio.Queue()
         self._worker_count = max(1, workers)
         self._workers: list[asyncio.Task] = []
 
@@ -182,6 +260,9 @@ class Speaker:
             self._workers = [
                 asyncio.ensure_future(self._run()) for _ in range(self._worker_count)
             ]
+
+    def _generation_for(self, destino: object | None) -> int:
+        return self._generations.get(destino, 0)
 
     def say(self, clause: str, destino: object | None) -> None:
         """Queue one clause for one destination. `None` is the room.
@@ -194,39 +275,70 @@ class Speaker:
         shared "current" sink on. There is no shared sink to move now,
         so that bug is unrepresentable rather than merely fixed.
         """
-        self._queue.put_nowait((self._generation, clause, destino))
+        self._queue.put_nowait((destino, self._generation_for(destino), clause))
 
     async def _run(self) -> None:
         while True:
-            generation, clause, destino = await self._queue.get()
-            if generation != self._generation:
-                continue  # queued before an interruption; drop it
+            destino, generation, clause = await self._queue.get()
+            if generation != self._generation_for(destino):
+                continue  # queued before an interruption of THIS destino
             try:
-                await self._synthesise(clause, destino)
+                await self._synthesise(clause, destino, generation)
             except Exception:
                 # A dead CosyVoice must not kill the worker, or she goes
                 # mute for the rest of the session with no error path.
                 continue
 
-    def interrupt(self) -> None:
-        """Stop talking, now. Called when the user starts speaking.
+    def interrupt(self, destino: object | None = None) -> None:
+        """Stop ONE destination, now. `None` is the room, as in `say()`.
 
-        The generation counter is what makes it stick: a synthesis
-        already in flight cannot be cancelled mid-HTTP-response, so it
-        finishes and then finds its generation stale and throws its
-        audio away instead of playing over the user. The same counter
-        invalidates everything already queued.
+        Called when THAT destination's own listener starts speaking
+        over him — today, only ever the room: the desk's barge-in, the
+        strip's own mute switch, and shutdown all interrupt the room,
+        because a phone is push-to-talk and has no way to barge in at
+        all. Scoping this by destination is what stops the room's
+        barge-in from reaching a phone's queued or in-flight answer —
+        measured before the fix: a cough in the room silently emptied a
+        phone's whole pending reply, with the phone never told.
+
+        The per-destination generation counter is what makes it stick:
+        a synthesis already in flight cannot be cancelled
+        mid-HTTP-response, so it finishes and then finds ITS
+        destination's generation stale and throws its audio away
+        instead of writing it out. The same counter invalidates
+        whatever is already queued for this destination — and nothing
+        queued for anybody else, which stays exactly where it was.
         """
-        self._generation += 1
-        while not self._queue.empty():
-            self._queue.get_nowait()
-        self._player.stop()
+        self._generations[destino] = self._generation_for(destino) + 1
+        self._drop_queued_for(destino)
+        if destino is None:
+            self._player.stop()
+        # A phone has nothing analogous to `_player.stop()` — there is
+        # no in-room playback of it to silence, and audio already
+        # written to its socket cannot be recalled. Whatever of ITS
+        # reply is still queued was already dropped above.
 
-    async def _synthesise(self, clause: str, destino: object | None) -> None:
+    def _drop_queued_for(self, destino: object | None) -> None:
+        """Discard queued clauses bound for `destino`; keep everyone
+        else's, in the order they were queued."""
+        kept: list[tuple[object | None, int, str]] = []
+        while not self._queue.empty():
+            item = self._queue.get_nowait()
+            if item[0] != destino:
+                kept.append(item)
+        for item in kept:
+            self._queue.put_nowait(item)
+
+    async def _synthesise(
+        self, clause: str, destino: object | None, generation: int
+    ) -> None:
         """Synthesise one clause and write it to `destino` (`None` → the room).
 
-        `destino` is exactly what `say()` was given at queue time — see
-        its docstring for why nothing here re-resolves it.
+        `destino` is exactly what `say()` was given at queue time, and
+        `generation` is this destination's generation at that same
+        moment — see `say()`'s docstring for why nothing here
+        re-resolves the destination, and `interrupt()`'s for why the
+        generation is per-destination rather than shared.
         """
         from Hermes.plugins.jarvis_voice import tts
 
@@ -236,9 +348,8 @@ class Speaker:
             self._client = tts.new_client()
 
         sink = self._player if destino is None else destino
-        generation = self._generation
         async for chunk, _backend in tts.stream(clause, client=self._client):
-            if generation != self._generation:
-                return  # interrupted while this clause was synthesising
+            if generation != self._generation_for(destino):
+                return  # this destination was interrupted mid-synthesis
             sink.write(chunk)
             await asyncio.sleep(0)  # let the loop breathe between chunks

@@ -754,8 +754,8 @@ class JARVISApp(Gtk.Application):
         from .audio import Microphone, Player, SpectrumAnalyser, describe_devices
         from .gateway import GatewayClient
         from .speech import (
-            ClauseChunker,
             Speaker,
+            TurnChunkers,
             is_system_message,
             unwrap_delivery,
         )
@@ -771,7 +771,11 @@ class JARVISApp(Gtk.Application):
         player = Player()
         player.start()
         speaker = Speaker(player)
-        chunker = ClauseChunker()
+        # One buffer per conversation, not one for the house — see
+        # `TurnChunkers`. `on_token`/`on_done`/`on_error` fetch the one
+        # for their own `chat_id` and `on_done`/`on_error` dispose of it
+        # once that turn has settled.
+        chunkers = TurnChunkers()
         # The hint carries his name and the words this box actually
         # says, so Whisper stops inventing spellings of both — see
         # `stt.build_hint`.
@@ -942,7 +946,19 @@ class JARVISApp(Gtk.Application):
             # `destino_de` asks THIS desk fresh on every batch of
             # clauses, so a claim that is gone simply resolves to
             # `None` (the room) on its own, with nothing to wire up
-            # here.
+            # for THAT any more.
+            #
+            # What IS wired here now is a different backstop: a
+            # person's `TurnChunkers` entry is normally dropped by
+            # `on_done`/`on_error`, but a turn that dies with neither —
+            # the gateway's socket drops mid-answer — would otherwise
+            # leave that buffer sitting there to be reused, half-built,
+            # by their NEXT turn. A phone's claim expires on its own
+            # ceiling even when nothing else does (`RemoteDesk`'s own
+            # docstring), and `on_release` fires on every way a claim
+            # ends — released or stolen — so it is the one place
+            # guaranteed to run even then.
+            on_release=lambda endpoint: chunkers.drop(endpoint.persona),
         )
         # Closed until the QR is actually shown (below) — the welcome
         # page it points at hands the shared secret to whoever asks,
@@ -1053,7 +1069,7 @@ class JARVISApp(Gtk.Application):
                 return
             machine.token(token)
             destino = destino_de(remote_desk, chat_id)
-            for clause in chunker.push(token):
+            for clause in chunkers.for_chat(chat_id).push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause, destino)
 
@@ -1062,9 +1078,12 @@ class JARVISApp(Gtk.Application):
             # while: a conversation is not a sequence of commands.
             wake.answered(time.monotonic())
             destino = destino_de(remote_desk, chat_id)
-            for clause in chunker.flush():
+            for clause in chunkers.for_chat(chat_id).flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause, destino)
+            # This conversation's buffer has said everything it had —
+            # see `TurnChunkers.drop` for why it must not linger.
+            chunkers.drop(chat_id)
             if machine.done():
                 # Give the room — and any phone waiting its turn — back.
                 # This is the recovery path for a held turn, not
@@ -1088,6 +1107,11 @@ class JARVISApp(Gtk.Application):
                 say(message, destino_de(remote_desk, chat_id))
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
+            # This is the OTHER way a turn ends, and its buffer is just
+            # as dead as one `on_done` would have flushed — whatever it
+            # still held was cut short by the error, not a real clause,
+            # so it is dropped rather than spoken.
+            chunkers.drop(chat_id)
             settle_turn(origin.settle(), remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
@@ -1552,10 +1576,12 @@ class JARVISApp(Gtk.Application):
             def _say_it() -> None:
                 print(f"diciendo: {_SAY_ON_START}", file=sys.stderr, flush=True)
                 machine.token(_SAY_ON_START)  # drives the wave to `speaking`
-                for clause in chunker.push(_SAY_ON_START):
+                greeting = chunkers.for_chat(None)  # always the room
+                for clause in greeting.push(_SAY_ON_START):
                     speaker.say(clause, None)
-                for clause in chunker.flush():
+                for clause in greeting.flush():
                     speaker.say(clause, None)
+                chunkers.drop(None)
                 # In a real turn the gateway sends `done` and the wave
                 # settles. Nothing sends one here, so without this the
                 # strip stays in `speaking` forever, frozen on the last

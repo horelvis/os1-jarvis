@@ -315,3 +315,361 @@ async def test_worker_count_is_configurable() -> None:
     assert len(speaker._workers) == 3
     for worker in speaker._workers:
         worker.cancel()
+
+
+# ── one buffer per conversation, not one for the house ────────────────
+#
+# Until 2026-09-06 `on_token`/`on_done` fed a SINGLE `ClauseChunker`
+# regardless of `chat_id`. Two people mid-turn together fed the same
+# buffer, and a clause could close holding either a fusion of both
+# people's words or one person's leftover text released under the
+# OTHER's `done`. `_drive` below plays exactly the frame sequences the
+# reviewer measured against the real adapter (CLAUDE.md, task 13),
+# first against the plain shared `ClauseChunker` `on_token`/`on_done`
+# used to share, to pin what was actually wrong, and then against
+# `TurnChunkers`, which is the fix.
+
+
+def _drive_shared(frames: list[tuple[str, str | None]]) -> list[tuple[str, str]]:
+    """What `on_token`/`on_done` did before task 13: one `ClauseChunker`
+    for every `chat_id`. `text=None` means a `done` for that chat_id."""
+    chunker = ClauseChunker()
+    out: list[tuple[str, str]] = []
+    for chat_id, text in frames:
+        if text is None:
+            for clause in chunker.flush():
+                out.append((chat_id, clause))
+        else:
+            for clause in chunker.push(text):
+                out.append((chat_id, clause))
+    return out
+
+
+def _drive_per_chat(frames: list[tuple[str, str | None]]) -> list[tuple[str, str]]:
+    """What `on_token`/`on_done` do since task 13: one `ClauseChunker`
+    PER `chat_id`, disposed of when that chat_id's `done` arrives."""
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    out: list[tuple[str, str]] = []
+    for chat_id, text in frames:
+        if text is None:
+            for clause in chunkers.for_chat(chat_id).flush():
+                out.append((chat_id, clause))
+            chunkers.drop(chat_id)
+        else:
+            for clause in chunkers.for_chat(chat_id).push(text):
+                out.append((chat_id, clause))
+    return out
+
+
+# Each case is `(chat_id, text)`, `text=None` standing for a `done`.
+# Verbatim from the reviewer's measurement (CLAUDE.md, task 13).
+_A_SHORT_REPLY_UNDER_THE_MINIMUM = [
+    ("marta", "Sí, señor."),
+    ("lucía", "Sí, hay huevos en la nevera."),
+    ("marta", None),
+    ("lucía", None),
+]
+_NO_FINAL_PUNCTUATION = [
+    ("marta", "La cita con el médico es el martes a las nueve"),
+    ("lucía", "Hay huevos en la nevera."),
+    ("marta", None),
+    ("lucía", None),
+]
+_A_TRAILING_SHORT_FRAGMENT = [
+    ("marta", "He apagado la luz del salón."),
+    ("marta", None),
+    ("lucía", "Vale"),
+    ("lucía", "Quedan dos yogures."),
+    ("lucía", None),
+]
+_AN_UNCLOSED_LAUGHTER_MARKER = [
+    ("marta", "Claro que sí."),
+    ("lucía", "<laughter>El niño ya está dormido."),
+    ("marta", None),
+    ("lucía", None),
+]
+
+_ALL_FOUR_ORDERINGS = [
+    _A_SHORT_REPLY_UNDER_THE_MINIMUM,
+    _NO_FINAL_PUNCTUATION,
+    _A_TRAILING_SHORT_FRAGMENT,
+    _AN_UNCLOSED_LAUGHTER_MARKER,
+]
+
+
+def test_a_single_shared_chunker_mixes_two_peoples_words() -> None:
+    """Pins the bug itself, against the code as it was: `_drive_shared`
+    is exactly what `on_token`/`on_done` did with one `ClauseChunker`
+    for the house. Every ordering the reviewer tried produced at least
+    one clause that is not solely one person's own words — either
+    literally fused, or someone's sentence released under the other
+    person's `chat_id`."""
+    assert _drive_shared(_A_SHORT_REPLY_UNDER_THE_MINIMUM) == [
+        ("lucía", "Sí, señor.Sí, hay huevos en la nevera.")
+    ]
+    assert _drive_shared(_NO_FINAL_PUNCTUATION) == [
+        (
+            "lucía",
+            "La cita con el médico es el martes a las nueveHay huevos en la nevera.",
+        )
+    ]
+    # The fourth ordering is the sharpest: lucía's own sentence is
+    # spoken to marta's chat_id, and lucía never gets it at all.
+    unclosed = _drive_shared(_AN_UNCLOSED_LAUGHTER_MARKER)
+    assert unclosed == [
+        ("marta", "Claro que sí."),
+        ("marta", "<laughter>El niño ya está dormido."),
+    ]
+    assert not any(chat_id == "lucía" for chat_id, _ in unclosed)
+
+
+def test_two_interleaved_conversations_never_share_a_clause() -> None:
+    """The fix: one `ClauseChunker` per `chat_id`. Every clause a chat_id
+    receives is made ENTIRELY of that chat_id's own tokens, in every
+    ordering `_drive_shared` above got wrong."""
+    for frames in _ALL_FOUR_ORDERINGS:
+        out = _drive_per_chat(frames)
+        by_chat: dict[str, list[str]] = {}
+        for chat_id, clause in out:
+            by_chat.setdefault(chat_id, []).append(clause)
+
+        for chat_id, clauses in by_chat.items():
+            spoken = "".join(clauses)
+            own_tokens = "".join(t for c, t in frames if c == chat_id and t)
+            other_tokens = "".join(t for c, t in frames if c != chat_id and t)
+            # Everything said under this chat_id came from its OWN
+            # tokens — nothing of the other person's leaked in.
+            assert spoken.replace(" ", "") in own_tokens.replace(" ", "")
+            if other_tokens:
+                assert other_tokens.strip() not in spoken
+
+    # And the sharpest case by name: lucía gets her own sentence, not
+    # marta's chat_id, and marta's is untouched by it.
+    fixed = _drive_per_chat(_AN_UNCLOSED_LAUGHTER_MARKER)
+    assert ("marta", "Claro que sí.") in fixed
+    assert ("lucía", "<laughter>El niño ya está dormido.") in fixed
+    assert all(
+        clause != "<laughter>El niño ya está dormido." or chat_id == "lucía"
+        for chat_id, clause in fixed
+    )
+
+
+# ── TurnChunkers on its own ────────────────────────────────────────────
+
+
+def test_each_chat_id_gets_its_own_chunker() -> None:
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    assert chunkers.for_chat("marta") is chunkers.for_chat("marta")
+    assert chunkers.for_chat("marta") is not chunkers.for_chat("lucía")
+
+
+def test_empty_chat_id_and_none_share_the_desks_chunker() -> None:
+    """`destino_de` treats `""` and `None` as the same thing — the
+    desk. So must this, or the desk's own reply would split across two
+    buffers depending on which falsy value happened to arrive."""
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    assert chunkers.for_chat(None) is chunkers.for_chat("")
+
+
+def test_dropping_a_chat_frees_a_fresh_chunker_next_time() -> None:
+    """The backstop for a turn that dies mid-buffer: whatever it had
+    not yet said must not bleed into that chat_id's NEXT turn."""
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    unfinished = chunkers.for_chat("marta")
+    unfinished.push("sin terminar, sin punto")  # never flushed
+    chunkers.drop("marta")
+
+    fresh = chunkers.for_chat("marta")
+    assert fresh is not unfinished
+    assert fresh.flush() == []  # nothing carried over from the dead turn
+
+
+# ── interrupt() is scoped to one destination ───────────────────────────
+#
+# Until 2026-09-06 `interrupt()` bumped one counter for the house and
+# stopped the room's player — correct while the room was the only place
+# any voice went, and wrong the moment a phone's answer could be queued
+# alongside it: somebody clearing their throat in the room silently
+# deleted a phone's entire pending reply. CLAUDE.md, task 13.
+
+
+async def test_interrupting_the_room_does_not_touch_a_phones_queue(
+    monkeypatch,
+) -> None:
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+            self.stopped = False
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    home, phone = Sink(), Sink()
+    speaker = Speaker(home)
+
+    # A phone's reply queued, then the room barges in before it starts.
+    speaker.say("La cita es el martes.", phone)
+    speaker.interrupt()  # the room's own barge-in — no destino given
+
+    speaker.start()
+    for _ in range(200):
+        if phone.written:
+            break
+        await asyncio.sleep(0)
+    for worker in speaker._workers:
+        worker.cancel()
+
+    # The phone's clause survived: it was never the room's to drop.
+    assert phone.written == [b"\x01"]
+    # The room's own player DOES stop — that is the barge-in doing its
+    # job — but stopping IT must not reach the phone's queue.
+    assert home.stopped is True
+
+
+async def test_interrupting_the_room_drops_only_the_rooms_queue(
+    monkeypatch,
+) -> None:
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+            self.stopped = False
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    home, phone = Sink(), Sink()
+    speaker = Speaker(home)
+
+    speaker.say("Para nadie en particular.", None)  # queued for the room
+    speaker.interrupt()  # bumps the room's generation before it plays
+
+    speaker.say("Y ahora sí, para el teléfono.", phone)
+
+    speaker.start()
+    for _ in range(200):
+        if phone.written:
+            break
+        await asyncio.sleep(0)
+    for worker in speaker._workers:
+        worker.cancel()
+
+    assert home.written == []  # the stale room clause never played
+    assert home.stopped is True  # and the room's player WAS told to stop
+    assert phone.written == [b"\x01"]  # the phone's is untouched
+
+
+def test_interrupting_a_specific_destination_leaves_the_room_alone() -> None:
+    """The other direction: interrupting a PHONE (were something ever
+    to call it that way) must not stop the room's player — only the
+    room's own barge-in does that."""
+    from jarvis_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.stopped = False
+
+        def write(self, pcm: bytes) -> None:
+            pass
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    home = Sink()
+    phone = Sink()
+    speaker = Speaker(home)
+
+    speaker.interrupt(phone)
+
+    assert home.stopped is False
+
+
+# ── raising `workers` and clause order ─────────────────────────────────
+
+
+async def test_raising_workers_does_not_preserve_clause_order(monkeypatch) -> None:
+    """The comment above `_DEFAULT_WORKERS` used to claim raising
+    `workers` cost nothing "without anything here having assumed
+    otherwise". Measured false (CLAUDE.md, task 13): with `workers=1`
+    the room heard `['uno', 'dos', 'tres']`; with `workers=3`, the same
+    three clauses came back as `['dos', 'tres', 'uno']`. Pinned here so
+    the next person to raise `_DEFAULT_WORKERS` meets this as a known
+    fact, not a surprise on a live turn.
+    """
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+    # "uno" takes measurably longer to synthesise than "dos" or "tres" —
+    # exactly the shape that lets a later clause of the SAME reply
+    # overtake an earlier one when nothing serialises them.
+    delays = {"uno": 0.03, "dos": 0.0, "tres": 0.0}
+
+    async def fake_stream(clause, client=None):
+        await asyncio.sleep(delays.get(clause, 0.0))
+        yield clause.encode(), "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    home = Sink()
+    speaker = Speaker(home, workers=3)
+    speaker.say("uno", None)
+    speaker.say("dos", None)
+    speaker.say("tres", None)
+
+    speaker.start()
+    for _ in range(500):
+        if len(home.written) == 3:
+            break
+        await asyncio.sleep(0.001)
+    for worker in speaker._workers:
+        worker.cancel()
+
+    assert [c.decode() for c in home.written] == ["dos", "tres", "uno"]
