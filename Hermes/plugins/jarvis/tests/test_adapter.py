@@ -486,7 +486,7 @@ def test_a_reply_that_arrives_in_time_gets_no_watchdog_error(tmp_path, monkeypat
                     # Past the watchdog deadline: nothing more may arrive.
                     with pytest.raises(asyncio.TimeoutError):
                         await ws.receive(timeout=0.6)
-                    assert a._turn is None
+                    assert a._turns == {}
         finally:
             await a.disconnect()
 
@@ -519,7 +519,13 @@ def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
                     assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
                         "error"
                     )
-                    result = await a.send("kiosk", "llego tarde")
+                    # "jarvis" — the resolved chat this turn actually
+                    # opened under (no chat_id was sent, so it defaulted
+                    # to CHAT_ID_DEFAULT). Since chat_id now selects
+                    # which turn a reply lands on, this must match the
+                    # turn that timed out — a mismatched key would find
+                    # no turn at all and let a fresh frame through.
+                    result = await a.send("jarvis", "llego tarde")
                     assert result.success is False
                     assert result.retryable is False
                     # The error text must read as a timeout to Hermes'
@@ -556,7 +562,7 @@ def test_the_watchdog_leaves_no_task_behind(tmp_path, monkeypatch):
                     for _ in range(5):
                         await a._handle_chat("hola", "primary")
                     await asyncio.sleep(0.05)
-                    assert a._turn is None
+                    assert a._turns == {}
                     assert len(asyncio.all_tasks()) <= before
         finally:
             await a.disconnect()
@@ -577,10 +583,10 @@ def test_disconnect_cancels_a_pending_watchdog(tmp_path, monkeypatch):
             async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
                 await asyncio.sleep(0.05)
                 await a._handle_chat("hola", "primary")
-                turn = a._turn
+                turn = a._turns.get("jarvis")
                 assert turn is not None
                 await a.disconnect()
-                assert a._turn is None
+                assert a._turns == {}
                 assert turn.watchdog.cancelled() or turn.watchdog.cancelling()
 
     asyncio.run(go())
@@ -1067,6 +1073,53 @@ def test_push_asking_goes_out_as_text(adapter):
 def test_push_asking_with_no_strip_connected_is_false_not_an_error(adapter):
     adapter._ws = None
     assert asyncio.run(adapter.push_asking(True)) is False
+
+
+def test_two_chats_hold_two_turns():
+    # Two people speaking at once must not collide on one slot — the
+    # rule that a second `chat` frame supersedes rather than queues
+    # keeps its meaning WITHIN one person's conversation now.
+    #
+    # The brief's own version of this test called `_open_turn` with no
+    # event loop running at all; `_open_turn` schedules a watchdog with
+    # `asyncio.create_task`, which raises `RuntimeError: no running
+    # event loop` outside one. Wrapped in `asyncio.run`, matching every
+    # other test in this file that opens a turn.
+    async def go():
+        a = JarvisAdapter(config={})
+        uno = a._open_turn("marta")
+        dos = a._open_turn("lucía")
+        assert not uno.settled and not dos.settled
+        a._settle(uno)
+        assert not dos.settled
+        a._settle(dos)  # leave nothing pending behind
+
+    asyncio.run(go())
+
+
+def test_a_second_turn_for_the_same_chat_supersedes_the_first():
+    async def go():
+        a = JarvisAdapter(config={})
+        primero = a._open_turn("marta")
+        segundo = a._open_turn("marta")
+        assert primero is not segundo
+        assert a._turns["marta"] is segundo
+        assert primero.watchdog.cancelled() or primero.watchdog.cancelling()
+        a._settle(segundo)
+
+    asyncio.run(go())
+
+
+def test_a_turn_for_one_chat_never_supersedes_another_chats_turn():
+    async def go():
+        a = JarvisAdapter(config={})
+        marta = a._open_turn("marta")
+        lucia = a._open_turn("lucía")
+        assert a._turns["marta"] is marta
+        a._settle(marta)
+        a._settle(lucia)
+
+    asyncio.run(go())
 
 
 def test_the_platform_is_called_jarvis():

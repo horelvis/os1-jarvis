@@ -240,9 +240,17 @@ class _Turn:
     Invariant this whole mechanism exists to hold: every accepted `chat`
     frame ends in exactly one `done` or one `error`. `settled` is what makes
     it *exactly* one — the watchdog and `send()` race on the same flag.
+
+    `chat` is the RESOLVED chat this turn belongs to — `CHAT_ID_DEFAULT`
+    ("jarvis") for the house's single session, or a person's id. It is
+    what `self._turns` is keyed by, and it is also what decides whether a
+    reply frame is tagged on the wire: `CHAT_ID_DEFAULT` is what an older
+    strip's session was called before chat_id existed at all, so a frame
+    for it must carry no `chat_id` field — see `_wire_chat`.
     """
 
-    turn_id: str
+    chat: str
+    turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     watchdog: Optional[asyncio.Task] = field(default=None, repr=False)
     settled: bool = False
     timed_out: bool = False
@@ -300,10 +308,14 @@ class JarvisAdapter(BasePlatformAdapter):
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._ws: Optional[web.WebSocketResponse] = None
-        # At most one open turn: the frontend serialises input behind `busy`,
-        # and a second `chat` frame supersedes the first rather than queueing.
-        # One slot, one task — nothing here grows with uptime.
-        self._turn: Optional[_Turn] = None
+        # At most one open turn PER CHAT. It was one for the whole
+        # platform until 2026-09-05, which is what made the house a
+        # single conversation. The rule that a second `chat` frame
+        # supersedes rather than queues keeps its meaning — it now
+        # applies within one person's conversation, where it was earned.
+        # One task per entry — nothing here grows with uptime, since
+        # every entry is removed the moment its turn settles.
+        self._turns: Dict[str, _Turn] = {}
 
         # While the code assistant waits for an answer, jarvis_code
         # sets this; the next unnamed input is the answer and goes to
@@ -386,7 +398,8 @@ class JarvisAdapter(BasePlatformAdapter):
         return self._configured_port
 
     async def disconnect(self) -> None:
-        self._abandon_turn()
+        for turn in list(self._turns.values()):
+            self._abandon_turn(turn)
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
         self._ws = None
@@ -426,8 +439,13 @@ class JarvisAdapter(BasePlatformAdapter):
         makes the retry path dead code. It also pushes Hermes' own English
         error text onto the OS1 screen as a second token/done pair.
         """
-        del chat_id, reply_to, metadata
-        turn = self._turn
+        del reply_to, metadata
+        # `chat_id` here is Hermes' own — the RESOLVED chat this reply
+        # belongs to (`event.source.chat_id`, which `_handle_chat` set to
+        # `chat_id or CHAT_ID_DEFAULT`). It is exactly what `_open_turn`
+        # keyed `self._turns` by, so no chat that was never opened here
+        # can ever collide with one that was.
+        turn = self._turns.get(chat_id)
 
         if turn is not None and turn.timed_out:
             # The watchdog already told the user this turn was lost. Pushing
@@ -437,7 +455,8 @@ class JarvisAdapter(BasePlatformAdapter):
             # and its `done` would resolve the wrong promise. Report the
             # failure instead; non-retryable, because retrying delivers the
             # same stale reply.
-            self._turn = None
+            if self._turns.get(turn.chat) is turn:
+                del self._turns[turn.chat]
             logger.warning(
                 f"jarvis: dropping a reply that arrived after the "
                 f"{self.turn_timeout:.0f}s watchdog already closed the turn"
@@ -463,7 +482,10 @@ class JarvisAdapter(BasePlatformAdapter):
                 retryable=False,
             )
 
-        delivered = await self._push(token(content)) and await self._push(done(0))
+        tag = self._wire_chat(turn)
+        delivered = await self._push(token(content, chat_id=tag)) and await self._push(
+            done(0, chat_id=tag)
+        )
         if not delivered:
             # Nobody is listening — a browser mid-refresh, or a socket that
             # died between the frontend's frame and this reply. `retryable`
@@ -667,22 +689,39 @@ class JarvisAdapter(BasePlatformAdapter):
     # asynchronously and has ten ways to answer with silence — so the adapter,
     # which is the layer that knows a turn was accepted, provides it here.
 
-    def _open_turn(self) -> _Turn:
-        # A new turn supersedes whatever was still open: one strip, one
-        # screen, and the frontend only sends again once the previous turn
-        # settled or the user reloaded.
-        self._abandon_turn()
-        turn = _Turn(turn_id=str(uuid.uuid4()))
-        self._turn = turn
+    def _wire_chat(self, turn: Optional[_Turn]) -> Optional[str]:
+        """The `chat_id` to stamp on a frame answering this turn.
+
+        `None` for the house's single session (`CHAT_ID_DEFAULT`) or for
+        no turn at all — both are what an older strip, or one built
+        before chat_id existed, already reads without a tag. A named
+        turn is stamped with its own chat so a socket carrying several
+        people's replies at once can be told apart.
+        """
+        if turn is None or turn.chat == CHAT_ID_DEFAULT:
+            return None
+        return turn.chat
+
+    def _open_turn(self, chat: str) -> _Turn:
+        # A new turn supersedes whatever was still open FOR THIS CHAT —
+        # one strip, but now one slot per person: two people speaking at
+        # once must not collide, and the frontend only sends again for a
+        # given chat once that chat's previous turn settled or the user
+        # reloaded.
+        previous = self._turns.get(chat)
+        if previous is not None and not previous.settled:
+            self._abandon_turn(previous)
+        turn = _Turn(chat=chat)
+        self._turns[chat] = turn
         turn.watchdog = asyncio.create_task(self._watch_turn(turn))
         return turn
 
-    def _abandon_turn(self) -> None:
-        """Drop the open turn without answering it (supersede / shutdown)."""
-        previous = self._turn
-        self._turn = None
-        if previous is not None and previous.watchdog is not None:
-            previous.watchdog.cancel()
+    def _abandon_turn(self, turn: _Turn) -> None:
+        """Drop an open turn without answering it (supersede / shutdown)."""
+        if self._turns.get(turn.chat) is turn:
+            del self._turns[turn.chat]
+        if turn.watchdog is not None:
+            turn.watchdog.cancel()
 
     def _settle(self, turn: _Turn, *, keep_slot: bool = False) -> None:
         """Mark a turn answered and stand the watchdog down.
@@ -692,10 +731,17 @@ class JarvisAdapter(BasePlatformAdapter):
         stale reply through as if it were a fresh turn, which is precisely
         the frame that lands in the wrong bubble.
         """
+        if turn.settled:
+            return
         turn.settled = True
-        if not keep_slot and self._turn is turn:
-            self._turn = None
+        if not keep_slot and self._turns.get(turn.chat) is turn:
+            del self._turns[turn.chat]
         watchdog = turn.watchdog
+        # Guard against a watchdog cancelling itself: `_watch_turn` calls
+        # `_settle(turn, keep_slot=True)` from inside its own task, right
+        # before its last `await self._push(...)` — cancelling the
+        # currently running task here would raise CancelledError out of
+        # that push instead of letting the apology land.
         if watchdog is not None and watchdog is not asyncio.current_task():
             watchdog.cancel()
 
@@ -705,17 +751,17 @@ class JarvisAdapter(BasePlatformAdapter):
             await asyncio.sleep(self.turn_timeout)
         except asyncio.CancelledError:
             return
-        if turn.settled or self._turn is not turn:
+        if turn.settled or self._turns.get(turn.chat) is not turn:
             return
         turn.timed_out = True
         self._settle(turn, keep_slot=True)
         logger.warning(
             f"jarvis: no reply within {self.turn_timeout:.0f}s for turn "
-            f"{turn.turn_id} — telling the user instead of leaving the screen "
-            f"stuck (check the gateway log for authorization, session-key or "
-            f"dispatch warnings)"
+            f"{turn.turn_id} (chat {turn.chat!r}) — telling the user instead "
+            f"of leaving the screen stuck (check the gateway log for "
+            f"authorization, session-key or dispatch warnings)"
         )
-        await self._push(error(_TURN_LOST))
+        await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn)))
 
     # ── transport ─────────────────────────────────────────────────────────
 
@@ -848,7 +894,7 @@ class JarvisAdapter(BasePlatformAdapter):
             source=source,
             message_id=str(uuid.uuid4()),
         )
-        turn = self._open_turn()
+        turn = self._open_turn(chat)
         try:
             # Returns as soon as the gateway has spawned its background task;
             # the reply comes back later through send(). The watchdog armed
@@ -858,4 +904,4 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.error(f"jarvis: dispatch failed — {exc}")
             if not turn.settled:
                 self._settle(turn)
-                await self._push(error(_TURN_LOST))
+                await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn)))

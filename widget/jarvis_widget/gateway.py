@@ -126,9 +126,13 @@ class GatewayClient:
         # Per instance so a test can force the keepalive to fire in
         # milliseconds instead of the default twenty seconds.
         self.connect_options: dict[str, Any] = dict(CONNECT_OPTIONS)
-        self.on_token: Callable[[str], None] = lambda _t: None
-        self.on_done: Callable[[int], None] = lambda _ms: None
-        self.on_error: Callable[[str], None] = lambda _m: None
+        # The trailing `chat_id` is whose reply this is — a phone's
+        # person, or None for the desk (an older gateway that tags
+        # nothing, or a reply for the house's own single session). Task
+        # 10 routes on it; this callback shape only carries it.
+        self.on_token: Callable[[str, str | None], None] = lambda _t, _c=None: None
+        self.on_done: Callable[[int, str | None], None] = lambda _ms, _c=None: None
+        self.on_error: Callable[[str, str | None], None] = lambda _m, _c=None: None
         # A picture for the band above the wave. It is a frame of its
         # own and never a token: an answer travels wherever the turn is
         # routed, and a path in one would be read aloud.
@@ -185,7 +189,7 @@ class GatewayClient:
         """
         ws = self._ws
         if ws is None:
-            self.on_error(_NO_GATEWAY)
+            self.on_error(_NO_GATEWAY, chat_id)
             return
         try:
             await ws.send(encode_chat(text, self.user_id, wake=wake, chat_id=chat_id))
@@ -193,7 +197,7 @@ class GatewayClient:
             raise
         except Exception as exc:
             logger.warning(f"pasarela: la frase no ha salido — {exc}")
-            self.on_error(_NO_GATEWAY)
+            self.on_error(_NO_GATEWAY, chat_id)
 
     async def run(self) -> None:
         """Connect, read, and reconnect forever. Cancel to stop.
@@ -273,11 +277,11 @@ class GatewayClient:
             return
         kind = msg["type"]
         if kind == "token":
-            self.on_token(msg.get("token", ""))
+            self.on_token(msg.get("token", ""), msg.get("chat_id"))
         elif kind == "done":
-            self.on_done(int(msg.get("thinking_ms", 0)))
+            self.on_done(int(msg.get("thinking_ms", 0)), msg.get("chat_id"))
         elif kind == "error":
-            self.on_error(msg.get("error", ""))
+            self.on_error(msg.get("error", ""), msg.get("chat_id"))
         elif kind == "console":
             if msg.get("reset"):
                 self.on_console_reset()

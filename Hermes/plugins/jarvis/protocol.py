@@ -114,12 +114,22 @@ def decode_client(raw: str) -> Dict[str, Any]:
     return msg
 
 
-def token(text: str) -> str:
-    return json.dumps({"type": "token", "token": text})
+def token(text: str, chat_id: str | None = None) -> str:
+    frame: Dict[str, Any] = {"type": "token", "token": text}
+    if chat_id:
+        # Whose reply this is. Omitted for the house's single session,
+        # so a strip built before today reads exactly what it always
+        # did — see `test_a_reply_frame_without_a_person_is_byte_for_
+        # byte_what_it_was`.
+        frame["chat_id"] = chat_id
+    return json.dumps(frame)
 
 
-def done(thinking_ms: int) -> str:
-    return json.dumps({"type": "done", "thinking_ms": thinking_ms})
+def done(thinking_ms: int, chat_id: str | None = None) -> str:
+    frame: Dict[str, Any] = {"type": "done", "thinking_ms": thinking_ms}
+    if chat_id:
+        frame["chat_id"] = chat_id
+    return json.dumps(frame)
 
 
 def photo(path: str, camera: str) -> str:
@@ -227,9 +237,12 @@ def asking(open_: bool) -> str:
     return json.dumps({"type": "asking", "open": bool(open_)})
 
 
-def error(message: str) -> str:
+def error(message: str, chat_id: str | None = None) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
-    return json.dumps({"type": "error", "error": message})
+    frame: Dict[str, Any] = {"type": "error", "error": message}
+    if chat_id:
+        frame["chat_id"] = chat_id
+    return json.dumps(frame)
 
 
 def silence() -> str:

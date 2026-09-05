@@ -990,7 +990,11 @@ class JARVISApp(Gtk.Application):
                 settle_turn(origin.settle(), speaker, remote_desk)
 
         # ── the gateway's replies ─────────────────────────────────────
-        def on_token(token: str) -> None:
+        #
+        # All three now accept a trailing `chat_id`, threaded from
+        # gateway.py's `_dispatch`: whose reply this is, or None for the
+        # desk. Task 10 routes on it; none of the three uses it yet.
+        def on_token(token: str, _chat_id: str | None = None) -> None:
             if is_system_message(token):
                 # Hermes narrating itself, in English, with emoji. Not
                 # hers to say — and its `done` must not end the turn.
@@ -1008,7 +1012,7 @@ class JARVISApp(Gtk.Application):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause)
 
-        def on_done(_ms: int) -> None:
+        def on_done(_ms: int, _chat_id: str | None = None) -> None:
             # He has answered, so the next sentence needs no name for a
             # while: a conversation is not a sequence of commands.
             wake.answered(time.monotonic())
@@ -1034,7 +1038,7 @@ class JARVISApp(Gtk.Application):
                 # phone's claim away either.
                 settle_turn(origin.settle(), speaker, remote_desk)
 
-        def on_error(message: str) -> None:
+        def on_error(message: str, _chat_id: str | None = None) -> None:
             if message:
                 say(message)
             _apply_error_to_wake_window(wake, message, time.monotonic())

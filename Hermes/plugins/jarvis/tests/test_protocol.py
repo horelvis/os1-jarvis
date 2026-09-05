@@ -208,6 +208,21 @@ def test_encoders_match_the_frontend_contract():
     }
 
 
+def test_a_reply_frame_says_whose_it_is_when_asked():
+    # One socket now carries several people's replies; without this the
+    # widget cannot tell whose clause it is holding.
+    assert json.loads(token("hola", chat_id="marta"))["chat_id"] == "marta"
+    assert json.loads(done(12, chat_id="marta"))["chat_id"] == "marta"
+    assert json.loads(error("vaya", chat_id="marta"))["chat_id"] == "marta"
+
+
+def test_a_reply_frame_without_a_person_is_byte_for_byte_what_it_was():
+    # The house's single session, and what an older strip already reads.
+    assert json.loads(token("hola")) == {"type": "token", "token": "hola"}
+    assert json.loads(done(12)) == {"type": "done", "thinking_ms": 12}
+    assert json.loads(error("vaya")) == {"type": "error", "error": "vaya"}
+
+
 def test_an_absurdly_long_message_is_rejected():
     # The socket is an unauthenticated local listener and whatever arrives
     # goes straight into a metered LLM; aiohttp's own frame default is 4 MB.

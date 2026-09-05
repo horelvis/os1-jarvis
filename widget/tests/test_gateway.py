@@ -86,8 +86,8 @@ async def test_a_full_turn_against_a_real_socket() -> None:
 
         tokens: list[str] = []
         finished = asyncio.Event()
-        client.on_token = tokens.append
-        client.on_done = lambda _ms: finished.set()
+        client.on_token = lambda t, _chat_id=None: tokens.append(t)
+        client.on_done = lambda _ms, _chat_id=None: finished.set()
 
         task = asyncio.create_task(client.run())
         await client.wait_connected(timeout=5)
@@ -125,12 +125,25 @@ async def test_sending_with_no_connection_says_so_instead_of_raising() -> None:
     """The gateway is down. She has to say something, not throw."""
     client = GatewayClient(uri="ws://127.0.0.1:1")  # nothing listens there
     said: list[str] = []
-    client.on_error = said.append
+    client.on_error = lambda m, _chat_id=None: said.append(m)
 
     await client.send_chat("hola")
 
     assert len(said) == 1
     assert said[0]  # in Spanish, in her voice — content is a judgement call
+
+
+async def test_a_local_send_failure_carries_whose_turn_it_was() -> None:
+    # The failure is local (no socket), not a gateway reply, but it is
+    # still whose turn it was — so a phone's failed send does not read
+    # as the desk's.
+    client = GatewayClient(uri="ws://127.0.0.1:1")  # nothing listens there
+    said: list[tuple[str, str | None]] = []
+    client.on_error = lambda m, chat_id=None: said.append((m, chat_id))
+
+    await client.send_chat("hola", chat_id="marta")
+
+    assert said == [(said[0][0], "marta")]
 
 
 def test_an_unknown_server_type_is_not_fatal() -> None:
@@ -157,8 +170,8 @@ def test_a_photo_frame_never_reaches_the_voice() -> None:
     # token would be read out as a file path by CosyVoice.
     gw = GatewayClient()
     spoken: list[str] = []
-    gw.on_token = lambda t: spoken.append(t)
-    gw.on_error = lambda m: spoken.append(m)
+    gw.on_token = lambda t, _chat_id=None: spoken.append(t)
+    gw.on_error = lambda m, _chat_id=None: spoken.append(m)
     gw._dispatch(json.dumps({"type": "photo", "path": "/tmp/a.jpg", "camera": "fuera"}))
     assert spoken == []
 
@@ -218,8 +231,8 @@ def test_a_non_object_is_still_an_error() -> None:
 def test_dispatch_ignores_an_unknown_type_without_calling_handlers() -> None:
     gw = GatewayClient()
     seen: list[str] = []
-    gw.on_token = lambda t: seen.append("token")
-    gw.on_error = lambda m: seen.append("error")
+    gw.on_token = lambda t, _chat_id=None: seen.append("token")
+    gw.on_error = lambda m, _chat_id=None: seen.append("error")
     gw._dispatch(json.dumps({"type": "nonesuch"}))
     assert seen == []
 
@@ -363,6 +376,40 @@ def test_send_chat_marks_named_turns_and_only_those():
     assert second["wake"] is True
 
 
+def test_a_tagged_reply_carries_its_chat_id_to_every_callback() -> None:
+    # One socket now carries several people's replies; without the tag
+    # threaded through, the widget cannot tell whose clause it is
+    # holding — the exact shape of the 2026-09-01 defect (a reply
+    # reaching the wrong place).
+    gw = GatewayClient()
+    tokens: list[tuple[str, str | None]] = []
+    dones: list[tuple[int, str | None]] = []
+    errors: list[tuple[str, str | None]] = []
+    gw.on_token = lambda t, chat_id=None: tokens.append((t, chat_id))
+    gw.on_done = lambda ms, chat_id=None: dones.append((ms, chat_id))
+    gw.on_error = lambda m, chat_id=None: errors.append((m, chat_id))
+
+    gw._dispatch(json.dumps({"type": "token", "token": "ho", "chat_id": "marta"}))
+    gw._dispatch(json.dumps({"type": "done", "thinking_ms": 5, "chat_id": "marta"}))
+    gw._dispatch(json.dumps({"type": "error", "error": "vaya", "chat_id": "marta"}))
+
+    assert tokens == [("ho", "marta")]
+    assert dones == [(5, "marta")]
+    assert errors == [("vaya", "marta")]
+
+
+def test_an_untagged_reply_still_reaches_the_desk() -> None:
+    # No chat_id on the wire means the house's single session — an
+    # older gateway that tags nothing must still be understood.
+    gw = GatewayClient()
+    tokens: list[tuple[str, str | None]] = []
+    gw.on_token = lambda t, chat_id=None: tokens.append((t, chat_id))
+
+    gw._dispatch(json.dumps({"type": "token", "token": "ho"}))
+
+    assert tokens == [("ho", None)]
+
+
 def test_a_question_waiting_reaches_the_asking_handler() -> None:
     client = GatewayClient()
     seen: list[bool] = []
@@ -379,8 +426,8 @@ def test_an_asking_frame_is_never_spoken() -> None:
     # leaked into the voice would have him read "asking true" aloud.
     client = GatewayClient()
     said: list[str] = []
-    client.on_token = said.append
-    client.on_error = said.append
+    client.on_token = lambda t, _chat_id=None: said.append(t)
+    client.on_error = lambda m, _chat_id=None: said.append(m)
 
     client._dispatch(json.dumps({"type": "asking", "open": True}))
 
@@ -467,7 +514,7 @@ async def test_a_send_on_a_dead_socket_settles_the_turn_instead_of_raising() -> 
 
     client = GatewayClient()
     said: list[str] = []
-    client.on_error = said.append
+    client.on_error = lambda m, _chat_id=None: said.append(m)
     client._ws = _Dead()
 
     await client.send_chat("¿me oyes?")  # must not raise

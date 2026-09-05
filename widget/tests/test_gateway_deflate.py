@@ -75,7 +75,7 @@ async def _turn_after_a_keepalive(compression=_AS_BUILT) -> list[str]:
     heard: list[str] = []
     client = GatewayClient(f"ws://127.0.0.1:{port}/ws")
     client.retry_seconds = 30.0  # no reconnect inside the test's window
-    client.on_token = heard.append
+    client.on_token = lambda t, _chat_id=None: heard.append(t)
     # Only the keepalive is overridden — milliseconds instead of the
     # default twenty seconds. The ping is not what is broken, it is only
     # what has to arrive first. Compression is left as the CLIENT asks
