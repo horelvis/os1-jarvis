@@ -9,7 +9,7 @@ during a running turn is refused and the page says so.
 import asyncio
 
 import pytest
-from aiohttp import web
+from aiohttp import WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from jarvis_widget.remote import (
@@ -22,13 +22,20 @@ from jarvis_widget.remote import (
     _handler,
     build_welcome_app,
 )
+from jarvis_widget.personas import CASA
 from jarvis_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
 from jarvis_widget.remote_auth import Guard, load_or_create_roster, save_roster
 
 
 class FakeEndpoint:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str = "prueba", persona: str = CASA) -> None:
         self.name = name
+        # Who this endpoint belongs to. Defaults to CASA, the same
+        # fallback `personas.normalizar` gives an unattributable turn —
+        # most of the tests below are about RemoteDesk's claim/release
+        # bookkeeping and never look at this, only the ones that assert
+        # identity (task 5) pass a real one.
+        self.persona = persona
         self.written: list[bytes] = []
         self.refusals = 0
 
@@ -37,6 +44,10 @@ class FakeEndpoint:
 
     def refuse(self) -> None:
         self.refusals += 1
+
+
+def test_an_endpoint_knows_whose_it_is() -> None:
+    assert FakeEndpoint(persona="marta").persona == "marta"
 
 
 def test_the_first_to_press_holds_the_turn() -> None:
@@ -423,6 +434,59 @@ async def _socket(desk: RemoteDesk) -> tuple[TestClient, web.Application]:
     client = TestClient(TestServer(app))
     await client.start_server()
     return client, app
+
+
+async def test_the_socket_refuses_an_unknown_token() -> None:
+    """A stranger's token must stay a refusal, never fall through to
+    `casa` — `casa` is what an unattributable DESK turn is, which is a
+    different thing from a wrong secret offered by a client."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    app = web.Application()
+    app.router.add_get(
+        "/ws",
+        _handler(desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None),
+    )
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        with pytest.raises(WSServerHandshakeError):
+            await client.ws_connect("/ws?t=" + "x" * 32)
+    finally:
+        await client.close()
+
+
+async def test_the_connection_carries_the_person_whose_secret_it_used() -> None:
+    """The endpoint the handler builds knows whose it is from the
+    roster lookup made when the socket was opened — never from
+    anything the client itself says. A phone offering `marta`'s secret
+    must produce an endpoint whose `persona` is `marta`, not `casa` and
+    not whatever the client might claim."""
+    seen: list[object] = []
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: seen.append(endpoint))
+    marta_secreto = "m" * 32
+    guard = Guard(
+        {"casa": "c" * 32, "marta": marta_secreto},
+        "https://brain.local:8443",
+    )
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect("/ws?t=" + marta_secreto)
+        await ws.send_json({"type": "start", "rate": 8000})
+        await ws.send_bytes(b"\x01\x02")
+        await ws.send_json({"type": "end"})
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if seen:
+                break
+        await ws.close()
+    finally:
+        await client.close()
+
+    assert seen, "the utterance never arrived"
+    assert seen[0].persona == "marta"
 
 
 async def test_thirty_seconds_at_48k_is_thirty_seconds_not_ten() -> None:

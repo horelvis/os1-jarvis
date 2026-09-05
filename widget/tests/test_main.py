@@ -464,6 +464,13 @@ class FakeSpeaker:
 class FakePhone:
     name = "iphone-cocina"
 
+    def __init__(self, persona: str = CASA) -> None:
+        # Who this phone belongs to. Most tests below never look at
+        # this — they are about RemoteDesk's claim/release bookkeeping
+        # and TurnOrigin's marker — only the ones asserting identity
+        # (task 5) pass a real one.
+        self.persona = persona
+
     def write(self, pcm: bytes) -> None:
         pass
 
@@ -564,6 +571,24 @@ def test_the_marker_is_one_shot():
     assert origin.settle() is phone
     assert origin.take() is None
     assert origin.settle() is None
+
+
+def test_a_turn_from_a_phone_carries_its_person():
+    """`TurnOrigin` stores the endpoint itself, so whatever the endpoint
+    knows about its person travels with it — no separate identity has
+    to cross the wire."""
+    origin = TurnOrigin()
+    telefono = FakePhone(persona="marta")
+    origin.arriving(telefono)
+
+    assert origin.take() is telefono
+    assert origin.current.persona == "marta"
+
+
+def test_a_desk_turn_has_no_endpoint_and_therefore_no_person():
+    origin = TurnOrigin()
+
+    assert origin.take() is None
 
 
 async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):

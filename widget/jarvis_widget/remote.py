@@ -217,6 +217,10 @@ class Endpoint(Protocol):
     """
 
     name: str
+    # Who this endpoint belongs to. Set once, from the roster lookup
+    # made when the socket was opened — never from anything the client
+    # itself says. `personas.CASA` for an unattributable turn.
+    persona: str
 
     def write(self, pcm: bytes) -> None: ...
 
@@ -329,10 +333,17 @@ class RemoteDesk:
 class WebEndpoint:
     """One connected phone."""
 
-    def __init__(self, ws: web.WebSocketResponse, name: str, loop) -> None:
+    def __init__(
+        self, ws: web.WebSocketResponse, name: str, persona: str, loop
+    ) -> None:
         self._ws = ws
         self._loop = loop
         self.name = name
+        # Who this phone belongs to. Set from the roster at connection
+        # time and never from anything the phone says: a client that
+        # could assert its own person could ask for the father's
+        # profile, which is the one holding `terminal`.
+        self.persona = persona
         # Every send is a task, and a task nobody holds is a task the
         # loop may collect before it runs — a chunk of his voice missing
         # with nothing anywhere to say so. Held here until they finish,
@@ -530,7 +541,12 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
     async def handle(request: web.Request) -> web.WebSocketResponse:
         if not guard.origin_ok(request.headers.get("Origin", "")):
             raise web.HTTPForbidden()
-        if not guard.token_ok(request.query.get("t")):
+        # The lookup, not the boolean: a stranger's token has to stay a
+        # refusal (`None`), and it must NOT become `casa` — `casa` is
+        # the identity of an unattributable turn, a different thing
+        # from a wrong secret offered on the wire.
+        persona = guard.persona_for(request.query.get("t"))
+        if persona is None:
             raise web.HTTPForbidden()
         ws = web.WebSocketResponse(
             heartbeat=20,
@@ -547,7 +563,7 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
             compress=False,
         )
         await ws.prepare(request)
-        endpoint = WebEndpoint(ws, request.remote or "phone", loop)
+        endpoint = WebEndpoint(ws, request.remote or "phone", persona, loop)
         buffer = bytearray()
         rate = 48000
         ceiling = max_bytes_at(rate)
