@@ -205,6 +205,34 @@ def test_a_top_level_array_does_not_raise_and_yields_a_usable_roster(tmp_path):
     assert ruta.read_text() == "[1, 2, 3]"
 
 
+def test_non_utf8_bytes_do_not_raise_and_yield_a_usable_roster(tmp_path):
+    """Corruption producing bytes that are not valid UTF-8 at all is at
+    least as likely as corruption producing invalid JSON — and until
+    fix round 2 only the JSON case was caught, so this one still raised
+    `UnicodeDecodeError` out of `_boot`."""
+    ruta = tmp_path / "personas.json"
+    ruta.write_bytes(b"\xff\xfe\x00\xff not valid utf-8")
+    ruta.chmod(0o600)
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    assert ruta.read_bytes() == b"\xff\xfe\x00\xff not valid utf-8"
+
+
+def test_an_unreadable_path_does_not_raise_and_yields_a_usable_roster(tmp_path):
+    """A directory left at the path the roster expects a file is the
+    portable way to provoke `OSError` — `chmod 000` proves nothing when
+    the test runs as root, which it may."""
+    ruta = tmp_path / "personas.json"
+    ruta.mkdir()
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    assert ruta.is_dir()  # left exactly as it was
+
+
 def test_an_unreadable_file_is_logged_by_path_not_by_contents(tmp_path, captured_logs):
     ruta = tmp_path / "personas.json"
     ruta.write_text("un-secreto-que-no-debe-salir esto no es json")

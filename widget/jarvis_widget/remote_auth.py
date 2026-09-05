@@ -131,17 +131,19 @@ def _read_roster_file(target: Path) -> dict[str, str] | None:
     cannot be trusted at all.
 
     Never raises: this runs inside `_boot`, with nobody to catch a
-    traceback, and a hand-edited file is exactly the kind of thing that
-    goes wrong in the ways a person makes mistakes — invalid JSON, or
-    valid JSON whose top level is not an object at all. Logged once,
-    naming the path and never the contents, and the file itself is left
-    untouched: an operator may want to look at it.
+    traceback, and a hand-edited file — or the path itself — is exactly
+    the kind of thing that goes wrong in the ways a person makes
+    mistakes: invalid JSON, valid JSON whose top level is not an object,
+    bytes that are not valid UTF-8 at all, or the path being unreadable
+    outright (permissions, or a directory left where a file is
+    expected). Logged once, naming the path and never the contents, and
+    the file — or whatever is at that path — is left untouched: an
+    operator may want to look at it.
     """
-    texto = target.read_text()
     try:
-        crudo = json.loads(texto or "{}")
-    except json.JSONDecodeError:
-        logger.warning(f"personas: {target} no es JSON válido; se ignora sin tocarlo")
+        crudo = json.loads(target.read_text() or "{}")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning(f"personas: {target} no se puede leer; se ignora sin tocarlo")
         return None
     if not isinstance(crudo, dict):
         logger.warning(f"personas: {target} no es un objeto; se ignora sin tocarlo")
@@ -181,7 +183,11 @@ def load_or_create_roster(path: Path | None = None) -> dict[str, str]:
     target = Path(
         path or os.getenv("JARVIS_WIDGET_REMOTE_ROSTER") or DEFAULT_ROSTER_PATH
     )
-    if target.is_file():
+    # `exists()`, not `is_file()`: a directory left at this path must go
+    # through the read attempt and its exception handling below, rather
+    # than falling to the create branch, which would crash trying to
+    # `O_CREAT | O_EXCL` a path that is already there.
+    if target.exists():
         roster = _read_roster_file(target)
         if roster is None:
             # The file itself could not be trusted at all. It is left
