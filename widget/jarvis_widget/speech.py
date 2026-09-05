@@ -119,6 +119,14 @@ class ClauseChunker:
         rest, self._buffer = self._buffer.strip(), ""
         return [rest] if rest else []
 
+    def pending_chars(self) -> int:
+        """How much is buffered and unspoken, as a COUNT only.
+
+        For a caller that wants to log a discard without ever holding
+        the text — the buffer is somebody's half-finished sentence.
+        """
+        return len(self._buffer.strip())
+
     def _ready(self, char: str) -> bool:
         if has_unclosed_tag(self._buffer):
             # Cutting here would hand CosyVoice "<laughter>Ya." — an
@@ -166,20 +174,55 @@ class TurnChunkers:
             self._by_chat[key] = chunker
         return chunker
 
-    def drop(self, chat_id: str | None) -> None:
+    def drop(self, chat_id: str | None) -> int:
         """Forget this conversation's buffer.
 
-        Called on every way a turn can end — `on_done`, `on_error` —
-        and, as the backstop for one that ends neither way (the
-        gateway's socket drops mid-answer), from a phone claim's own
-        expiry. Without this the dict would hold one entry per
+        Returns how many characters were sitting in it, unspoken — a
+        COUNT, never the text, so a caller can log a discard without
+        ever holding somebody's half-finished sentence. 0 if there was
+        nothing buffered, or no chunker had ever been created for this
+        `chat_id`.
+
+        Called on both of the per-`chat_id` ways a turn ends —
+        `on_done`, `on_error` — and, for a PHONE only, as the backstop
+        for a turn that ends neither way: a phone's claim always
+        expires on its own ceiling even when nothing else does, so
+        `RemoteDesk.on_release` calls this too. The desk (`chat_id=
+        None`) has no claim to expire, so that backstop does not reach
+        it — see `drop_all` for what does.
+
+        Without any of this the dict would hold one entry per
         `chat_id` for as long as the process runs: harmless in the
         handful a household's phones reach, but a dead turn's
         half-built clause has no business surviving into that
         `chat_id`'s NEXT one, which is exactly what reusing a stale
         entry would do.
         """
-        self._by_chat.pop(chat_id or None, None)
+        chunker = self._by_chat.pop(chat_id or None, None)
+        return chunker.pending_chars() if chunker is not None else 0
+
+    def drop_all(self) -> int:
+        """Forget every conversation's buffer at once.
+
+        The backstop `drop` cannot be, for ANY `chat_id` — including
+        the desk's, which holds no claim for `drop`'s own phone-only
+        backstop to ride on. Called when the gateway CONNECTION itself
+        is lost (`GatewayClient.on_disconnect`), the one event neither
+        `on_done` nor `on_error` is ever sent to mark. Measured against
+        the desk specifically (CLAUDE.md, task 13): a room turn
+        mid-reply when the socket dropped left its half-built clause
+        sitting under `chat_id=None` forever, for the reply AFTER the
+        reconnect to inherit. A reconnect starts a new conversation on
+        the gateway's side; nothing buffered from before it will ever
+        be spoken, so keeping it can only corrupt what comes next.
+
+        Returns how many conversations had anything buffered at all —
+        a COUNT of chats, not of characters and never their text, for
+        the same reason `drop` returns one.
+        """
+        affected = sum(1 for c in self._by_chat.values() if c.pending_chars())
+        self._by_chat.clear()
+        return affected
 
 
 class Speaker:
@@ -232,9 +275,10 @@ class Speaker:
     # of the SAME reply can be synthesised faster and overtake an
     # earlier one — `workers=1` gave `['uno', 'dos', 'tres']` for the
     # same three clauses that `workers=3` played back as
-    # `['dos', 'tres', 'uno']`. `test_raising_workers_does_not_preserve_
-    # clause_order` in `tests/test_speech.py` pins that fact rather
-    # than leaving the next person to discover it live. A box where the
+    # `['dos', 'tres', 'uno']`.
+    # `test_raising_workers_does_not_preserve_clause_order` in
+    # `tests/test_speech.py` pins that fact rather than leaving the
+    # next person to discover it live. A box where the
     # VRAM constraint loosens (CLAUDE.md §12, the Ryzen AI Halo note)
     # can still raise `workers` for THROUGHPUT — several people's
     # replies synthesised at once — but needs per-destination

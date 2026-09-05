@@ -173,6 +173,15 @@ class GatewayClient:
         # Not part of a turn and not shown: it only decides whether an
         # unnamed sentence is still worth sending on. See `wake.hold`.
         self.on_asking: Callable[[bool], None] = lambda _open: None
+        # The connection to an established session was just lost — the
+        # gateway closed the socket, or the read raised. Nothing here
+        # ends a TURN by itself (there is no `chat_id` to end one
+        # with): it is the one place a caller can learn "whatever was
+        # buffered for any conversation belongs to a turn that is never
+        # coming back", because `on_done`/`on_error` are exactly the two
+        # calls a dropped socket cannot make. Not fired on the FIRST
+        # connection attempt failing (nothing was established to lose).
+        self.on_disconnect: Callable[[], None] = lambda: None
         self._ws: Any = None
         self._connected = asyncio.Event()
 
@@ -261,6 +270,9 @@ class GatewayClient:
             if connected:
                 connected = False
                 logger.warning(f"pasarela: conexión perdida — {why}")
+                # Whatever any conversation had buffered belongs to a
+                # turn `on_done`/`on_error` will never arrive to close.
+                self.on_disconnect()
             elif not complained:
                 complained = True
                 logger.warning(f"pasarela: no puedo conectar con {self.uri} — {why}")

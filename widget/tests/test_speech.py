@@ -492,6 +492,38 @@ def test_dropping_a_chat_frees_a_fresh_chunker_next_time() -> None:
     assert fresh.flush() == []  # nothing carried over from the dead turn
 
 
+def test_drop_reports_the_discarded_length_not_the_text() -> None:
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    assert chunkers.drop("nadie") == 0  # nothing was ever created
+
+    chunkers.for_chat("marta").push("doce caracteres")
+    discarded = chunkers.drop("marta")
+
+    assert isinstance(discarded, int)
+    assert discarded == len("doce caracteres")
+
+
+def test_drop_all_clears_every_conversation_at_once() -> None:
+    """The backstop `drop` cannot be for the DESK (`chat_id=None` holds
+    no phone claim to expire): the gateway CONNECTION being lost is the
+    only signal there is, and it does not come with a `chat_id` to
+    scope a single `drop` to — see `GatewayClient.on_disconnect`."""
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    chunkers.for_chat(None).push("sin terminar, sala")
+    chunkers.for_chat("marta").push("sin terminar, marta")
+    chunkers.for_chat("lucía")  # created, but nothing ever buffered
+
+    affected = chunkers.drop_all()
+
+    assert affected == 2  # only the two with something actually pending
+    assert chunkers.for_chat(None).flush() == []
+    assert chunkers.for_chat("marta").flush() == []
+
+
 # ── interrupt() is scoped to one destination ───────────────────────────
 #
 # Until 2026-09-06 `interrupt()` bumped one counter for the house and

@@ -99,6 +99,132 @@ async def test_a_full_turn_against_a_real_socket() -> None:
     assert "".join(tokens) == "Hola."
 
 
+async def test_a_dropped_connection_calls_on_disconnect() -> None:
+    """The one hook `on_done`/`on_error` cannot be: whatever any
+    `chat_id` had buffered belongs to a turn that will never get either
+    of those calls once the SOCKET itself is gone (CLAUDE.md, task 13,
+    the round-2 finding). Fired once the connection is genuinely lost,
+    never merely while still trying to connect for the first time."""
+    connections = 0
+
+    async def handler(ws) -> None:
+        nonlocal connections
+        connections += 1
+        await ws.close()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        client = GatewayClient(uri=f"ws://127.0.0.1:{port}")
+        client.retry_seconds = 0.05
+        count = {"n": 0}
+        client.on_disconnect = lambda: count.__setitem__("n", count["n"] + 1)
+
+        task = asyncio.create_task(client.run())
+        await client.wait_connected(timeout=5)
+        for _ in range(200):
+            if connections >= 2:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+
+    assert count["n"] >= 1
+
+
+async def test_a_connection_that_never_succeeds_does_not_call_on_disconnect() -> None:
+    """`on_disconnect` means a connection was LOST, not merely absent.
+    Nothing was ever established here for the strip to have buffered
+    anything against."""
+    client = GatewayClient(uri="ws://127.0.0.1:1")  # nothing listens there
+    client.retry_seconds = 0.02
+    fired = []
+    client.on_disconnect = lambda: fired.append(True)
+
+    task = asyncio.create_task(client.run())
+    await asyncio.sleep(0.2)
+    task.cancel()
+
+    assert fired == []
+
+
+async def test_a_socket_drop_mid_room_turn_does_not_bleed_into_the_next_one() -> None:
+    """The room's own version of Finding A (CLAUDE.md, task 13) — found
+    on round-2 review, after per-`chat_id` buffers already existed:
+    nothing ever cleared the DESK's (`chat_id=None`) buffer when the
+    CONNECTION itself was lost mid-answer, because `run()`'s reconnect
+    calls neither `on_done` nor `on_error`.
+
+    Reproduced against a real socket, wiring `GatewayClient` and
+    `TurnChunkers` exactly as `__main__.py` does: one room turn's
+    tokens arrive, the server drops the connection with no `done` at
+    all, the client reconnects, and a second, unrelated room turn's
+    tokens arrive. Measured before the fix (`client.on_disconnect =
+    chunkers.drop_all` wired in `__main__.py`): the second turn spoke
+    `['Le he apagado la luz del salSon las nueve y media,', 'señor.']`
+    — the first turn's dead fragment fused onto the second's words,
+    verbatim what the reviewer measured live. With it wired, only the
+    second turn's own words are ever said.
+    """
+    from jarvis_widget.speech import TurnChunkers
+
+    turns = 0
+
+    async def handler(ws) -> None:
+        nonlocal turns
+        turns += 1
+        json.loads(await ws.recv())
+        if turns == 1:
+            await ws.send(
+                json.dumps({"type": "token", "token": "Le he apagado la luz del sal"})
+            )
+            await ws.close()  # dropped mid-answer: no `done`, no `error`
+            return
+        await ws.send(
+            json.dumps({"type": "token", "token": "Son las nueve y media, señor."})
+        )
+        await ws.send(json.dumps({"type": "done", "thinking_ms": 10}))
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        client = GatewayClient(uri=f"ws://127.0.0.1:{port}")
+        client.retry_seconds = 0.05
+
+        chunkers = TurnChunkers()
+        said: list[str] = []
+        done = asyncio.Event()
+
+        def on_token(token, chat_id=None):
+            for clause in chunkers.for_chat(chat_id).push(token):
+                said.append(clause)
+
+        def on_done(_ms, chat_id=None):
+            for clause in chunkers.for_chat(chat_id).flush():
+                said.append(clause)
+            chunkers.drop(chat_id)
+            done.set()
+
+        client.on_token = on_token
+        client.on_done = on_done
+        client.on_disconnect = chunkers.drop_all  # the fix under test
+
+        task = asyncio.create_task(client.run())
+        await client.wait_connected(timeout=5)
+        await client.send_chat("apaga la luz")
+
+        # Wait for the drop and the second connection — `turns` is the
+        # server's own count, immune to the client-side race between
+        # `_connected` being cleared and re-set.
+        for _ in range(200):
+            if turns >= 2:
+                break
+            await asyncio.sleep(0.01)
+        await client.wait_connected(timeout=5)
+        await client.send_chat("qué hora es")
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+    assert said == ["Son las nueve y media, señor."]
+
+
 async def test_it_reconnects_after_the_server_drops_it() -> None:
     """The gateway restarts. The strip must come back on its own."""
     connections = 0

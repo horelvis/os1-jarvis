@@ -948,16 +948,19 @@ class JARVISApp(Gtk.Application):
             # `None` (the room) on its own, with nothing to wire up
             # for THAT any more.
             #
-            # What IS wired here now is a different backstop: a
-            # person's `TurnChunkers` entry is normally dropped by
-            # `on_done`/`on_error`, but a turn that dies with neither —
-            # the gateway's socket drops mid-answer — would otherwise
-            # leave that buffer sitting there to be reused, half-built,
-            # by their NEXT turn. A phone's claim expires on its own
-            # ceiling even when nothing else does (`RemoteDesk`'s own
-            # docstring), and `on_release` fires on every way a claim
-            # ends — released or stolen — so it is the one place
-            # guaranteed to run even then.
+            # What IS wired here now is a different backstop, and only
+            # for a PHONE: a person's `TurnChunkers` entry is normally
+            # dropped by `on_done`/`on_error`, but a turn that dies with
+            # neither — the gateway's socket drops mid-answer — would
+            # otherwise leave that buffer sitting there to be reused,
+            # half-built, by their NEXT turn. A phone's claim expires on
+            # its own ceiling even when nothing else does (`RemoteDesk`'s
+            # own docstring), and `on_release` fires on every way a claim
+            # ends — released, stolen, or the socket dropping under it —
+            # so it is the one place guaranteed to run even then, FOR A
+            # PHONE. The desk (`chat_id=None`) holds no claim, so this
+            # covers nothing for it — see `client.on_disconnect` below
+            # for the desk's own version of this same backstop.
             on_release=lambda endpoint: chunkers.drop(endpoint.persona),
         )
         # Closed until the QR is actually shown (below) — the welcome
@@ -1045,6 +1048,29 @@ class JARVISApp(Gtk.Application):
                 machine.error("")
                 settle_turn(origin.settle(), remote_desk)
 
+        def on_disconnect() -> None:
+            """The gateway connection itself was lost, mid-turn or not.
+
+            `gateway.py`'s `run()` reconnects on its own and neither
+            calls `on_done` nor `on_error` for whatever was in flight —
+            it cannot, there is no `chat_id` left to address either
+            with. `RemoteDesk.on_release` is the equivalent backstop
+            for a PHONE claim (see the comment where `remote_desk` is
+            built); the desk holds no claim, so nothing dropped ITS
+            buffer on a socket drop until this. `drop_all` clears every
+            `chat_id`, phones included, since a reconnect is a new
+            gateway session and nothing buffered from before it will
+            ever be spoken — see CLAUDE.md, task 13.
+            """
+            discarded = chunkers.drop_all()
+            if discarded:
+                print(
+                    f"pasarela: {discarded} conversación(es) con texto "
+                    "sin decir, descartado por la reconexión",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
         # ── the gateway's replies ─────────────────────────────────────
         #
         # All three accept a trailing `chat_id`, threaded from
@@ -1110,8 +1136,18 @@ class JARVISApp(Gtk.Application):
             # This is the OTHER way a turn ends, and its buffer is just
             # as dead as one `on_done` would have flushed — whatever it
             # still held was cut short by the error, not a real clause,
-            # so it is dropped rather than spoken.
-            chunkers.drop(chat_id)
+            # so it is dropped rather than spoken. Logged by LENGTH
+            # only, never the text — that buffer is somebody's
+            # half-finished sentence.
+            discarded = chunkers.drop(chat_id)
+            if discarded:
+                quien = chat_id or "la sala"
+                print(
+                    f"turno con error: {discarded} caracteres sin decir "
+                    f"descartados ({quien})",
+                    file=sys.stderr,
+                    flush=True,
+                )
             settle_turn(origin.settle(), remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
@@ -1241,6 +1277,7 @@ class JARVISApp(Gtk.Application):
             print(f"vídeo terminado: {reason}", file=sys.stderr, flush=True)
             GLib.idle_add(band.live_end, epoch, reason)
 
+        client.on_disconnect = on_disconnect
         client.on_token = on_token
         client.on_done = on_done
         client.on_error = on_error
