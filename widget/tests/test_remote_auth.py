@@ -10,6 +10,8 @@ import io
 import json
 import os
 import stat
+import threading
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -231,6 +233,59 @@ def test_an_unreadable_path_does_not_raise_and_yields_a_usable_roster(tmp_path):
 
     assert CASA in roster
     assert ruta.is_dir()  # left exactly as it was
+
+
+def test_a_fifo_at_the_path_does_not_hang_boot(tmp_path):
+    """A FIFO does not raise when opened for reading with nobody on the
+    write end — `read_text()` simply blocks forever, which is exactly
+    what `exists()` widening the branch (fix round 2) traded the
+    directory crash for. Run off the main thread with a real deadline,
+    daemon so a regression fails THIS test rather than freezing the
+    whole suite."""
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no FIFOs on this platform")
+    ruta = tmp_path / "personas.json"
+    os.mkfifo(ruta)
+
+    resultado: list[dict[str, str]] = []
+    hilo = threading.Thread(
+        target=lambda: resultado.append(load_or_create_roster(ruta)),
+        daemon=True,
+    )
+    hilo.start()
+    hilo.join(timeout=5)
+
+    assert not hilo.is_alive(), "load_or_create_roster hung reading a FIFO"
+    assert resultado and CASA in resultado[0]
+
+
+def test_a_dangling_symlink_at_the_path_does_not_raise(tmp_path):
+    """`exists()` is False for a broken symlink, so this reaches the
+    CREATE branch, not the read branch — and `O_CREAT | O_EXCL` then
+    fails because the link itself is already a directory entry, even
+    though it points nowhere. The docstring says "Never raises"; this
+    was the last way it was untrue."""
+    ruta = tmp_path / "personas.json"
+    ruta.symlink_to(tmp_path / "no-existe-nada-aqui")
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+
+
+def test_dev_null_is_not_treated_as_a_usable_roster_file(tmp_path):
+    """`/dev/null` reads back as empty text, which the empty-file case
+    already handles on its own — but it is not a regular file, and this
+    pins that it is rejected by the KIND check rather than by
+    accidentally producing the right answer through the read path, so
+    the check in `_read_roster_file` cannot later be "simplified" away
+    on the theory that non-regular nodes are harmless to just open."""
+    if not Path("/dev/null").exists():
+        pytest.skip("no /dev/null on this platform")
+
+    roster = load_or_create_roster(Path("/dev/null"))
+
+    assert CASA in roster
 
 
 def test_an_unreadable_file_is_logged_by_path_not_by_contents(tmp_path, captured_logs):

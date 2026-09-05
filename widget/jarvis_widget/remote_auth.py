@@ -139,7 +139,19 @@ def _read_roster_file(target: Path) -> dict[str, str] | None:
     expected). Logged once, naming the path and never the contents, and
     the file — or whatever is at that path — is left untouched: an
     operator may want to look at it.
+
+    The KIND of node is checked with `stat`, before anything is opened,
+    rather than leaving it to the `try` below: a directory or a Unix
+    socket raise promptly and would be caught there, but a FIFO with no
+    writer on the other end does not raise at all — `read_text()` simply
+    blocks forever. No `except` catches a hang, so the only way to rule
+    it out is to never attempt the read.
     """
+    if not target.is_file():
+        logger.warning(
+            f"personas: {target} no es un archivo normal; se ignora sin tocarlo"
+        )
+        return None
     try:
         crudo = json.loads(target.read_text() or "{}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -183,10 +195,12 @@ def load_or_create_roster(path: Path | None = None) -> dict[str, str]:
     target = Path(
         path or os.getenv("JARVIS_WIDGET_REMOTE_ROSTER") or DEFAULT_ROSTER_PATH
     )
-    # `exists()`, not `is_file()`: a directory left at this path must go
-    # through the read attempt and its exception handling below, rather
-    # than falling to the create branch, which would crash trying to
-    # `O_CREAT | O_EXCL` a path that is already there.
+    # `exists()`, not `is_file()`: a directory (or a FIFO, a socket, a
+    # device node) left at this path must go through the read attempt
+    # below rather than falling to the create branch, which would crash
+    # trying to `O_CREAT | O_EXCL` a path that is already there. Whether
+    # the node is actually a regular file is `_read_roster_file`'s own
+    # first check, made by `stat` and never by opening it.
     if target.exists():
         roster = _read_roster_file(target)
         if roster is None:
@@ -201,9 +215,18 @@ def load_or_create_roster(path: Path | None = None) -> dict[str, str]:
             roster[CASA] = new_secret()
             save_roster(roster, target)
         return roster
-    target.parent.mkdir(parents=True, exist_ok=True)
     roster = {CASA: _adopted_or_fresh_secret()}
-    _write_roster_file(target, roster, exclusive=True)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_roster_file(target, roster, exclusive=True)
+    except OSError as exc:
+        # `exists()` is False for a dangling symlink, so it reaches
+        # here — and `O_CREAT | O_EXCL` then fails because the link
+        # itself is already a directory entry, even though it points
+        # nowhere. A box that cannot persist its roster should still
+        # answer its phones for this boot; the roster this returns is
+        # simply never written to disk.
+        logger.warning(f"personas: no se pudo crear {target} — {exc}")
     return roster
 
 
