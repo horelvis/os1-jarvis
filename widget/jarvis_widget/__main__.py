@@ -823,7 +823,7 @@ class JARVISApp(Gtk.Application):
 
         from .certs import lan_address
         from .remote import HOSTNAME, PORT, Enrolment, RemoteDesk, serve
-        from .remote_auth import Guard, load_or_create_secret
+        from .remote_auth import Guard, load_or_create_roster
 
         def on_remote_utterance(pcm: bytes, endpoint) -> None:
             """A phone released its button.
@@ -1340,14 +1340,14 @@ class JARVISApp(Gtk.Application):
             # that owns them.
             self._spawn(client.run())
             speaker.start()
-            secret = load_or_create_secret()
+            roster = load_or_create_roster()
             # Both ways in: the name, and the address it resolves to.
             # mDNS is not guaranteed on a house network — the LAN IP is
             # the design's own fallback — and a browser sends the origin
             # it was loaded from, so a Guard bound to the name alone
             # refuses every connection the fallback ever makes.
             guard = Guard(
-                secret,
+                roster,
                 f"https://{HOSTNAME}:{PORT}",
                 f"https://{lan_address()}:{PORT}",
             )

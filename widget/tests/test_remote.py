@@ -170,7 +170,7 @@ async def test_the_welcome_routes_404_while_the_window_is_closed(
 
     `ca` is never read on this path — the 404 fires before the handler
     would touch it — so a path that does not exist is fine here."""
-    guard = Guard("secret", "https://brain.local:8443")
+    guard = Guard({"casa": "secret"}, "https://brain.local:8443")
     enrolment = Enrolment()  # never opened
     app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
 
@@ -191,7 +191,7 @@ async def test_the_profile_route_advertises_a_mobileconfig_filename(
     was never tried in Safari, which is the only browser that does."""
     ca = tmp_path / "ca.pem"
     ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
-    guard = Guard("secret", "https://brain.local:8443")
+    guard = Guard({"casa": "secret"}, "https://brain.local:8443")
     enrolment = Enrolment()
     enrolment.open_enrolment()  # real clock: the route checks it too
     app = build_welcome_app(guard, enrolment, ca)
@@ -344,7 +344,8 @@ async def test_the_enrolment_socket_is_up_only_while_the_window_is() -> None:
 async def _socket(desk: RemoteDesk) -> tuple[TestClient, web.Application]:
     app = web.Application()
     app.router.add_get(
-        "/ws", _handler(desk, Guard("s" * 32, "https://brain.local:8443"), None)
+        "/ws",
+        _handler(desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None),
     )
     client = TestClient(TestServer(app))
     await client.start_server()

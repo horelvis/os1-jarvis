@@ -24,6 +24,7 @@ from aiohttp import WSMsgType, web
 
 from .certs import ensure_certificate, lan_address
 from .enrol import mobileconfig, write_qr
+from .personas import CASA
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret
 
@@ -352,7 +353,10 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
             # 403, which would confirm to a scanning stranger that
             # something is listening on this port at all.
             raise web.HTTPNotFound()
-        target = f"https://{HOSTNAME}:{PORT}/#{guard.secret}"
+        # Interim: the enrolling person is not known here yet, so the
+        # link carries `casa`'s secret. Task 4 rewrites this to serve
+        # the secret of whoever is actually enrolling.
+        target = f"https://{HOSTNAME}:{PORT}/#{guard.secretos[CASA]}"
         return web.Response(
             content_type="text/html",
             text=(
