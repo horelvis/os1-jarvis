@@ -121,11 +121,26 @@ silently un-routed on the next apply.
 
 ### Who is who, per surface
 
-**A phone is a person.** Enrolment already issues a per-device token
-(`widget/jarvis_widget/{enrol,remote_auth}.py`); it gains a person's
-name at enrolment time. The `Endpoint` carries it, `dispatch()`
-propagates it, and it reaches the adapter as the `chat_id`. This half is
-cheap and cannot be wrong.
+**A phone is a person** — and this needs building, which an earlier
+draft of this section got wrong. **There is no per-device token today.**
+`remote_auth.py` holds ONE shared secret for the whole house
+(`~/.jarvis/remote.token`), every phone presents it, and the endpoint is
+named after its IP address (`remote.py`: `WebEndpoint(ws,
+request.remote or "phone", loop)`). So the phone side is not "add a
+name to something that already identifies devices"; it is a roster of
+one secret per person, a `Guard` that answers *which* person rather
+than *yes*, and an enrolment act that names who it is for.
+
+The consequence that matters for the enrolment ritual: the welcome page
+hands its secret, in cleartext, to whoever asks during the window
+(`enrol.py` says so itself). With one secret that was one risk; with a
+roster it becomes "whoever is on the wifi during those five minutes can
+take the FATHER's token, which holds `terminal`". So **the person is
+chosen at the keyboard, not on the page** — see the plan's task 4.
+
+Once built, the rest is cheap and cannot be wrong: the `Endpoint`
+carries the person, `dispatch()` propagates it, and it reaches the
+adapter as the `chat_id`.
 
 **The room is a voice.** A new pure module — the embedding, the
 centroids, the threshold and the decision, with no GTK and no audio
