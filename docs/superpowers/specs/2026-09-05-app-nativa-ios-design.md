@@ -168,6 +168,45 @@ over the photoreal option. One colour, the project's own. In the
 mockups the character is a pebble with two eyes and a mouth; the mockup
 is SVG and proposes the FORM and the framing, not the asset.
 
+### The asset: Huginn
+
+**Chosen 2026-09-05 by the user.** [Huginn](https://studio.blender.org/characters/huginn/v2/)
+is Blender Studio's character rig for Einar's robot companion in the
+open movie *Charge*: stylised, unmistakably not human, and rigged by
+people who rig for film. "Robot companion" is the part it already
+plays, which is the part this app is casting.
+
+- **Licence: CC-BY.** It costs a credit line, and a credit line in a
+  house app is an *acerca de* screen with one sentence: *"Huginn —
+  Blender Studio, CC-BY."* Put it in before shipping to a phone, not
+  after; it is the entire obligation and forgetting it is the only way
+  to get this wrong.
+- **A film rig is not a phone asset.** Blender Studio's rigs carry
+  large armatures, drivers and subdivision, and do not export cleanly
+  to glTF as they stand. Baking down to a game-ready mesh is real
+  work — and it is Blender work, not iOS work, which is the good half
+  of the news.
+- **Two shape keys is the whole requirement**: mouth-open and blink,
+  because the mouth is driven by amplitude (above). So **a character
+  with no facial rig at all is still usable** — the keys get added in
+  Blender. That matters here specifically: a robot plausibly has no
+  mouth, and Huginn may well express with its head and its eye instead.
+  If so, **follow the character rather than fighting it** — the state
+  table above is written in postures precisely because that is what
+  survives having no face, and a robot that leans in and looks at you
+  reads as listening without a jaw.
+
+**Unverified, and the first thing to do:** open the file in Blender and
+look. What the rig actually contains has not been checked — the Studio
+page refused an automated fetch on 2026-09-05, so everything above about
+Huginn's contents is from its description, not from the file. Three
+questions to answer there, in this order: does it carry facial shape
+keys or controls; what does it weigh once baked for a phone; and does
+the baked mesh survive a glTF/USDZ round trip with its keys intact. If
+the answer to the third is no, that is the point to look at Quaternius
+(CC0, ships glTF already, simpler characters) rather than to fight the
+exporter.
+
 **What changes between states is posture, not brightness**, and this is
 the part to implement faithfully because it is what makes him read as
 somebody rather than as an indicator:
