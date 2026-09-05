@@ -1,5 +1,7 @@
 import base64
 import json
+import pathlib
+import re
 
 import pytest
 
@@ -105,6 +107,91 @@ def test_a_chat_id_that_could_escape_a_session_key_is_refused():
                     }
                 )
             )
+
+
+def _accepts_chat_id(chat_id) -> bool:
+    try:
+        decode_client(
+            json.dumps(
+                {
+                    "type": "chat",
+                    "message": "h",
+                    "user_id": "primary",
+                    "chat_id": chat_id,
+                }
+            )
+        )
+        return True
+    except ProtocolError:
+        return False
+
+
+def test_chat_id_that_is_not_a_valid_profile_name_is_refused_case_and_position():
+    # Finding 1 (review round 1): a position-blind, case-blind check
+    # (`c.isalnum() or c in "-_"` over every character) accepted things
+    # the real grammar never would — a leading `-` or `_`, and any
+    # uppercase letter. `ProfileRoute.matches` compares chat_id exactly,
+    # so an id that fails to route falls back to the DEFAULT profile —
+    # the privileged one — which makes a looser wire grammar a fail-open
+    # bug, not a cosmetic one.
+    for hostile in ("-rf", "_x", "MARTA", "Marta"):
+        assert not _accepts_chat_id(hostile), hostile
+
+
+def test_the_chat_id_grammar_is_hermes_own_profile_grammar():
+    # Read from the live vendored source rather than trusting a copied
+    # pattern: a copy only catches OUR drift, and the drift that
+    # actually breaks routing in silence is HERMES changing its grammar
+    # under us on a vendor update. Mirrors
+    # widget/tests/test_personas.py::test_the_grammar_is_hermes_own_profile_grammar.
+    fuente = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / ".hermes/src/hermes_cli/profiles.py"
+    )
+    if not fuente.is_file():
+        pytest.skip("el árbol vendorizado de Hermes no está en esta caja")
+    encontrado = re.search(
+        r"_PROFILE_ID_RE = re\.compile\(r\"(.+?)\"\)", fuente.read_text()
+    )
+    assert encontrado, "no se encuentra _PROFILE_ID_RE en profiles.py"
+    hermes = re.compile(encontrado.group(1))
+    for candidato in (
+        "-rf",
+        "_x",
+        "MARTA",
+        "Marta",
+        "marta",
+        "lucia",
+        "a-b_c",
+        "x9",
+        "",
+        "a" * 65,
+    ):
+        assert _accepts_chat_id(candidato) == bool(hermes.match(candidato)), candidato
+
+
+def test_chat_id_is_validated_on_a_listen_frame_too():
+    # Finding 3 (review round 1): "validated at the boundary" must be
+    # true of the frame format, not of one frame type. Nothing reads a
+    # chat_id off a listen frame today, but the socket is the trust
+    # boundary regardless of which handler looks at the field.
+    with pytest.raises(ProtocolError):
+        decode_client(json.dumps({"type": "listen", "chat_id": "a/b"}))
+
+
+def test_an_oversize_chat_id_is_rejected_by_length_before_anything_else():
+    # Finding 2 (review round 1): the length check must come first, so
+    # neither the regex nor the exception message ever has to scan or
+    # copy a multi-megabyte value.
+    huge = "x" * (4 * 1024 * 1024)
+    with pytest.raises(ProtocolError) as exc:
+        decode_client(
+            json.dumps(
+                {"type": "chat", "message": "h", "user_id": "primary", "chat_id": huge}
+            )
+        )
+    # The message must not carry the value whole into whatever logs it.
+    assert len(str(exc.value)) < 200
 
 
 def test_listen_needs_no_fields():

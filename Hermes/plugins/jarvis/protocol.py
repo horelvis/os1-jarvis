@@ -17,9 +17,22 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any, Dict
 
 _CLIENT_TYPES = {"chat", "listen"}
+
+# The same grammar as `personas._ID` in the widget and as Hermes' own
+# `_PROFILE_ID_RE` (`.hermes/src/hermes_cli/profiles.py`) — anchored,
+# lowercase, ASCII. It is duplicated rather than imported because this
+# plugin runs inside the gateway and must not depend on the widget;
+# `test_protocol.py`'s grammar-parity test is what keeps the copies
+# honest. Looser here would be worse than stricter: `ProfileRoute.matches`
+# compares `chat_id` exactly, so an id that matches no route falls back
+# to the DEFAULT profile — the privileged one, since task 11. This
+# boundary fails open, not closed, so it must match Hermes' own rule
+# exactly rather than merely refuse what looks obviously hostile.
+_CHAT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 # Nothing a person says out loud, or types on a screen with no keyboard in
 # front of it, comes near this. The cap exists because the socket is an
@@ -48,6 +61,31 @@ def decode_client(raw: str) -> Dict[str, Any]:
     if kind not in _CLIENT_TYPES:
         raise ProtocolError(f"unknown type: {kind!r}")
 
+    # Validated wherever it appears, not only inside the `chat` branch:
+    # "validated at the boundary" must be true of the frame format, not
+    # of one frame type. Nothing reads a `chat_id` off a `listen` frame
+    # today, but the socket is the trust boundary and a field's meaning
+    # should not depend on which handler happens to look at it.
+    chat = msg.get("chat_id")
+    if chat is not None:
+        if not isinstance(chat, str):
+            raise ProtocolError(f"chat_id must be a string, got {type(chat).__name__}")
+        # Length before anything that scans the value or writes it
+        # anywhere: a `chat_id` this large should never be regex-matched
+        # or interpolated whole into an exception that a caller may log
+        # (as `adapter.py`'s read loop does, at warning level, straight
+        # into the journal). Measured: a 4 MB `chat_id` cost 84 ms on the
+        # gateway's event loop when this was checked last — the loop
+        # that also serves the strip and the live camera. The truncated
+        # preview below is deliberately shorter than the cap itself.
+        if len(chat) > 64:
+            raise ProtocolError(f"chat_id is over 64 chars: {chat[:32]!r}...")
+        if not _CHAT_ID.match(chat):
+            # See _CHAT_ID above for why this must be Hermes' own
+            # grammar exactly, not merely a refusal of what looks
+            # obviously hostile.
+            raise ProtocolError(f"chat_id is not a usable id: {chat!r}")
+
     if kind == "chat":
         message = msg.get("message")
         if not isinstance(message, str) or not message.strip():
@@ -72,19 +110,6 @@ def decode_client(raw: str) -> Dict[str, Any]:
         wake = msg.get("wake")
         if wake is not None and not isinstance(wake, bool):
             raise ProtocolError("wake must be a boolean when present")
-
-        # Optional, and it must stay optional: the strip is versioned
-        # separately, and a build older than today sends no chat_id.
-        # Absent means the house's single session.
-        chat = msg.get("chat_id")
-        if chat is not None:
-            if not isinstance(chat, str) or not chat.strip():
-                raise ProtocolError("chat_id must be a non-blank string when present")
-            usable = all(c.isascii() and (c.isalnum() or c in "-_") for c in chat)
-            if len(chat) > 64 or not usable:
-                # It becomes a session key and a profile name — the
-                # trust boundary is here, not at whatever uses it.
-                raise ProtocolError(f"chat_id is not a usable id: {chat!r}")
 
     return msg
 
