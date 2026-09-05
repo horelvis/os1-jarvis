@@ -56,7 +56,7 @@ def test_the_first_to_press_holds_the_turn() -> None:
 
     assert desk.claim(phone) is True
     assert desk.busy is True
-    assert desk.current is phone
+    assert desk.holders.get(CASA) is phone
 
 
 def test_the_second_to_press_is_refused_not_queued() -> None:
@@ -65,7 +65,7 @@ def test_the_second_to_press_is_refused_not_queued() -> None:
     desk.claim(first)
 
     assert desk.claim(second) is False
-    assert desk.current is first
+    assert desk.holders.get(CASA) is first
     assert second.written == []
 
 
@@ -73,7 +73,7 @@ def test_releasing_lets_the_next_one_in() -> None:
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     first, second = FakeEndpoint("a"), FakeEndpoint("b")
     desk.claim(first)
-    desk.release()
+    desk.release(first)
 
     assert desk.busy is False
     assert desk.claim(second) is True
@@ -100,7 +100,7 @@ def test_a_release_by_a_phone_that_does_not_hold_the_turn_is_ignored() -> None:
 
     desk.release(second)
 
-    assert desk.current is first
+    assert desk.holders.get(CASA) is first
 
 
 def test_a_turn_held_under_the_ceiling_cannot_be_stolen() -> None:
@@ -109,7 +109,7 @@ def test_a_turn_held_under_the_ceiling_cannot_be_stolen() -> None:
     desk.claim(first, now=0.0)
 
     assert desk.claim(second, now=HELD_TURN_SECONDS - 1) is False
-    assert desk.current is first
+    assert desk.holders.get(CASA) is first
     assert second.refusals == 1
 
 
@@ -122,7 +122,7 @@ def test_a_turn_held_past_the_ceiling_is_stolen_not_refused() -> None:
     desk.claim(first, now=0.0)
 
     assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is True
-    assert desk.current is second
+    assert desk.holders.get(CASA) is second
     assert second.refusals == 0
 
 
@@ -138,8 +138,80 @@ def test_finishing_ends_the_deadline_so_a_long_reply_is_not_stolen() -> None:
     desk.finish(b"\x01\x02" * 100, first, now=0.0)
 
     assert desk.claim(second, now=HELD_TURN_SECONDS + 1) is False
-    assert desk.current is first
+    assert desk.holders.get(CASA) is first
     assert second.refusals == 1
+
+
+# ── one turn per person, not one turn for the whole house ────────────
+#
+# Until 2026-09-06 the desk held ONE turn, whoever it belonged to, and
+# a second press by ANYONE heard "está ocupado". The user's decision is
+# that different people hold genuinely parallel conversations; only a
+# SECOND press by the SAME person is still refused — a queued spoken
+# order answered a minute later reads as him being confused rather than
+# busy. The shared engines (STT, the LLM, TTS) stay serialised
+# elsewhere (task 10); this is only the claim.
+
+
+def test_two_people_hold_turns_at_the_same_time() -> None:
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    marta = FakeEndpoint("iphone-marta", persona="marta")
+    lucia = FakeEndpoint("iphone-lucia", persona="lucía")
+
+    assert desk.claim(marta, now=0.0)
+    assert desk.claim(lucia, now=0.0)
+    assert marta.refusals == 0 and lucia.refusals == 0
+
+
+def test_the_same_person_pressing_twice_is_still_refused() -> None:
+    """Two phones logged in as the same person, or one phone pressed
+    twice: a queued spoken order answered a minute later reads as him
+    being confused, which is the reason this refusal exists."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    uno = FakeEndpoint("uno", persona="marta")
+    otro = FakeEndpoint("otro", persona="marta")
+
+    assert desk.claim(uno, now=0.0)
+    assert not desk.claim(otro, now=0.0)
+    assert otro.refusals == 1
+
+
+def test_an_expired_claim_is_stolen_only_from_its_own_person() -> None:
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    uno = FakeEndpoint("uno", persona="marta")
+    otro = FakeEndpoint("otro", persona="marta")
+    desk.claim(uno, now=0.0)
+
+    assert desk.claim(otro, now=HELD_TURN_SECONDS + 1)
+
+
+def test_releasing_one_person_leaves_the_other_holding() -> None:
+    liberadas: list[object] = []
+    desk = RemoteDesk(
+        on_utterance=lambda pcm, endpoint: None,
+        on_release=lambda endpoint: liberadas.append(endpoint),
+    )
+    marta = FakeEndpoint("iphone-marta", persona="marta")
+    lucia = FakeEndpoint("iphone-lucia", persona="lucía")
+    desk.claim(marta, now=0.0)
+    desk.claim(lucia, now=0.0)
+
+    desk.release(marta)
+
+    assert desk.busy_for("lucía")
+    assert not desk.busy_for("marta")
+    assert liberadas == [marta]
+
+
+def test_endpoint_for_returns_the_holder_or_none() -> None:
+    """Task 10's speaker asks this, rather than reading `_claims`
+    itself, to decide where a reply's clauses go."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    marta = FakeEndpoint("iphone-marta", persona="marta")
+    desk.claim(marta, now=0.0)
+
+    assert desk.endpoint_for("marta") is marta
+    assert desk.endpoint_for("lucía") is None
 
 
 def test_enrolment_is_closed_until_opened() -> None:
@@ -301,7 +373,7 @@ def test_a_reply_that_never_settles_can_still_be_stolen_eventually() -> None:
     desk.finish(b"\x01\x02" * 100, first, now=0.0)
 
     assert desk.claim(second, now=ANSWERING_SECONDS + 1) is True
-    assert desk.current is second
+    assert desk.holders.get(CASA) is second
     assert second.refusals == 0
 
 
@@ -320,7 +392,7 @@ def test_releasing_sends_his_voice_home_too() -> None:
     homed = []
     desk = RemoteDesk(
         on_utterance=lambda pcm, endpoint: None,
-        on_release=lambda: homed.append(True),
+        on_release=lambda endpoint: homed.append(True),
     )
     phone = FakeEndpoint("iphone-cocina")
     desk.claim(phone)
@@ -339,7 +411,7 @@ def test_a_claim_that_merely_EXPIRES_sends_his_voice_home() -> None:
     homed = []
     desk = RemoteDesk(
         on_utterance=lambda pcm, endpoint: None,
-        on_release=lambda: homed.append(True),
+        on_release=lambda endpoint: homed.append(True),
     )
     gone, next_one = FakeEndpoint("gone"), FakeEndpoint("next")
     desk.claim(gone, now=0.0)
@@ -352,7 +424,7 @@ def test_a_release_that_frees_nothing_does_not_move_his_voice() -> None:
     homed = []
     desk = RemoteDesk(
         on_utterance=lambda pcm, endpoint: None,
-        on_release=lambda: homed.append(True),
+        on_release=lambda endpoint: homed.append(True),
     )
     first, second = FakeEndpoint("a"), FakeEndpoint("b")
     desk.claim(first)

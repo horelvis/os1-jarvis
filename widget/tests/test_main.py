@@ -512,7 +512,7 @@ def test_a_desk_turn_settling_does_not_release_a_phones_claim():
 
     settle_turn(None, speaker, desk)  # the desk's turn, not the phone's
 
-    assert desk.current is phone
+    assert desk.holders.get(CASA) is phone
     assert speaker.sink is phone
 
 
@@ -525,7 +525,7 @@ def test_a_phone_turn_settling_gives_the_room_back():
 
     settle_turn(phone, speaker, desk)
 
-    assert desk.current is None
+    assert desk.holders.get(CASA) is None
     assert speaker.sink == "desk"
 
 
@@ -539,7 +539,7 @@ def test_a_settle_from_a_turn_that_is_no_longer_the_holders_is_ignored():
 
     settle_turn(old, speaker, desk)
 
-    assert desk.current is new
+    assert desk.holders.get(CASA) is new
 
 
 def test_an_unprompted_turn_does_not_take_a_phones_claim():
@@ -556,7 +556,7 @@ def test_an_unprompted_turn_does_not_take_a_phones_claim():
 
     settle_turn(origin.settle(), speaker, desk)  # the reminder's own `done`
 
-    assert desk.current is phone
+    assert desk.holders.get(CASA) is phone
     assert speaker.sink is phone
 
 

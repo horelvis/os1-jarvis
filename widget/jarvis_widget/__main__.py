@@ -897,7 +897,12 @@ class JARVISApp(Gtk.Application):
             # at a phone that had dropped, and the next reply, to
             # anybody, was written into a dead socket while the room
             # heard nothing.
-            on_release=lambda: speaker.route_home(),
+            #
+            # The endpoint that let go is accepted and ignored here: the
+            # speaker still has one sink for the whole house (task 10
+            # gives each person their own and removes `route_home`
+            # along with it).
+            on_release=lambda endpoint: speaker.route_home(),
         )
         # Closed until the QR is actually shown (below) — the welcome
         # page it points at hands the shared secret to whoever asks,

@@ -17,6 +17,7 @@ import os
 import ssl
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -227,46 +228,98 @@ class Endpoint(Protocol):
     def refuse(self) -> None: ...
 
 
-class RemoteDesk:
-    """Who is holding the turn.
+@dataclass
+class _Claim:
+    """One person's hold on a turn: who, since when, and how long.
 
-    One at a time, and a second press is REFUSED rather than queued: a
-    queued spoken order is answered a minute after it was asked, which
-    reads as him being confused rather than busy.
+    `margen` is which ceiling applies to THIS person's claim right
+    now — `HELD_TURN_SECONDS` while recording, `ANSWERING_SECONDS`
+    once `finish()` has run (see `RemoteDesk.finish`) — and it switches
+    in place rather than the claim being replaced, so the object a
+    caller is holding a reference to stays the live one.
+    """
+
+    endpoint: Endpoint
+    desde: float
+    margen: float
+
+
+class RemoteDesk:
+    """Who is holding a turn — one at a time PER PERSON.
+
+    Until 2026-09-06 this was one turn for the whole house, and a
+    second press anywhere heard "está ocupado". The refusal survives
+    where it was earned and only there: two presses by the SAME
+    person, where a queued spoken order answered a minute later reads
+    as him being confused. Two different people are two conversations,
+    and they run at once — the shared engines are serialised in the
+    speaker's queue (task 10), not here.
     """
 
     def __init__(
         self,
         on_utterance: Callable[[bytes, Endpoint], None],
-        on_release: Callable[[], None] | None = None,
+        on_release: Callable[[Endpoint], None] | None = None,
     ) -> None:
         self._on_utterance = on_utterance
         # Called on EVERY way a claim ends — released, or stolen when it
-        # expires — and it is how his voice comes home with it. Only the
-        # claim used to expire: the sink went on pointing at a phone
-        # that had dropped, so the NEXT reply, to anybody, was written
-        # into a dead socket and the room heard nothing at all.
+        # expires — with the endpoint that let go, and it is how his
+        # voice comes home with it. Only the claim used to expire: the
+        # sink went on pointing at a phone that had dropped, so the NEXT
+        # reply, to anybody, was written into a dead socket and the room
+        # heard nothing at all.
         self._on_release = on_release
-        self.current: Endpoint | None = None
-        # Set whenever somebody holds the turn, RECORDING or ANSWERING —
-        # `None` only while nobody does. Which ceiling applies to it is
-        # `_allowance`: short while recording (a phone that presses and
-        # never releases), long while answering (a reply that never
-        # settles — see `finish`). Both expire; neither is unbounded,
-        # because a turn producing no answer at all is a real, measured
-        # shape (CLAUDE.md §5, the `📬 No home channel` first turn) and
-        # must not hold a phone forever.
-        self._claimed_at: float | None = None
-        self._allowance: float = HELD_TURN_SECONDS
+        # One record per person currently holding a turn, RECORDING or
+        # ANSWERING — a person absent from this dict holds nothing.
+        # Which ceiling applies to a claim is its own `_Claim.margen`:
+        # short while recording (a phone that presses and never
+        # releases), long while answering (a reply that never settles
+        # — see `finish`). Both expire; neither is unbounded, because a
+        # turn producing no answer at all is a real, measured shape
+        # (CLAUDE.md §5, the `📬 No home channel` first turn) and must
+        # not hold a phone forever.
+        self._claims: dict[str, _Claim] = {}
 
     @property
     def busy(self) -> bool:
-        return self.current is not None
+        """Whether ANYBODY holds a turn. Kept for callers that only ask
+        whether the house is quiet; identity questions use `busy_for`."""
+        return bool(self._claims)
+
+    def busy_for(self, persona: str) -> bool:
+        """Whether THIS person holds a turn right now."""
+        return persona in self._claims
+
+    @property
+    def holders(self) -> dict[str, Endpoint]:
+        """Who holds a turn right now, keyed by persona.
+
+        Replaces the single `current` this desk kept until 2026-09-06,
+        when there was only ever one turn for the whole house. A
+        snapshot — mutating the returned dict does not touch a claim.
+        """
+        return {persona: claim.endpoint for persona, claim in self._claims.items()}
+
+    def endpoint_for(self, persona: str) -> Endpoint | None:
+        """The endpoint holding this person's turn, or None.
+
+        Task 10's speaker asks this to decide where a reply's clauses
+        go. It is a method rather than the caller reading `_claims`
+        because the speaker has no business knowing how the desk keeps
+        its books — and because "whose claim is live right now" is a
+        question that must be answered in one place once turns can end
+        while audio is still being made.
+        """
+        held = self._claims.get(persona)
+        return held.endpoint if held is not None else None
 
     def claim(self, endpoint: Endpoint, now: float | None = None) -> bool:
-        """True if this endpoint now holds the turn.
+        """True if this endpoint now holds ITS PERSON's turn.
 
-        `now` is a monotonic clock reading, injectable for tests. A turn
+        `now` is a monotonic clock reading, injectable for tests. Only
+        that SAME person's own claim can refuse this one or be stolen
+        from — a different person's claim is untouched, which is the
+        whole of what makes two people's turns run at once. A claim
         held longer than its current allowance — `HELD_TURN_SECONDS`
         while recording, `ANSWERING_SECONDS` while answering (see
         `finish`) — is stolen rather than defended: its holder cannot
@@ -274,44 +327,48 @@ class RemoteDesk:
         """
         if now is None:
             now = time.monotonic()
-        if self.current is not None and self.current is not endpoint:
-            expired = (
-                self._claimed_at is not None
-                and now - self._claimed_at >= self._allowance
-            )
+        held = self._claims.get(endpoint.persona)
+        if held is not None and held.endpoint is not endpoint:
+            expired = now - held.desde >= held.margen
             if not expired:
                 endpoint.refuse()
                 return False
             # Stolen, not released: the previous holder never said so,
             # which is exactly why its sink has to be given up here.
-            self._give_back()
-        self.current = endpoint
-        self._claimed_at = now
-        self._allowance = HELD_TURN_SECONDS
+            self._give_back(held.endpoint)
+        self._claims[endpoint.persona] = _Claim(endpoint, now, HELD_TURN_SECONDS)
         return True
 
     def release(self, endpoint: Endpoint | None = None) -> None:
-        """Give the turn back. A release from an endpoint that does not
-        hold it is ignored — otherwise the second phone to press frees
-        the first one's turn."""
-        if endpoint is not None and self.current is not endpoint:
-            return
-        self._give_back()
+        """Give this endpoint's person's turn back.
 
-    def _give_back(self) -> None:
-        """Both halves of giving the turn back: the claim AND the voice."""
-        was_held = self.current is not None
-        self.current = None
-        self._claimed_at = None
-        if was_held and self._on_release is not None:
-            self._on_release()
+        A release from an endpoint that does not hold its own person's
+        turn is ignored — otherwise a second phone logged in as the
+        same person frees the first one's turn, and there would be no
+        way for one person's release to reach only their own claim.
+        `endpoint=None` is a no-op rather than "release whoever holds
+        the turn": with more than one person able to hold one at once,
+        there is no longer a single "whoever" to mean.
+        """
+        if endpoint is None:
+            return
+        held = self._claims.get(endpoint.persona)
+        if held is None or held.endpoint is not endpoint:
+            return
+        self._give_back(endpoint)
+
+    def _give_back(self, endpoint: Endpoint) -> None:
+        """Both halves of giving a turn back: the claim AND the voice."""
+        self._claims.pop(endpoint.persona, None)
+        if self._on_release is not None:
+            self._on_release(endpoint)
 
     def finish(self, pcm: bytes, endpoint: Endpoint, now: float | None = None) -> None:
         """The button was released: hand the utterance up with the
         endpoint that spoke, so the reply knows where to go.
 
         This also SWITCHES the deadline rather than clearing it.
-        `_claimed_at` while recording exists to catch a phone that
+        `desde`/`margen` while recording exist to catch a phone that
         presses and never releases; once `end` has arrived that risk is
         gone, and what remains is the reply, which may legitimately
         take minutes — he holds a terminal. Clearing the deadline
@@ -325,8 +382,10 @@ class RemoteDesk:
         """
         if now is None:
             now = time.monotonic()
-        self._claimed_at = now
-        self._allowance = ANSWERING_SECONDS
+        held = self._claims.get(endpoint.persona)
+        if held is not None and held.endpoint is endpoint:
+            held.desde = now
+            held.margen = ANSWERING_SECONDS
         self._on_utterance(pcm, endpoint)
 
 
@@ -588,7 +647,10 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
                         truncated = False
                         if not desk.claim(endpoint, time.monotonic()):
                             continue
-                    elif frame.get("type") == "end" and desk.current is endpoint:
+                    elif (
+                        frame.get("type") == "end"
+                        and desk.endpoint_for(endpoint.persona) is endpoint
+                    ):
                         desk.finish(
                             resample_to_input(bytes(buffer), rate),
                             endpoint,
@@ -596,7 +658,7 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
                         )
                         buffer.clear()
                 elif message.type == WSMsgType.BINARY:
-                    if desk.current is not endpoint:
+                    if desk.endpoint_for(endpoint.persona) is not endpoint:
                         continue
                     # Measured BEFORE appending, and against the ceiling
                     # at the rate this phone is actually sending: the
@@ -616,9 +678,10 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
             # above, a bad rate, resample_to_input raising on an
             # odd-length buffer, on_utterance raising, or the socket
             # just dying mid-utterance — the turn goes back. Without
-            # this, `desk.current` points at a dead endpoint forever
-            # and every phone in the house is told he is busy until
-            # the widget restarts.
+            # this, this endpoint's claim points at a dead endpoint
+            # forever and this same person is told he is busy until the
+            # widget restarts — a different person is unaffected either
+            # way.
             desk.release(endpoint)
         return ws
 
