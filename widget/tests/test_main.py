@@ -9,6 +9,9 @@ just the predicate that decides it — can be driven and asserted without
 a strip, a socket or a display.
 """
 
+import json
+import stat
+
 from jarvis_widget.__main__ import (
     TurnOrigin,
     _apply_asking_to_wake,
@@ -16,11 +19,13 @@ from jarvis_widget.__main__ import (
     _apply_ficha_click,
     _apply_ficha_frame,
     _apply_ficha_tick,
+    _persona_pendiente,
     _serve_quietly,
     settle_turn,
     spoken_text,
 )
 from jarvis_widget.ficha import ESPERA_S, FichaModel
+from jarvis_widget.personas import CASA
 from jarvis_widget.remote import RemoteDesk
 from jarvis_widget.wake import WakeWord
 
@@ -689,3 +694,64 @@ def test_the_last_press_is_the_one_that_puts_it_away() -> None:
 
     assert not model.visible
     assert area.calls[-1] == ("", "", "", None, None, 0)
+
+
+def test_no_pending_file_enrols_casa(tmp_path) -> None:
+    """The normal state between `enrolar.py` invocations. Never the
+    owner, never whoever was enrolled last."""
+    assert _persona_pendiente(tmp_path / "no-existe.json") == CASA
+
+
+def test_the_pending_person_is_read_and_the_file_removed(tmp_path) -> None:
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.write_text(json.dumps({"persona": "marta", "escrito": 0}))
+
+    assert _persona_pendiente(ruta) == "marta"
+    assert not ruta.exists()
+
+
+def test_a_second_signal_cannot_replay_the_name(tmp_path) -> None:
+    """`tools/enrolar.py` writes the file once per invocation; a second
+    SIGUSR1 with nothing freshly written must enrol CASA, not repeat
+    the last person read."""
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.write_text(json.dumps({"persona": "marta"}))
+
+    assert _persona_pendiente(ruta) == "marta"
+    assert _persona_pendiente(ruta) == CASA
+
+
+def test_malformed_json_enrols_casa_and_still_removes_the_file(tmp_path) -> None:
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.write_text("{esto no es json")
+
+    assert _persona_pendiente(ruta) == CASA
+    assert not ruta.exists()
+
+
+def test_a_json_array_is_not_a_pending_person(tmp_path) -> None:
+    """The top level must be an object; anything else is malformed in
+    the way that matters here, same as `_read_roster_file`'s own
+    guard."""
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.write_text(json.dumps(["marta"]))
+
+    assert _persona_pendiente(ruta) == CASA
+
+
+def test_a_name_that_does_not_survive_normalizar_enrols_casa(tmp_path) -> None:
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.write_text(json.dumps({"persona": "../papá"}))
+
+    assert _persona_pendiente(ruta) == CASA
+
+
+def test_a_directory_at_the_path_is_left_untouched(tmp_path) -> None:
+    """`stat` rules this out before anything is opened — the same guard
+    `_read_roster_file` uses, and for the same reason: a node that is
+    not a regular file must never be attempted with a blocking read."""
+    ruta = tmp_path / "enrolamiento.json"
+    ruta.mkdir()
+
+    assert _persona_pendiente(ruta) == CASA
+    assert stat.S_ISDIR(ruta.stat().st_mode)

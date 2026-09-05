@@ -23,7 +23,7 @@ from jarvis_widget.remote import (
     build_welcome_app,
 )
 from jarvis_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
-from jarvis_widget.remote_auth import Guard
+from jarvis_widget.remote_auth import Guard, load_or_create_roster, save_roster
 
 
 class FakeEndpoint:
@@ -177,6 +177,50 @@ async def test_the_welcome_routes_404_while_the_window_is_closed(
     async with TestClient(TestServer(app)) as client:
         assert (await client.get("/")).status == 404
         assert (await client.get("/jarvis.mobileconfig")).status == 404
+
+
+async def test_the_welcome_page_carries_the_enrolling_persons_secret(
+    tmp_path,
+) -> None:
+    """The page has nothing to choose (task-4-brief.md): whoever the
+    window was opened FOR is who its link authenticates as, and nobody
+    else's secret is anywhere in the page."""
+    guard = Guard(
+        {"casa": "casa-secreto", "marta": "marta-secreto"},
+        "https://brain.local:8443",
+    )
+    enrolment = Enrolment()
+    enrolment.abrir("marta")  # real clock: the route checks it too
+    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+
+    async with TestClient(TestServer(app)) as client:
+        body = await (await client.get("/")).text()
+
+    assert "#marta-secreto" in body
+    assert "casa-secreto" not in body
+
+
+async def test_the_welcome_page_mints_a_secret_for_a_new_person(
+    tmp_path, monkeypatch
+) -> None:
+    """A person opened for the first time is not on the roster yet —
+    the page mints their secret and persists it, rather than 500ing or
+    falling back to somebody else's."""
+    roster_path = tmp_path / "personas.json"
+    save_roster({"casa": "casa-secreto"}, roster_path)
+    monkeypatch.setenv("JARVIS_WIDGET_REMOTE_ROSTER", str(roster_path))
+    guard = Guard({"casa": "casa-secreto"}, "https://brain.local:8443")
+    enrolment = Enrolment()
+    enrolment.abrir("nuevo")  # real clock: the route checks it too
+    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/")
+        assert response.status == 200
+
+    assert "nuevo" in guard.secretos
+    persisted = load_or_create_roster(roster_path)
+    assert persisted["nuevo"] == guard.secretos["nuevo"]
 
 
 async def test_the_profile_route_advertises_a_mobileconfig_filename(

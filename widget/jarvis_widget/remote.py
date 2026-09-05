@@ -24,9 +24,9 @@ from aiohttp import WSMsgType, web
 
 from .certs import ensure_certificate, lan_address
 from .enrol import mobileconfig, write_qr
-from .personas import CASA
+from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
-from .remote_auth import Guard, load_or_create_secret
+from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
 
 PORT = int(os.getenv("JARVIS_WIDGET_REMOTE_PORT", "8443"))
 HOSTNAME = os.getenv("JARVIS_WIDGET_REMOTE_NAME", "brain.local")
@@ -83,6 +83,11 @@ class Enrolment:
 
     def __init__(self) -> None:
         self._opened_at: float | None = None
+        # Who the open window is for. Cleared with the window itself —
+        # `is_open` going False must take this with it, or a name from a
+        # closed window could still be read by whatever calls `persona`
+        # a moment too late.
+        self._persona: str | None = None
         # The listening socket, raised and dropped with the window. See
         # `attach`; `None` in every test that only drives the clock.
         self._site: EnrolmentSite | None = None
@@ -100,12 +105,41 @@ class Enrolment:
         if self._site is not None:
             self._site.open_soon()
 
+    def abrir(self, persona: str, now: float | None = None) -> None:
+        """Open the window FOR one named person.
+
+        Wraps the existing `open_enrolment`, which is what raises the
+        plain-HTTP socket. The name is normalised here rather than
+        trusted: it arrives from a file written by `tools/enrolar.py`,
+        and a name that does not survive would otherwise become a
+        profile name and a session key.
+        """
+        self._persona = normalizar(persona)
+        self.open_enrolment(now)
+
+    def persona(self, now: float | None = None) -> str | None:
+        """Who the open window is for, or None when it is shut.
+
+        A method rather than a property because it takes the injectable
+        clock every other method here takes, and because a stale name
+        must never be readable: an expired window is nobody's.
+        """
+        return self._persona if self.is_open(now) else None
+
     def is_open(self, now: float | None = None) -> bool:
         if self._opened_at is None:
             return False
         if now is None:
             now = time.monotonic()
-        return now - self._opened_at < ENROLMENT_SECONDS
+        abierta = now - self._opened_at < ENROLMENT_SECONDS
+        if not abierta:
+            # Takes the name with it: a window that has expired is
+            # nobody's, and a stale name left behind would otherwise be
+            # servable to whoever opens the page a moment after — or
+            # replayable if the window is ever reopened without going
+            # through `abrir` again.
+            self._persona = None
+        return abierta
 
 
 class EnrolmentSite:
@@ -348,15 +382,23 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
     welcome = web.Application()
 
     async def _welcome(request: web.Request) -> web.Response:
-        if not enrolment.is_open():
-            # A closed window looks like nothing is there — 404, not
-            # 403, which would confirm to a scanning stranger that
-            # something is listening on this port at all.
+        persona = enrolment.persona()
+        if persona is None:
+            # The window is shut. This is the normal state and it is not
+            # an error: the page simply is not there. Also covers the
+            # closed-window case that used to be `is_open()`'s job — a
+            # 404, not 403, which would confirm to a scanning stranger
+            # that something is listening on this port at all.
             raise web.HTTPNotFound()
-        # Interim: the enrolling person is not known here yet, so the
-        # link carries `casa`'s secret. Task 4 rewrites this to serve
-        # the secret of whoever is actually enrolling.
-        target = f"https://{HOSTNAME}:{PORT}/#{guard.secretos[CASA]}"
+        secreto = guard.secretos.get(persona)
+        if secreto is None:
+            # A person not yet on the roster: mint their secret now,
+            # the first time their window is opened, rather than
+            # somewhere the tool that only knows the name could reach.
+            secreto = new_secret()
+            guard.secretos[persona] = secreto
+            save_roster(guard.secretos)
+        target = f"https://{HOSTNAME}:{PORT}/#{secreto}"
         return web.Response(
             content_type="text/html",
             text=(

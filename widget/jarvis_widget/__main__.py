@@ -10,11 +10,14 @@ only bridge there is.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
+import stat
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import gi
@@ -28,6 +31,7 @@ from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
 from .hotword import SENSITIVITY as HOTWORD_SENSITIVITY  # noqa: E402
 from .echo import EchoFilter  # noqa: E402
 from .hotword import Hotword  # noqa: E402
+from .personas import CASA, normalizar  # noqa: E402
 from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
@@ -164,6 +168,46 @@ _DUMP_DIR = os.environ.get("JARVIS_WIDGET_DUMP")
 # frames can flow and cutting in works. Set this to 1 on a box without
 # it, or he will hear himself and reply to it.
 _MIC_GATE = os.environ.get("JARVIS_WIDGET_MIC_GATE") == "1"
+
+
+PERSONA_PENDIENTE = Path.home() / ".jarvis" / "enrolamiento.json"
+
+
+def _persona_pendiente(ruta: Path = PERSONA_PENDIENTE) -> str:
+    """The person `tools/enrolar.py` asked to enrol, consumed once.
+
+    Runs on the asyncio loop's SIGUSR1 handler, with nobody to catch a
+    traceback and nothing that may block it — the same constraints
+    `remote_auth._read_roster_file` is written against, and for the same
+    reason: `stat` rules out a node whose `open()` could hang forever
+    (a FIFO with no writer never raises, it just waits) before anything
+    is opened at all.
+
+    The file is removed on every way out of this function — found
+    malformed, found empty, or read clean — so a second SIGUSR1 with
+    nothing freshly written can never replay a name. A missing,
+    unreadable or malformed file means `CASA`: never the owner, never
+    whoever was enrolled last.
+    """
+    try:
+        try:
+            info = ruta.stat()
+        except OSError:
+            return CASA
+        if not stat.S_ISREG(info.st_mode):
+            return CASA
+        try:
+            datos = json.loads(ruta.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return CASA
+        if not isinstance(datos, dict):
+            return CASA
+        return normalizar(datos.get("persona"))
+    finally:
+        try:
+            ruta.unlink()
+        except OSError:
+            pass
 
 
 def _apply_error_to_wake_window(wake: WakeWord, message: str, now: float) -> None:
@@ -1019,9 +1063,7 @@ class JARVISApp(Gtk.Application):
 
         GLib.timeout_add_seconds(1, _ficha_tick)
 
-        from pathlib import Path
-
-        def _show_qr() -> bool:
+        def _mostrar_qr() -> bool:
             # The band already draws a PNG for the cameras; this is the
             # same gesture, not a new one — `remote.serve()` writes the
             # QR to this same path once at startup. `band` only exists
@@ -1032,30 +1074,39 @@ class JARVISApp(Gtk.Application):
             # The QR itself is harmless — it encodes only a LAN URL, no
             # secret — so its going away with the band's own fade
             # (`photo.FADE_S`, 15 s) is not what protects anything.
-            # What DOES need bounding is the plain-HTTP page it points
-            # at, which hands over the shared secret to whoever asks;
-            # `enrolment.open_enrolment` starts that window at the exact
-            # moment the QR becomes something a phone could scan, not at
-            # `serve()`'s startup, so the window is not open for however
-            # long the widget has simply been running.
-            enrolment.open_enrolment(time.monotonic())
+            # Opening the window itself — who it is FOR — is the
+            # caller's job now (`enrolment.abrir`): what does need
+            # bounding is the plain-HTTP page the QR points at, which
+            # hands over that person's secret to whoever asks, and the
+            # window it opens starts at the exact moment the QR becomes
+            # something a phone could scan, not at `serve()`'s startup.
             band.show_photo(str(Path.home() / ".jarvis" / "enrol-qr.png"), "alta")
             return False  # GLib.SOURCE_REMOVE
 
         if os.getenv("JARVIS_WIDGET_SHOW_QR") == "1":
             # Shows the code a few seconds after startup — a shortcut for
-            # exercising the path with no phone in the room. The normal
-            # way in is the signal below, which needs no flag and no
-            # restart.
-            GLib.timeout_add_seconds(3, _show_qr)
+            # exercising the path with no phone in the room and nobody
+            # at this keyboard naming a person. `CASA` is the only safe
+            # default here: it must never silently become the owner.
+            # The normal way in is the signal below, which needs no
+            # flag and no restart.
+            def _show_qr_dev() -> bool:
+                enrolment.abrir(CASA, time.monotonic())
+                return _mostrar_qr()
+
+            GLib.timeout_add_seconds(3, _show_qr_dev)
 
         def _on_enrol_signal(*_args: object) -> None:
-            """Open enrolment for a few minutes and show the code.
+            """Open enrolment for whoever `tools/enrolar.py` named, and
+            show the code.
 
             A signal rather than a route: nothing on the network can send
             one, so the window cannot be opened by the people it exists
             to keep out. `systemctl --user kill -s USR1
-            jarvis-widget.service` is the whole ritual.
+            jarvis-widget.service` is the whole ritual, and it is always
+            preceded by `tools/enrolar.py <persona>` writing who it is
+            for — read once, here, and deleted so a second signal cannot
+            replay it.
 
             `add_signal_handler`'s callback runs on whatever thread is
             executing `loop.run_forever()` — the asyncio thread started
@@ -1063,7 +1114,12 @@ class JARVISApp(Gtk.Application):
             through `GLib.idle_add` rather than touching the band
             directly.
             """
-            GLib.idle_add(_show_qr)
+
+            def _abrir_y_mostrar() -> bool:
+                enrolment.abrir(_persona_pendiente(), time.monotonic())
+                return _mostrar_qr()
+
+            GLib.idle_add(_abrir_y_mostrar)
 
         loop.add_signal_handler(signal.SIGUSR1, _on_enrol_signal)
 

@@ -5,6 +5,34 @@ import plistlib
 import stat
 
 from jarvis_widget.enrol import mobileconfig, write_qr
+from jarvis_widget.personas import CASA
+from jarvis_widget.remote import Enrolment
+
+
+def test_a_closed_enrolment_is_for_nobody():
+    e = Enrolment()
+    assert e.persona() is None
+    assert not e.is_open(now=1000.0)
+
+
+def test_opening_names_the_person_it_is_for():
+    e = Enrolment()
+    e.abrir("marta", now=1000.0)
+    assert e.persona(now=1000.0) == "marta"
+    assert e.is_open(now=1000.0)
+
+
+def test_the_window_closes_and_takes_the_person_with_it():
+    e = Enrolment()
+    e.abrir("marta", now=1000.0)
+    assert not e.is_open(now=1000.0 + 10_000)
+    assert e.persona(now=1000.0 + 10_000) is None
+
+
+def test_a_name_that_does_not_survive_normalizar_enrols_casa():
+    e = Enrolment()
+    e.abrir("../papá", now=1000.0)
+    assert e.persona(now=1000.0) == CASA
 
 
 def test_the_qr_is_a_png_that_is_not_empty(tmp_path) -> None:
