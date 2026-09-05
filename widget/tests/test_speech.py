@@ -190,15 +190,10 @@ def test_a_multi_sentence_body_is_kept_whole() -> None:
 # ── routing ──────────────────────────────────────────────────────────
 
 
-def test_the_speaker_can_be_pointed_somewhere_else() -> None:
-    """The user, 2026-09-01: "la respuesta de JARVIS tiene que oírse por
-    el canal que pregunta." The Speaker writes PCM to a sink; making the
-    sink swappable is the whole of routing a reply to a phone.
-
-    It is also what keeps two speakers from ever sounding at once, which
-    is what made "he is in both places" affordable: cross-room feedback
-    cannot happen if only one room is sounding.
-    """
+def test_say_takes_an_explicit_destination_none_means_the_room() -> None:
+    """Since 2026-09-06 there is no shared "current sink" to point
+    anywhere — see the class docstring for why. `say(clause, None)`
+    is the room; anything else is written straight to that object."""
     from jarvis_widget.speech import Speaker
 
     class Sink:
@@ -208,29 +203,63 @@ def test_the_speaker_can_be_pointed_somewhere_else() -> None:
         def write(self, pcm: bytes) -> None:
             self.written.append(pcm)
 
+    home = Sink()
+    speaker = Speaker(home)
+
+    # Nothing to assert yet — queueing is silent — but neither call
+    # should raise, and there is no `sink` attribute left to inspect.
+    speaker.say("Hola.", None)
+    assert not hasattr(speaker, "sink")
+    assert not hasattr(speaker, "route_to")
+    assert not hasattr(speaker, "route_home")
+
+
+async def test_a_clause_bound_to_a_phone_reaches_it(monkeypatch) -> None:
+    """The interface `route_to`/`route_home` used to give: a clause
+    destined for a phone is written to the phone, not the room."""
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    class Sink:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, pcm: bytes) -> None:
+            self.written.append(pcm)
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01\x02", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
     home, phone = Sink(), Sink()
     speaker = Speaker(home)
 
-    assert speaker.sink is home
+    speaker.say("Hola, señor.", phone)
 
-    speaker.route_to(phone)
-    assert speaker.sink is phone
+    speaker.start()
+    for _ in range(200):
+        if phone.written:
+            break
+        await asyncio.sleep(0)
+    for worker in speaker._workers:
+        worker.cancel()
 
-    speaker.route_home()
-    assert speaker.sink is home
+    assert phone.written == [b"\x01\x02"]
+    assert home.written == []
 
 
-async def test_a_clause_still_reaches_the_phone_once_route_home_fires_first(
-    monkeypatch,
-) -> None:
-    """Measured on a live iPhone, 2026-09-01: the gateway sends a reply's
-    text in a burst and its `done` arrives while CosyVoice is still
-    synthesising the first clause — `on_done` calls `route_home()`
-    seconds before the worker ever touches the queue. If the sink were
-    read at synthesis time instead of capture time, every reply would
-    play on the desk regardless of who asked. Not one byte reached the
-    phone, every time, until `enqueue` started carrying the destination
-    with the clause.
+async def test_the_destination_is_bound_when_the_clause_is_queued(monkeypatch) -> None:
+    """Pins the 2026-09-01 defect against the new interface (CLAUDE.md
+    §12): the destination travels WITH the clause from the instant
+    `say()` is called. There is no shared "current" sink left for
+    anything that happens AFTER that — a later turn, a later reply, a
+    different person entirely — to move out from under a clause
+    already on the queue.
     """
     import asyncio
 
@@ -254,18 +283,35 @@ async def test_a_clause_still_reaches_the_phone_once_route_home_fires_first(
     home, phone = Sink(), Sink()
     speaker = Speaker(home)
 
-    speaker.route_to(phone)
-    speaker.enqueue("Hola, señor.")
-    # The `done` that ends the turn arrives — and routes home — before
-    # the worker has pulled the clause off the queue.
-    speaker.route_home()
+    speaker.say("Hola, señor.", phone)
+    # Something else happens to the room's speaker in between — the
+    # closest thing left to "route_home firing first". It must not
+    # touch the clause already queued for the phone.
+    speaker.say("Otra cosa, para nadie en particular.", None)
 
     speaker.start()
     for _ in range(200):
-        if phone.written:
+        if phone.written and home.written:
             break
         await asyncio.sleep(0)
-    speaker._worker.cancel()
+    for worker in speaker._workers:
+        worker.cancel()
 
     assert phone.written == [b"\x01\x02"]
-    assert home.written == []
+    assert home.written == [b"\x01\x02"]
+
+
+async def test_worker_count_is_configurable() -> None:
+    """Not an invariant — CLAUDE.md §12's Ryzen AI Halo note: a box
+    where VRAM stops being the binding constraint could synthesise
+    more than one clause at once. Today's default is 1 (§2.8)."""
+    from jarvis_widget.speech import Speaker
+
+    speaker = Speaker(object())
+    assert speaker._worker_count == 1
+
+    speaker = Speaker(object(), workers=3)
+    speaker.start()
+    assert len(speaker._workers) == 3
+    for worker in speaker._workers:
+        worker.cancel()

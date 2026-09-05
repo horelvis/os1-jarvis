@@ -133,62 +133,76 @@ class ClauseChunker:
 
 
 class Speaker:
-    """Synthesise clauses IN ORDER and hand the PCM to the player.
+    """Synthesise clauses and hand the PCM to whichever endpoint they
+    are for. One clause at a time, globally — not because a sink is
+    shared, but because CosyVoice measurably garbles two clauses made
+    at once (CLAUDE.md §2.8).
 
-    The order is the whole reason this has a queue. Firing one
-    `say()` per clause concurrently — which is the obvious way to write
-    it — synthesises them in parallel and interleaves their chunks in
-    the player, so a two-clause reply comes out shredded. Clauses are
-    strictly sequential; only the *first* one's latency is on the
-    critical path, and that is the latency the chunking was for.
+    Several people may be mid-turn together. Only one of them is ever
+    having a clause SYNTHESISED at any instant; each clause carries its
+    own destination, bound at `say()` and never re-read.
+
+    Until 2026-09-06 this had a single mutable `sink`, moved by
+    `route_to`/`route_home` — workable while only one turn ever ran,
+    and already the second design here: the FIRST one read the
+    destination at synthesis time, and on a live iPhone (2026-09-01)
+    that let the gateway's `done` send the sink home before CosyVoice
+    had produced a single byte, so a private question came out of the
+    room. Binding the destination to the sink fixed that for one turn
+    at a time. It stops working the moment two people are answered in
+    the same breath — a clause queued for one person and a `route_home`
+    fired for the other would race on the same shared variable — so
+    there is no shared destination left to race on at all: `say` takes
+    it explicitly, an `Endpoint` or `None` for the room, and it rides
+    in the queue with the clause.
     """
 
-    def __init__(self, player) -> None:
+    # How many clauses may be IN SYNTHESIS at once. A parameter, not a
+    # law: it is 1 because this box's VRAM budget makes CosyVoice the
+    # only thing using the GPU for speech, and because interleaving two
+    # clauses' chunks in the SAME sink garbles them (§2.8) — a hazard
+    # that only exists between clauses sharing a destination, not
+    # between two different people's. A box where the constraint
+    # loosens (CLAUDE.md §12, the Ryzen AI Halo note: unified memory,
+    # no VRAM ceiling to share) may raise `workers` without anything
+    # here having assumed otherwise.
+    _DEFAULT_WORKERS = 1
+
+    def __init__(self, player, workers: int = _DEFAULT_WORKERS) -> None:
         self._player = player
-        # Where the PCM goes. `player` is the desk; a phone that pressed
-        # its button becomes this for the length of its own turn, which
-        # is what "the answer is heard on the channel that asked" means
-        # in code. Anything with `write(pcm)` qualifies.
-        self.sink = player
         self._client = None
         self._generation = 0
-        self._queue: asyncio.Queue[tuple[int, str, object]] = asyncio.Queue()
-        self._worker: asyncio.Task | None = None
+        self._queue: asyncio.Queue[tuple[int, str, object | None]] = asyncio.Queue()
+        self._worker_count = max(1, workers)
+        self._workers: list[asyncio.Task] = []
 
     def start(self) -> None:
-        """Start the worker. Must be called on the asyncio loop."""
-        if self._worker is None:
-            self._worker = asyncio.ensure_future(self._run())
+        """Start the worker(s). Must be called on the asyncio loop."""
+        if not self._workers:
+            self._workers = [
+                asyncio.ensure_future(self._run()) for _ in range(self._worker_count)
+            ]
 
-    def route_to(self, sink) -> None:
-        """Send what he says next to this sink instead of the desk."""
-        self.sink = sink
+    def say(self, clause: str, destino: object | None) -> None:
+        """Queue one clause for one destination. `None` is the room.
 
-    def route_home(self) -> None:
-        """Back to the speaker in the room with the strip in it."""
-        self.sink = self._player
-
-    def enqueue(self, clause: str) -> None:
-        """Queue a clause, WITH the sink it was destined for.
-
-        The destination is captured here rather than read at synthesis
-        time, because those are seconds apart and the routing does not
-        survive the gap. The gateway sends a reply's text in a burst and
-        its `done` arrives while CosyVoice is still working, and that
-        `done` sends the sink home — so a clause synthesised afterwards
-        would play in the room even though it was answering a phone.
-        Measured on a live iPhone 2026-09-01: not one byte reached the
-        phone, every time.
+        The destination is bound HERE, at queue time, not read again
+        later. That is not a style choice — see the class docstring
+        and CLAUDE.md §12 (2026-09-01) for the turn this repeats: the
+        destination was read when the clause was SYNTHESISED, seconds
+        after the gateway's `done` had already arrived and moved a
+        shared "current" sink on. There is no shared sink to move now,
+        so that bug is unrepresentable rather than merely fixed.
         """
-        self._queue.put_nowait((self._generation, clause, self.sink))
+        self._queue.put_nowait((self._generation, clause, destino))
 
     async def _run(self) -> None:
         while True:
-            generation, clause, sink = await self._queue.get()
+            generation, clause, destino = await self._queue.get()
             if generation != self._generation:
                 continue  # queued before an interruption; drop it
             try:
-                await self.say(clause, sink)
+                await self._synthesise(clause, destino)
             except Exception:
                 # A dead CosyVoice must not kill the worker, or she goes
                 # mute for the rest of the session with no error path.
@@ -208,12 +222,11 @@ class Speaker:
             self._queue.get_nowait()
         self._player.stop()
 
-    async def say(self, clause: str, sink) -> None:
-        """Synthesise one clause and write it to `sink`.
+    async def _synthesise(self, clause: str, destino: object | None) -> None:
+        """Synthesise one clause and write it to `destino` (`None` → the room).
 
-        `sink` is the destination captured by `enqueue` at queue time,
-        not necessarily `self.sink` right now — see `enqueue`'s
-        docstring for why the two can differ by the time this runs.
+        `destino` is exactly what `say()` was given at queue time — see
+        its docstring for why nothing here re-resolves it.
         """
         from Hermes.plugins.jarvis_voice import tts
 
@@ -222,6 +235,7 @@ class Speaker:
             # created it, and this loop is not uvicorn's.
             self._client = tts.new_client()
 
+        sink = self._player if destino is None else destino
         generation = self._generation
         async for chunk, _backend in tts.stream(clause, client=self._client):
             if generation != self._generation:

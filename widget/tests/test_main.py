@@ -21,6 +21,7 @@ from jarvis_widget.__main__ import (
     _apply_ficha_tick,
     _persona_pendiente,
     _serve_quietly,
+    destino_de,
     settle_turn,
     spoken_text,
 )
@@ -450,17 +451,6 @@ def test_a_discarded_utterance_still_ends_the_detectors_turn() -> None:
 # mid-answer.
 
 
-class FakeSpeaker:
-    def __init__(self) -> None:
-        self.sink = "desk"
-
-    def route_to(self, sink) -> None:
-        self.sink = sink
-
-    def route_home(self) -> None:
-        self.sink = "desk"
-
-
 class FakePhone:
     name = "iphone-cocina"
 
@@ -470,9 +460,10 @@ class FakePhone:
         # and TurnOrigin's marker — only the ones asserting identity
         # (task 5) pass a real one.
         self.persona = persona
+        self.written: list[bytes] = []
 
     def write(self, pcm: bytes) -> None:
-        pass
+        self.written.append(pcm)
 
     def refuse(self) -> None:
         pass
@@ -504,40 +495,33 @@ def test_a_desk_turn_settling_does_not_release_a_phones_claim():
     things the desk microphone produces, and each of them used to end a
     phone's answer halfway through — every clause queued after it
     played out loud in the room."""
-    speaker = FakeSpeaker()
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     phone = FakePhone()
     desk.claim(phone, now=0.0)
-    speaker.route_to(phone)
 
-    settle_turn(None, speaker, desk)  # the desk's turn, not the phone's
+    settle_turn(None, desk)  # the desk's turn, not the phone's
 
     assert desk.holders.get(CASA) is phone
-    assert speaker.sink is phone
 
 
 def test_a_phone_turn_settling_gives_the_room_back():
-    speaker = FakeSpeaker()
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     phone = FakePhone()
     desk.claim(phone, now=0.0)
-    speaker.route_to(phone)
 
-    settle_turn(phone, speaker, desk)
+    settle_turn(phone, desk)
 
     assert desk.holders.get(CASA) is None
-    assert speaker.sink == "desk"
 
 
 def test_a_settle_from_a_turn_that_is_no_longer_the_holders_is_ignored():
     """`release` is given the endpoint, so its own identity guard
     applies: a late settle cannot free a claim that has since moved."""
-    speaker = FakeSpeaker()
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     old, new = FakePhone(), FakePhone()
     desk.claim(new, now=0.0)
 
-    settle_turn(old, speaker, desk)
+    settle_turn(old, desk)
 
     assert desk.holders.get(CASA) is new
 
@@ -548,16 +532,13 @@ def test_an_unprompted_turn_does_not_take_a_phones_claim():
     — which is what they are. They used to send the sink home and free
     whichever phone was mid-answer."""
     origin = TurnOrigin()
-    speaker = FakeSpeaker()
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     phone = FakePhone()
     desk.claim(phone, now=0.0)
-    speaker.route_to(phone)
 
-    settle_turn(origin.settle(), speaker, desk)  # the reminder's own `done`
+    settle_turn(origin.settle(), desk)  # the reminder's own `done`
 
     assert desk.holders.get(CASA) is phone
-    assert speaker.sink is phone
 
 
 def test_the_marker_is_one_shot():
@@ -589,6 +570,110 @@ def test_a_desk_turn_has_no_endpoint_and_therefore_no_person():
     origin = TurnOrigin()
 
     assert origin.take() is None
+
+
+# ── where a reply's clauses go ────────────────────────────────────────
+#
+# This is the task that repeats a bug already paid for once (CLAUDE.md
+# §12, 2026-09-01): reading the destination at SYNTHESIS time, after the
+# turn that owned it had already ended, sent a private question out
+# loud into the room. `destino_de` is what `on_token`/`on_done`/
+# `on_error` call, once per batch of clauses, to bind a destination that
+# is then never re-read.
+
+
+def test_destino_de_is_the_room_when_there_is_no_chat_id():
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+
+    assert destino_de(desk, None) is None
+    assert destino_de(desk, "") is None
+
+
+def test_destino_de_finds_the_claim_for_its_own_chat_id():
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    telefono = FakePhone(persona="marta")
+    desk.claim(telefono, now=0.0)
+
+    assert destino_de(desk, "marta") is telefono
+
+
+def test_destino_de_falls_back_to_the_room_once_the_claim_is_gone():
+    """The residue recorded on 2026-09-01, preserved rather than fixed:
+    a phone that drops mid-answer resolves to `None` from here on, and
+    the rest of the reply is spoken in the room."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    telefono = FakePhone(persona="marta")
+    desk.claim(telefono, now=0.0)
+    desk.release(telefono)
+
+    assert destino_de(desk, "marta") is None
+
+
+def test_two_conversations_do_not_cross():
+    """Two people mid-turn at once: each clause must reach the endpoint
+    its OWN chat_id names, never the other's."""
+    entregado: list[tuple[str, str | None]] = []
+
+    class FakeSpeaker:
+        def say(self, clause: str, destino) -> None:
+            entregado.append((clause, getattr(destino, "persona", None)))
+
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    marta, lucia = FakePhone(persona="marta"), FakePhone(persona="lucía")
+    desk.claim(marta, now=0.0)
+    desk.claim(lucia, now=0.0)
+
+    hablante = FakeSpeaker()
+    hablante.say("una", destino_de(desk, "marta"))
+    hablante.say("dos", destino_de(desk, "lucía"))
+    hablante.say("tres", destino_de(desk, "marta"))
+
+    assert entregado == [("una", "marta"), ("dos", "lucía"), ("tres", "marta")]
+
+
+async def test_the_destination_is_bound_when_the_clause_is_queued(monkeypatch):
+    """The failure this pins: reading the destination at SYNTHESIS time
+    let the turn end, the claim go home, and the clause be written into
+    the room instead of the phone. `Speaker.say` is given the resolved
+    destination once, up front — exactly as `on_token`/`on_done` do —
+    and nothing that happens to the claim afterwards can reach a clause
+    already on the queue.
+    """
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01\x02", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    room = FakePhone(persona=CASA)
+    speaker = Speaker(room)
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    telefono = FakePhone(persona="marta")
+    desk.claim(telefono, now=0.0)
+
+    destino = destino_de(desk, "marta")
+    speaker.say("hola", destino)
+    # The turn ends here, and the phone lets go — before the worker has
+    # even looked at the queue.
+    desk.release(telefono)
+    assert destino_de(desk, "marta") is None  # the NEXT clause would go home
+
+    speaker.start()
+    for _ in range(200):
+        if telefono.written:
+            break
+        await asyncio.sleep(0)
+    for worker in speaker._workers:
+        worker.cancel()
+
+    assert telefono.written == [b"\x01\x02"]
+    assert room.written == []
 
 
 async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):

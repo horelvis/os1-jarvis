@@ -552,18 +552,53 @@ def spoken_text(
     return wake.heard(text, now)
 
 
-def settle_turn(phone: object | None, speaker, desk) -> None:
-    """Give the voice and the phone's claim back — if it was a phone's.
+def destino_de(remote_desk, chat_id: str | None) -> object | None:
+    """The endpoint a reply belongs to, or `None` for the room.
+
+    Resolved from the frame's own `chat_id` — the persona `dispatch`
+    sent as `chat_id` when the turn began (task 9) — through
+    `RemoteDesk.endpoint_for` rather than by reaching into its
+    bookkeeping directly: the desk is the only thing that gets to
+    decide whose claim is still live, and that question has to be
+    answered in one place now that turns can end while audio for them
+    is still being made.
+
+    Called once per batch of clauses, at the moment they are about to
+    be queued on the `Speaker` — never re-read afterwards, which is
+    the whole of the fix for the defect CLAUDE.md §12 records on
+    2026-09-01: reading the destination later, at SYNTHESIS time, let
+    the turn end and the reply's sink move on first, and a question
+    asked on a phone came out of the room instead.
+
+    If the claim is already gone by the time this runs — a phone
+    dropped mid-answer — this returns `None` and the REST of that
+    reply is spoken in the room. That is known, deliberate residue
+    (CLAUDE.md §12, 2026-09-01) and this function does not try to fix
+    it — see PROGRESS.md, task 12.
+    """
+    if not chat_id:
+        return None
+    return remote_desk.endpoint_for(chat_id)
+
+
+def settle_turn(phone: object | None, desk) -> None:
+    """Give the phone's claim back — if it was a phone's.
 
     Called on every way a turn can end. A desk turn settles nothing on
     the phone side: it never held the claim, and taking it away is how
     an empty desk transcription used to end a phone's answer halfway
     through. The endpoint is passed to `release` so its own identity
     guard applies too, in case the claim has moved on since.
+
+    Used to also send the voice home (`speaker.route_home()`): with a
+    single shared sink, giving up a claim and giving up the voice were
+    the same event. They are not any more — `destino_de` resolves
+    fresh from `remote_desk` on every batch of clauses, so a claim
+    ending here is already enough; there is no separate sink left to
+    reset.
     """
     if phone is None:
         return
-    speaker.route_home()
     desk.release(phone)
 
 
@@ -785,8 +820,14 @@ class JARVISApp(Gtk.Application):
                 sys.stderr.flush()
                 os._exit(0)
 
-        def say(clause: str) -> None:
-            """Speak a clause, unless his voice is switched off."""
+        def say(clause: str, destino: object | None) -> None:
+            """Speak a clause, unless his voice is switched off.
+
+            `destino` is resolved once per batch of clauses by the
+            caller (`destino_de`, from that turn's `chat_id`) and
+            passed straight through to `Speaker.say` — never looked up
+            again here.
+            """
             # Remembered even when muted: `interrupt()` can leave a
             # clause half-played, and half of one still comes back.
             echo.spoke(clause, time.monotonic())
@@ -795,7 +836,7 @@ class JARVISApp(Gtk.Application):
                 # while he is muted would empty itself the moment he
                 # is unmuted, and say a minute-old answer out loud.
                 return
-            speaker.enqueue(clause)
+            speaker.say(clause, destino)
 
         wave.on_switch = on_switch
 
@@ -882,27 +923,26 @@ class JARVISApp(Gtk.Application):
             The marker goes down immediately before the audio is handed
             up, and `dispatch` takes it: it is the only thing that tells
             that one function whether the mouth it is serving is in the
-            room or in somebody's hand.
+            room or in somebody's hand. Nothing routes the voice here
+            any more — `destino_de` resolves it fresh, per batch of
+            clauses, from that turn's own `chat_id`.
             """
-            speaker.route_to(endpoint)
             origin.arriving(endpoint)
             machine.heard(pcm)
 
         origin = TurnOrigin()
         remote_desk = RemoteDesk(
             on_utterance=on_remote_utterance,
-            # The claim and the voice go home together, on every way a
-            # claim can end — including the one nobody calls: a claim
-            # that simply expires. Without it the sink went on pointing
-            # at a phone that had dropped, and the next reply, to
-            # anybody, was written into a dead socket while the room
-            # heard nothing.
-            #
-            # The endpoint that let go is accepted and ignored here: the
-            # speaker still has one sink for the whole house (task 10
-            # gives each person their own and removes `route_home`
-            # along with it).
-            on_release=lambda endpoint: speaker.route_home(),
+            # Until 2026-09-06 a claim ending — including the one
+            # nobody calls: a claim that simply expires — had to send
+            # the speaker's single shared sink home too, or it went on
+            # pointing at a phone that had dropped and the next reply,
+            # to anybody, was written into a dead socket while the room
+            # heard nothing. There is no shared sink left to send home:
+            # `destino_de` asks THIS desk fresh on every batch of
+            # clauses, so a claim that is gone simply resolves to
+            # `None` (the room) on its own, with nothing to wire up
+            # here.
         )
         # Closed until the QR is actually shown (below) — the welcome
         # page it points at hands the shared secret to whoever asks,
@@ -947,7 +987,7 @@ class JARVISApp(Gtk.Application):
                     # Only if it WAS the phone's turn, though — an empty
                     # desk transcription is the commonest event in the
                     # room, and it used to end a phone's answer halfway.
-                    settle_turn(origin.settle(), speaker, remote_desk)
+                    settle_turn(origin.settle(), remote_desk)
                     return
                 print(f"→ {text}", file=sys.stderr, flush=True)
                 text = echo.clean(text, time.monotonic())
@@ -955,7 +995,7 @@ class JARVISApp(Gtk.Application):
                     # All of it was him. Not a turn, and not an error.
                     print("(era su propio eco)", file=sys.stderr, flush=True)
                     machine.error("")
-                    settle_turn(origin.settle(), speaker, remote_desk)
+                    settle_turn(origin.settle(), remote_desk)
                     return
                 # A phone's press IS the address, and ONLY a phone's.
                 # This asked `remote_desk.busy` until 2026-09-01, which
@@ -987,14 +1027,18 @@ class JARVISApp(Gtk.Application):
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
-                settle_turn(origin.settle(), speaker, remote_desk)
+                settle_turn(origin.settle(), remote_desk)
 
         # ── the gateway's replies ─────────────────────────────────────
         #
-        # All three now accept a trailing `chat_id`, threaded from
+        # All three accept a trailing `chat_id`, threaded from
         # gateway.py's `_dispatch`: whose reply this is, or None for the
-        # desk. Task 10 routes on it; none of the three uses it yet.
-        def on_token(token: str, _chat_id: str | None = None) -> None:
+        # desk. Resolved through `destino_de` exactly once per callback
+        # — at the moment its clauses are about to be queued — and
+        # passed straight into every `say()` that batch makes. See
+        # `destino_de`'s own docstring for why that timing is the whole
+        # of the fix CLAUDE.md §12 (2026-09-01) records.
+        def on_token(token: str, chat_id: str | None = None) -> None:
             if is_system_message(token):
                 # Hermes narrating itself, in English, with emoji. Not
                 # hers to say — and its `done` must not end the turn.
@@ -1008,17 +1052,19 @@ class JARVISApp(Gtk.Application):
             if not token:
                 return
             machine.token(token)
+            destino = destino_de(remote_desk, chat_id)
             for clause in chunker.push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                say(clause)
+                say(clause, destino)
 
-        def on_done(_ms: int, _chat_id: str | None = None) -> None:
+        def on_done(_ms: int, chat_id: str | None = None) -> None:
             # He has answered, so the next sentence needs no name for a
             # while: a conversation is not a sequence of commands.
             wake.answered(time.monotonic())
+            destino = destino_de(remote_desk, chat_id)
             for clause in chunker.flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                say(clause)
+                say(clause, destino)
             if machine.done():
                 # Give the room — and any phone waiting its turn — back.
                 # This is the recovery path for a held turn, not
@@ -1027,23 +1073,22 @@ class JARVISApp(Gtk.Application):
                 # restarts. Gated on the real settle, not on every
                 # `done`: the gateway emits one after each of its own
                 # system messages too (turn.py, one measured turn
-                # carried six), and releasing on THAT one would send the
-                # sink home and free the desk before the real tokens
-                # ever arrive — a question asked on a phone, answered
-                # out loud in the room.
+                # carried six), and releasing on THAT one would free the
+                # desk before the real tokens ever arrive — a question
+                # asked on a phone, answered out loud in the room.
                 #
                 # And gated on the ORIGIN of the turn being settled: a
                 # desk turn gives nothing back, so an unprompted one — a
                 # cron reminder, a camera alert — no longer takes a
                 # phone's claim away either.
-                settle_turn(origin.settle(), speaker, remote_desk)
+                settle_turn(origin.settle(), remote_desk)
 
-        def on_error(message: str, _chat_id: str | None = None) -> None:
+        def on_error(message: str, chat_id: str | None = None) -> None:
             if message:
-                say(message)
+                say(message, destino_de(remote_desk, chat_id))
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
-            settle_turn(origin.settle(), speaker, remote_desk)
+            settle_turn(origin.settle(), remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
             # Straight to the GTK thread. Everything else the gateway
@@ -1508,9 +1553,9 @@ class JARVISApp(Gtk.Application):
                 print(f"diciendo: {_SAY_ON_START}", file=sys.stderr, flush=True)
                 machine.token(_SAY_ON_START)  # drives the wave to `speaking`
                 for clause in chunker.push(_SAY_ON_START):
-                    speaker.enqueue(clause)
+                    speaker.say(clause, None)
                 for clause in chunker.flush():
-                    speaker.enqueue(clause)
+                    speaker.say(clause, None)
                 # In a real turn the gateway sends `done` and the wave
                 # settles. Nothing sends one here, so without this the
                 # strip stays in `speaking` forever, frozen on the last
