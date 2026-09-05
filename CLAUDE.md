@@ -205,9 +205,7 @@ as the primary interaction mode.
 
 ### What he is NOT
 
-- ❌ A multi-user system (single user, always)
 - ❌ A cloud-LLM wrapper (conversational inference stays local — Qwen via llama-server)
-- ❌ A mobile app (this desktop only)
 - ❌ A coding assistant
 - ❌ **A visible agent.** She uses tools; she never performs using them.
   No "ejecutando 3 de 5", no tool names out loud, no progress reports, no
@@ -218,6 +216,13 @@ as the primary interaction mode.
 "❌ An agentic tool-using system (no function calling, no web search)".
 Both were contradicted by Phase 9, which integrated Hermes *for* agentic
 tool use, and the contradiction was resolved in favour of acting.
+
+**Removed 2026-09-05** (see §12): "❌ A multi-user system (single user,
+always)" and "❌ A mobile app (this desktop only)". The first is the
+oldest assumption in the project — older than the widget, older than
+Hermes — and the whole phone path was built on it. Both went in one
+conversation, for one reason: two teenagers in this house are going to
+study with him.
 
 ---
 
@@ -1215,6 +1220,79 @@ If you encounter:
 ## 12. Decision Log
 
 Significant decisions made during development. Append-only.
+
+### 2026-09-05 — The house becomes several people, and he gets a face
+
+**Three decisions from one conversation, and every one of them reverses
+something older than the surface it changes.** The reason underneath all
+three is the same and it is not technical: two daughters, 17 and 16, are
+going to use the teacher mode.
+
+**§1 loses two lines** — "❌ A multi-user system (single user, always)"
+and "❌ A mobile app (this desktop only)". Memory, sessions, persona,
+model and TOOLS become per person, and the phone stops being a web page.
+Both designs are written:
+`docs/superpowers/specs/2026-09-05-identidad-por-persona-design.md` and
+`…-app-nativa-ios-design.md`.
+
+**The multi-user work turned out to be configuration, not a subsystem,
+and the finding is worth carrying.** Hermes profiles are complete
+`HERMES_HOME` isolation, `gateway.profile_routes` already routes an
+inbound message to one by `platform` + `chat_id`, and the matching is
+platform-generic despite a Discord-only docstring. **Our own adapter
+throws the identity away**: `plugins/jarvis/adapter.py:822` hard-codes
+`chat_id="jarvis"` while the `user_id` it is handed rides along unused.
+That literal is the entire reason the house shares one memory. What the
+isolation buys matters more than the harness the user also asked for:
+**the daughters' profile simply does not load `terminal` or the
+cameras**, and the 2026-09-01 measurement says the harness stands in
+front of dark humour and opinions, not in front of anything that would
+worry a parent.
+
+**Parallel conversations cost no VRAM, measured.** 1,681 MiB free; two
+real 64K slots would cost ~1 GB and are not needed, because
+`llama-server` queues, Whisper takes 67-148 ms, and a phone and the room
+are different speakers. Only CosyVoice needs a queue, for the
+clause-interleaving reason §2.8 already records. **Identity in the room
+is a speaker embedding** with a hard rule around it: below the
+confidence floor the turn belongs to a shared `casa` profile that owns
+no tools, and **a failure never degrades to another person**. Sisters of
+16 and 17 are the difficult case, so a measurement gate sits in front of
+that half; if they do not separate, the phones deliver the feature and
+the room falls back to one identity, which is a supported outcome and
+not a failure.
+
+**And the avatar comes back — on the phone, and only there.** This
+amends the 2026-09-01 entry below, which discarded **any** avatar. That
+discard **stands for the strip**, and the reason it stood is the reason
+it does not apply here: the objection was VRAM on this box, a MetaHuman
+measured at 3,240 MiB that does not fit beside the 27B. **A phone
+renders its own face.** The other measurement from those two days
+survives intact and is what makes this affordable at all: the face was
+never the expensive part — what costs is whatever drives it.
+
+The user's choice is **stylised 3D and not human**, after being offered
+the photoreal option and the "abstract shape that talks" that would have
+reopened nothing. Mockups:
+`https://claude.ai/code/artifact/2a12d71b-15c9-4239-8bf7-ccdd462af9dc`.
+The character is a pebble with two eyes and a mouth, in the one colour,
+and **what changes between states is posture rather than brightness** —
+he leans in and opens his eyes while listening, looks up and away with
+his mouth shut while thinking, and while speaking only the mouth works.
+That thinking pose is where the measured 14-second wait lives, and it is
+half of the answer to it; the other half is that **what he understood
+appears before the answer does**, which also fixes the third finding of
+the phone trial (a bad transcription was invisible until an absurd reply
+arrived).
+
+**Costs, stated rather than discovered:** a rigged model (glTF/USDZ with
+ARKit blendshapes) becomes an asset this project has to source and keep,
+and lip-sync has to be driven on the device from the 24 kHz PCM it
+already receives — neither exists today, and a generated picture is a
+reference, not an asset. §1.3's aesthetic restraint now has to govern a
+CHARACTER, which is a much harder thing to hold than a line. And the
+project's surface count goes to two: a wave on the desktop, a face on
+the phone, and nothing says they have to agree.
 
 ### 2026-09-03 — The card gets a webview, and the estimate goes
 
