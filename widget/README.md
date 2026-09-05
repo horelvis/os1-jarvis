@@ -81,8 +81,9 @@ it she runs and is simply mute.
 | `JARVIS_WIDGET_REMOTE_NAME` | The name on the certificate (default `brain.local`; avahi is running, so mDNS resolves it). The certificate also carries the LAN IP, because client isolation breaks mDNS on some networks. |
 | `JARVIS_WIDGET_REMOTE_HOST` | Override the LAN address if the routing-table guess is wrong. It is guessed by asking which source address would reach the outside, which never picks one of this box's twelve Docker bridges. |
 | `JARVIS_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
-| `JARVIS_WIDGET_REMOTE_TOKEN` | Where the shared secret lives (default `~/.jarvis/remote.token`, 0600). Delete it to rotate; every phone then needs the link again. |
-| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
+| `JARVIS_WIDGET_REMOTE_TOKEN` | Where the **pre-roster** shared secret lives (default `~/.jarvis/remote.token`, 0600). Read exactly once now — the moment `~/.jarvis/personas.json` is first created — to adopt an already-enrolled house's secret as `casa`'s. **Deleting it afterwards does nothing**: nothing reads it again, so it does not rotate anything. See `JARVIS_WIDGET_REMOTE_ROSTER` below for what rotation actually is today. |
+| `JARVIS_WIDGET_REMOTE_ROSTER` | Where the roster lives (default `~/.jarvis/personas.json`, 0600): `{persona: secret}`, one entry per enrolled person plus `casa` for whoever the system cannot attribute. **This is the authority now, not `JARVIS_WIDGET_REMOTE_TOKEN` above.** On a box that already had a `remote.token` and no roster yet, the roster is created carrying that secret forward as `casa`'s, so every phone enrolled before the upgrade keeps working with no re-enrolment. Rotating one person is removing their entry by hand and enrolling them again (`tools/enrolar.py <persona>`, below) — a fresh secret for them, nobody else touched. Rotating everyone means deleting this file **and** `remote.token`: delete only this one and `casa` re-adopts the old secret from `remote.token` on the next boot, unrotated. |
+| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start, open for `casa` — never a named person; see the ritual below for that. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
@@ -118,10 +119,18 @@ afterwards. Skipping the second step looks like it worked — the page
 loads — right up until the microphone or the WebSocket needs the
 connection actually trusted.
 
-1. Point the phone's camera at the QR (`JARVIS_WIDGET_SHOW_QR=1` at
-   start, or any time with
-   `systemctl --user kill -s USR1 jarvis-widget.service` — no restart
-   needed). **Open the link in Safari.**
+1. **Name whose phone this is**, at this keyboard:
+
+       PYTHONNOUSERSITE=1 widget/.venv/bin/python widget/tools/enrolar.py <persona>
+
+   It writes who the window is for and sends the widget the signal
+   itself — no separate `systemctl kill` needed. (A bare
+   `systemctl --user kill -s USR1 jarvis-widget.service`, or
+   `JARVIS_WIDGET_SHOW_QR=1` at start, opens the same window with no
+   flag and no restart either, but for `casa` — the shared,
+   unattributed identity — never for a named person; use `enrolar.py`
+   whenever the phone belongs to somebody.) Point the phone's camera
+   at the QR that appears on the strip. **Open the link in Safari.**
 2. **1 · Instalar el certificado** → Settings shows "Profile Downloaded"
    → Install. This installs the profile. It does not yet trust it.
 3. Separately, find where this iOS version lets you trust an installed
@@ -140,6 +149,13 @@ from across the room; the difference is a switch on the side of the
 phone, not a bug.
 
 Two minutes, once per phone. The certificate is issued for ten years.
+
+**`JARVIS_ALLOWED_USERS` is not the family list.** It gates the
+`user_id`, which is `primary` for every turn from this house, and it is
+authorization: a name missing from it is dropped in silence. Who a turn
+BELONGS to is the `chat_id`, which selects a Hermes profile. Adding
+people to the allowlist is not how a person gets their own memory —
+`gateway.profile_routes` is (task 11).
 
 ## The cameras are not here any more
 
