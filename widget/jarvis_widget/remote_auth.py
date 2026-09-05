@@ -22,7 +22,9 @@ from hmac import compare_digest
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .personas import CASA, normalizar
+from loguru import logger
+
+from .personas import CASA, es_valida
 
 DEFAULT_SECRET_PATH = Path.home() / ".jarvis" / "remote.token"
 DEFAULT_ROSTER_PATH = Path.home() / ".jarvis" / "personas.json"
@@ -83,6 +85,85 @@ def _adopted_or_fresh_secret() -> str:
     return new_secret()
 
 
+def _es_canonica(clave: object) -> bool:
+    """Whether `clave` is already a person id, exactly as it stands —
+    not merely one that WOULD become one through `normalizar`.
+
+    Used only for a key already read off disk or handed to `save_roster`:
+    a key that only survives by folding (an accented `papá`, an
+    upper-case `MARTA`) is a typo, not a person, and folding it in
+    `load_or_create_roster` used to let a typo overwrite `casa` or
+    promote itself into an existing person's slot. `normalizar` itself
+    stays exactly what it was for task 4's enrolment path, where turning
+    a raw string INTO a valid id is exactly the point.
+    """
+    return (
+        isinstance(clave, str)
+        and es_valida(clave)
+        and clave == clave.strip().casefold()
+    )
+
+
+def _sanitized_roster(crudo: dict) -> dict[str, str]:
+    """Only entries whose key is already canonical, string-valued, and
+    the first of its kind. Anything else is dropped rather than folded
+    — see `_es_canonica` — and every drop is logged once, naming the
+    key and never the secret."""
+    limpio: dict[str, str] = {}
+    for clave, valor in crudo.items():
+        if not isinstance(valor, str):
+            logger.warning(
+                f"personas: entrada descartada, valor no es texto — {clave!r}"
+            )
+            continue
+        if not _es_canonica(clave):
+            logger.warning(f"personas: entrada descartada, id inválido — {clave!r}")
+            continue
+        if clave in limpio:
+            logger.warning(f"personas: entrada duplicada descartada — {clave!r}")
+            continue
+        limpio[clave] = valor
+    return limpio
+
+
+def _read_roster_file(target: Path) -> dict[str, str] | None:
+    """The roster as parsed and sanitised, or `None` if the file itself
+    cannot be trusted at all.
+
+    Never raises: this runs inside `_boot`, with nobody to catch a
+    traceback, and a hand-edited file is exactly the kind of thing that
+    goes wrong in the ways a person makes mistakes — invalid JSON, or
+    valid JSON whose top level is not an object at all. Logged once,
+    naming the path and never the contents, and the file itself is left
+    untouched: an operator may want to look at it.
+    """
+    texto = target.read_text()
+    try:
+        crudo = json.loads(texto or "{}")
+    except json.JSONDecodeError:
+        logger.warning(f"personas: {target} no es JSON válido; se ignora sin tocarlo")
+        return None
+    if not isinstance(crudo, dict):
+        logger.warning(f"personas: {target} no es un objeto; se ignora sin tocarlo")
+        return None
+    return _sanitized_roster(crudo)
+
+
+def _write_roster_file(
+    target: Path, roster: dict[str, str], *, exclusive: bool
+) -> None:
+    """Write `roster` as JSON to `target`, flushed and fsynced before the
+    handle closes: a power cut between the write and the flush is what
+    used to leave the empty file that then read back as a roster with
+    no `casa` in it at all."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else os.O_TRUNC)
+    fd = os.open(target, flags, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(roster, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def load_or_create_roster(path: Path | None = None) -> dict[str, str]:
     """`{person: secret}`, made once and reused.
 
@@ -91,33 +172,52 @@ def load_or_create_roster(path: Path | None = None) -> dict[str, str]:
     put in it, for the reason `load_or_create_secret` gives: creating it
     world-readable and chmod'ing afterwards leaves a window in which
     every secret in the house is on disk and readable.
+
+    Always contains `casa`. A roster that came back without it — an
+    empty file, one edited by hand to drop it — would otherwise lock
+    every phone in the house out and 500 the enrolment page, both in
+    silence; one is minted, persisted, and logged instead.
     """
     target = Path(
         path or os.getenv("JARVIS_WIDGET_REMOTE_ROSTER") or DEFAULT_ROSTER_PATH
     )
     if target.is_file():
-        crudo = json.loads(target.read_text() or "{}")
-        # Names are re-normalised on the way in: this file is edited by
-        # hand, and a person id that does not survive `normalizar` would
-        # otherwise reach a session key and a profile name.
-        return {normalizar(k): v for k, v in crudo.items() if isinstance(v, str)}
+        roster = _read_roster_file(target)
+        if roster is None:
+            # The file itself could not be trusted at all. It is left
+            # exactly as it was; what comes back behaves like a fresh
+            # box, in memory only — nothing is persisted over it.
+            return {CASA: _adopted_or_fresh_secret()}
+        if CASA not in roster:
+            logger.warning(
+                f"personas: {target} no tenía 'casa'; se ha creado uno nuevo"
+            )
+            roster[CASA] = new_secret()
+            save_roster(roster, target)
+        return roster
     target.parent.mkdir(parents=True, exist_ok=True)
     roster = {CASA: _adopted_or_fresh_secret()}
-    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as handle:
-        json.dump(roster, handle)
+    _write_roster_file(target, roster, exclusive=True)
     return roster
 
 
 def save_roster(roster: dict[str, str], path: Path | None = None) -> None:
-    """Replace the roster on disk, 0600, atomically."""
+    """Replace the roster on disk, 0600, atomically.
+
+    Refuses to write a key that is not already a valid person id,
+    raising `ValueError`: reaching this function with one is a
+    programming error, not runtime input — task 4 is what writes into
+    this roster from an enrolment flow, and the roster's own grammar is
+    not something to relax at the point that persists it.
+    """
+    for persona in roster:
+        if not _es_canonica(persona):
+            raise ValueError(f"id de persona inválido para escribir: {persona!r}")
     target = Path(
         path or os.getenv("JARVIS_WIDGET_REMOTE_ROSTER") or DEFAULT_ROSTER_PATH
     )
     temporal = target.with_suffix(".tmp")
-    fd = os.open(temporal, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as handle:
-        json.dump(roster, handle)
+    _write_roster_file(temporal, roster, exclusive=False)
     temporal.replace(target)
 
 
@@ -144,12 +244,20 @@ class Guard:
         in the roster, which is a timing oracle for WHO is on this
         network — a smaller leak than the secret itself, and free to
         avoid.
+
+        `compare_digest` raises `TypeError` on a non-ASCII `str`, on
+        either side, and `offered` reaches here straight off an
+        unauthenticated query string. A stranger on the wifi gets a 500
+        rather than a refusal for that alone, and a single non-ASCII
+        secret already on the roster would do the same to everyone
+        else's login, not just its own — so both are simply "not a
+        match" rather than an exception.
         """
-        if not offered:
+        if not offered or not offered.isascii():
             return None
         encontrada: str | None = None
         for persona, secreto in sorted(self.secretos.items()):
-            if compare_digest(offered, secreto):
+            if secreto.isascii() and compare_digest(offered, secreto):
                 encontrada = persona
         return encontrada
 

@@ -6,17 +6,35 @@ this feature the whole of the project's authentication was "only from
 this machine"; these two checks are what replaces it.
 """
 
+import io
 import json
+import os
 import stat
 
 import pytest
+from loguru import logger
 
 from jarvis_widget.personas import CASA
 from jarvis_widget.remote_auth import (
     Guard,
     load_or_create_roster,
     load_or_create_secret,
+    save_roster,
 )
+
+
+@pytest.fixture
+def captured_logs():
+    """Everything loguru writes during one test. Matches the fixture
+    already used in `test_gateway.py` for the same reason: this project
+    keeps paying for failures that were silent, so a fix that adds a log
+    line is only proven by a test that reads it back."""
+    sink = io.StringIO()
+    handler = logger.add(sink, level="DEBUG")
+    try:
+        yield sink
+    finally:
+        logger.remove(handler)
 
 
 def test_a_secret_is_created_once_and_reused(tmp_path) -> None:
@@ -68,9 +86,9 @@ def test_the_roster_adopts_an_existing_single_secret(tmp_path, monkeypatch):
 
 
 def test_a_secret_names_its_person(tmp_path):
-    # Names ASCII, not "papá": `personas.normalizar` (task 2) is ASCII
-    # only and would fold an accented id to `CASA`, which is a different
-    # thing being tested (see `test_the_roster_re_normalises_names_on_read`).
+    # Names ASCII, not "papá": an accented id is invalid and is DROPPED
+    # on read rather than folded to anything — see
+    # `test_an_invalid_key_is_dropped_not_folded`.
     ruta = tmp_path / "personas.json"
     ruta.write_text(json.dumps({"papa": "aaa", "marta": "bbb"}))
     ruta.chmod(0o600)
@@ -89,14 +107,148 @@ def test_an_unknown_secret_is_nobody_and_not_casa(tmp_path):
     assert guard.persona_for("") is None
 
 
-def test_the_roster_re_normalises_names_on_read(tmp_path):
-    """The file is edited by hand. An accented or otherwise invalid id
-    does not survive `normalizar` and falls back to `CASA` rather than
-    reaching a session key or a profile name unchecked."""
+def test_an_invalid_key_is_dropped_not_folded(tmp_path):
+    """The file is edited by hand. An id that only survives by FOLDING
+    through `normalizar` (an accent, upper case) used to be kept under
+    its folded name — which let a typo overwrite `casa`'s real secret,
+    or a second, differently-cased spelling of the same name silently
+    replace an earlier entry. Fix round 1: such an entry is dropped
+    instead, and `casa` — reached only by the literal key `casa` — is
+    never touched by one."""
     ruta = tmp_path / "personas.json"
-    ruta.write_text(json.dumps({"papá": "aaa"}))
+    ruta.write_text(
+        json.dumps(
+            {"casa": "CASA-REAL", "papá": "INVALIDO", "MARTA": "M1", "marta": "M2"}
+        )
+    )
     ruta.chmod(0o600)
-    assert load_or_create_roster(ruta) == {CASA: "aaa"}
+    assert load_or_create_roster(ruta) == {"casa": "CASA-REAL", "marta": "M2"}
+
+
+def test_an_invalid_key_is_logged_by_name_not_by_secret(tmp_path, captured_logs):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text(json.dumps({"papá": "un-secreto-que-no-debe-salir"}))
+    ruta.chmod(0o600)
+
+    load_or_create_roster(ruta)
+
+    logged = captured_logs.getvalue()
+    assert "papá" in logged
+    assert "un-secreto-que-no-debe-salir" not in logged
+
+
+def test_save_roster_refuses_a_key_that_is_not_already_canonical(tmp_path):
+    """Reaching `save_roster` with an invalid key is a programming
+    error — task 4 is what writes into this roster from an enrolment
+    flow — so it raises rather than writing a file the read path would
+    then have to sanitise again."""
+    with pytest.raises(ValueError):
+        save_roster({"MARTA": "m"}, tmp_path / "personas.json")
+
+
+def test_an_empty_roster_file_still_gets_a_casa(tmp_path):
+    """An interrupted write, or a file simply emptied by hand, used to
+    lock every phone out and 500 the enrolment page — both in silence."""
+    ruta = tmp_path / "personas.json"
+    ruta.write_text("")
+    ruta.chmod(0o600)
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    assert load_or_create_roster(ruta) == roster  # persisted, reused
+
+
+def test_a_roster_missing_casa_gets_one(tmp_path):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text(json.dumps({"marta": "m"}))
+    ruta.chmod(0o600)
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    assert roster["marta"] == "m"
+    assert load_or_create_roster(ruta) == roster  # persisted, not re-minted
+
+
+def test_a_missing_casa_is_logged(tmp_path, captured_logs):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text(json.dumps({"marta": "m"}))
+    ruta.chmod(0o600)
+
+    load_or_create_roster(ruta)
+
+    assert "casa" in captured_logs.getvalue()
+
+
+def test_invalid_json_does_not_raise_and_yields_a_usable_roster(tmp_path):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text("{esto no es json en absoluto")
+    ruta.chmod(0o600)
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    # The broken file is left exactly as it was — an operator may want
+    # to see it — never deleted or overwritten.
+    assert ruta.read_text() == "{esto no es json en absoluto"
+
+
+def test_a_top_level_array_does_not_raise_and_yields_a_usable_roster(tmp_path):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text("[1, 2, 3]")
+    ruta.chmod(0o600)
+
+    roster = load_or_create_roster(ruta)
+
+    assert CASA in roster
+    assert ruta.read_text() == "[1, 2, 3]"
+
+
+def test_an_unreadable_file_is_logged_by_path_not_by_contents(tmp_path, captured_logs):
+    ruta = tmp_path / "personas.json"
+    ruta.write_text("un-secreto-que-no-debe-salir esto no es json")
+    ruta.chmod(0o600)
+
+    load_or_create_roster(ruta)
+
+    logged = captured_logs.getvalue()
+    assert str(ruta) in logged
+    assert "un-secreto-que-no-debe-salir" not in logged
+
+
+def test_save_roster_flushes_and_fsyncs(tmp_path, monkeypatch):
+    """A power cut between the write and the flush is what used to
+    leave the empty file that then reads back as a roster with no
+    `casa` in it at all."""
+    calls = []
+    real_fsync = os.fsync
+
+    def spy(fd):
+        calls.append(fd)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", spy)
+
+    save_roster({CASA: "x" * 32}, tmp_path / "personas.json")
+
+    assert calls
+
+
+def test_a_non_ascii_offered_token_is_nobody(tmp_path):
+    """`compare_digest` raises on a non-ASCII `str`, and `offered`
+    reaches `persona_for` straight off an unauthenticated query string
+    — `?t=é` must be a refusal, not a 500."""
+    guard = Guard({"casa": "s" * 32}, "https://brain.local:8443")
+    assert guard.persona_for("é" * 32) is None
+
+
+def test_a_non_ascii_roster_secret_does_not_break_everyone_else():
+    """One corrupted, non-ASCII secret on the roster must not 500 every
+    OTHER person's login: the comparison against it is skipped rather
+    than raising out of the loop that still has to check them all."""
+    guard = Guard({"papa": "café" * 8, "marta": "m" * 32}, "https://brain.local:8443")
+    assert guard.persona_for("m" * 32) == "marta"
 
 
 def test_token_ok_still_means_what_it_meant():
