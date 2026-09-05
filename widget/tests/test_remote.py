@@ -223,6 +223,35 @@ async def test_the_welcome_page_mints_a_secret_for_a_new_person(
     assert persisted["nuevo"] == guard.secretos["nuevo"]
 
 
+async def test_a_failed_save_refuses_the_enrolment_and_does_not_adopt_it_in_memory(
+    tmp_path, monkeypatch
+) -> None:
+    """The disk has to lead. Mutating `guard.secretos` before the write
+    succeeds would let a failed save pass unnoticed here: the phone
+    would enrol, work for the rest of THIS process, and simply stop
+    working at the next widget restart, with nothing in the log at the
+    moment it actually broke. A test that only checked the status code
+    would pass against that broken shape — the second assertion below
+    is the one that catches it."""
+    import jarvis_widget.remote as remote_module
+
+    def _falla(*_args, **_kwargs) -> None:
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(remote_module, "save_roster", _falla)
+
+    guard = Guard({"casa": "casa-secreto"}, "https://brain.local:8443")
+    enrolment = Enrolment()
+    enrolment.abrir("nuevo")  # real clock: the route checks it too
+    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/")
+
+    assert response.status == 503
+    assert "nuevo" not in guard.secretos
+
+
 async def test_the_profile_route_advertises_a_mobileconfig_filename(
     tmp_path,
 ) -> None:

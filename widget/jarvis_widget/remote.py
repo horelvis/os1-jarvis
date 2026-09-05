@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from aiohttp import WSMsgType, web
+from loguru import logger
 
 from .certs import ensure_certificate, lan_address
 from .enrol import mobileconfig, write_qr
@@ -392,12 +393,26 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
             raise web.HTTPNotFound()
         secreto = guard.secretos.get(persona)
         if secreto is None:
-            # A person not yet on the roster: mint their secret now,
-            # the first time their window is opened, rather than
-            # somewhere the tool that only knows the name could reach.
-            secreto = new_secret()
-            guard.secretos[persona] = secreto
-            save_roster(guard.secretos)
+            # A person not yet on the roster: mint their secret now, the
+            # first time their window is opened, rather than somewhere
+            # the tool that only knows the name could reach.
+            #
+            # The disk leads: build the candidate roster and persist it
+            # BEFORE touching `guard.secretos`. Mutating memory first and
+            # saving after would let a failed write pass unnoticed — the
+            # phone enrols, works for the rest of this process's life,
+            # and simply stops working at the next restart, with nothing
+            # in the log at the moment it actually broke to explain it.
+            nuevo = new_secret()
+            try:
+                save_roster({**guard.secretos, persona: nuevo})
+            except OSError as exc:
+                logger.warning(f"personas: no se pudo guardar a {persona} — {exc}")
+                raise web.HTTPServiceUnavailable(
+                    text="No he podido guardar este teléfono. Inténtalo otra vez."
+                )
+            guard.secretos[persona] = nuevo
+            secreto = nuevo
         target = f"https://{HOSTNAME}:{PORT}/#{secreto}"
         return web.Response(
             content_type="text/html",
