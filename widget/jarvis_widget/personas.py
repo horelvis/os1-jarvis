@@ -30,6 +30,12 @@ _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 def es_valida(raw: str) -> bool:
     """Whether `raw` is already a person id, exactly as it stands."""
+    # Guard: the type hint is a promise to readers; this is a promise to
+    # the process. A socket handler decoding JSON or an audio thread can
+    # send a number or None without warning. Any non-string is simply not
+    # a valid id, never an exception.
+    if not isinstance(raw, str):
+        return False
     return bool(_ID.match(raw))
 
 
@@ -41,7 +47,11 @@ def normalizar(raw: str | None) -> str:
     handler and an audio thread, and neither has anywhere to put an
     exception.
     """
-    if raw is None:
+    # Guard: the type hint is a promise to readers; this is a promise to
+    # the process. A JSON decoder off the wire can send a number, a list
+    # or bytes. None is documented and handled. Any non-string is simply
+    # not a person id, never an exception.
+    if not isinstance(raw, str):
         return CASA
     limpio = raw.strip().casefold()
     return limpio if es_valida(limpio) else CASA
