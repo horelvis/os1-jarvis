@@ -71,6 +71,42 @@ def test_rejects_json_that_is_not_an_object():
         decode_client("[1, 2, 3]")
 
 
+def test_chat_id_is_optional():
+    msg = decode_client(
+        json.dumps({"type": "chat", "message": "hola", "user_id": "primary"})
+    )
+    assert msg.get("chat_id") is None
+
+
+def test_chat_id_is_validated_when_present():
+    msg = decode_client(
+        json.dumps(
+            {
+                "type": "chat",
+                "message": "hola",
+                "user_id": "primary",
+                "chat_id": "marta",
+            }
+        )
+    )
+    assert msg["chat_id"] == "marta"
+
+
+def test_a_chat_id_that_could_escape_a_session_key_is_refused():
+    for hostile in ("a/b", "", "x" * 200, 7):
+        with pytest.raises(ProtocolError):
+            decode_client(
+                json.dumps(
+                    {
+                        "type": "chat",
+                        "message": "h",
+                        "user_id": "primary",
+                        "chat_id": hostile,
+                    }
+                )
+            )
+
+
 def test_listen_needs_no_fields():
     assert decode_client('{"type": "listen"}') == {"type": "listen"}
 

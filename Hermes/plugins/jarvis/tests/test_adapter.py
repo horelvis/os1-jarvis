@@ -80,6 +80,117 @@ def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
     assert seen[0].source.chat_name == "JARVIS"
 
 
+def test_a_named_chat_id_becomes_its_own_session_and_display_name(
+    tmp_path, monkeypatch
+):
+    # This is the whole point of the task: a phone turn carries a
+    # person, and that person gets a session — and a memory — of their
+    # own rather than sharing the house's.
+    import Hermes.plugins.jarvis.adapter as mod
+
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+
+    monkeypatch.setattr(
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            await a._handle_chat("hola", "primary", "marta")
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert len(seen) == 1
+    assert seen[0].source.chat_id == "marta"
+    # The id is ASCII-only and ships with no accent; the display name is
+    # not the identity, only what is shown for it.
+    assert seen[0].source.chat_name == "Marta"
+
+
+def test_a_chat_frame_with_no_chat_id_still_reaches_the_house_session(
+    tmp_path, monkeypatch
+):
+    # An older strip build sends no chat_id at all through the read loop.
+    import Hermes.plugins.jarvis.adapter as mod
+
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+        await self.send(event.source.chat_id, "hola")
+
+    monkeypatch.setattr(
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                        )
+                    )
+                    assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
+                        "token"
+                    )
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert len(seen) == 1
+    assert seen[0].source.chat_id == "jarvis"
+
+
+def test_a_chat_id_on_the_wire_reaches_handle_chat(tmp_path, monkeypatch):
+    import Hermes.plugins.jarvis.adapter as mod
+
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+        await self.send(event.source.chat_id, "hola")
+
+    monkeypatch.setattr(
+        mod.JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = mod.JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "chat_id": "marta",
+                            }
+                        )
+                    )
+                    assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
+                        "token"
+                    )
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert len(seen) == 1
+    assert seen[0].source.chat_id == "marta"
+
+
 def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):
     async def go():
         a = JarvisAdapter(_cfg(tmp_path))

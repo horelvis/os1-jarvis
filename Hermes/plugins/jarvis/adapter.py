@@ -207,6 +207,11 @@ def _env(name: str) -> str | None:
 # authorization gate.
 DEFAULT_USER_ID = "primary"
 
+# The chat this platform's turns belong to when the strip does not say.
+# It was a literal inside `_handle_chat` until 2026-09-05, and that
+# literal was the whole reason one house shared one memory.
+CHAT_ID_DEFAULT = "jarvis"
+
 # How long a turn may stay open before the strip apologises for it.
 #
 # The gateway answers asynchronously: `handle_message()` returns as soon as it
@@ -790,7 +795,9 @@ class JarvisAdapter(BasePlatformAdapter):
                         # hear this and must not reply to it.
                         await self._push(silence())
                         continue
-                    await self._handle_chat(decoded["message"], decoded["user_id"])
+                    await self._handle_chat(
+                        decoded["message"], decoded["user_id"], decoded.get("chat_id")
+                    )
         finally:
             # In a finally because an exception in the loop body would
             # otherwise leave self._ws pointing at a socket whose handler has
@@ -817,10 +824,20 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.warning(f"jarvis: divert failed — {exc}")
             return False
 
-    async def _handle_chat(self, message: str, user_id: str) -> None:
+    async def _handle_chat(
+        self, message: str, user_id: str, chat_id: Optional[str] = None
+    ) -> None:
+        # Whose conversation this is. None is a desk turn or an older
+        # strip build, and both mean the house's one session — the
+        # single literal this whole feature was waiting behind.
+        chat = chat_id or CHAT_ID_DEFAULT
         source = self.build_source(
-            chat_id="jarvis",
-            chat_name="JARVIS",
+            chat_id=chat,
+            # A display name only, never the identity: `chat` is
+            # already validated ASCII (protocol.decode_client), so an
+            # accent typed into a person's name would not survive being
+            # the id and is not attempted here — `.title()` is cosmetic.
+            chat_name=chat.upper() if chat == CHAT_ID_DEFAULT else chat.title(),
             chat_type="dm",
             user_id=user_id,
             user_name=user_id,

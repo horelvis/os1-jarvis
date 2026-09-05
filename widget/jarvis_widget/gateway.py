@@ -58,13 +58,22 @@ def decode_live_frame(raw: bytes) -> tuple[int, bytes]:
 
 
 def encode_chat(
-    text: str, user_id: str = DEFAULT_USER_ID, *, wake: bool = False
+    text: str,
+    user_id: str = DEFAULT_USER_ID,
+    *,
+    wake: bool = False,
+    chat_id: str | None = None,
 ) -> str:
     frame: dict[str, Any] = {"type": "chat", "message": text, "user_id": user_id}
     if wake:
         # Addressed by name: the gateway must never divert this one to
         # the code assistant, whatever gate or question is pending.
         frame["wake"] = True
+    if chat_id:
+        # Whose conversation this is. Absent means the house's one
+        # session, which is what every build before today sent and what
+        # an older gateway understands.
+        frame["chat_id"] = chat_id
     return json.dumps(frame)
 
 
@@ -157,7 +166,9 @@ class GatewayClient:
     async def wait_connected(self, timeout: float = 10.0) -> None:
         await asyncio.wait_for(self._connected.wait(), timeout=timeout)
 
-    async def send_chat(self, text: str, *, wake: bool = False) -> None:
+    async def send_chat(
+        self, text: str, *, wake: bool = False, chat_id: str | None = None
+    ) -> None:
         """Send one turn. Never raises: a lost send is a spoken failure.
 
         The socket can die between the last frame read and this write —
@@ -167,13 +178,17 @@ class GatewayClient:
         for as long as the strip is up. `on_error` settles the turn and
         says something out loud, which is the whole difference between a
         failure and a disappearance.
+
+        `chat_id` is whose turn this is — a phone's person, or None for
+        the desk. A desk turn passes None and the frame carries no
+        chat_id at all, exactly as it always has.
         """
         ws = self._ws
         if ws is None:
             self.on_error(_NO_GATEWAY)
             return
         try:
-            await ws.send(encode_chat(text, self.user_id, wake=wake))
+            await ws.send(encode_chat(text, self.user_id, wake=wake, chat_id=chat_id))
         except asyncio.CancelledError:
             raise
         except Exception as exc:

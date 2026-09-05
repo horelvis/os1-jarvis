@@ -28,6 +28,21 @@ def test_chat_frame_matches_the_adapter() -> None:
     assert frame == {"type": "chat", "message": "hola", "user_id": "primary"}
 
 
+def test_a_chat_frame_without_a_person_is_exactly_what_it_was() -> None:
+    # The widget and the gateway ship separately. An older gateway must
+    # see the frame it has always seen.
+    assert json.loads(encode_chat("hola")) == {
+        "type": "chat",
+        "message": "hola",
+        "user_id": "primary",
+    }
+
+
+def test_a_chat_frame_carries_the_person_when_there_is_one() -> None:
+    frame = json.loads(encode_chat("hola", chat_id="marta"))
+    assert frame["chat_id"] == "marta"
+
+
 def test_token_frame_reads_the_token_field() -> None:
     assert decode_server('{"type":"token","token":"ho"}')["token"] == "ho"
 

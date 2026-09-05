@@ -971,7 +971,14 @@ class JARVISApp(Gtk.Application):
                     machine.error("")
                     origin.settle()
                     return
-                await client.send_chat(spoken, wake=wake.named)
+                # None for the desk, exactly what every build before
+                # today sent. The room does not become multi-person
+                # here — only a phone's turn carries a person, and only
+                # because the Endpoint that answered for it already
+                # knows who they are (task 5's roster, not the words
+                # they said).
+                persona = phone.persona if phone is not None else None
+                await client.send_chat(spoken, wake=wake.named, chat_id=persona)
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")

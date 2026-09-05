@@ -73,6 +73,19 @@ def decode_client(raw: str) -> Dict[str, Any]:
         if wake is not None and not isinstance(wake, bool):
             raise ProtocolError("wake must be a boolean when present")
 
+        # Optional, and it must stay optional: the strip is versioned
+        # separately, and a build older than today sends no chat_id.
+        # Absent means the house's single session.
+        chat = msg.get("chat_id")
+        if chat is not None:
+            if not isinstance(chat, str) or not chat.strip():
+                raise ProtocolError("chat_id must be a non-blank string when present")
+            usable = all(c.isascii() and (c.isalnum() or c in "-_") for c in chat)
+            if len(chat) > 64 or not usable:
+                # It becomes a session key and a profile name — the
+                # trust boundary is here, not at whatever uses it.
+                raise ProtocolError(f"chat_id is not a usable id: {chat!r}")
+
     return msg
 
 
