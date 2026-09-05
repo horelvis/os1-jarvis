@@ -14,6 +14,7 @@ import pytest
 import websockets
 
 from jarvis_widget.gateway import (
+    _NO_GATEWAY,
     GatewayClient,
     ProtocolError,
     decode_live_frame,
@@ -143,7 +144,7 @@ async def test_a_local_send_failure_carries_whose_turn_it_was() -> None:
 
     await client.send_chat("hola", chat_id="marta")
 
-    assert said == [(said[0][0], "marta")]
+    assert said == [(_NO_GATEWAY, "marta")]
 
 
 def test_an_unknown_server_type_is_not_fatal() -> None:

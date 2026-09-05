@@ -424,6 +424,55 @@ def test_send_with_nobody_connected_is_a_retryable_failure(tmp_path):
     asyncio.run(go())
 
 
+def test_a_reply_with_no_open_turn_still_carries_its_chat_id(tmp_path):
+    # An unprompted message — a camera alert, a cron reminder — must
+    # still reach the strip when no turn is open for it; that path is
+    # load-bearing and must not regress. But the frame must say whom it
+    # is for: task 10 routes an UNTAGGED frame to the room, so a phone's
+    # reply with no matching turn must not go out anonymously. Found by
+    # review (2026-09-06): `_wire_chat` used to take the (possibly None)
+    # `_Turn` rather than the chat itself, so a miss on `self._turns`
+    # always tagged nothing, whatever `chat_id` `send()` was given.
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    result = await a.send("marta", "hola")
+                    assert result.success is True
+                    got = json.loads((await ws.receive(timeout=5)).data)
+                    assert got == {
+                        "type": "token",
+                        "token": "hola",
+                        "chat_id": "marta",
+                    }
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_a_reply_for_the_houses_own_chat_with_no_open_turn_is_untagged(tmp_path):
+    # The other half of the same path: an unprompted message for the
+    # house's own session (CHAT_ID_DEFAULT) must stay untagged — that is
+    # the desk, and the frame shape an older strip already reads.
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    result = await a.send("jarvis", "hola")
+                    assert result.success is True
+                    got = json.loads((await ws.receive(timeout=5)).data)
+                    assert got == {"type": "token", "token": "hola"}
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
 def test_a_turn_that_never_comes_back_gets_an_error_frame(tmp_path, monkeypatch):
     # THE guarantee: every accepted `chat` frame ends in exactly one `done`
     # or one `error`. Without it the frontend's `busy` never clears (it is

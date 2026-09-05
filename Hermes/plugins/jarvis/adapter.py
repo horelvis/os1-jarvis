@@ -313,8 +313,18 @@ class JarvisAdapter(BasePlatformAdapter):
         # single conversation. The rule that a second `chat` frame
         # supersedes rather than queues keeps its meaning — it now
         # applies within one person's conversation, where it was earned.
-        # One task per entry — nothing here grows with uptime, since
-        # every entry is removed the moment its turn settles.
+        #
+        # An entry OUTLIVES its turn settling when the watchdog fires:
+        # `_watch_turn` calls `_settle(turn, keep_slot=True)` on purpose,
+        # so the entry stays until a late `send()` for that chat finds
+        # and refuses it, a new turn for that chat supersedes it, or
+        # `disconnect()` clears everything. Reviewed 2026-09-06: measured
+        # still present 0.3s after its turn timed out. This is not
+        # unbounded growth — at most one entry per distinct chat id ever
+        # seen on this socket, and `chat_id` is validated against
+        # `^[a-z0-9][a-z0-9_-]{0,63}$` — but it is not "removed the
+        # moment its turn settles" either, and a reader should not trust
+        # that this comment once said so.
         self._turns: Dict[str, _Turn] = {}
 
         # While the code assistant waits for an answer, jarvis_code
@@ -482,7 +492,10 @@ class JarvisAdapter(BasePlatformAdapter):
                 retryable=False,
             )
 
-        tag = self._wire_chat(turn)
+        # The chat_id `send()` was GIVEN, not the turn's — this must tag
+        # correctly even when `turn` is None (see `_wire_chat`'s
+        # docstring for the bug this closes).
+        tag = self._wire_chat(chat_id)
         delivered = await self._push(token(content, chat_id=tag)) and await self._push(
             done(0, chat_id=tag)
         )
@@ -689,18 +702,30 @@ class JarvisAdapter(BasePlatformAdapter):
     # asynchronously and has ten ways to answer with silence — so the adapter,
     # which is the layer that knows a turn was accepted, provides it here.
 
-    def _wire_chat(self, turn: Optional[_Turn]) -> Optional[str]:
-        """The `chat_id` to stamp on a frame answering this turn.
+    def _wire_chat(self, chat: Optional[str]) -> Optional[str]:
+        """The `chat_id` to stamp on a frame for this chat.
 
         `None` for the house's single session (`CHAT_ID_DEFAULT`) or for
-        no turn at all — both are what an older strip, or one built
-        before chat_id existed, already reads without a tag. A named
-        turn is stamped with its own chat so a socket carrying several
+        no chat at all — both are what an older strip, or one built
+        before chat_id existed, already reads without a tag. Anything
+        else is stamped with its own chat so a socket carrying several
         people's replies at once can be told apart.
+
+        Takes the chat itself, NOT a `_Turn` — a reply can arrive for a
+        chat with no open turn at all (an unprompted cron reminder or
+        camera alert, or a late reply whose turn already expired and was
+        dropped from `self._turns`), and it must still say whom it is
+        FOR. Task 10 routes an untagged frame to the room; deriving the
+        tag from a turn that may not exist would push that reply out
+        anonymously, and a phone's stray reply would be spoken aloud in
+        the house — found by review (2026-09-06) against exactly this
+        path: `send("marta", …)` with no matching entry in `self._turns`
+        used to reach the strip as a bare `token`/`done`, no `chat_id` at
+        all.
         """
-        if turn is None or turn.chat == CHAT_ID_DEFAULT:
+        if chat is None or chat == CHAT_ID_DEFAULT:
             return None
-        return turn.chat
+        return chat
 
     def _open_turn(self, chat: str) -> _Turn:
         # A new turn supersedes whatever was still open FOR THIS CHAT —
@@ -730,6 +755,17 @@ class JarvisAdapter(BasePlatformAdapter):
         `send()` can still find it. Clearing the slot there would let the
         stale reply through as if it were a fresh turn, which is precisely
         the frame that lands in the wrong bubble.
+
+        The early return on an already-settled turn is new: every caller
+        already checks `turn.settled` before calling this (`send()`,
+        `_watch_turn`, `_handle_chat`'s exception handler), so nothing
+        observable changes today. It is here so a FUTURE caller that
+        forgets that check gets an idempotent no-op instead of the old
+        behaviour — which would re-cancel an already-cancelled watchdog
+        (harmless) but, with `keep_slot=False`, could also delete a
+        DIFFERENT, newer turn that has since taken this chat's slot in
+        `self._turns`, if this were somehow called a second time after
+        that.
         """
         if turn.settled:
             return
@@ -761,7 +797,7 @@ class JarvisAdapter(BasePlatformAdapter):
             f"of leaving the screen stuck (check the gateway log for "
             f"authorization, session-key or dispatch warnings)"
         )
-        await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn)))
+        await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn.chat)))
 
     # ── transport ─────────────────────────────────────────────────────────
 
@@ -904,4 +940,4 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.error(f"jarvis: dispatch failed — {exc}")
             if not turn.settled:
                 self._settle(turn)
-                await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn)))
+                await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn.chat)))

@@ -130,6 +130,15 @@ class GatewayClient:
         # person, or None for the desk (an older gateway that tags
         # nothing, or a reply for the house's own single session). Task
         # 10 routes on it; this callback shape only carries it.
+        #
+        # `_dispatch` and `send_chat` always CALL these with both
+        # positional arguments — the `Callable[[str, str | None], None]`
+        # below is accurate about that. What is free is the
+        # IMPLEMENTATION: every real one (`__main__.py`'s three
+        # handlers, and every test in tests/) declares its own second
+        # parameter with a default, which is a strictly more permissive
+        # signature and is exactly how a callback that has no use for
+        # `chat_id` yet stays that simple.
         self.on_token: Callable[[str, str | None], None] = lambda _t, _c=None: None
         self.on_done: Callable[[int, str | None], None] = lambda _ms, _c=None: None
         self.on_error: Callable[[str, str | None], None] = lambda _m, _c=None: None
