@@ -241,6 +241,20 @@ ROTULO_PIDIENDO = "Estoy aprendiendo su voz.\nLéame esto en voz alta."
 # so the header asks exactly that and says what answer closes it.
 ROTULO_CONFIRMANDO = "¿Le he oído bien?\nDígame sí o no."
 
+
+def _rotulo_hecho(nombre: str) -> str:
+    """The last thing the band ever says on an unpaired box.
+
+    Requested by the owner the minute after he paired for real
+    (2026-09-06): the band went from his name straight to nothing, and
+    the one fact worth leaving up — that this house now has an owner and
+    who — vanished with it. The name stays under this; `__main__` is
+    what eventually empties the band, on a clock, since there is nothing
+    left to wait for.
+    """
+    return f"Encantado, {nombre}.\nEsta casa es suya."
+
+
 _AFIRMATIVOS = frozenset({"si", "vale", "correcto", "exacto", "afirmativo"})
 _NEGATIVOS = frozenset({"no", "negativo", "incorrecto"})
 
@@ -452,8 +466,36 @@ def _texto_confirma_nombre(nombre: str) -> str:
     return f"{nombre}, ha dicho. ¿Es así?"
 
 
+# What he is for, said once, at the only moment a person has no idea
+# yet. Requested by the owner (2026-09-06) — "debe dar información de
+# qué es y para qué sirve" — and it required `jarvis-soul.md` to lose
+# the line that forbade exactly this ("no ofreces menús de lo que sabes
+# hacer"); both changed in the same commit, so the persona and this
+# string cannot disagree.
+#
+# **Every item is something he can actually do on this box**, named by
+# what it is FOR and never by the machinery behind it: the toolsets in
+# `jarvis-config.yaml`, `jarvis_vision`, Hermes' own memory and cron,
+# `jarvis_teacher`, `jarvis_code`. A list that promised a seventh thing
+# would be the worst possible first sentence of a relationship. Said in
+# one breath per item, with the pauses `speech.py` will cut it on.
+_TEXTO_PRESENTACION = (
+    "Y ya que no me conoce, esto es lo que puedo hacer por usted: "
+    "oírle y contestarle, sin que tenga que llamarme de ninguna manera "
+    "especial; ver las cámaras de la casa y contarle lo que pasa; "
+    "acordarme de lo que hablamos, de un día para otro; "
+    "avisarle de lo que me pida, cuando toque; "
+    "enseñarle una asignatura, si le hace falta; "
+    "y encargar trabajo de código por usted. "
+    "Si algo de eso le sobra, dígamelo y no lo hago."
+)
+
+
 def _texto_bienvenida(nombre: str) -> str:
-    return f"{nombre}. Ya sé quién es usted, y esta casa es suya a partir de ahora."
+    return (
+        f"{nombre}. Ya sé quién es usted, y esta casa es suya a partir de ahora. "
+        f"{_TEXTO_PRESENTACION}"
+    )
 
 
 class Estado(str, Enum):
@@ -779,10 +821,15 @@ class Encuentro:
             )
 
         self.estado = Estado.HECHO
-        # HECHO: nothing left to show — the band is done.
+        # HECHO: the passphrase and the passages are spent, and what
+        # replaces them is the name — the only thing on the band still
+        # true a minute later. `terminado` is what tells `__main__` to
+        # consume the phrase file and to start the clock that empties
+        # the band; this module has no clock of its own and does not
+        # want one.
         return Respuesta(
             habla=_texto_bienvenida(persona.nombre),
             terminado=True,
-            lectura=None,
-            rotulo=None,
+            lectura=persona.nombre,
+            rotulo=_rotulo_hecho(persona.nombre),
         )

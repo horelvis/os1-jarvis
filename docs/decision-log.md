@@ -11,6 +11,75 @@
 
 ---
 
+### 2026-09-06 — He says what he is doing, and what he is for
+
+**Decision (owner, reversing two of his own standing rules):** JARVIS
+narrates the important part of what he is doing, and answers "what are
+you for" with an actual answer. Both were forbidden in writing until
+today, in two places each — `jarvis-soul.md` and CLAUDE.md §1 — and the
+prohibition was old enough to predate the tools it was protecting
+against.
+
+**What the owner said, and it is the whole reasoning:** *"una de las
+cosas que echo en falta cuando está trabajando es ver qué hace, no
+necesito verlo en vivo"*, and then, asked what "important" meant:
+*"narrar sólo lo importante"*, with his own example — *"si pregunta por
+una receta, voy a buscar en internet información sobre ese tema. he
+encontrado varios vídeos"*.
+
+**What was measured before changing anything.** The premise was that
+some record existed and was merely hidden. It did not:
+
+| | records what he does? |
+|---|---|
+| the strip's console (`protocol.console`) | only `jarvis_code` — the ONLY caller of `push_console` in the whole tree |
+| the gateway's journal | **32 lines today, none naming a tool** |
+| disk | nothing |
+
+So `mirar`, the live camera, the teacher, memory, reminders and
+`terminal` leave no trace anywhere — not on screen, not on disk, not in
+the journal. The gap was not visibility of a record; there was no record.
+
+**And that is why the answer is narration rather than a log.** A
+logging subsystem was designed and dropped in the same conversation: it
+would have spanned the gateway and the widget, and the owner's own
+constraint — *no necesito verlo en vivo* — pointed the other way. Speech
+costs nothing to build, because the thing that decides what he says is
+the persona, not our code. The whole change is one bullet in
+`jarvis-soul.md` and the two CLAUDE.md rules that contradicted it.
+
+**Where the line now falls.** Two moments, and only two: **what he is
+about to do**, when it will take a while or when it LEAVES THIS HOUSE,
+and **what he found**, when the finding is the point. Still forbidden:
+tool names, step counts, "ejecutando 3 de 5", routine successes.
+
+**The half of this that is a privacy control, not a courtesy.**
+`jarvis-config.yaml` has carried a note since 2026-08-26 that the `web`
+toolset works with no key at all, and that while the conversation stays
+on this box, **the text of a search leaves it**. Until today he did that
+silently. "Voy a buscar en internet sobre eso" is the only signal a
+person in this room gets that something went outside — §1.1's "privacy
+with eyes open" was, on this one path, privacy with the eyes shut.
+
+**The second half: he introduces himself.** Asked for at the same time
+— *"debe dar información de qué es y para qué sirve"* — and for the one
+moment that has no second chance: the sentence right after a stranger
+becomes the amo. `encuentro._TEXTO_PRESENTACION` names six things, each
+one backed by a toolset this box actually has, described by what it is
+for and never by its machinery. The band keeps his name under
+"Encantado, X. / Esta casa es suya." for 30 seconds and then empties —
+a fixed clock, because `speech.Speaker` drains an asyncio queue and
+tells nobody when it runs dry, and a drained-callback is more surface
+than one moment is worth.
+
+**What this cost in the documents**, because a rule removed in one place
+and left in another is how this project once ended up with two
+personality documents that disagreed (§7): `jarvis-soul.md`'s bullet,
+CLAUDE.md §1.2's principle and CLAUDE.md §1's "A visible agent" all
+changed in the same commit. **And the persona only takes effect after
+`/new` + `/approve`** — the system prompt is fixed when the session is
+born, and restarting the gateway does not touch it.
+
 ### 2026-09-05 — The house becomes several people, and he gets a face
 
 **Three decisions from one conversation, and every one of them reverses

@@ -594,8 +594,6 @@ def test_confirmando_si_finishes_and_the_register_has_an_amo(tmp_path):
     assert "Marta" in r.habla
     assert registro.amo == "marta"
     assert registro.personas()[0].nombre == "Marta"
-    # HECHO: the band is done.
-    assert r.lectura is None
 
 
 def test_a_name_rejected_by_no_can_be_corrected(tmp_path):
@@ -741,3 +739,55 @@ def test_a_cancelled_wipe_puts_the_welcome_back_over_the_passphrase(tmp_path):
 
     assert r.lectura == FRASE
     assert r.rotulo == ROTULO_ESPERANDO
+
+
+# ── what he leaves on the band, and says, once he has an amo ──────────
+#
+# Requirement change from the owner, 2026-09-06, the minute after he
+# paired for real: the band went from the name straight to nothing (240
+# px to 96, measured), and he said one sentence. He asked for the texts
+# cleared, the NAME kept, and for JARVIS to say what he is and what he
+# is for.
+
+
+def test_hecho_keeps_the_name_on_the_band_under_a_greeting(tmp_path):
+    enc, _registro = _hasta_confirmando(tmp_path, nombre="Marta")
+
+    r = enc.oye("sí")
+
+    assert enc.estado is Estado.HECHO
+    assert r.terminado is True
+    # The name stays — it is the one thing worth leaving up.
+    assert r.lectura == "Marta"
+    # Under a header of its own, not under the welcome that told a
+    # stranger to say a passphrase.
+    assert r.rotulo is not None and r.rotulo.strip()
+    assert r.rotulo != ROTULO_ESPERANDO
+    assert "Marta" in r.rotulo
+
+
+def test_hecho_says_what_he_is_for(tmp_path):
+    """The presentation, in his own voice. `jarvis-soul.md` lost the
+    line forbidding it in the same commit as this test."""
+    enc, _registro = _hasta_confirmando(tmp_path, nombre="Marta")
+
+    habla = enc.oye("sí").habla.casefold()
+
+    # The welcome he already said is still there, first.
+    assert "marta" in habla
+    assert "esta casa es suya" in habla
+    # And then what he is for, in his words. Six things he can actually
+    # do — every one of them backed by a toolset this platform has.
+    for lo_que_hace in (
+        "oírle",
+        "cámaras",
+        "acordarme",
+        "avisarle",
+        "asignatura",
+        "código",
+    ):
+        assert lo_que_hace in habla, lo_que_hace
+    # Never the machinery: no tool names, no counts, no menus of the
+    # kind `mirar` / `ver_en_vivo` / `terminal` would be.
+    for maquinaria in ("mirar(", "ver_en_vivo", "terminal", "herramienta", "tool"):
+        assert maquinaria not in habla, maquinaria

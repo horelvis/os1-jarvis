@@ -186,6 +186,16 @@ PERSONA_PENDIENTE = Path.home() / ".jarvis" / "enrolamiento.json"
 RUTA_CASA = Path.home() / ".jarvis" / "casa.json"
 RUTA_FRASE = Path.home() / ".jarvis" / "frase.txt"
 
+# How long the new amo's name stays on the band after pairing closes,
+# before it empties for good. Long enough to outlast the presentation he
+# gives at that moment (`encuentro._TEXTO_PRESENTACION`, six clauses,
+# ~25 s spoken through CosyVoice) and no longer: the band is zero pixels
+# tall by default, and a name left up for ever would make it permanent
+# furniture. Not a measurement of his speech — nothing reports when he
+# stops talking (see `_vaciar_bienvenida`) — so it is deliberately
+# generous rather than tight.
+SEGUNDOS_BIENVENIDA_FINAL = 30
+
 
 def _persona_pendiente(ruta: Path = PERSONA_PENDIENTE) -> str:
     """The person `tools/enrolar.py` asked to enrol, consumed once.
@@ -1039,6 +1049,23 @@ class JARVISApp(Gtk.Application):
 
         wave.on_switch = on_switch
 
+        def _vaciar_bienvenida() -> bool:
+            """Empty the band once he has finished presenting himself.
+
+            A fixed clock, not a "he stopped speaking" signal, because
+            there is no such signal to use: `speech.Speaker` drains an
+            asyncio queue and tells nobody when it runs dry, and giving
+            it a drained-callback is more surface than this one moment
+            is worth. The same fixed-clock resource the photo band and
+            the live view's ceiling already use.
+
+            It fires exactly once per pairing (`GLib` drops a timeout
+            that returns False), and `ocultar` is idempotent, so a
+            person who quit the strip in between costs nothing.
+            """
+            bienvenida_area.ocultar()
+            return False
+
         def _atendido_por_encuentro(
             texto: str, vector: "np.ndarray | None", destino: object | None
         ) -> bool:
@@ -1077,7 +1104,19 @@ class JARVISApp(Gtk.Application):
                     # the band's phrase is spent, and the file behind it
                     # must go too, or a restart would show — and
                     # accept — it again.
-                    GLib.idle_add(bienvenida_area.ocultar)
+                    #
+                    # The band does NOT go blank here any more (owner,
+                    # 2026-09-06, the minute after pairing for real: it
+                    # dropped from his name to nothing in one step,
+                    # measured 240 px to 96). It keeps the name under a
+                    # greeting of its own while he says what he is for,
+                    # and empties on a clock afterwards.
+                    GLib.idle_add(
+                        bienvenida_area.mostrar, respuesta.lectura, respuesta.rotulo
+                    )
+                    GLib.timeout_add_seconds(
+                        SEGUNDOS_BIENVENIDA_FINAL, _vaciar_bienvenida
+                    )
                     consumir(RUTA_FRASE)
                 elif respuesta.lectura is not None:
                     # `Respuesta.lectura` is set, deliberately, by every
