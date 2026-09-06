@@ -37,6 +37,7 @@ naming the path and never its contents.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 from dataclasses import dataclass
@@ -300,19 +301,25 @@ def _guardar_snapshot(presentes: tuple[Nodo, ...], respaldo: Path) -> bool:
         try:
             destino.parent.mkdir(parents=True, exist_ok=True)
             if stat.S_ISLNK(info.st_mode):
-                # The snapshot's job is a recoverable copy of the
-                # CONTENT that is about to be erased, so a symlink is
-                # followed for backup purposes only — never for
-                # deletion, see `_eliminar` below, which removes the
-                # link itself and nothing the link points at.
-                if nodo.ruta.is_dir():
-                    shutil.copytree(nodo.ruta, destino, dirs_exist_ok=True)
-                elif nodo.ruta.is_file():
-                    shutil.copy2(nodo.ruta, destino)
-                else:
-                    logger.warning(
-                        f"borrar: {nodo.ruta} es un enlace roto; nada que respaldar"
+                # Recreate the LINK, never copy what it points at. A
+                # "goes" entry can legitimately be a symlink into a
+                # "stays" directory (`certs/` -> somewhere under
+                # `models/`, say) — following it here to copy CONTENT
+                # would duplicate gigabytes of protected model weights
+                # into the snapshot, exactly the "24 MB, not 87 GB"
+                # confusion this whole module exists to prevent.
+                # Restoring a symlink is recreating the same symlink,
+                # not duplicating the bytes on the other end of it —
+                # and the other end is untouched anyway, since
+                # `_eliminar` never deletes it either.
+                try:
+                    objetivo = os.readlink(nodo.ruta)
+                except OSError as exc:
+                    logger.error(
+                        f"borrar: no se pudo leer el enlace {nodo.ruta} — {exc!r}"
                     )
+                    return False
+                destino.symlink_to(objetivo)
             elif stat.S_ISDIR(info.st_mode):
                 shutil.copytree(nodo.ruta, destino, dirs_exist_ok=True, symlinks=True)
             elif stat.S_ISREG(info.st_mode):

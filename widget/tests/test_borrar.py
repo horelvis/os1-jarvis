@@ -326,6 +326,33 @@ def test_a_goes_symlink_into_stays_removes_only_the_link(tmp_path):
     assert (modelos / "peso.bin").exists()
 
 
+def test_a_goes_symlink_into_stays_is_relinked_not_copied_in_the_snapshot(tmp_path):
+    """The regression this guards against: following a 'goes' symlink to
+    copy its CONTENT into the backup would duplicate whatever is on the
+    other end — here a stand-in for 69 GB of `models/` — straight into
+    the snapshot. The snapshot must recreate the LINK instead."""
+    raiz_jarvis = tmp_path / "jarvis"
+    raiz_hermes = tmp_path / "hermes"
+    raiz_jarvis.mkdir()
+    raiz_hermes.mkdir()
+    modelos = raiz_jarvis / "models"
+    modelos.mkdir()
+    (modelos / "peso.bin").write_bytes(b"87GB, en teoria")
+    (raiz_jarvis / "certs").symlink_to(modelos, target_is_directory=True)
+
+    borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
+    respaldo = tmp_path / "respaldo"
+    borrar.ejecutar(borrado, respaldo=respaldo)
+
+    copia = respaldo / "jarvis" / "certs"
+    assert copia.is_symlink()
+    assert os.readlink(copia) == str(modelos)
+    # No duplicate of `peso.bin` was made inside the snapshot itself —
+    # only the link was recreated, resolving back to the untouched
+    # original.
+    assert (copia / "peso.bin").read_bytes() == b"87GB, en teoria"
+
+
 def test_a_broken_symlink_in_goes_is_removed_without_raising(tmp_path):
     raiz_jarvis = tmp_path / "jarvis"
     raiz_hermes = tmp_path / "hermes"
