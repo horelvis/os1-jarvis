@@ -2021,7 +2021,9 @@ class JARVISApp(Gtk.Application):
                 f"https://{HOSTNAME}:{PORT}",
                 f"https://{lan_address()}:{PORT}",
             )
-            self._spawn(_serve_quietly(serve(remote_desk, guard, enrolment, loop)))
+            self._spawn(
+                _serve_quietly(serve(remote_desk, guard, enrolment, registro, loop))
+            )
             # Once per process — this function's own single call site.
             # If an amo already exists, `_saludar_sin_amo` returns
             # immediately without saying anything.

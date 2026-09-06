@@ -501,7 +501,9 @@ async def _socket(desk: RemoteDesk) -> tuple[TestClient, web.Application]:
     app = web.Application()
     app.router.add_get(
         "/ws",
-        _handler(desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None),
+        _handler(
+            desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None, None
+        ),
     )
     client = TestClient(TestServer(app))
     await client.start_server()
@@ -516,7 +518,9 @@ async def test_the_socket_refuses_an_unknown_token() -> None:
     app = web.Application()
     app.router.add_get(
         "/ws",
-        _handler(desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None),
+        _handler(
+            desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None, None
+        ),
     )
     client = TestClient(TestServer(app))
     await client.start_server()
@@ -541,7 +545,7 @@ async def test_the_connection_carries_the_person_whose_secret_it_used() -> None:
         "https://brain.local:8443",
     )
     app = web.Application()
-    app.router.add_get("/ws", _handler(desk, guard, None))
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
@@ -605,6 +609,10 @@ async def test_the_ceiling_is_hit_at_the_real_thirty_seconds_and_says_so() -> No
     client, _ = await _socket(desk)
     try:
         ws = await client.ws_connect("/ws?t=" + "s" * 32)
+        # The handshake's own "enrolled" frame arrives first, ahead of
+        # anything this test sends — consumed and ignored here, since
+        # whose phone this is is a different task's assertion.
+        await asyncio.wait_for(ws.receive_json(), timeout=5)
         await ws.send_json({"type": "start", "rate": 8000})
         for _ in range(9):  # 9 x 60 kB against a 480 kB ceiling
             await ws.send_bytes(b"\x01\x02" * 30_000)
@@ -696,3 +704,42 @@ def test_the_qr_is_not_rewritten_when_writing_it_fails() -> None:
     enrolment.abrir("Nata", now=0.0)
 
     assert enrolment.persona(now=1.0) == "nata"
+
+
+def test_the_display_name_comes_from_the_register(tmp_path) -> None:
+    """`persona_for` answers with an id; a person reads a name. The
+    contract's whole purpose is somebody enrolling four phones in a row
+    being able to tell which one they just did, so "orelvis" where the
+    house says "Orelvis" is a worse answer than it looks."""
+    import numpy as np
+
+    from jarvis_widget.casa import Registro
+    from jarvis_widget.remote import nombre_para
+
+    registro = Registro(tmp_path / "casa.json")
+    registro.emparejar("Orelvis", [np.array([1.0, 0.0, 0.0], dtype=np.float32)])
+
+    assert nombre_para(registro, "orelvis") == "Orelvis"
+
+
+def test_an_unknown_id_falls_back_to_itself(tmp_path) -> None:
+    from jarvis_widget.casa import Registro
+    from jarvis_widget.remote import nombre_para
+
+    registro = Registro(tmp_path / "casa.json")
+
+    assert nombre_para(registro, "nata") == "nata"
+
+
+def test_a_register_that_cannot_be_read_does_not_break_the_handshake(tmp_path) -> None:
+    """This runs inside a socket handler. `casa.Registro` reads from
+    disk on every call by its own contract, so an unreadable file must
+    degrade to the id, never raise into a connection that was otherwise
+    fine."""
+    from jarvis_widget.remote import nombre_para
+
+    class Roto:
+        def personas(self):
+            raise OSError("ilegible")
+
+    assert nombre_para(Roto(), "nata") == "nata"

@@ -26,7 +26,7 @@ from loguru import logger
 
 from .certs import ensure_certificate, lan_address, spki_fingerprint
 from .enrol import mobileconfig, sobre, write_qr
-from .personas import normalizar
+from .personas import id_desde_nombre, normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
 
@@ -569,7 +569,7 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
 
 
 async def serve(
-    desk: RemoteDesk, guard: Guard, enrolment: Enrolment, loop
+    desk: RemoteDesk, guard: Guard, enrolment: Enrolment, registro, loop
 ) -> web.AppRunner:
     """Start the HTTPS server. Returns the runner so it can be stopped.
 
@@ -578,7 +578,7 @@ async def serve(
     enrolment server) without touching what is already here.
     """
     app = web.Application()
-    app.router.add_get("/ws", _handler(desk, guard, loop))
+    app.router.add_get("/ws", _handler(desk, guard, registro, loop))
 
     static = Path(__file__).parent / "static"
 
@@ -655,7 +655,24 @@ async def serve(
     return runner
 
 
-def _handler(desk: RemoteDesk, guard: Guard, loop):
+def nombre_para(registro, persona: str) -> str:
+    """The display name for a person id, or the id when nobody knows it.
+
+    `Guard.persona_for` answers with an id and a human reads a name.
+    Never raises: this is called from inside a socket handler, and a
+    register that cannot be read is a reason to say "nata" instead of
+    "Nata", not a reason to drop a connection that is otherwise fine.
+    """
+    try:
+        for quien in registro.personas():
+            if id_desde_nombre(quien.nombre) == persona:
+                return quien.nombre
+    except Exception:
+        logger.debug("alta: no he podido leer el registro para nombrar a %s", persona)
+    return persona
+
+
+def _handler(desk: RemoteDesk, guard: Guard, registro, loop):
     async def handle(request: web.Request) -> web.WebSocketResponse:
         if not guard.origin_ok(request.headers.get("Origin", "")):
             raise web.HTTPForbidden()
@@ -681,6 +698,14 @@ def _handler(desk: RemoteDesk, guard: Guard, loop):
             compress=False,
         )
         await ws.prepare(request)
+        # Whose phone this is, said back once. The box has always known
+        # — `persona_for` above is the lookup — and simply never said
+        # so, which left somebody enrolling four phones in a row with no
+        # way to tell whether they had just done the one they meant
+        # (contract, 2026-09-06). This is a display string and nothing
+        # more: the phone never sends a name back, and nothing here
+        # accepts one.
+        await ws.send_json({"type": "enrolled", "name": nombre_para(registro, persona)})
         endpoint = WebEndpoint(ws, request.remote or "phone", persona, loop)
         buffer = bytearray()
         rate = 48000
@@ -761,5 +786,6 @@ __all__ = [
     "WebEndpoint",
     "build_welcome_app",
     "load_or_create_secret",
+    "nombre_para",
     "serve",
 ]
