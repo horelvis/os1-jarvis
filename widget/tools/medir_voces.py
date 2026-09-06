@@ -49,12 +49,10 @@ from __future__ import annotations
 import argparse
 import itertools
 import queue
-import re
 import sys
 import time
 import wave
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -63,9 +61,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jarvis_widget.audio import Microphone
 from jarvis_widget.locutor import Locutor
+from jarvis_widget.medicion import (
+    Muestra,
+    centroide,
+    centroides_loo,
+    parsear_nombre,
+    rango,
+    sanear_condicion,
+    siguiente_seq,
+    tabla_confusion,
+)
 from jarvis_widget.personas import CASA, es_valida
 from jarvis_widget.vad import INPUT_RATE, SileroDetector, UtteranceDetector
-from jarvis_widget.voz import MARGEN_POR_DEFECTO, Huellas, coseno
+from jarvis_widget.voz import MARGEN_POR_DEFECTO, coseno
 
 BASE_POR_DEFECTO = Path.home() / ".jarvis" / "medicion"
 
@@ -79,57 +87,15 @@ _AVISO_MICROFONO = (
     "    systemctl --user start jarvis-widget.service"
 )
 
-# <persona>__<seq de 3 cifras>__<condición>. La condición nunca lleva
-# guión bajo (`_sanear_condicion` sólo deja letras, dígitos y guiones),
-# así que el separador doble no es ambiguo con nombres de persona
-# razonables.
-_RE_NOMBRE = re.compile(r"^([a-z0-9][a-z0-9_-]*)__(\d{3})__([a-z0-9-]+)$")
-
-# Cuánto esperar sin ninguna señal de voz antes de recordar, en voz alta,
-# que el micrófono correcto importa. No aborta: sólo avisa y sigue
-# esperando, porque la persona puede simplemente estar tardando.
+# How long to wait with no sign of speech before saying, out loud, that
+# having the right microphone matters. Does not abort: it only warns and
+# keeps waiting, since the person may simply be taking their time.
 _SEGUNDOS_ENTRE_AVISOS = 12.0
-
-
-@dataclass(eq=False)
-class Muestra:
-    """One embedded utterance, with enough to group and re-find it."""
-
-    persona: str
-    condicion: str
-    seq: int
-    vector: np.ndarray
-    ruta_audio: Path | None
 
 
 # --------------------------------------------------------------------
 # Nombres de archivo
 # --------------------------------------------------------------------
-
-
-def _sanear_condicion(cruda: str) -> str:
-    limpia = re.sub(r"[^a-z0-9]+", "-", cruda.strip().casefold()).strip("-")
-    return limpia or "estandar"
-
-
-def _parsear_nombre(stem: str) -> tuple[str, int, str] | None:
-    coincidencia = _RE_NOMBRE.match(stem)
-    if coincidencia is None:
-        return None
-    persona, seq, condicion = coincidencia.groups()
-    return persona, int(seq), condicion
-
-
-def _siguiente_seq(base: Path, persona: str) -> int:
-    directorio = base / "vectores"
-    if not directorio.is_dir():
-        return 1
-    maximo = 0
-    for ruta in directorio.glob(f"{persona}__*.npy"):
-        analizado = _parsear_nombre(ruta.stem)
-        if analizado is not None and analizado[0] == persona:
-            maximo = max(maximo, analizado[1])
-    return maximo + 1
 
 
 def _guardar(
@@ -159,7 +125,7 @@ def _cargar_vectores(base: Path) -> list[Muestra]:
     if not directorio.is_dir():
         return muestras
     for ruta in sorted(directorio.glob("*.npy")):
-        analizado = _parsear_nombre(ruta.stem)
+        analizado = parsear_nombre(ruta.stem)
         if analizado is None:
             print(f"  (se ignora, nombre inesperado: {ruta.name})", file=sys.stderr)
             continue
@@ -184,7 +150,7 @@ def _cargar_desde_audio(base: Path, locutor: Locutor) -> list[Muestra]:
     if not directorio.is_dir():
         return muestras
     for ruta in sorted(directorio.glob("*.wav")):
-        analizado = _parsear_nombre(ruta.stem)
+        analizado = parsear_nombre(ruta.stem)
         if analizado is None:
             print(f"  (se ignora, nombre inesperado: {ruta.name})", file=sys.stderr)
             continue
@@ -226,7 +192,7 @@ def _grabar_persona(
     eventos: "queue.Queue[tuple[str, bytes | None]]",
 ) -> None:
     print(f"\n--- {persona} ---")
-    seq = _siguiente_seq(base, persona)
+    seq = siguiente_seq(base, persona)
     ya_grabadas = seq - 1
     if ya_grabadas:
         print(
@@ -287,7 +253,7 @@ def cmd_grabar(args: argparse.Namespace) -> int:
             return 2
         personas.append(candidato)
 
-    condicion = _sanear_condicion(args.condicion)
+    condicion = sanear_condicion(args.condicion)
     base: Path = args.dir
 
     locutor = Locutor()
@@ -349,72 +315,13 @@ def cmd_grabar(args: argparse.Namespace) -> int:
 
     muestras = _cargar_vectores(base)
     if muestras:
-        _imprimir_informe(muestras, _rango(0.30, 0.90, 0.05), MARGEN_POR_DEFECTO)
+        _imprimir_informe(muestras, rango(0.30, 0.90, 0.05), MARGEN_POR_DEFECTO)
     return 0
 
 
 # --------------------------------------------------------------------
 # Informe
 # --------------------------------------------------------------------
-
-
-def _rango(minimo: float, maximo: float, paso: float) -> list[float]:
-    pasos = round((maximo - minimo) / paso)
-    return [round(minimo + i * paso, 10) for i in range(pasos + 1)]
-
-
-def _centroide(vectores: list[np.ndarray]) -> np.ndarray:
-    return np.mean(np.stack(vectores), axis=0).astype(np.float32)
-
-
-def _centroides_loo(
-    muestra: Muestra, indice: dict[str, list[Muestra]]
-) -> dict[str, np.ndarray]:
-    """Centroids for scoring ONE utterance: leave-it-out of its own person's.
-
-    Scoring an utterance against a centroid that was built partly FROM
-    it inflates its own similarity — worst for the person with the
-    fewest samples. Every other person's centroid is unaffected, since
-    the utterance was never theirs.
-    """
-    centroides: dict[str, np.ndarray] = {}
-    for persona, lista in indice.items():
-        if persona == muestra.persona:
-            resto = [m.vector for m in lista if m is not muestra]
-            if not resto:
-                # Only sample this person has: no leave-one-out centroid
-                # exists, so this person is not a candidate for THIS
-                # utterance. Huellas({}) already answers CASA safely if
-                # nothing else is enrolled either.
-                continue
-            centroides[persona] = _centroide(resto)
-        else:
-            centroides[persona] = _centroide([m.vector for m in lista])
-    return centroides
-
-
-def _tabla_confusion(
-    muestras: list[Muestra],
-    indice: dict[str, list[Muestra]],
-    pisos: list[float],
-    margen: float,
-) -> list[tuple[float, int, int, int, Counter]]:
-    filas = []
-    for piso in pisos:
-        correctas = rechazadas = equivocadas = 0
-        ejemplos: Counter = Counter()
-        for m in muestras:
-            centroides = _centroides_loo(m, indice)
-            resultado = Huellas(centroides).quien(m.vector, piso=piso, margen=margen)
-            if resultado == m.persona:
-                correctas += 1
-            elif resultado == CASA:
-                rechazadas += 1
-            else:
-                equivocadas += 1
-                ejemplos[(m.persona, resultado)] += 1
-        filas.append((piso, correctas, rechazadas, equivocadas, ejemplos))
-    return filas
 
 
 def _imprimir_informe(
@@ -437,7 +344,7 @@ def _imprimir_informe(
         print("  sólo hay una persona todavía; no hay comparación cruzada que hacer")
     else:
         centroides_completos = {
-            p: _centroide([m.vector for m in indice[p]]) for p in personas
+            p: centroide([m.vector for m in indice[p]]) for p in personas
         }
         for a, b in itertools.combinations(personas, 2):
             similitud = coseno(centroides_completos[a], centroides_completos[b])
@@ -462,7 +369,7 @@ def _imprimir_informe(
         f"  {'persona':<10} {'condición':<14} {'#':>3}  {'mejor':<18} {'segundo':<18} margen"
     )
     for m in sorted(muestras, key=lambda m: (m.persona, m.condicion, m.seq)):
-        centroides = _centroides_loo(m, indice)
+        centroides = centroides_loo(m, indice)
         puntuaciones = sorted(
             ((coseno(m.vector, c), persona) for persona, c in centroides.items()),
             reverse=True,
@@ -492,7 +399,7 @@ def _imprimir_informe(
     print(
         f"  {'piso':>5}  {'correctas':>9}  {'casa':>6}  {'equivocadas':>11}  {'total':>5}"
     )
-    for piso, correctas, rechazadas, equivocadas, ejemplos in _tabla_confusion(
+    for piso, correctas, rechazadas, equivocadas, ejemplos in tabla_confusion(
         muestras, indice, pisos, margen
     ):
         total = correctas + rechazadas + equivocadas
@@ -529,7 +436,7 @@ def cmd_informe(args: argparse.Namespace) -> int:
         )
         return 1
 
-    pisos = _rango(args.floor_min, args.floor_max, args.floor_step)
+    pisos = rango(args.floor_min, args.floor_max, args.floor_step)
     _imprimir_informe(muestras, pisos, args.margen)
     return 0
 
