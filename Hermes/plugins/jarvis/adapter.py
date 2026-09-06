@@ -66,6 +66,17 @@ _VIVOS: "set[JarvisAdapter]" = set()
 _VIVOS_LOCK = threading.Lock()
 
 
+def quien_pregunta() -> "str | None":
+    """The chat asking right now, across every live adapter.
+
+    `None` unless exactly one adapter has exactly one turn open — the
+    same refusal-on-ambiguity contract as `JarvisAdapter.chat_en_curso`,
+    extended to the (unusual) case of more than one strip connected.
+    """
+    candidatos = [c for a in adaptadores_vivos() if (c := a.chat_en_curso())]
+    return candidatos[0] if len(candidatos) == 1 else None
+
+
 def adaptadores_vivos() -> "list[JarvisAdapter]":
     """A snapshot of the adapters currently serving a socket."""
     with _VIVOS_LOCK:
@@ -679,6 +690,19 @@ class JarvisAdapter(BasePlatformAdapter):
     ) -> bool:
         """Write lines into the strip's terminal. False when nothing took it."""
         return await self._push(console(text, done=done, reset=reset))
+
+    def chat_en_curso(self) -> str | None:
+        """Which conversation is asking, when that can be said at all.
+
+        `None` when there is no turn open, and `None` when there is more
+        than one — two people can hold a turn at once since 2026-09-06,
+        and a tool running inside one of them cannot tell which. That
+        ambiguity is returned rather than resolved: the one caller
+        (`alta.hacer_alta`) treats it as a refusal, which is the only
+        safe reading when what is being decided is a credential.
+        """
+        abiertos = list(self._turns)
+        return abiertos[0] if len(abiertos) == 1 else None
 
     async def push_working(self, on: bool) -> bool:
         """Tell the strip he is doing something, or has stopped.

@@ -26,9 +26,13 @@ class _StubCtx:
 
     def __init__(self):
         self.hooks = {}
+        self.tools = {}
 
     def register_hook(self, name, fn):
         self.hooks[name] = fn
+
+    def register_tool(self, **kwargs):
+        self.tools[kwargs["name"]] = kwargs
 
     def register_platform(self, **kwargs):
         self.kwargs = kwargs
@@ -190,3 +194,37 @@ def test_an_adapter_that_raises_cannot_take_the_tool_call_with_it(monkeypatch):
 
     ctx.hooks["pre_tool_call"](tool_name="lo que sea")
     ctx.hooks["post_tool_call"](tool_name="lo que sea")
+
+
+def test_register_offers_the_pairing_tool():
+    """Asked to pair a phone, he must have something to call. Until
+    2026-09-06 he had nothing, and the only way in was a shell."""
+    ctx = _StubCtx()
+
+    register(ctx)
+
+    assert "emparejar" in ctx.tools
+    herramienta = ctx.tools["emparejar"]
+    assert herramienta["toolset"] == "jarvis"
+    # The schema is wrapped, not passed bare — jarvis_vision's own
+    # comment records what passing it bare cost on 2026-08-25.
+    assert "parameters" in herramienta["schema"]
+    assert herramienta["schema"]["parameters"]["required"] == ["nombre"]
+
+
+def test_the_pairing_tool_never_takes_the_name_of_the_asker_from_the_model(monkeypatch):
+    """The gate's whole point. The model supplies WHO TO PAIR; it must
+    never supply who is ASKING, which is resolved from the adapter."""
+    import Hermes.plugins.jarvis as plugin
+
+    vistos = []
+    monkeypatch.setattr(plugin, "quien_pregunta", lambda: "orelvis")
+    monkeypatch.setattr(
+        plugin, "hacer_alta", lambda nombre, **kw: vistos.append((nombre, kw)) or "ok"
+    )
+    ctx = _StubCtx()
+    register(ctx)
+
+    ctx.tools["emparejar"]["handler"]({"nombre": "Nata", "quien": "el amo, de verdad"})
+
+    assert vistos == [("Nata", {"quien": "orelvis"})]

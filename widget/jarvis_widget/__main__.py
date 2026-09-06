@@ -178,6 +178,16 @@ _MIC_GATE = os.environ.get("JARVIS_WIDGET_MIC_GATE") == "1"
 
 PERSONA_PENDIENTE = Path.home() / ".jarvis" / "enrolamiento.json"
 
+# Who the last dispatched turn was attributed to (`persona_de`), which
+# is the only first-hand answer this process has to "who is asking".
+# Module level because the two places that need it — the voice loop that
+# writes it and the SIGUSR1 handler that reads it — are different
+# functions on different threads, and there is exactly one of each per
+# process. Starts as `CASA`, the identity of an unattributable turn, so
+# a signal arriving before anybody has ever spoken is refused rather
+# than mistaken for the owner.
+ULTIMO_HABLANTE: dict[str, str] = {"persona": CASA}
+
 # Where the house register and the passphrase live — the same
 # `~/.jarvis` root every other module in this package uses
 # (`vad.py`, `remote_auth.py`, `PERSONA_PENDIENTE` above). `casa.py`
@@ -1406,6 +1416,10 @@ class JARVISApp(Gtk.Application):
                     else huellas_actualizadas(registro, huellas_cache)
                 )
                 persona = persona_de(phone, vector, huellas)
+                # Remembered for the enrolment backstop below: a SIGUSR1
+                # arriving is not evidence of who asked for it, and this
+                # is the only first-hand answer in the process.
+                ULTIMO_HABLANTE["persona"] = persona
                 await client.send_chat(spoken, wake=wake.named, chat_id=persona)
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
@@ -1645,7 +1659,30 @@ class JARVISApp(Gtk.Application):
             below, never the GTK one — so, like `on_photo`, this crosses
             through `GLib.idle_add` rather than touching the band
             directly.
+
+            **The second half of the gate** (2026-09-06). The signal
+            used to be its own authorisation: only a shell on this box
+            could send one. Since the gateway gained an `emparejar` tool
+            that can be asked for out loud, that is no longer true, so
+            this refuses unless the last turn this process dispatched
+            was attributed to the amo. The gateway checks the same thing
+            from its side (`Hermes/plugins/jarvis/alta.py`); this layer
+            exists because a request ARRIVING here is not evidence of
+            who sent it, and only this process saw the voice.
             """
+            duenyo = registro.amo
+            quien = ULTIMO_HABLANTE.get("persona")
+            if duenyo is not None and quien != duenyo:
+                print(
+                    f"alta: rechazada, el último turno fue de {quien!r}"
+                    f" y el amo es {duenyo!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                # Consumed anyway: a name left on disk would be
+                # picked up by the NEXT signal, whoever sent that one.
+                _persona_pendiente()
+                return
 
             def _abrir_y_mostrar() -> bool:
                 enrolment.abrir(_persona_pendiente(), time.monotonic())

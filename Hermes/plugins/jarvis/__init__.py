@@ -14,7 +14,9 @@ from .adapter import (
     JarvisAdapter,
     _env,
     adaptadores_vivos,
+    quien_pregunta,
 )
+from .alta import hacer_alta
 
 __all__ = ["JarvisAdapter", "register"]
 
@@ -270,6 +272,46 @@ def register(ctx):
             ultima = estado["abiertas"] == 0
         if ultima:
             _anunciar(False)
+
+    # ── pairing a phone, asked for out loud ──────────────────────────
+    #
+    # Enrolment used to require a shell on this box, and that WAS the
+    # gate. `alta.py` carries the replacement and the reasoning; what
+    # belongs here is only that the caller is resolved by the adapter
+    # (`quien_pregunta`) rather than taken from the model, which could
+    # be told any name at all.
+    def _emparejar(args: Any = None, **_kwargs: Any) -> str:
+        nombre = (args or {}).get("nombre", "") if isinstance(args, dict) else ""
+        return hacer_alta(nombre, quien=quien_pregunta())
+
+    ctx.register_tool(
+        name="emparejar",
+        toolset="jarvis",
+        description=(
+            "Da de alta el teléfono de una persona: abre la ventana de "
+            "enrolamiento y pone su código en la tira durante cinco "
+            "minutos. Sólo funciona si quien lo pide es el amo de la casa."
+        ),
+        emoji="📱",
+        # The function object, not its parameters — the same shape
+        # jarvis_vision uses, and for the reason recorded there: passing
+        # the bare schema is what made him call a tool with no argument
+        # five times out of five on 2026-08-25.
+        schema={
+            "description": "Da de alta el teléfono de una persona.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "description": "El nombre de la persona, tal y como se dijo.",
+                    }
+                },
+                "required": ["nombre"],
+            },
+        },
+        handler=_emparejar,
+    )
 
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
