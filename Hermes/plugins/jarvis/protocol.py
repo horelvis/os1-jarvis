@@ -27,11 +27,22 @@ _CLIENT_TYPES = {"chat", "listen"}
 # lowercase, ASCII. It is duplicated rather than imported because this
 # plugin runs inside the gateway and must not depend on the widget;
 # `test_protocol.py`'s grammar-parity test is what keeps the copies
-# honest. Looser here would be worse than stricter: `ProfileRoute.matches`
-# compares `chat_id` exactly, so an id that matches no route falls back
-# to the DEFAULT profile — the privileged one, since task 11. This
-# boundary fails open, not closed, so it must match Hermes' own rule
-# exactly rather than merely refuse what looks obviously hostile.
+# honest.
+#
+# Corrected 2026-09-06 (final review, CLAUDE.md): this used to say a
+# `chat_id` that matches no configured route "falls back to the
+# DEFAULT profile — the privileged one, since task 11". Task 11 never
+# landed — `profile_routes` and `multiplex_profiles` exist only in
+# plan and spec documents, not in this codebase (`grep` finds neither
+# anywhere else). There is no per-`chat_id` routing to fall back FROM:
+# every `chat_id` this plugin sees today — `casa`, or any enrolled
+# person's — resolves to the SAME default Hermes profile, the one
+# holding `terminal`. Per-profile isolation is the mechanism this
+# branch's `chat_id` tagging makes possible, not a policy configured
+# anywhere yet. Looser here would still be worse than stricter, since a
+# future `ProfileRoute.matches` (or whatever implements task 11) would
+# compare `chat_id` exactly, so this boundary is kept as strict as
+# Hermes' own rule now, ahead of having anything that reads it.
 _CHAT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 # Nothing a person says out loud, or types on a screen with no keyboard in

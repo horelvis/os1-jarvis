@@ -102,10 +102,19 @@ class TurnMachine:
     def done(self) -> bool:
         """End the turn, but only if she actually said something.
 
-        Returns whether the turn settled, because a caller may need to
-        undo something that belongs to the turn — routing a reply back
-        to the phone that asked for it — and must not undo it on a
-        `done` that belongs to a system message this ignores.
+        Returns whether the turn settled. This machine is shared by
+        every conversation the house is having at once — it draws ONE
+        wave, and `_heard_token` is one flag, not one per `chat_id` —
+        so from 2026-09-06 (final review, CLAUDE.md) its return value
+        is used ONLY to decide the WAVE. `__main__.on_done` used to
+        also read it to decide whether to give a phone's claim back;
+        that was wrong the moment two conversations could be open at
+        once, because a `done` for one can consume this flag and make
+        a DIFFERENT conversation's `done`, arriving after, report
+        `False` for a reply that really did arrive. That decision is
+        made per-`chat_id` now, from `TurnChunkers.has` — see its
+        docstring — which shares nothing between conversations because
+        nothing here does either.
         """
         if not self._heard_token:
             # A `done` belonging to a system message the filter dropped.

@@ -7,10 +7,20 @@ and it is made narrow.
 
 `CASA` is the identity of a turn nobody can attribute: a guest, a
 device that was never enrolled, a name that does not survive this
-module. It owns no tools and it never writes into a person's memory.
-**A failure degrades here and never to another person**, which is what
-makes the probabilistic half of this feature (a voice in a room) safe
-to build on later.
+module. **A failure degrades here and never to another person**, which
+is what makes the probabilistic half of this feature (a voice in a
+room) safe to build on later.
+
+**What `CASA` does NOT yet mean, corrected 2026-09-06 (final review,
+CLAUDE.md):** this used to claim it "owns no tools and it never writes
+into a person's memory". Neither half is true today. Every `chat_id` —
+`CASA` included — resolves to the same default Hermes profile, the one
+holding `terminal`, because nothing in this branch configures
+`profile_routes` or `multiplex_profiles`; `grep` finds neither outside
+plan and spec documents. Per-profile isolation is the MECHANISM this
+branch provides, not a POLICY anybody has configured. A reader must not
+take this docstring's word that `CASA` — or any other persona — is
+sandboxed from tools or from another person's memory.
 """
 
 from __future__ import annotations
@@ -24,7 +34,9 @@ CASA = "casa"
 # (`.hermes/src/hermes_cli/profiles.py`, `_PROFILE_ID_RE`), because a
 # person id becomes a profile name. ASCII only, deliberately: `'á'`
 # passes `str.isalnum()`, and an id Hermes cannot use as a profile
-# would make `profile_routes` fail to match in silence.
+# would make a future per-`chat_id` profile route fail to match in
+# silence — kept strict ahead of that ever being configured (see the
+# module docstring: nothing routes by profile today).
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

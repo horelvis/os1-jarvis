@@ -580,6 +580,61 @@ def test_an_unprompted_turn_does_not_take_a_phones_claim():
     assert desk.holders.get(CASA) is phone
 
 
+def test_two_conversations_dones_interleaved_release_both_claims():
+    """The final review (2026-09-06): `TurnMachine` is the one piece of
+    state `on_done` still shared across every conversation. Gating
+    `settle_turn` on `machine.done()`'s return value — as `on_done` did
+    before this fix — means whichever `chat_id`'s `done` reaches the
+    machine FIRST consumes its one `_heard_token` and settles; a
+    SECOND `chat_id`'s `done`, arriving after, finds the flag already
+    spent and reports it did not settle, even though ITS OWN real
+    token arrived. Reproduced with the exact interleaving `send()`'s
+    two separate `await self._push(...)` calls make possible in
+    production: `token(marta)`, `token(lucía)`, `done(marta)`,
+    `done(lucía)`.
+
+    `on_done` now asks `chunkers.has(chat_id)` — read before that
+    chat's buffer is flushed and dropped — instead of `machine.done()`,
+    so each conversation's settle is decided from its OWN frames and
+    cannot be swallowed by another's."""
+    from jarvis_widget.speech import TurnChunkers
+    from jarvis_widget.turn import TurnMachine
+
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    marta, lucia = FakePhone(persona="marta"), FakePhone(persona="lucía")
+    desk.claim(marta, now=0.0)
+    desk.claim(lucia, now=0.0)
+
+    chunkers = TurnChunkers()
+    machine = TurnMachine(on_state=lambda _s: None, on_level=lambda _lv: None)
+
+    def _on_done(chat_id: str | None) -> object | None:
+        """`__main__.on_done`'s decision, minus GTK/print/say: resolve
+        the destination, decide from THIS chat's own frames whether it
+        settles, flush and drop its buffer, and — only if it was
+        real — give its claim back. Returns whichever endpoint was
+        released, or `None`."""
+        destino = destino_de(desk, chat_id)
+        real_reply = chunkers.has(chat_id)
+        chunkers.for_chat(chat_id).flush()
+        chunkers.drop(chat_id)
+        machine.done()  # still drives the shared wave, unconditionally
+        if real_reply:
+            settle_turn(destino, desk)
+            return destino
+        return None
+
+    machine.heard(b"\x00\x00" * 16000)  # a turn is open on the shared wave
+    chunkers.for_chat("marta").push("Hola, marta.")
+    chunkers.for_chat("lucía").push("Hola, lucía.")
+
+    assert _on_done("marta") is marta
+    assert _on_done("lucía") is lucia  # NOT swallowed by marta's done above
+
+    assert desk.holders.get("marta") is None
+    assert desk.holders.get("lucía") is None
+
+
 # `TurnOrigin` — the `arriving()`/`take()` hand-off that used to carry a
 # phone's endpoint into `dispatch` on its own, a scheduling gap away
 # from the audio it belonged to — is gone (task 14, round 2). The

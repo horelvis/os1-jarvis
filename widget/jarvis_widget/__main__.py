@@ -560,11 +560,33 @@ def destino_de(remote_desk, chat_id: str | None) -> object | None:
     the turn end and the reply's sink move on first, and a question
     asked on a phone came out of the room instead.
 
-    If the claim is already gone by the time this runs — a phone
-    dropped mid-answer — this returns `None` and the REST of that
-    reply is spoken in the room. That is known, deliberate residue
-    (CLAUDE.md §12, 2026-09-01) and this function does not try to fix
-    it — see PROGRESS.md, task 12.
+    This resolves by PERSON, not by device — `RemoteDesk` keeps one
+    claim per `persona` (`remote.py`'s `_claims`), and `endpoint_for`
+    hands back whichever `Endpoint` currently holds that persona's
+    claim. That is the same device only for as long as one device
+    holds a given persona. Corrected 2026-09-06 (final review,
+    CLAUDE.md): this used to say a phone dropping mid-answer is the
+    only way a reply goes somewhere OTHER than where it was asked for
+    — false whenever a SECOND device holds the same persona's claim.
+    Reproduced: `papá`'s reply, mid-answer, resolved to `iphone-hija`,
+    who received his private answer while his own phone received
+    nothing.
+
+    It is reachable TODAY, on this box, and not merely in theory:
+    `remote_auth._adopted_or_fresh_secret()` deliberately carries the
+    pre-upgrade `remote.token` forward as `casa`'s secret, so every
+    iPhone enrolled before this branch — all three, in this house —
+    authenticates as the SAME persona, `casa`. Enrolling each phone to
+    its own person (`tools/enrolar.py <persona>`) is what closes this;
+    it is operational, not a code change, and nothing here does it for
+    you.
+
+    A phone dropping mid-answer with nobody else holding its persona
+    is the residue this docstring used to describe in full: this
+    returns `None` and the REST of that reply is spoken in the room.
+    That half is still known, deliberate residue (CLAUDE.md §12,
+    2026-09-01) and this function does not try to fix it — see
+    PROGRESS.md, task 12.
     """
     if not chat_id:
         return None
@@ -957,6 +979,17 @@ class JARVISApp(Gtk.Application):
             # PHONE. The desk (`chat_id=None`) holds no claim, so this
             # covers nothing for it — see `client.on_disconnect` below
             # for the desk's own version of this same backstop.
+            #
+            # And it is sharper than "the dead phone's own buffer" the
+            # moment two devices hold the SAME persona — see
+            # `destino_de`'s docstring for why that is reachable today,
+            # not merely hypothetical. `chunkers.drop` is keyed on
+            # `endpoint.persona`, not on `endpoint` itself, so ONE
+            # device of that persona disconnecting drops the buffer for
+            # the WHOLE persona — including a reply mid-flight to the
+            # OTHER device still holding that persona's claim. Closing
+            # this needs the same operational fix as `destino_de`'s:
+            # one secret per person (`tools/enrolar.py <persona>`).
             on_release=lambda endpoint: chunkers.drop(endpoint.persona),
         )
         # Closed until the QR is actually shown (below) — the welcome
@@ -1098,23 +1131,46 @@ class JARVISApp(Gtk.Application):
             # while: a conversation is not a sequence of commands.
             wake.answered(time.monotonic())
             destino = destino_de(remote_desk, chat_id)
+            # Whether THIS `chat_id` actually said something, as opposed
+            # to one of the gateway's own system messages (turn.py, one
+            # measured turn carried six `done`s of those). Read BEFORE
+            # `for_chat`/`drop` below touch this same `chat_id` — see
+            # `TurnChunkers.has`'s own docstring for why this replaces
+            # `machine.done()`'s return value here (final review,
+            # 2026-09-06, CLAUDE.md): `machine` has ONE `_heard_token`
+            # for the whole house, and a `done` for one `chat_id`
+            # consuming it could make a DIFFERENT `chat_id`'s `done`,
+            # arriving after — or the desk's own `machine.error("")` for
+            # an empty transcription, arriving between the two — find
+            # nothing left and report it did not settle, even though a
+            # real reply of its own had arrived. Reproduced with the
+            # exact interleaving `send()`'s two separate `await
+            # self._push(...)` calls make possible in production:
+            # token(marta), token(lucía), done(marta), done(lucía) left
+            # lucía's claim held for the full 600s ceiling.
+            real_reply = chunkers.has(chat_id)
             for clause in chunkers.for_chat(chat_id).flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause, destino)
             # This conversation's buffer has said everything it had —
             # see `TurnChunkers.drop` for why it must not linger.
             chunkers.drop(chat_id)
-            if machine.done():
+            # Still drives the shared wave exactly as before — the wave
+            # is a picture of the room, not a ledger of who owes whom a
+            # settle, so ANY conversation's `done` is entitled to move
+            # it. Its return value is no longer read: see `real_reply`
+            # above for what decides whether a CLAIM is given back.
+            machine.done()
+            if real_reply:
                 # Give the room — and any phone waiting its turn — back.
                 # This is the recovery path for a held turn, not
                 # bookkeeping: without it, a reply that hangs or crashes
                 # locks every phone in the house out until the widget
-                # restarts. Gated on the real settle, not on every
-                # `done`: the gateway emits one after each of its own
-                # system messages too (turn.py, one measured turn
-                # carried six), and releasing on THAT one would free the
-                # desk before the real tokens ever arrive — a question
-                # asked on a phone, answered out loud in the room.
+                # restarts. Gated on THIS chat's own real settle, not on
+                # every `done`: releasing on one of the gateway's system
+                # -message `done`s would free the desk before the real
+                # tokens ever arrive — a question asked on a phone,
+                # answered out loud in the room.
                 #
                 # And it settles the endpoint this SAME callback already
                 # resolved above, from this turn's own `chat_id` — never
@@ -1123,7 +1179,9 @@ class JARVISApp(Gtk.Application):
                 # `destino` is already `None` here and gives nothing
                 # back; a desk turn is the same. Two phones overlapping
                 # cannot cross here either, because each `on_done` only
-                # ever asks after ITS OWN `chat_id`.
+                # ever asks after ITS OWN `chat_id`, and `real_reply` is
+                # read from that SAME `chat_id`'s own buffer — nothing
+                # shared for a second conversation's `done` to consume.
                 #
                 # `settle_turn`'s own identity guard (`release` ignoring
                 # an endpoint that no longer holds the claim) is vacuous

@@ -174,6 +174,29 @@ class TurnChunkers:
             self._by_chat[key] = chunker
         return chunker
 
+    def has(self, chat_id: str | None) -> bool:
+        """Whether a real (non-system) token has been pushed for this
+        conversation since it was last dropped. A peek, never a
+        create — unlike `for_chat`, calling this must not conjure an
+        entry that `drop` would then have to remove for nothing.
+
+        This is what `on_done`/`on_error` ask INSTEAD of
+        `TurnMachine.done()`'s return value (final review, 2026-09-06,
+        CLAUDE.md). `machine`'s `_heard_token` is one flag for the
+        whole house — a `done` for one `chat_id` resets it, and a
+        SECOND `chat_id`'s `done`, arriving afterwards, then finds
+        nothing left to consume and reports it did not settle, even
+        though a real reply of its own had arrived. `_by_chat` is
+        already keyed by exactly the identity that matters — the same
+        one `destino_de` resolves by — so asking it costs nothing new
+        and shares nothing between conversations. Must be read BEFORE
+        `for_chat`/`drop` touch this same `chat_id` in the same
+        callback: this method itself never creates or removes an
+        entry, but a caller who calls it after flushing has already
+        erased the evidence.
+        """
+        return (chat_id or None) in self._by_chat
+
     def drop(self, chat_id: str | None) -> int:
         """Forget this conversation's buffer.
 

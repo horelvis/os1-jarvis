@@ -492,6 +492,57 @@ def test_dropping_a_chat_frees_a_fresh_chunker_next_time() -> None:
     assert fresh.flush() == []  # nothing carried over from the dead turn
 
 
+def test_has_is_false_until_a_real_token_is_pushed() -> None:
+    """`has` is what `on_done`/`on_error` ask instead of
+    `TurnMachine.done()`'s return value (final review, 2026-09-06,
+    CLAUDE.md): that flag is shared across every conversation, so a
+    `done` for one `chat_id` can silently consume it and swallow the
+    settle for a different one still in flight. `_by_chat` is already
+    keyed by exactly the identity that matters, so this costs nothing
+    new and shares nothing between conversations.
+    """
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    assert chunkers.has("marta") is False
+
+    chunkers.for_chat("marta").push("hola")
+    assert chunkers.has("marta") is True
+    assert chunkers.has("lucía") is False  # a different chat is untouched
+
+
+def test_has_never_creates_a_chunker() -> None:
+    """A peek, not a `for_chat`: asking must not conjure an entry that
+    `drop` would then have to remove for nothing, and must not make a
+    later `for_chat` return something other than a fresh chunker."""
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    assert chunkers.has("marta") is False
+
+    assert chunkers.drop("marta") == 0  # nothing was ever created
+
+
+def test_has_treats_empty_and_none_as_the_desk() -> None:
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    chunkers.for_chat(None).push("hola")
+
+    assert chunkers.has("") is True
+    assert chunkers.has(None) is True
+
+
+def test_has_is_false_again_once_the_chat_is_dropped() -> None:
+    from jarvis_widget.speech import TurnChunkers
+
+    chunkers = TurnChunkers()
+    chunkers.for_chat("marta").push("hola")
+    chunkers.drop("marta")
+
+    assert chunkers.has("marta") is False
+
+
 def test_drop_reports_the_discarded_length_not_the_text() -> None:
     from jarvis_widget.speech import TurnChunkers
 

@@ -92,9 +92,11 @@ def test_a_turn_survives_several_system_dones_before_the_real_one() -> None:
 
 
 def test_done_with_no_token_reports_that_it_did_not_settle() -> None:
-    """A caller may need to undo something that belongs to the turn —
-    routing a reply back to the phone that asked for it — and must not
-    undo it on a `done` that belongs to a system message this ignores.
+    """The return value now decides only the WAVE (see `done`'s own
+    docstring, final review 2026-09-06): a caller must not drop the
+    wave out of `thinking` on a `done` that belongs to one of the
+    gateway's own system messages, which this reports by returning
+    `False`.
     """
     machine, _ = _machine()
     _up_to_thinking(machine)
@@ -180,6 +182,30 @@ def test_an_utterance_carries_its_own_endpoint() -> None:
     machine.heard(b"audio-de-lucia", lucia)
 
     assert heard == [(b"audio-de-marta", marta), (b"audio-de-lucia", lucia)]
+
+
+def test_done_is_one_flag_for_every_conversation_and_must_not_gate_a_settle() -> None:
+    """`TurnMachine` is the one piece of state left in `__main__.py`
+    that is shared across every conversation (final review, 2026-09-06,
+    CLAUDE.md) — `_heard_token` is a single flag, not one per
+    `chat_id`. This characterises exactly why: a `done` for one
+    conversation consumes the flag, so a SECOND conversation's `done`
+    — for a real reply of its own — can find nothing left to consume
+    and report it did not settle. `__main__.on_done` no longer reads
+    this return value to decide whether to release a claim (see
+    `TurnChunkers.has` and `test_main.py`'s
+    `test_two_conversations_dones_interleaved_release_both_claims`);
+    `done()` still drives the wave, and this is why it may not drive
+    anything else.
+    """
+    machine, _ = _machine()
+    _up_to_thinking(machine)
+
+    machine.token("Hola, marta.")  # marta's real reply
+    machine.token("Hola, lucía.")  # lucía's, interleaved before either `done`
+
+    assert machine.done() is True  # marta's `done` — consumes the flag
+    assert machine.done() is False  # lucía's `done` — swallowed
 
 
 def test_two_utterances_scheduled_out_of_order_do_not_cross() -> None:

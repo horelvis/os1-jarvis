@@ -130,10 +130,11 @@ def test_chat_id_that_is_not_a_valid_profile_name_is_refused_case_and_position()
     # Finding 1 (review round 1): a position-blind, case-blind check
     # (`c.isalnum() or c in "-_"` over every character) accepted things
     # the real grammar never would — a leading `-` or `_`, and any
-    # uppercase letter. `ProfileRoute.matches` compares chat_id exactly,
-    # so an id that fails to route falls back to the DEFAULT profile —
-    # the privileged one — which makes a looser wire grammar a fail-open
-    # bug, not a cosmetic one.
+    # uppercase letter. Kept strict ahead of task 11 ever landing:
+    # whatever eventually routes a `chat_id` to its own profile will
+    # compare it exactly, the way `_CHAT_ID`'s own comment describes,
+    # so a looser wire grammar now would be a fail-open bug then, not a
+    # cosmetic one today.
     for hostile in ("-rf", "_x", "MARTA", "Marta"):
         assert not _accepts_chat_id(hostile), hostile
 

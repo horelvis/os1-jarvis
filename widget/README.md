@@ -153,9 +153,20 @@ Two minutes, once per phone. The certificate is issued for ten years.
 **`JARVIS_ALLOWED_USERS` is not the family list.** It gates the
 `user_id`, which is `primary` for every turn from this house, and it is
 authorization: a name missing from it is dropped in silence. Who a turn
-BELONGS to is the `chat_id`, which selects a Hermes profile. Adding
-people to the allowlist is not how a person gets their own memory —
-`gateway.profile_routes` is (task 11).
+BELONGS to is the `chat_id`, which identifies whose conversation and
+memory a reply routes to.
+
+**Corrected 2026-09-06 (final review, CLAUDE.md):** this used to point
+an operator at `gateway.profile_routes` (task 11) as the way a person
+gets their own memory. Task 11 never landed — `profile_routes` and
+`multiplex_profiles` exist only in plan and spec documents, not in this
+code. Every `chat_id` this box sees today resolves to the SAME default
+Hermes profile, the one holding `terminal`. `chat_id` isolation is the
+MECHANISM this branch provides, not a policy anybody has configured —
+adding people to the allowlist, or enrolling their own phone
+(`tools/enrolar.py <persona>`), gives them their own identity on the
+wire and nothing more. If per-person memory or tool isolation ever
+lands, this is where its configuration will be documented.
 
 ## The cameras are not here any more
 
