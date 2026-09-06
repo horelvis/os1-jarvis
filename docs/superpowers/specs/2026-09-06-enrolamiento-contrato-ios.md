@@ -118,13 +118,28 @@ Con esto puedes verificar el lado de la caja sin tener un iPhone delante:
    `access_log=None` es deliberado (evita que el propio token acabe en el
    registro de acceso).
 
-   **Si la app manda cabecera `Origin`**, tiene que ser exactamente el mismo
-   origen que la `url` del sobre — esquema, host y puerto los tres, comparados
-   enteros por `Guard.origin_ok` (`remote_auth.py`). Si la app no manda
-   ninguna, la caja también acepta la conexión: `origin_ok` trata la ausencia
-   de `Origin` como válida a propósito, porque es así como distingue un
-   cliente que no es un navegador — que es lo que la app es — de uno que sí lo
-   es y por tanto sujeto a esta comprobación.
+   **La app no debe mandar cabecera `Origin` en absoluto — esa es la ruta
+   soportada, y la que debe tomar un cliente nativo.** `Guard.origin_ok`
+   (`remote_auth.py`) trata su ausencia como válida a propósito: es así
+   como distingue un cliente que no es un navegador — que es lo que la
+   app es — de uno que sí lo es y por tanto sujeto a esta comprobación.
+
+   **Si la app manda una de todos modos**, tiene que ser
+   `https://brain.local:8443` o `https://<IP de la LAN>:8443` —
+   comparados enteros, esquema, host y puerto los tres, por
+   `Guard._same` (`remote_auth.py`). El esquema tiene que ser **`https`,
+   nunca el `wss` de la `url` del propio sobre.** La caja arma el
+   `Guard` así — `widget/jarvis_widget/__main__.py`:
+   `Guard(roster, f"https://{HOSTNAME}:{PORT}", f"https://{lan_address()}:{PORT}")`
+   — y `_same` compara el esquema letra por letra
+   (`offered.scheme == expected.scheme`), así que un origen `wss://…`
+   no encaja nunca y la conexión recibe un 403 sin nada en el registro
+   que lo explique. Esto no es una inconsistencia por corregir: `Origin`
+   es un concepto de navegador, y un navegador informa el esquema del
+   *documento* desde el que se cargó — `https` — incluso cuando ese
+   documento abre después un socket `wss://` hacia la misma dirección.
+   Repetir el `wss` de la `url` del sobre en la cabecera `Origin`
+   produce un 403 silencioso contra este código tal y como está hoy.
 5. Si más adelante la caja **rechaza el token** —revocado, o la IP cambió—, la
    app vuelve a la pantalla de emparejamiento explicando qué pasó, en lugar de
    reintentar en silencio.

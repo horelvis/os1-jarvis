@@ -14,8 +14,11 @@ the strip taken by somebody else in the room IS a credential leak. The
 window (`remote.ENROLMENT_SECONDS`) bounds only how long the code is on
 screen to be photographed — nothing bounds the token itself once it
 exists: it is valid forever, and revoking one today means editing
-`personas.json` by hand to remove that person's entry. It matters more
-now than it did when the window only bounded a page.
+`personas.json` by hand to remove that person's entry AND restarting
+`jarvis-widget.service` — `Guard.secretos` is loaded once, at boot,
+and never re-read, so the edit alone changes nothing the running
+process (or that person's phone) would notice. It matters more now
+than it did when the window only bounded a page.
 
 The plain-HTTP welcome page still exists for a phone with no app, but it
 is no longer reachable by scanning: its address is typed. It is on its

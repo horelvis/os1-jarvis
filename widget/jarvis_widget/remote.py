@@ -217,11 +217,33 @@ class Enrolment:
         failure — a blank band, not somebody else's credential. A
         missing file at the start (the very first enrolment, or a clean
         boot) is not an error either.
+
+        The delete itself can fail too — `missing_ok=True` only covers
+        the file already being gone, not a `PermissionError` or a
+        read-only mount — and that failure gets its own guard, deliberately
+        stricter than the two below. Those two still open the window,
+        because their worst case is a picture that is missing or a
+        person not yet credentialed — nothing already on disk is wrong,
+        only absent. Here the opposite may be true: the old PNG can
+        still be sitting at `_qr_path`, undeleted, and going on to open
+        the window is exactly the "Marta's live token on `hijo`'s
+        window" failure this ordering exists to prevent, just reached
+        by a different road. So this one does not open the window at
+        all — no picture is a safe failure; somebody else's credential
+        on screen is not.
         """
         self._persona = normalizar(persona)
         if self._escribir_qr is not None:
             if self._qr_path is not None:
-                self._qr_path.unlink(missing_ok=True)
+                try:
+                    self._qr_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        f"alta: no he podido borrar el QR anterior antes "
+                        f"de abrir la ventana de {self._persona}, puede "
+                        f"seguir en el disco — {exc}"
+                    )
+                    return
             try:
                 self._escribir_qr(self._persona)
             except RosterWriteError as exc:

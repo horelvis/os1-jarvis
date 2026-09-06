@@ -1607,7 +1607,11 @@ class JARVISApp(Gtk.Application):
             # (`ENROLMENT_SECONDS`) only bound how long the CODE is on
             # screen to be scanned or photographed — neither bounds the
             # TOKEN itself, which stays valid forever once minted.
-            # Revoking one today means editing `personas.json` by hand.
+            # Revoking one today means editing `personas.json` by hand
+            # AND restarting `jarvis-widget.service`: `Guard.secretos`
+            # is read once, at boot, and never again, so the edit alone
+            # leaves this running process — and that person's phone —
+            # none the wiser.
             band.show_photo(str(QR_PATH), "alta")
             return False  # GLib.SOURCE_REMOVE
 

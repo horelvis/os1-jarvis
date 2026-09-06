@@ -51,7 +51,10 @@ is on screen (or in a photo of the screen) to be scanned in the first
 place — it bounds *display*, not the credential itself. The token
 inside it is valid forever once minted: nothing expires it, and nothing
 in this codebase revokes one short of a person editing `personas.json`
-by hand and removing the entry. A guest who photographs the strip
+by hand, removing the entry, **and restarting `jarvis-widget.service`**
+— `Guard.secretos` is read from that file once, at boot, and never
+again, so the hand-edit alone leaves the running process none the
+wiser and the phone still connecting. A guest who photographs the strip
 during those 300 s can come back three weeks later, on the same wifi,
 and connect as that person for as long as `personas.json` still holds
 their secret. Both `enrol.write_qr` and `__main__._mostrar_qr` used to say

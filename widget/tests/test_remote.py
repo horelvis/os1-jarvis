@@ -743,6 +743,32 @@ def test_a_failed_qr_write_does_not_leave_the_previous_persons_qr_readable(
     assert not qr_path.exists()
 
 
+def test_a_qr_that_cannot_be_deleted_does_not_open_the_window() -> None:
+    """The delete that clears the previous person's QR sits outside
+    `missing_ok`'s reach: a `PermissionError` or a read-only mount makes
+    `unlink` raise rather than silently no-op. Going on to open the
+    window regardless would risk showing the very failure this ordering
+    exists to prevent — a stale, live QR for someone else, on this
+    person's window, undeleted because the delete itself failed. So this
+    must refuse the window rather than gamble on what is still on disk:
+    neither the QR writer nor `open_enrolment` may run."""
+    from jarvis_widget.remote import Enrolment
+
+    class NoBorrable:
+        def unlink(self, missing_ok: bool = False) -> None:
+            raise PermissionError("solo lectura")
+
+    escritos: list[str] = []
+    enrolment = Enrolment()
+    enrolment.attach_qr(escritos.append, NoBorrable())
+
+    enrolment.abrir("hijo", now=0.0)
+
+    assert escritos == []
+    assert enrolment.persona(now=0.0) is None
+    assert not enrolment.is_open(now=0.0)
+
+
 def test_the_journal_says_which_of_two_failures_happened(tmp_path) -> None:
     """A `save_roster` failure means no credential exists at all for this
     person; a `write_qr` failure means one exists on disk while the
