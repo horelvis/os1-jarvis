@@ -264,6 +264,18 @@ platform_toolsets:
     - codigo
     - terminal
     - clases
+    # `file` — read_file / write_file / patch / search_files, which is
+    # what Hermes' own `note-taking/obsidian` skill uses to reach the
+    # vault at OBSIDIAN_VAULT_PATH (.env, git-ignored). Added 2026-09-06.
+    #
+    # **It is not a sandbox, and nothing here confines it to the vault.**
+    # `file_tools._authoritative_workspace_root` only warns about a
+    # RELATIVE path escaping the session cwd; an absolute path returns
+    # before that check ever runs, so these tools reach the whole disk.
+    # That does not widen the blast radius — `terminal` above has been
+    # here since 2026-08-26 and can already do all of it — but nobody
+    # should read this line as "he can only touch the vault".
+    - file
 
 # ── Model ─────────────────────────────────────────────────────────────
 # The gateway resolves its own per request and works without this. Cron

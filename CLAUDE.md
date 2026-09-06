@@ -508,6 +508,34 @@ log (2026-05-13).
 *JARVIS never forgets anything* (2026-05-12). Whether Hermes' own
 `memory` toolset honours it has never been checked.
 
+**Since 2026-09-06 there is a second place, and it is deliberately NOT
+memory.** A vault of Markdown — the user's own notes, opened with
+Obsidian, read by JARVIS through Hermes' bundled `note-taking/obsidian`
+skill and the `file` toolset. The distinction is the whole design and
+must not blur: `memories/USER.md` is INJECTED into every turn, so it is
+what he knows; the vault is a place he DECIDES to look when the
+conversation asks for it. Writing the same fact into both is how this
+project gets an assistant whose remembered and read answers disagree —
+the §7 scar, in a new place.
+
+- **It is grep, not retrieval.** The skill is filesystem-first
+  (`read_file`, `search_files`, `patch`); there are no embeddings
+  anywhere in it. Tens of notes work; thousands will silently stop being
+  found, and he will answer as though they do not exist. ChromaDB was
+  the answer to that and was deleted on 2026-09-03 for never being used.
+- **`file` is not a sandbox.** `file_tools._authoritative_workspace_root`
+  only warns when a RELATIVE path escapes the session cwd; an absolute
+  path returns before that check runs. These tools reach the whole disk.
+  It widens nothing — `terminal` has been enabled since 2026-08-26 — but
+  it is not "the vault only" either.
+- **The path is `OBSIDIAN_VAULT_PATH` in the repo-root `.env`**, which is
+  git-ignored: like the `tts:` block in §1.1, it must be re-applied by
+  hand on any new box, and without it the skill silently falls back to
+  `~/Documents/Obsidian Vault`.
+- **Syncing that folder with Obsidian Sync or iCloud breaks §1.1** — the
+  notes leave the house. Syncthing between the user's own machines does
+  not.
+
 ### 2.8 Audio I/O: everything in the widget, nothing in a browser
 
 **Decision (revised 2026-08-23):** the widget owns the microphone and
@@ -1135,6 +1163,7 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-06** — He gains a vault, and it is not his memory
 - **2026-09-06** — One scan carries the house, not a link to it
 - **2026-09-06** — He says what he is doing, and what he is for
 - **2026-09-05** — The house becomes several people, and he gets a face

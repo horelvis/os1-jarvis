@@ -11,6 +11,69 @@
 
 ---
 
+### 2026-09-06 — He gains a vault, and it is not his memory
+
+**Decision (owner, after an assessment that argued against half of it):**
+JARVIS reads a vault of Markdown — the user's own notes — through
+Hermes' bundled `note-taking/obsidian` skill. The `file` toolset is
+added to `platform_toolsets.jarvis`; `OBSIDIAN_VAULT_PATH` points at
+`~/boveda` from the repo-root `.env`. **He reads it. He does not write
+to it**, and that half was deferred deliberately rather than forgotten.
+
+**What the assessment found, before anything was built.** "Obsidian"
+turned out not to be an integration at all: the bundled skill is
+filesystem-first — `read_file`, `search_files`, `write_file`, `patch`
+against a directory — and Obsidian is simply what a human opens those
+files with. So the question was never "should we integrate Obsidian";
+it was "should he have a folder of Markdown shared with the user". That
+reframing is the useful part of this entry.
+
+**Hermes allowed it and shipped it; this platform did not.** The skill
+was already installed at `.hermes/home/skills/note-taking/obsidian/`,
+and the tools it wants are the `file` toolset — which was NOT in
+`platform_toolsets.jarvis`. He had `terminal` and would have fallen back
+to `cat` and `grep`, which the skill argues against in every section,
+with reason: vault paths contain spaces.
+
+**Why it is separate from memory, in one sentence each.**
+`memories/USER.md` is injected into every turn — it is what he knows.
+The vault is a place he decides to look. Putting the same fact in both
+produces an assistant whose remembered answer and read answer disagree,
+which is §7's scar (`docs/personality.md` against `jarvis-soul.md`) in a
+new location. That is why the write direction was deferred: it is where
+the boundary has to be decided, and nobody has decided it.
+
+**What was argued against and shipped anyway, honestly.** It is grep,
+not retrieval — no embeddings anywhere in that skill. It works for tens
+of notes and will silently stop working for thousands, answering as
+though a note does not exist rather than saying it could not find one.
+This project already owned the fix for that (ChromaDB, §2.7) and deleted
+it on 2026-09-03 for never being used on the gateway path. The vault is
+therefore a small-scale tool by construction, and its README says so to
+whoever fills it.
+
+**`file` is not a sandbox, and it was checked rather than assumed.**
+`file_tools._authoritative_workspace_root` only warns when a RELATIVE
+path escapes the session cwd; an absolute path returns before that check
+ever runs (`file_tools.py:422`). These tools reach the whole disk. This
+widens no boundary — `terminal` has been enabled since 2026-08-26 and
+can already do all of it — but the config comment says so plainly so
+nobody reads the line as "he can only touch the vault".
+
+**Measured live, first try**, with a note written into the vault a
+moment earlier: asked "¿cada cuánto riego los tomates y qué pasa con el
+gotero?", he answered with both facts from the note and added the
+consequence himself — "esa fila va a ir a secas si no lo toca". One
+turn, no prompting toward the tool.
+
+**The trap this leaves.** `OBSIDIAN_VAULT_PATH` lives in the git-ignored
+`.env`, so it must be re-applied by hand on any new box — and without
+it the skill does not fail, it silently falls back to
+`~/Documents/Obsidian Vault`. Same shape as §1.1's `tts:` trap, and it
+belongs on the same list. And: syncing the vault with Obsidian Sync or
+iCloud takes the notes out of the house, which ends §1.1's guarantee.
+Syncthing between the owner's own machines does not.
+
 ### 2026-09-06 — One scan carries the house, not a link to it
 
 **Decision:** the enrolment QR stops being a LAN address and becomes an
