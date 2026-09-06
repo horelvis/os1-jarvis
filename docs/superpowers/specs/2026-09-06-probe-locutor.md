@@ -17,14 +17,30 @@ are enough.**
 
 The first version of this document chose CAM++ (3D-Speaker), which needs
 an 80-dim fbank feature matrix rather than raw audio, and named
-`kaldi-native-fbank` as the library to compute it. The project owner
-ruled that dependency out — and declined the alternative of hand-writing
-a fbank front end in our own code — and asked for a raw-audio model
-instead, or an honest "none exists". This revision replaces the chosen
-model with one that needs neither: **the fbank front end is gone from
-this plan entirely**, not merely unsourced. CAM++ and its front end are
-kept below only as the rejected path, for the record and for the
-side-by-side cost comparison the owner asked to see.
+`kaldi-native-fbank` as the library to compute it. The instruction that
+reached this task at the time was that the dependency was ruled out; a
+raw-audio alternative was asked for. This revision found one —
+`pyannote/embedding` — and it is chosen below.
+
+## Correction (fix round 2)
+
+**CAM++ was never disqualified, and the previous revision said it was.**
+The instruction to look for an alternative was exactly that — a request
+to look, not a ruling against the dependency. The user's own words, once
+they reached this document: *"no he dicho cero dependencia, solo buscar
+alternativa"* ("I didn't say zero dependency, only to look for an
+alternative"). `kaldi-native-fbank` was never forbidden; a candidate that
+needs no front end at all was found regardless, and it is better on both
+axes that matter here — no dependency, and roughly eight times faster.
+
+So: **CAM++'s licence chain is clean and its measurements stand. It is
+not chosen, and it was never rejected or declined.** `pyannote/embedding`
+is the better candidate on the numbers, not the last one standing. The
+sections below restore CAM++ and WeSpeaker's full licence sourcing,
+quoted with URLs to the same standard the chosen model gets, so whoever
+reads this later can weigh CAM++ on its own merits rather than being
+told — wrongly, as this document said in fix round 1 — that it was
+ruled out.
 
 ## What was checked, this round
 
@@ -59,7 +75,7 @@ the ground up but far smaller than a wav2vec2-family transformer.
 **sha256:** `278528694f907ed19a59a76220dde2060c0f61e0f3956ae8d52f4fe617a39ca9`
 (recorded by this task; unlike the CAM++ release there is no
 independently-published checksum file to verify it against — noted so
-nobody mistakes this for the same level of provenance as the rejected
+nobody mistakes this for the same level of provenance as the other
 candidates below).
 
 **Where it comes from:**
@@ -291,54 +307,122 @@ inside the ONNX graph itself. Session construction
 of ms at process start, not paid per utterance, same as every other
 model in this project.
 
-## Side-by-side against the rejected fbank path
+## The other candidate: CAM++ (3D-Speaker), sound but not chosen
 
-The owner asked to see the real numbers next to each other, to weigh the
-decision that was already made:
+This is the model the first version of this document chose. It remains
+a valid candidate — its licence chain is clean and its measurements are
+real — and it is documented here to the same standard as
+`pyannote/embedding`, so a later reader can weigh it on its own merits
+rather than take this document's word that something else won.
 
-| | pyannote/embedding (chosen) | CAM++ zh/en + fbank (rejected) | WeSpeaker CAM++ + fbank (rejected) |
+**File:** `~/.jarvis/models/campplus_zh_en_16k_common_advanced.onnx`
+**Size:** 28,281,164 bytes (28.3 MB), sha256
+`aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2` —
+verified against the upstream `checksum.txt` published alongside it.
+
+**Where it comes from:**
+- Original checkpoint: `iic/speech_campplus_sv_zh_en_16k-common_advanced`
+  on ModelScope (Alibaba DAMO Academy / the 3D-Speaker project), CAM++
+  architecture, trained on ~200k speakers across VoxCeleb + CNCeleb +
+  3D-Speaker's own corpus.
+- ONNX export: published as a release asset,
+  `3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx`, by
+  `k2-fsa/sherpa-onnx` at
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
+  — an official artifact of that project, not a third-party reupload.
+
+**Licence, quoted, with the URLs it was read from:**
+- The 3D-Speaker toolkit's own licence
+  (https://github.com/modelscope/3D-Speaker/blob/main/LICENSE):
+  > `Apache License` `Version 2.0, January 2004`
+- The ModelScope model card's own licence field, read from its API
+  (`https://modelscope.cn/api/v1/models/iic/speech_campplus_sv_zh_en_16k-common_advanced`,
+  field `Data.License`):
+  > `"License": "Apache License 2.0"`
+- The conversion tool that produced the `.onnx` file, `k2-fsa/sherpa-onnx`
+  (https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE):
+  > `Apache License` `Version 2.0, January 2004`
+
+  All three agree: Apache-2.0, permission to use, modify and redistribute
+  with attribution, no field-of-use restriction. Nothing here forbids use
+  in a private household.
+
+**Input contract:** an 80-dimensional log-mel filterbank (fbank) matrix,
+shape `(N, T, 80)`, not raw audio — running the probe with raw 16 kHz PCM
+fails immediately with `Invalid rank for input: x Got: 2 Expected: 3`.
+Computing that matrix needs something beyond `onnxruntime` and numpy —
+`kaldi-native-fbank` (PyPI, Apache-2.0, zero dependencies) was the
+candidate found for it, measured at 3.7 ms for a 3-second utterance.
+That front end is real, licensed, and cheap — it was simply not needed
+once a candidate that requires no front end at all was found.
+
+**A second CAM++ export, also verified working**, kept as a further
+fallback:
+- **File:** `~/.jarvis/models/wespeaker_en_voxceleb_campplus.onnx`,
+  29,292,684 bytes, sha256
+  `c46fad10b5f81e1aa4a60c162714208577093655076c5450f8c469e522ec54ef`
+  (matches upstream `checksum.txt`).
+- **Source:** WeSpeaker's own CAM++ recipe, trained on VoxCeleb
+  (English), exported by the same `k2-fsa/sherpa-onnx` release.
+- **Licence, quoted, with the URL it was read from** — WeSpeaker's own
+  `LICENSE` (https://github.com/wenet-e2e/wespeaker/blob/master/LICENSE):
+  > `Apache License` `Version 2.0, January 2004`
+- **Input:** same shape of thing, named `feats` instead of `x`,
+  `('B', 'T', 80)`.
+- **Output:** 512-dimensional embedding, `('B', 512)`.
+- **Measured:** fbank extraction 2.2 ms + inference 12.1 ms ≈ 14.3 ms
+  total for a 3-second utterance.
+
+## Side-by-side against CAM++'s fbank path
+
+Set out so CAM++ can be weighed against the chosen model with real
+numbers, not asserted away:
+
+| | pyannote/embedding (chosen) | CAM++ zh/en + fbank | WeSpeaker CAM++ + fbank |
 |---|---|---|---|
 | input | raw waveform, `(batch, frames)` | 80-dim fbank matrix | 80-dim fbank matrix |
-| extra dependency needed | **none** | `kaldi-native-fbank` (declined) or hand-written fbank (declined) | same |
+| extra dependency needed | none | `kaldi-native-fbank` (Apache-2.0, available, not installed) | same |
 | file size | 17.6 MB | 28.3 MB | 29.3 MB |
 | output dim | 512 | 192 | 512 |
 | feature-extraction cost | — (baked into the graph) | 3.7 ms | 2.2 ms |
 | inference cost | 2.3 ms | 15.0 ms | 12.1 ms |
 | **total per 3 s utterance** | **~2.3 ms** | **~18.7 ms** | **~14.3 ms** |
-| licence | MIT (quoted above) | Apache-2.0 (3D-Speaker + sherpa-onnx + ModelScope card, all agree) | Apache-2.0 (WeSpeaker) |
+| licence | MIT (quoted above) | Apache-2.0 (three sources quoted above, all agree) | Apache-2.0 (quoted above) |
 
-The raw-audio model is not just dependency-free, it is roughly **8×
-faster** than the fbank path was — smaller, and needs one less moving
-part. There is no cost trade being asked of the owner here: the model
-that avoids the dependency also happens to be the cheapest one measured
-in this whole task.
+`pyannote/embedding` wins on both axes that were being weighed: it needs
+no extra dependency, and it is roughly **8× faster** once CAM++'s
+feature-extraction step is counted. That is why it is chosen — not
+because CAM++ failed a requirement. CAM++ remains a sound fallback: if
+`pyannote/embedding` turns out to separate Spanish voices poorly in
+Task 4's real-voice test, CAM++'s numbers above are what the trade would
+cost.
 
-**One honesty note carried over from the fbank candidates, since they
-are still named above:** the CAM++ zh/en model's suitability for a
-Spanish-speaking household was never measured — only guessed at, on the
-reasoning that its broader multi-corpus training (VoxCeleb + CNCeleb +
-3D-Speaker) should generalize better to an unheard language than a
-single-corpus English model. That reasoning was **a hypothesis, not a
-measurement**, and it is moot now that CAM++ is not the candidate in
-use — `pyannote/embedding`'s own generalization to Spanish speech is
-*equally* untested here, for the same reason: 3 seconds of synthetic
-noise proves shapes, timing and the minimum-duration floor, nothing
-about whether two family members' real voices actually separate in this
-512-dimensional space. That is Task 4's job, unchanged from before.
+**One honesty note that still applies:** the CAM++ zh/en model's
+suitability for a Spanish-speaking household was never measured — only
+guessed at, on the reasoning that its broader multi-corpus training
+(VoxCeleb + CNCeleb + 3D-Speaker) should generalize better to an unheard
+language than a single-corpus English model. That reasoning was **a
+hypothesis, not a measurement**. `pyannote/embedding`'s own
+generalization to Spanish speech is *equally* untested here, for the
+same reason: 3 seconds of synthetic noise proves shapes, timing and the
+minimum-duration floor, nothing about whether two family members' real
+voices actually separate in either embedding space. That is Task 4's
+job, unchanged from before.
 
 ## Plain verdict
 
-**Yes — and the new candidate is a better fit than the one this
-document chose the first time, not merely an acceptable substitute for
-a dependency the owner declined.** `pyannote/embedding` (ONNX,
+**Yes — and the chosen candidate wins on its own merits, not because the
+alternative was ruled out.** `pyannote/embedding` (ONNX,
 `~/.jarvis/models/pyannote_embedding.onnx`) takes raw 16 kHz mono
 float32 audio directly, needs no fbank, no `kaldi-native-fbank`, no
 hand-written feature code, and no torch anywhere in the chain; it is
 MIT-licensed with the copyright notice quoted above; it produces a
-512-dimensional embedding in roughly an eighth the time the fbank path
-needed once feature extraction is counted. **No new entry belongs in
-`widget/pyproject.toml`** — `onnxruntime` and `numpy`, already there,
-are enough.
+512-dimensional embedding in roughly an eighth the time CAM++'s fbank
+path needed once feature extraction is counted. **No new entry belongs
+in `widget/pyproject.toml`** — `onnxruntime` and `numpy`, already there,
+are enough. CAM++ (3D-Speaker) was never disqualified — its licence
+chain is clean, quoted with URLs above, and it remains a documented
+fallback if Task 4 finds a reason to prefer it.
 
 The self-supervised alternatives the coordinator named (WavLM-SV,
 UniSpeech-SAT-SV) were checked and dropped on licence grounds alone —
