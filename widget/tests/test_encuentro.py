@@ -158,6 +158,28 @@ def test_the_passphrase_advances_esperando_to_borrando(tmp_path):
     assert isinstance(r, Respuesta)
     assert r.habla
     assert not r.terminado
+    # The band shows what BORRANDO is waiting for, immediately — never
+    # the spent passphrase for one more turn.
+    assert r.lectura == CONFIRMACION_BORRADO
+
+
+def test_esperando_shows_the_passphrase_on_the_band_while_it_waits(tmp_path):
+    enc, _registro = _nuevo(tmp_path)
+
+    saludo = enc.oye("hola")
+    recordatorio = enc.oye("hola de nuevo")
+
+    assert saludo.lectura == FRASE
+    assert recordatorio.lectura == FRASE
+
+
+def test_borrando_returns_to_showing_the_passphrase_on_a_wrong_answer(tmp_path):
+    enc, _registro = _hasta_borrando(tmp_path)
+
+    r = enc.oye("esto no es la confirmación")
+
+    assert enc.estado is Estado.ESPERANDO
+    assert r.lectura == FRASE
 
 
 def test_the_phrase_read_with_filler_still_advances(tmp_path):
@@ -431,7 +453,17 @@ def test_pidiendo_accepts_an_accented_name(tmp_path):
 
 @pytest.mark.parametrize(
     "respuesta",
-    ["Marta", "me llamo Marta", "Me llamo Marta.", "soy Marta", "Marta, a secas"],
+    [
+        "Marta",
+        "me llamo Marta",
+        "Me llamo Marta.",
+        "soy Marta",
+        "Marta, a secas",
+        "puedes llamarme Marta",
+        "Puedes llamarme Marta.",
+        "llámame Marta",
+        "llamame Marta",
+    ],
 )
 def test_pidiendo_extracts_the_name_from_ordinary_spanish_answers(tmp_path, respuesta):
     enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=1)
@@ -457,6 +489,28 @@ def test_pidiendo_still_refuses_what_does_not_survive_after_extraction(tmp_path)
 
     assert enc.estado is Estado.PIDIENDO
     assert r is not None and r.habla
+
+
+def test_an_unrecognised_word_still_needs_an_explicit_confirmation(tmp_path):
+    """The conclusion on "should a single unrecognised word need
+    confirmation rather than acceptance": it already does. Every
+    candidate — a real name or Whisper's garble of one ("Salvis") —
+    goes through `CONFIRMANDO`'s explicit yes before `emparejar` is
+    ever called; a "no" here refuses it without founding anything."""
+    enc, registro = _hasta_pidiendo(tmp_path, n_muestras=1)
+    enc.oye("una frase", _v(1.0, 0.0, 0.0))
+
+    r = enc.oye("Salvis")
+
+    assert enc.estado is Estado.CONFIRMANDO
+    assert registro.amo is None
+    assert "Salvis" in r.habla
+    assert r.lectura == "Salvis"
+
+    enc.oye("no")
+
+    assert enc.estado is Estado.PIDIENDO
+    assert registro.amo is None
 
 
 # --- CONFIRMANDO -----------------------------------------------------------
@@ -491,14 +545,28 @@ def test_confirmando_recovers_if_the_candidate_name_is_somehow_missing(tmp_path)
     assert registro.amo is None
 
 
+def test_pidiendo_shows_the_heard_name_on_the_band_entering_confirmando(tmp_path):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=1)
+    enc.oye("una frase", _v(1.0, 0.0, 0.0))
+
+    r = enc.oye("Marta")
+
+    assert enc.estado is Estado.CONFIRMANDO
+    # Seeing "Marta" spelled out is worth more than hearing it — the
+    # whole question is whether it was heard correctly.
+    assert r.lectura == "Marta"
+
+
 def test_confirmando_requires_an_affirmative(tmp_path):
     enc, _registro = _hasta_confirmando(tmp_path, nombre="Marta")
 
     r = enc.oye("perdona, puedes repetir eso")
 
-    # Neither yes nor no: repeats the question, stays put.
+    # Neither yes nor no: repeats the question, stays put, and the
+    # band keeps showing the same name.
     assert enc.estado is Estado.CONFIRMANDO
     assert r is not None and r.habla
+    assert r.lectura == "Marta"
 
 
 def test_confirmando_no_sends_it_back_to_asking(tmp_path):
@@ -509,6 +577,8 @@ def test_confirmando_no_sends_it_back_to_asking(tmp_path):
     assert enc.estado is Estado.PIDIENDO
     assert r is not None and r.habla
     assert _registro.amo is None
+    # Nothing to read while a new name is asked for.
+    assert r.lectura is None
 
 
 def test_confirmando_si_finishes_and_the_register_has_an_amo(tmp_path):
@@ -522,6 +592,8 @@ def test_confirmando_si_finishes_and_the_register_has_an_amo(tmp_path):
     assert "Marta" in r.habla
     assert registro.amo == "marta"
     assert registro.personas()[0].nombre == "Marta"
+    # HECHO: the band is done.
+    assert r.lectura is None
 
 
 def test_a_name_rejected_by_no_can_be_corrected(tmp_path):

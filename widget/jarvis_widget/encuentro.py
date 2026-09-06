@@ -68,6 +68,41 @@ bastante") and asks for the SAME reading again — the slot index does
 not advance on a refusal, so no passage is spent on an attempt that
 produced no sample.
 
+**The band shows what he is waiting for, in every state, not only
+`PIDIENDO`.** A second requirement change, reported by the owner
+himself trying to pair: the band kept showing the passphrase through
+the whole name-and-confirmation exchange — spent, no longer doing
+anything — so the screen said "say this phrase" while he was being
+asked for a name, and he answered the screen twice instead of the
+question. `Respuesta.lectura` is now set, deliberately, by every
+handler in this file, never left to default to `None` by omission:
+
+- `ESPERANDO` — `self._frase`, the passphrase, for as long as it is
+  still what is needed — including the greeting and the reminder, and
+  gone the instant it is recognised (the same `Respuesta` that advances
+  to `BORRANDO` already carries `BORRANDO`'s own `lectura`, not the
+  spent passphrase for one more turn).
+- `BORRANDO` — `CONFIRMACION_BORRADO`, the sentence written out. This
+  is the one that matters most: it is the sentence that erases the
+  house, deliberately hard to say by accident, and expecting someone to
+  recall it from having heard it once is the same mistake the reading
+  passages exist to fix for a voice sample. A wrong answer here returns
+  to `ESPERANDO` and its `lectura` switches back to the passphrase in
+  the same `Respuesta`.
+- `PIDIENDO` — the current passage while collecting samples
+  (`_lectura_pantalla_muestra`, which also puts the "(2 de 3)" count on
+  screen, since it is already said out loud); `None` once enough
+  samples are in and he is asking for a name — there is nothing to
+  read at that point, and showing the last passage would repeat this
+  exact bug in miniature.
+- `CONFIRMANDO` — the candidate name, exactly as heard. Seeing
+  "Orelvis" spelled out is worth more than hearing it, because the
+  whole question at that point is whether it was heard correctly —
+  Whisper produced "Or Elvis", "Horelvis" and "Salvis" for one real
+  name in a single afternoon. `None` again on the way back to asking
+  for a new name.
+- `HECHO` — `None`. The band is done.
+
 **Dispatch is by CURRENT state, and that is what stops the passphrase
 from advancing twice.** `oye()` looks at `self.estado` once and routes
 to exactly one handler. Saying the passphrase again while already in
@@ -217,17 +252,19 @@ def _vector_usable(vector: "np.ndarray | None") -> bool:
     return vector is not None
 
 
-# Asked "¿cómo la llamo?", a person answers with a bare name about half
+# Asked "¿cómo le llamo?", a person answers with a bare name about half
 # the time and with one of these ordinary sentences the other half.
 # Handling them here — rather than sending "me-llamo-marta" straight to
 # `id_desde_nombre`, which folds spaces out of nothing and refuses the
-# whole sentence as a person id — is what lets "me llamo Marta" and "soy
-# Marta" register exactly as "Marta" would. What genuinely does not
-# survive `id_desde_nombre` (an unintelligible answer, silence) is still
-# refused after this: this only strips the CARRIER phrase, it does not
-# invent a name that was not said.
+# whole sentence as a person id — is what lets "me llamo Marta", "soy
+# Marta", "puedes llamarme Marta" and "llámame Marta" all register
+# exactly as "Marta" would. What genuinely does not survive
+# `id_desde_nombre` (an unintelligible answer, silence) is still refused
+# after this: this only strips the CARRIER phrase, it does not invent a
+# name that was not said.
 _PREFIJOS_NOMBRE = re.compile(
-    r"^\s*(?:me\s+llamo|mi\s+nombre\s+es|soy)\s+(.+)$", re.IGNORECASE
+    r"^\s*(?:me\s+llamo|mi\s+nombre\s+es|soy|puedes\s+llamarme|ll[aá]mame)\s+(.+)$",
+    re.IGNORECASE,
 )
 
 # "Marta, a secas" — the colloquial way of saying "just Marta, nothing
@@ -374,6 +411,14 @@ def _texto_pide_lectura(ordinal: int, total: int, *, otra_vez: bool) -> str:
     return f"{pregunta} Es {_texto_orden(ordinal, total)}."
 
 
+def _lectura_pantalla_muestra(pasaje: str, ordinal: int, total: int) -> str:
+    """What the band shows while a sample is being asked for: the count
+    (digits are fine on a screen — it is speech that wants them spelled
+    out) above the passage itself, so glancing at it answers "how many
+    of how many" as well as "what do I say"."""
+    return f"({ordinal} de {total})\n{pasaje}"
+
+
 def _texto_confirma_nombre(nombre: str) -> str:
     return f"{nombre}, ha dicho. ¿Es así?"
 
@@ -392,17 +437,24 @@ class Estado(str, Enum):
 
 @dataclass(frozen=True)
 class Respuesta:
-    """What he says, whether this is the last thing he will say, and —
-    during `PIDIENDO` — what the strip should show while it waits.
+    """What he says, whether this is the last thing he will say, and
+    what the strip should show while it waits — kept separate from
+    `habla` on purpose. `habla` is what reaches the speakers; a person
+    cannot read a passphrase, a passage, or their own name spelled out
+    off what they just heard spoken over it, so the band is something
+    to look at, never something spoken.
 
-    `lectura` is `None` for every `Respuesta` except the ones asking
-    for a voice sample: it carries the passage to read, kept separate
-    from `habla` on purpose. `habla` is what reaches the speakers; a
-    person cannot read a passage off what they just heard spoken over
-    it, so the passage is something to look at, not something spoken.
-    Optional and defaulting to `None` so every existing caller — most
-    pointedly whoever is wiring `Respuesta` into `__main__.py` right
-    now — keeps working unchanged.
+    Every `Respuesta` from a state that is waiting for something sets
+    `lectura` explicitly — see the module docstring's "the band shows
+    what he is waiting for" for the full mapping. `None` means there is
+    genuinely nothing to look at right now (asking for a name, `HECHO`),
+    not "leave whatever was there": nothing in this module ever relies
+    on a stale value surviving from a previous `Respuesta`, which is
+    exactly the bug this field's every-state coverage exists to close.
+
+    Optional and defaulting to `None` so a caller that does not care
+    about it — most pointedly whoever is wiring `Respuesta` into
+    `__main__.py` — keeps working unchanged.
     """
 
     habla: str
@@ -485,8 +537,14 @@ class Encuentro:
             # house a moment ago.
             return None
         if parecida(texto, self._frase):
+            # The passphrase is SPENT the moment it is said — the band
+            # must stop showing it right here, in the same `Respuesta`,
+            # not on some later turn. It switches straight to what
+            # `BORRANDO` is waiting for instead of going blank in
+            # between, so there is never a turn where the band shows
+            # nothing at all for a state that IS waiting for something.
             self.estado = Estado.BORRANDO
-            return Respuesta(habla=_TEXTO_ANUNCIO_BORRADO, terminado=False)
+            return Respuesta(habla=_TEXTO_ANUNCIO_BORRADO, lectura=CONFIRMACION_BORRADO)
         if not texto.strip():
             # Nothing was actually said — not "somebody talking to him
             # and it was not the passphrase", just silence. Answered
@@ -507,11 +565,13 @@ class Encuentro:
         # Every later utterance that is still not the passphrase gets a
         # short reminder instead of the same paragraph again: a
         # presence that repeats itself on every stray sentence is a
-        # kiosk (CLAUDE.md §1.5), not what he is.
+        # kiosk (CLAUDE.md §1.5), not what he is. Either way, the band
+        # keeps showing the passphrase — it is still what `ESPERANDO`
+        # is waiting for, said once or said again.
         if not self._saludado:
             self._saludado = True
-            return Respuesta(habla=_TEXTO_SALUDO_INICIAL, terminado=False)
-        return Respuesta(habla=_TEXTO_RECORDATORIO_ESPERA, terminado=False)
+            return Respuesta(habla=_TEXTO_SALUDO_INICIAL, lectura=self._frase)
+        return Respuesta(habla=_TEXTO_RECORDATORIO_ESPERA, lectura=self._frase)
 
     # --- BORRANDO ------------------------------------------------------
 
@@ -520,9 +580,10 @@ class Encuentro:
             # Wrong answer -> the previous state, with something to
             # say. Nothing has been touched: the passphrase (still
             # unconsumed outside this module) said again reopens
-            # `BORRANDO` from the top.
+            # `BORRANDO` from the top. The band switches back to it
+            # too — `ESPERANDO` is waiting for it again.
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_BORRADO_CANCELADO, terminado=False)
+            return Respuesta(habla=_TEXTO_BORRADO_CANCELADO, lectura=self._frase)
 
         # The wipe happens here, once, between the passphrase and the
         # first sentence — announced already (`_TEXTO_ANUNCIO_BORRADO`,
@@ -553,11 +614,12 @@ class Encuentro:
         since nothing was recorded for this slot yet.
         """
         ordinal = len(self._muestras) + 1
-        lectura = self._lecturas_muestra[len(self._muestras)]
+        pasaje = self._lecturas_muestra[len(self._muestras)]
         pregunta = _texto_pide_lectura(
             ordinal, self._n_muestras, otra_vez=motivo is not None
         )
         habla = " ".join(parte for parte in (prefijo, motivo, pregunta) if parte)
+        lectura = _lectura_pantalla_muestra(pasaje, ordinal, self._n_muestras)
         return Respuesta(habla=habla, terminado=False, lectura=lectura)
 
     def _en_pidiendo(self, texto: str, vector: "np.ndarray | None") -> Respuesta:
@@ -568,16 +630,31 @@ class Encuentro:
             if len(self._muestras) < self._n_muestras:
                 motivo = None if aceptada else _TEXTO_MUESTRA_NO_SERVIDA
                 return self._respuesta_pide_muestra(motivo=motivo)
-            return Respuesta(habla=_TEXTO_PIDE_NOMBRE, terminado=False)
+            # Enough samples: nothing left to read, so the band goes
+            # blank rather than keep showing the last passage — there
+            # is genuinely nothing to look at while he asks for a name,
+            # and showing stale reading material here is exactly the
+            # bug this round exists to fix.
+            return Respuesta(habla=_TEXTO_PIDE_NOMBRE, lectura=None)
 
         # Enough samples already: this utterance is the candidate name,
-        # said plainly or wrapped in "me llamo…" / "soy…" / "…, a secas".
+        # said plainly or wrapped in "me llamo…" / "soy…" /
+        # "puedes llamarme…" / "llámame…" / "…, a secas". Whatever
+        # candidate comes out of that — a real name, or Whisper's own
+        # garble of one — is never trusted outright: it goes to
+        # `CONFIRMANDO`, which reads it back and waits for an explicit
+        # yes before `emparejar` is ever called. That is the answer to
+        # "should an unrecognised single word need confirmation rather
+        # than acceptance": it already does, for every candidate alike.
         nombre = _nombre_desde_texto(texto)
         if id_desde_nombre(nombre) == CASA:
-            return Respuesta(habla=_TEXTO_NOMBRE_INVALIDO, terminado=False)
+            return Respuesta(habla=_TEXTO_NOMBRE_INVALIDO, lectura=None)
         self._nombre_candidato = nombre
         self.estado = Estado.CONFIRMANDO
-        return Respuesta(habla=_texto_confirma_nombre(nombre), terminado=False)
+        # The band shows the name exactly as heard — seeing "Orelvis"
+        # spelled out is worth more than hearing it, since the whole
+        # question at this point is whether it was heard correctly.
+        return Respuesta(habla=_texto_confirma_nombre(nombre), lectura=nombre)
 
     # --- CONFIRMANDO -----------------------------------------------------
 
@@ -593,21 +670,23 @@ class Encuentro:
             # with something to say, rather than crash on it.
             logger.warning("encuentro: CONFIRMANDO reached with no candidate name")
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, terminado=False)
+            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, lectura=self._frase)
 
         if _es_negativo(texto):
             # Wrong answer -> the previous state ("asking"), with
             # something to say. The samples already gathered are kept;
-            # only the name is asked again.
+            # only the name is asked again — nothing to read while that
+            # happens, same as the first time it was asked.
             self.estado = Estado.PIDIENDO
-            return Respuesta(habla=_TEXTO_PIDE_NOMBRE_DE_NUEVO, terminado=False)
+            return Respuesta(habla=_TEXTO_PIDE_NOMBRE_DE_NUEVO, lectura=None)
 
         if not _es_afirmativo(texto):
             # Neither a yes nor a no: repeat the question rather than
-            # guess. Still `CONFIRMANDO`, still something to say.
+            # guess. Still `CONFIRMANDO`, still something to say, and
+            # the band keeps showing the same name — it has not changed.
             return Respuesta(
                 habla=_texto_confirma_nombre(self._nombre_candidato),
-                terminado=False,
+                lectura=self._nombre_candidato,
             )
 
         try:
@@ -618,10 +697,14 @@ class Encuentro:
             # voiceprint could not be written. None of this is
             # recoverable by trying the same name again, so back to
             # `ESPERANDO` — where, if a house now exists, the security
-            # check above makes the passphrase inert anyway.
+            # check above makes the passphrase inert anyway. The band
+            # goes back to showing the passphrase along with it.
             logger.warning(f"encuentro: emparejar failed — {exc!r}")
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, terminado=False)
+            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, lectura=self._frase)
 
         self.estado = Estado.HECHO
-        return Respuesta(habla=_texto_bienvenida(persona.nombre), terminado=True)
+        # HECHO: nothing left to show — the band is done.
+        return Respuesta(
+            habla=_texto_bienvenida(persona.nombre), terminado=True, lectura=None
+        )
