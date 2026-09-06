@@ -84,7 +84,7 @@ it she runs and is simply mute.
 | `JARVIS_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
 | `JARVIS_WIDGET_REMOTE_TOKEN` | Where the **pre-roster** shared secret lives (default `~/.jarvis/remote.token`, 0600). Read exactly once now — the moment `~/.jarvis/personas.json` is first created — to adopt an already-enrolled house's secret as `casa`'s. **Deleting it afterwards does nothing**: nothing reads it again, so it does not rotate anything. See `JARVIS_WIDGET_REMOTE_ROSTER` below for what rotation actually is today. |
 | `JARVIS_WIDGET_REMOTE_ROSTER` | Where the roster lives (default `~/.jarvis/personas.json`, 0600): `{persona: secret}`, one entry per enrolled person plus `casa` for whoever the system cannot attribute. **This is the authority now, not `JARVIS_WIDGET_REMOTE_TOKEN` above.** On a box that already had a `remote.token` and no roster yet, the roster is created carrying that secret forward as `casa`'s, so every phone enrolled before the upgrade keeps working with no re-enrolment. Rotating one person is removing their entry by hand and enrolling them again (`tools/enrolar.py <persona>`, below) — a fresh secret for them, nobody else touched. Rotating everyone means deleting this file **and** `remote.token`: delete only this one and `casa` re-adopts the old secret from `remote.token` on the next boot, unrotated. |
-| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start, open for `casa` — never a named person; see the ritual below for that. The QR itself is a plain LAN URL, no secret in it; what is short-lived is the enrolment WINDOW behind it (`remote.ENROLMENT_SECONDS`, 300 s), not the code on screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
+| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start, open for `casa` — never a named person; see the ritual below for that. **The QR is a credential since 2026-09-06**, not a bare LAN URL: it carries `casa`'s token inside the envelope (`enrol.sobre`), and the enrolment WINDOW (`remote.ENROLMENT_SECONDS`, 300 s) is what bounds how long it is worth anything, on screen or in a photo of the screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
@@ -105,6 +105,29 @@ it she runs and is simply mute.
       unzip -q -d ~/.jarvis/models /tmp/vosk-es.zip
 
 ### Putting him on a phone
+
+**The QR is scanned by the app now, not by a camera app into Safari.**
+Since 2026-09-06 it carries an envelope (`enrol.sobre`) — where the box
+is, this person's token, and the fingerprint of the CA's public key the
+app pins — and the app is what reads it; nothing about that scan has
+been tried against a real iPhone yet, because the app is being written
+against this contract in a separate repo (`ios-jarvis`). A phone with
+no app still has a way in: type the address by hand,
+`http://<LAN>:<JARVIS_WIDGET_REMOTE_PORT + 1>/` (8444, by default), and
+follow the two-link welcome page below. That page (`static/movil.html`)
+is untouched and no longer reachable by scanning — it is on its way out
+(owner's decision, 2026-09-06), and the steps below are its ritual, kept
+here only until the app replaces it.
+
+> **El QR es ahora una credencial.** Antes era una URL de la red local y
+> daba igual quién lo viera; ahora lleva el token de una persona. Una
+> foto de la tira hecha por otro en la habitación es una fuga. La
+> ventana de alta (`JARVIS_WIDGET_ENROLMENT_SECONDS`, 300 s) es lo único
+> que la acota.
+
+> **Rotar la clave de la CA obliga a reenrolar todos los teléfonos.**
+> Renovar el certificado conservando la clave, no. Es la contrapartida
+> de fijar la clave pública en vez del certificado.
 
 **It must be Safari.** Chrome (and every other browser on iOS — all of
 them are WebKit underneath, by Apple's rule) downloads the enrolment
@@ -130,8 +153,10 @@ connection actually trusted.
    `JARVIS_WIDGET_SHOW_QR=1` at start, opens the same window with no
    flag and no restart either, but for `casa` — the shared,
    unattributed identity — never for a named person; use `enrolar.py`
-   whenever the phone belongs to somebody.) Point the phone's camera
-   at the QR that appears on the strip. **Open the link in Safari.**
+   whenever the phone belongs to somebody.) The QR that appears on the
+   strip is now that person's envelope, not a link — with no app to
+   scan it, open `http://<LAN>:<JARVIS_WIDGET_REMOTE_PORT + 1>/` in
+   Safari instead, by hand.
 2. **1 · Instalar el certificado** → Settings shows "Profile Downloaded"
    → Install. This installs the profile. It does not yet trust it.
 3. Separately, find where this iOS version lets you trust an installed

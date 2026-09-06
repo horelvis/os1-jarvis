@@ -1069,6 +1069,7 @@ If you encounter:
 | The live view: session, tools, decoding | `Hermes/plugins/jarvis_vision/{live,live_tool}.py`, `widget/jarvis_widget/live_decode.py` |
 | Testing without a microphone | `widget/jarvis_widget/fake_mic.py` |
 | The phone: socket, auth, audio, enrolment | `widget/jarvis_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
+| What one scan hands a phone | `widget/jarvis_widget/enrol.py` (`sobre`), `certs.py` (`spki_fingerprint`) |
 | The page it serves | `widget/jarvis_widget/static/movil.html` |
 | A course's state: the plan, concepts, questions | `Hermes/plugins/jarvis_teacher/curso.py` |
 | The sources, and the domain gate in front of them | `Hermes/plugins/jarvis_teacher/fuentes.py` |
@@ -1134,6 +1135,7 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-06** — One scan carries the house, not a link to it
 - **2026-09-06** — He says what he is doing, and what he is for
 - **2026-09-05** — The house becomes several people, and he gets a face
 - **2026-09-03** — The card gets a webview, and the estimate goes

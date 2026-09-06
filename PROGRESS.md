@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
 - 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 - 2026-09-06 — Varias conversaciones a la vez, y cada una con nombre ✅
 - 2026-09-03 — Modo profesor: JARVIS enseña, apoyado en fuentes que él mismo trajo ✅⏸
@@ -63,6 +64,63 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 ---
+
+## 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
+
+Cuatro commits en `development` (`ac3c7e8`, `fa775ce`, `facd230`+
+`d56054e`, `939d715`+`b319ad6`). El QR de alta llevaba una URL de la red
+local en claro; ahora lleva un sobre JSON — `{v, url, token, ca}` — con
+el token de la persona y la huella SHA-256 (SPKI) de la clave pública de
+la CA de la casa, que el teléfono fija. `enrol.sobre()` lo construye y
+se niega a escribir uno incompleto; `certs.spki_fingerprint()` calcula
+el campo `ca`. El QR pasa además de genérico y dibujado una sola vez al
+arrancar a personal, dibujado por `Enrolment.abrir()` en el momento en
+que se abre la ventana de esa persona. Y el saludo por el socket
+contesta ahora `{"type": "enrolled", "name": "Orelvis"}` — el nombre, no
+el id, resuelto en el servidor desde `casa.Registro`; el teléfono nunca
+manda ni nombre ni id propios.
+
+**Lo que compra: la app no necesita pantalla de configuración.** Un
+solo escaneo entrega dirección, credencial y clave a fijar.
+
+**Fijar la clave pública, no el certificado**, es lo que permite
+reemitir el certificado sin reenrolar ningún teléfono — y el coste es
+el simétrico exacto: rotar la clave de la CA obliga a reenrolar todos.
+
+**El QR pasó a ser una credencial**, y eso se corrigió donde antes decía
+lo contrario por escrito: dos docstrings (`enrol.write_qr` y
+`__main__._mostrar_qr`) afirmaban que era inofensivo y que el
+desvanecimiento de la banda «no protege nada». La ventana de alta
+(`JARVIS_WIDGET_ENROLMENT_SECONDS`, 300 s) es ahora lo único que acota
+cuánto vale una foto de la tira hecha por otro.
+
+**El orden se invirtió, y el primer intento del propio plan lo dejó mal
+otra vez.** El secreto de cada persona se acuñaba al PEDIRSE la página
+de bienvenida; con el token dentro del QR tiene que existir antes de
+dibujar la imagen, así que acuñarlo se mudó a `Enrolment.abrir()`, antes
+del dibujo. El texto del plan para ese paso abría primero el socket de
+alta y acuñaba después — y eso reintroduce la misma carrera desde el
+otro lado: `open_enrolment()` levanta el socket en el hilo del bucle
+asyncio vía `call_soon_threadsafe`, mientras `abrir()` corre en el hilo
+de GTK. Quien llegase a la página de bienvenida dentro de esa ventana se
+llevaba un segundo secreto, distinto del que ya estaba grabado en el QR
+recién dibujado — el teléfono que lo escaneó se quedaba con un token
+muerto. Lo cogió la revisión, no un test; el arreglo fue acuñar y
+dibujar antes de levantar el socket.
+
+**`movil.html` no se corrige, se jubila.** Sigue intacto y ya no se
+llega a él escaneando — su dirección hay que teclearla,
+`http://<LAN>:<puerto+1>/` — y sigue caminando el ritual viejo de
+certificado en dos pasos. Decisión del dueño, hoy: la interfaz web va de
+salida, así que no se le enseñó el sobre nuevo.
+
+**Nada de esto lo ha tocado un iPhone de verdad.** La app que lee el
+sobre se está escribiendo contra este contrato en otro repositorio,
+`ios-jarvis`. Lo que esta caja puede demostrar sola termina en «el
+marco que manda por el cable es el correcto»; medirlo contra un teléfono
+real queda para otra tarea.
+
+Tests: 676 → 688.
 
 ## 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 

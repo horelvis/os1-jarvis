@@ -11,6 +11,93 @@
 
 ---
 
+### 2026-09-06 — One scan carries the house, not a link to it
+
+**Decision:** the enrolment QR stops being a LAN address and becomes an
+envelope: `{"v": 1, "url": "wss://…", "token": "…", "ca": "sha256/…"}`
+— where the box is, the person's own token, and the fingerprint of the
+house CA's public key, which the phone pins. `enrol.sobre()` builds it
+and refuses outright to write one missing a field; `certs.spki_fingerprint()`
+computes the `ca` value by shelling out to `openssl`, the way every other
+certificate operation in that module already does.
+
+**What it buys, in one sentence: the app ships with nothing to
+configure.** The old QR was a bookmark — a host and a port, entered once
+into a browser that still had to be told, separately, to trust a
+certificate it had never seen. The new one hands the app the address,
+the credential and the key to pin, in a single scan, and there is no
+settings screen behind it because there is nothing left to type. That is
+also why it is drawn **per person** now, by `Enrolment.abrir()` when
+that person's window opens, rather than once at startup for nobody in
+particular: the envelope carries an identity, and a generic one drawn at
+boot had no identity to carry.
+
+**The key, not the certificate — and the trade is symmetrical.** Pinning
+`spki_fingerprint()` rather than the leaf certificate means the
+certificate can be reissued, on its ten-year clock or sooner, without
+touching a single enrolled phone: the key underneath it does not change,
+so the pin still matches. The cost is the mirror image and just as
+absolute: **rotating the CA's key means re-enrolling every phone in the
+house**, because every one of them is now pinned to that key by name.
+There is no partial version of either direction.
+
+**The QR became a credential, and that changes what a photograph of it
+costs.** It used to encode a LAN URL that was nobody's secret — anyone
+could have it, it named a place, not a person. Now it carries one
+person's token, and a photo of the strip taken by somebody else in the
+room is a leak of that person's access, not a curiosity. The only thing
+that bounds it is `JARVIS_WIDGET_ENROLMENT_SECONDS` (300 s): the window
+during which the QR is worth anything at all, on screen or in a photo of
+the screen. Both `enrol.write_qr` and `__main__._mostrar_qr` used to say
+the opposite in as many words — the second one in the very file that
+draws the code on screen, arguing that the band's 15-second fade "is not
+what protects anything." Both were wrong the moment the payload changed,
+and both are corrected in these commits.
+
+**The ordering reversed, and the plan's own first draft got the new
+order wrong too.** Minting a person's secret used to happen when the
+welcome page was *requested* — the token didn't need to exist until a
+browser asked for it. With the token now baked into the QR, it has to
+exist before the image is drawn, so minting moved into `Enrolment.abrir()`,
+ahead of the draw. The plan's text for that step had `abrir()` open the
+enrolment socket *before* minting, which reintroduced the same bug from
+the other side: `open_enrolment()` raises `EnrolmentSite` on the
+asyncio-loop thread via `call_soon_threadsafe`, while `abrir()` itself
+runs on the GTK thread — two real OS threads, racing. A first-time
+person whose phone (or a browser, on the old page) reached the welcome
+endpoint inside that window would mint a *second* secret and overwrite
+the one already burned into the QR just drawn, leaving the phone that
+scanned it holding a dead token. Caught in review, not by a test, and
+fixed by minting and drawing before the socket goes up at all — the
+`try/except` around the draw stayed, because the window must still open
+for `casa` even on a box where the QR itself cannot be written.
+
+**The new frame changes the wire contract for every client, and it
+arrives first.** The handshake now answers `{"type": "enrolled", "name":
+"Orelvis"}` before anything else — the display name from `casa.Registro`,
+resolved server-side from the token, so the phone still never sends a
+name or an id of its own. `static/movil.html` was checked rather than
+assumed compatible: its `onmessage` only branches on `busy` and
+`truncated`, so an unrecognised leading frame falls through with no
+exception and no state change. It survives the new frame without
+knowing it exists.
+
+**`movil.html` is deprecated, not fixed.** It is untouched by these
+commits and no longer reachable by scanning — its address has to be
+typed by hand now, `http://<LAN>:<port+1>/`, and it still walks a phone
+through the old two-step certificate ritual. The owner's decision,
+today: the web interface is on its way out, so its long-tail — no
+envelope-aware onboarding, no offer to open the app instead — was left
+alone rather than built into a page that will not be there to enjoy it.
+
+**Nothing here has been tried against a real iPhone.** The scan itself,
+the pin, the app reading its own envelope — all of it is being written
+against this contract in a separate repo, `ios-jarvis`. What this box
+can prove alone stops at "the frame it sends is correct"; the next task
+is what an actual phone does with it.
+
+Tests: 676 → 688 across the four commits.
+
 ### 2026-09-06 — He says what he is doing, and what he is for
 
 **Decision (owner, reversing two of his own standing rules):** JARVIS
