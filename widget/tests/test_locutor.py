@@ -56,3 +56,11 @@ def test_a_model_that_raises_costs_the_utterance_and_nothing_else():
 def test_an_utterance_too_short_to_mean_anything_is_refused():
     locutor = Locutor.para_pruebas(FakeSesion())
     assert locutor.vector(b"\x00\x00" * 800) is None
+
+
+def test_an_odd_length_buffer_does_not_raise():
+    # A real caller in this codebase cannot produce this — PCM always
+    # arrives as whole int16 samples — but the module's own promise is
+    # that NOTHING escapes `vector()`, not "nothing plausible".
+    locutor = Locutor.para_pruebas(FakeSesion())
+    assert locutor.vector(b"\x00" * 32001) is None

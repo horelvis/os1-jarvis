@@ -65,10 +65,13 @@ class _Sesion(Protocol):
 class Locutor:
     """`pyannote/embedding` over onnxruntime: PCM in, a 512-wide vector out.
 
-    `listo` is False, and `vector()` always None, for anything short of
-    a session that loaded and ran cleanly — a missing file, one
-    onnxruntime refuses at load time, or one that raises once it is
-    asked to run. None of those may raise into the caller.
+    `vector()` returns `None` — never raises — for a model that never
+    loaded, an utterance under `_MINIMO_SEGUNDOS`, or a model that
+    raises when asked to run. `listo` only covers the first of those:
+    it reports whether the model loaded at construction, and stays
+    `True` for the life of the object even if `vector()` later starts
+    returning `None` because `run()` is failing. Read it as "did the
+    file load", never as "has this ever failed".
     """
 
     def __init__(self, model_path: str | os.PathLike[str] | None = None) -> None:
@@ -111,37 +114,52 @@ class Locutor:
 
     @property
     def listo(self) -> bool:
+        """Whether the model loaded at construction — nothing more.
+
+        This never goes False afterwards. A `run()` failure is retried
+        rather than fatal (see `vector()`), so `listo` staying True
+        does not mean the model is still working; it only ever means
+        the file loaded.
+        """
         return self._session is not None
 
     def vector(self, pcm: bytes) -> "np.ndarray | None":
         """16 kHz mono int16 PCM in, a (512,) float32 vector out, or None.
 
         None for: no model loaded, an utterance shorter than
-        `_MINIMO_SEGUNDOS`, or the model raising when asked to run.
-        Never raises.
+        `_MINIMO_SEGUNDOS`, a `pcm` that cannot even be interpreted as
+        int16 samples, or the model raising when asked to run. Never
+        raises — everything that touches `pcm` or the session sits
+        inside the one `try` below, on purpose: this is called from the
+        microphone thread, which has nowhere for an exception to go.
         """
         if self._session is None:
             return None
 
         import numpy as np
 
-        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        if audio.shape[0] < _MINIMO_MUESTRAS:
-            return None
-
         try:
+            audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+            if audio.shape[0] < _MINIMO_MUESTRAS:
+                return None
             (salida,) = self._session.run(
                 None, {self._input_name: audio[np.newaxis, :]}
             )
+            return np.asarray(salida, dtype=np.float32).reshape(-1)
         except Exception as exc:
-            # Logged once per Locutor, not once per utterance: a model
-            # that has started raising keeps raising, and filling the
-            # journal with the same traceback tells nobody anything new
-            # (CLAUDE.md §2.8, VoskSwitch in __main__.py — the same
-            # invariant applied here).
+            # Retried, not switched off — unlike `VoskSwitch` in
+            # __main__.py, which retires itself for good on its first
+            # failure. That difference is deliberate, not an oversight:
+            # Vosk is asked thirty-one times a second from a stream that
+            # accumulates state (`KaldiRecognizer`), so a broken engine
+            # left running would fail constantly and could compound its
+            # own corruption. This is asked once per COMPLETED
+            # utterance, and the ONNX session is stateless between
+            # calls, so retrying costs ~2.3 ms per utterance and carries
+            # none of that risk. Logged once regardless, so a model that
+            # keeps raising does not fill the journal with the same
+            # traceback forever.
             if not self._logged_failure:
                 logger.error(f"speaker embedding failed: {exc!r}")
                 self._logged_failure = True
             return None
-
-        return np.asarray(salida, dtype=np.float32).reshape(-1)
