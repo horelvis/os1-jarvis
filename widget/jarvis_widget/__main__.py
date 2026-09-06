@@ -488,54 +488,43 @@ def _turn_bookkeeping(was_on: bool, is_on: bool) -> tuple[bool, bool]:
     return (was_on and not is_on, is_on)
 
 
-class TurnOrigin:
-    """The hand-off from the microphone thread into `dispatch`, and
-    nothing past it.
-
-    Until 2026-09-06 this also held `current` — a SECOND slot, written
-    by `take()` and read back by `settle()` — because `on_done` and
-    `on_error` arrive long after `dispatch` has returned and had no
-    other way to learn whose turn they were closing. That stopped being
-    true once reply frames started carrying their own `chat_id` (task
-    9): a closer now asks `destino_de(remote_desk, chat_id)`, which
-    resolves the ANSWERING endpoint through `RemoteDesk.endpoint_for`
-    instead of through a slot here. `current` is gone, and with it the
-    bug task 14 exists for — two phones overlap by design now
-    (`RemoteDesk` is per-person), and a single shared `current` meant a
-    SECOND phone's `arriving()`/`take()` before the FIRST phone's turn
-    had settled overwrote it, so the first phone's close released the
-    second phone's claim instead of its own.
-
-    What is left is genuinely single-slot: `arriving()` then `take()`
-    happen back to back, inside one call, on the way INTO `dispatch` —
-    microseconds, never read by anything that outlives that call. Both
-    `None` means the desk, which is also what an UNPROMPTED turn is: a
-    cron reminder or a camera alert never calls `arriving()` at all, so
-    it carries no `chat_id` either, and `destino_de` resolves it to the
-    room the same way. Two bugs this shape must keep closed, both
-    measured on 2026-09-01 against the OLDER `remote_desk.busy` design
-    this replaced and never reintroduced since:
-
-    - a sentence said at the DESK while a phone held a turn skipping
-      the wake word, leaving the room an open microphone in front of an
-      agent that holds a terminal;
-    - a desk turn settling — an empty transcription and an all-echo
-      one, the two commonest desk outcomes — freeing a phone's claim
-      MID-ANSWER and finishing a private question out loud in the
-      house.
-    """
-
-    def __init__(self) -> None:
-        self.pending: object | None = None
-
-    def arriving(self, endpoint: object) -> None:
-        """A phone's utterance is on its way into `dispatch`."""
-        self.pending = endpoint
-
-    def take(self) -> object | None:
-        """The endpoint this turn belongs to, or None for the desk."""
-        current, self.pending = self.pending, None
-        return current
+# `TurnOrigin` lived here until 2026-09-06 (task 14, round 2) — a class
+# with a `pending` slot, written by `arriving()` on a phone's utterance
+# and read-and-cleared by `take()` at the top of `dispatch`. It looked
+# safe (a single value, cleared the instant it was read) but `arriving()`
+# and `take()` were separated by two real scheduling hops in production
+# — `loop.call_soon_threadsafe`, then the spawned task actually
+# starting — and two phones are two concurrent handler tasks on the same
+# loop, so a SECOND phone's `arriving()` landing before the FIRST
+# phone's `dispatch` had reached `take()` was ordinary, not exotic. It
+# crossed their identities: the first phone's turn settled holding the
+# second phone's claim, and the second's sat forgotten until its own
+# ceiling. Round 1 of this task had already removed a SECOND such slot
+# (`current`, read by a now-gone `settle()`) in favour of resolving
+# `on_done`/`on_error` fresh from each reply's own `chat_id`
+# (`destino_de`) — but left this first one standing, with a docstring
+# that called it safe.
+#
+# The fix is not a bigger or safer slot: it is not having one.
+# `TurnMachine.heard(pcm, endpoint)` now takes the endpoint as an
+# ordinary argument, bound to THIS `pcm` in THIS call, and passes it
+# straight through `on_utterance`'s own closure into `dispatch` — a
+# fresh pair, captured fresh, every time. Nothing is written anywhere
+# for a second utterance to land in before the first is read. See
+# `TurnMachine.heard`'s docstring for the mechanism and `on_utterance`
+# below for where the pair is captured on its way to being scheduled.
+#
+# Two bugs this shape must keep closed, both measured on 2026-09-01
+# against the OLDER `remote_desk.busy` design and pinned by
+# `test_a_desk_utterance_while_a_phone_holds_the_turn_still_needs_his_name`
+# and `test_a_desk_turn_settling_does_not_release_a_phones_claim`:
+#
+# - a sentence said at the DESK while a phone held a turn skipping the
+#   wake word, leaving the room an open microphone in front of an agent
+#   that holds a terminal;
+# - a desk turn settling — an empty transcription and an all-echo one,
+#   the two commonest desk outcomes — freeing a phone's claim
+#   MID-ANSWER and finishing a private question out loud in the house.
 
 
 def spoken_text(
@@ -901,8 +890,16 @@ class JARVISApp(Gtk.Application):
         def set_bands(bands: list[float]) -> None:
             GLib.idle_add(wave.set_bands, bands)
 
-        def on_utterance(pcm: bytes) -> None:
-            loop.call_soon_threadsafe(lambda: self._spawn(dispatch(pcm)))
+        def on_utterance(pcm: bytes, endpoint: object | None = None) -> None:
+            """`TurnMachine.heard()` calls this once, synchronously, with
+            exactly the `(pcm, endpoint)` pair that arrived together —
+            never a shared slot (task 14, round 2; see `TurnMachine.heard`).
+            `endpoint` is recaptured fresh in THIS lambda, paired with
+            THIS `pcm`, so two utterances scheduled back to back cannot
+            cross no matter which of their spawned tasks the loop
+            actually runs first.
+            """
+            loop.call_soon_threadsafe(lambda: self._spawn(dispatch(pcm, endpoint)))
 
         machine = TurnMachine(
             on_state=set_state,
@@ -925,17 +922,15 @@ class JARVISApp(Gtk.Application):
             runs inside `dispatch`, and costs nothing here because the
             phone's microphone is closed while he answers.
 
-            The marker goes down immediately before the audio is handed
-            up, and `dispatch` takes it: it is the only thing that tells
-            that one function whether the mouth it is serving is in the
-            room or in somebody's hand. Nothing routes the voice here
-            any more — `destino_de` resolves it fresh, per batch of
-            clauses, from that turn's own `chat_id`.
+            `endpoint` travels with `pcm` from here all the way into
+            `dispatch`, as an ordinary argument — through `heard()`, then
+            `on_utterance`'s own closure — and nothing in between stores
+            it. Nothing routes the voice here either — `destino_de`
+            resolves that fresh, per batch of clauses, from that turn's
+            own `chat_id`.
             """
-            origin.arriving(endpoint)
-            machine.heard(pcm)
+            machine.heard(pcm, endpoint)
 
-        origin = TurnOrigin()
         remote_desk = RemoteDesk(
             on_utterance=on_remote_utterance,
             # Until 2026-09-06 a claim ending — including the one
@@ -969,7 +964,7 @@ class JARVISApp(Gtk.Application):
         # over plain HTTP, with no check of its own (remote.py).
         enrolment = Enrolment()
 
-        async def dispatch(pcm: bytes) -> None:
+        async def dispatch(pcm: bytes, phone: object | None = None) -> None:
             # Wrapped whole: `transcriber.transcribe` can raise (a
             # starved GPU has left him deaf before — CLAUDE.md §12,
             # 2026-08-30) and so can `client.send_chat`, the same reason
@@ -979,11 +974,11 @@ class JARVISApp(Gtk.Application):
             # `_claimed_at` is already `None` by the time `dispatch`
             # runs — so an uncaught exception here would lock every
             # phone in the house out until the widget restarts.
-            # Read and cleared at the top, and bound for the life of
-            # this turn: everything below asks THIS, never
-            # `remote_desk.busy` — see `TurnOrigin` for the two
-            # different bugs that question caused.
-            phone = origin.take()
+            # `phone` arrives as an ordinary argument, paired with THIS
+            # `pcm` all the way from `heard()` — never read from
+            # `remote_desk.busy`, which answers a DIFFERENT question and
+            # answers it wrongly in both directions (see the module
+            # docstring history, CLAUDE.md §12, 2026-09-01).
             try:
                 seconds = len(pcm) / 2 / INPUT_RATE
                 print(
@@ -1129,6 +1124,17 @@ class JARVISApp(Gtk.Application):
                 # back; a desk turn is the same. Two phones overlapping
                 # cannot cross here either, because each `on_done` only
                 # ever asks after ITS OWN `chat_id`.
+                #
+                # `settle_turn`'s own identity guard (`release` ignoring
+                # an endpoint that no longer holds the claim) is vacuous
+                # here: `destino_de` just asked `remote_desk` who holds
+                # this persona's claim RIGHT NOW, so `destino` can only
+                # ever be the current holder or `None` — never stale.
+                # It is the three `settle_turn` calls inside `dispatch`
+                # (above) that pass the ORIGINATING endpoint, which a
+                # re-press CAN steal the claim out from under before the
+                # first press's turn ever gets here; the guard does real
+                # work only there.
                 settle_turn(destino, remote_desk)
 
         def on_error(message: str, chat_id: str | None = None) -> None:

@@ -21,7 +21,9 @@ class TurnMachine:
         *,
         on_state: Callable[[WaveState], None],
         on_level: Callable[[float], None],
-        on_utterance: Callable[[bytes], None] = lambda _pcm: None,
+        on_utterance: Callable[[bytes, object | None], None] = lambda _pcm, _e=None: (
+            None
+        ),
         on_interrupt: Callable[[], None] = lambda: None,
     ) -> None:
         self._on_state = on_state
@@ -55,11 +57,30 @@ class TurnMachine:
             self._on_interrupt()
         self._go(WaveState.LISTENING)
 
-    def heard(self, pcm: bytes) -> None:
-        """A complete utterance. Transcription and dispatch follow."""
+    def heard(self, pcm: bytes, endpoint: object | None = None) -> None:
+        """A complete utterance. Transcription and dispatch follow.
+
+        `endpoint` is a phone's, or `None` for the desk microphone — and
+        it travels bound to THIS `pcm`, in this one synchronous call,
+        never stored. Task 14 (round 2) removed a shared slot
+        (`TurnOrigin.pending`) that used to carry a phone's endpoint
+        from here into `dispatch` separately from its audio: written by
+        one call and read by another, with two real scheduling hops in
+        between (`loop.call_soon_threadsafe`, then the spawned task
+        actually starting). Two phones are two concurrent handler tasks
+        on the same loop, so a SECOND phone's `heard()` landing before
+        the FIRST phone's audio had been taken out of that slot was
+        ordinary rather than exotic, and it crossed their identities —
+        the first phone's turn settled holding the second phone's
+        claim. Passing `endpoint` straight through as an argument, paired
+        with `pcm` in the same call and recaptured fresh in whatever
+        closure schedules the next step, closes the race by
+        construction: there is no gap between "receiving it" and
+        "using it" for a second call to land in.
+        """
         self._heard_token = False
         self._go(WaveState.THINKING)
-        self._on_utterance(pcm)
+        self._on_utterance(pcm, endpoint)
 
     def typed(self) -> None:
         """A line was typed at him on the strip (user, 2026-08-26).

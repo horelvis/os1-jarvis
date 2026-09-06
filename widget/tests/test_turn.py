@@ -151,16 +151,76 @@ def test_every_state_change_is_announced_once() -> None:
 
 
 def test_an_utterance_reaches_the_caller() -> None:
-    heard: list[bytes] = []
+    heard: list[tuple[bytes, object | None]] = []
     machine = TurnMachine(
         on_state=lambda _s: None,
         on_level=lambda _level: None,
-        on_utterance=heard.append,
+        on_utterance=lambda pcm, endpoint: heard.append((pcm, endpoint)),
     )
     machine.speech_started()
     machine.heard(b"\x01\x02" * 100)
 
-    assert heard == [b"\x01\x02" * 100]
+    assert heard == [(b"\x01\x02" * 100, None)]
+
+
+def test_an_utterance_carries_its_own_endpoint() -> None:
+    """The desk microphone has none — `None` — and a phone's travels
+    bound to its OWN pcm, passed straight through in the same call
+    (task 14, round 2: this replaces a shared slot a second utterance
+    could overwrite before the first had been read)."""
+    heard: list[tuple[bytes, object | None]] = []
+    machine = TurnMachine(
+        on_state=lambda _s: None,
+        on_level=lambda _level: None,
+        on_utterance=lambda pcm, endpoint: heard.append((pcm, endpoint)),
+    )
+    marta, lucia = object(), object()
+
+    machine.heard(b"audio-de-marta", marta)
+    machine.heard(b"audio-de-lucia", lucia)
+
+    assert heard == [(b"audio-de-marta", marta), (b"audio-de-lucia", lucia)]
+
+
+def test_two_utterances_scheduled_out_of_order_do_not_cross() -> None:
+    """The exact race task 14 (round 2) closes, reproduced at the shape
+    it actually happens in: in production, `__main__.py`'s own
+    `on_utterance` closure hands `(pcm, endpoint)` to
+    `loop.call_soon_threadsafe`, a real gap between `heard()` returning
+    and the scheduled call actually running — and two phones are two
+    concurrent handler tasks on that same loop, so their two `heard()`
+    calls can be scheduled in either order relative to when each
+    scheduled callback is actually RUN. The removed `TurnOrigin.pending`
+    was a single slot written by the first call and read by whichever
+    scheduled callback ran next — so reordering crossed identities.
+    Nothing is shared here: each scheduled callback closes over its OWN
+    `pcm`/`endpoint`, captured at `heard()`-time, so running them in the
+    OPPOSITE order they were produced still pairs each correctly."""
+    scheduled: list = []
+    dispatched: list[tuple[bytes, object | None]] = []
+
+    def on_utterance(pcm: bytes, endpoint: object | None) -> None:
+        # Mimics `loop.call_soon_threadsafe(lambda: self._spawn(dispatch(pcm, endpoint)))`:
+        # a fresh closure per call, queued to run later, in whatever
+        # order the loop gets to it.
+        scheduled.append(lambda: dispatched.append((pcm, endpoint)))
+
+    machine = TurnMachine(
+        on_state=lambda _s: None,
+        on_level=lambda _level: None,
+        on_utterance=on_utterance,
+    )
+    marta, lucia = object(), object()
+
+    machine.heard(b"audio-de-marta", marta)
+    machine.heard(b"audio-de-lucia", lucia)
+
+    # Lucía's scheduled dispatch actually runs FIRST — the reordering
+    # two concurrent handler tasks on the same loop can produce.
+    for call in reversed(scheduled):
+        call()
+
+    assert dispatched == [(b"audio-de-lucia", lucia), (b"audio-de-marta", marta)]
 
 
 def test_a_typed_line_shows_him_thinking() -> None:

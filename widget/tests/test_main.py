@@ -13,7 +13,6 @@ import json
 import stat
 
 from jarvis_widget.__main__ import (
-    TurnOrigin,
     _apply_asking_to_wake,
     _apply_error_to_wake_window,
     _apply_ficha_click,
@@ -457,8 +456,7 @@ class FakePhone:
     def __init__(self, persona: str = CASA) -> None:
         # Who this phone belongs to. Most tests below never look at
         # this — they are about RemoteDesk's claim/release bookkeeping
-        # and TurnOrigin's marker — only the ones asserting identity
-        # (task 5) pass a real one.
+        # — only the ones asserting identity (task 5) pass a real one.
         self.persona = persona
         self.written: list[bytes] = []
 
@@ -515,8 +513,15 @@ def test_a_phone_turn_settling_gives_the_room_back():
 
 
 def test_a_settle_from_a_turn_that_is_no_longer_the_holders_is_ignored():
-    """`release` is given the endpoint, so its own identity guard
-    applies: a late settle cannot free a claim that has since moved."""
+    """Pins `RemoteDesk.release`'s own identity guard in isolation, not
+    any turn-closing behaviour: it ignores an endpoint that no longer
+    holds ITS PERSON's claim. This is what still matters for the three
+    `settle_turn` calls inside `dispatch`, which pass the endpoint that
+    ORIGINATED the turn — a claim a re-press can steal before that
+    first press's turn is ever settled. It does nothing for
+    `on_done`/`on_error`: those resolve fresh through `destino_de`,
+    which only ever names whoever CURRENTLY holds the claim (or
+    `None`), so there the guard can never actually reject anything."""
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     old, new = FakePhone(), FakePhone()
     desk.claim(new, now=0.0)
@@ -575,35 +580,16 @@ def test_an_unprompted_turn_does_not_take_a_phones_claim():
     assert desk.holders.get(CASA) is phone
 
 
-def test_the_marker_is_one_shot():
-    """Read and cleared the instant `dispatch` takes it — the only
-    state `TurnOrigin` keeps now. A marker that survived would make the
-    NEXT desk turn look like the previous phone's."""
-    origin = TurnOrigin()
-    phone = FakePhone()
-    origin.arriving(phone)
-
-    assert origin.take() is phone
-    assert origin.take() is None
-
-
-def test_a_turn_from_a_phone_carries_its_person():
-    """`TurnOrigin.take()` hands back the endpoint itself, so whatever
-    it knows about its person travels with it — no separate identity
-    has to cross the wire."""
-    origin = TurnOrigin()
-    telefono = FakePhone(persona="marta")
-    origin.arriving(telefono)
-
-    taken = origin.take()
-    assert taken is telefono
-    assert taken.persona == "marta"
-
-
-def test_a_desk_turn_has_no_endpoint_and_therefore_no_person():
-    origin = TurnOrigin()
-
-    assert origin.take() is None
+# `TurnOrigin` — the `arriving()`/`take()` hand-off that used to carry a
+# phone's endpoint into `dispatch` on its own, a scheduling gap away
+# from the audio it belonged to — is gone (task 14, round 2). The
+# endpoint now travels as an ordinary argument, bound to its own `pcm`
+# in the same call, all the way from `TurnMachine.heard()` through to
+# `dispatch`. `tests/test_turn.py` pins that: `heard()` carries the
+# endpoint through to `on_utterance` unchanged
+# (`test_an_utterance_reaches_the_caller`), and two utterances scheduled
+# out of order still pair correctly because nothing is shared between
+# them (`test_two_utterances_scheduled_out_of_order_do_not_cross`).
 
 
 # ── where a reply's clauses go ────────────────────────────────────────
