@@ -1244,10 +1244,23 @@ throws the identity away**: `plugins/jarvis/adapter.py:822` hard-codes
 `chat_id="jarvis"` while the `user_id` it is handed rides along unused.
 That literal is the entire reason the house shares one memory. What the
 isolation buys matters more than the harness the user also asked for:
-**the daughters' profile simply does not load `terminal` or the
+**the daughters' profile will simply not load `terminal` or the
 cameras**, and the 2026-09-01 measurement says the harness stands in
 front of dark humour and opinions, not in front of anything that would
 worry a parent.
+
+> **Corrected 2026-09-06, at the final review's insistence, and it is
+> the distinction that matters most in this entry: what shipped is the
+> MECHANISM, not the POLICY.** The wire carries an identity, the adapter
+> routes on it, and Hermes resolves plugins and toolsets per profile —
+> all verified. But **`gateway.profile_routes` and `multiplex_profiles`
+> are configured nowhere on this box**: the two tasks that would have
+> written them were replaced, the same day, by the first-encounter
+> design. So today every `chat_id` — `casa`, `marta`, `lucía` — reaches
+> the same default profile, the one holding `terminal`. **Nobody is
+> sandboxed yet.** Every sentence in this entry about what a profile
+> does or does not hold is written in the future tense for that reason,
+> and this note stays until a routing table exists.
 
 **Parallel conversations cost no VRAM, measured.** 1,681 MiB free; two
 real 64K slots would cost ~1 GB and are not needed, because
@@ -1255,8 +1268,9 @@ real 64K slots would cost ~1 GB and are not needed, because
 are different speakers. Only CosyVoice needs a queue, for the
 clause-interleaving reason §2.8 already records. **Identity in the room
 is a speaker embedding** with a hard rule around it: below the
-confidence floor the turn belongs to a shared `casa` profile that owns
-no tools, and **a failure never degrades to another person**. Sisters of
+confidence floor the turn belongs to a shared `casa` profile that will
+own no tools once the routing exists (see the correction above), and
+**a failure never degrades to another person**. Sisters of
 16 and 17 are the difficult case, so a measurement gate sits in front of
 that half; if they do not separate, the phones deliver the feature and
 the room falls back to one identity, which is a supported outcome and
