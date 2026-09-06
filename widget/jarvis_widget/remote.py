@@ -128,19 +128,31 @@ class Enrolment:
         trusted: it arrives from a file written by `tools/enrolar.py`,
         and a name that does not survive would otherwise become a
         profile name and a session key.
+
+        The QR is drawn BEFORE the socket goes up, and that order is
+        load-bearing, not cosmetic. `open_enrolment` raises
+        `EnrolmentSite` on the asyncio-loop thread via
+        `call_soon_threadsafe`, while this method itself runs on the
+        GTK thread — two real OS threads. Opening the socket first would
+        let `_welcome` become reachable, and mint ITS OWN secret for a
+        first-time person, before `_escribir_qr` below has finished
+        minting and persisting one: two secrets for one person, and the
+        one burned into the QR just drawn is not the one that survives.
+        Minting first means the plain-HTTP page can only ever find the
+        secret already on disk.
         """
         self._persona = normalizar(persona)
-        self.open_enrolment(now)
         if self._escribir_qr is not None:
             try:
                 self._escribir_qr(self._persona)
             except Exception as exc:
-                # The window stays open. This runs off a file watcher
+                # The window still opens. This runs off a file watcher
                 # (`tools/enrolar.py`) and an unwritable QR is a worse
                 # outcome as an exception than as a missing image: the
                 # welcome page is still a way in, and the journal says
                 # what happened.
                 logger.warning(f"alta: no he podido escribir el QR — {exc}")
+        self.open_enrolment(now)
 
     def persona(self, now: float | None = None) -> str | None:
         """Who the open window is for, or None when it is shut.

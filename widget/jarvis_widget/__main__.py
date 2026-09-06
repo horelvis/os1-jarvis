@@ -1588,21 +1588,22 @@ class JARVISApp(Gtk.Application):
 
         def _mostrar_qr() -> bool:
             # The band already draws a PNG for the cameras; this is the
-            # same gesture, not a new one — `remote.serve()` writes the
-            # QR to this same path once at startup. `band` only exists
-            # from `do_activate` onward, which is why this cannot sit
-            # beside `_SWITCHES_OFF` and the other module-level switches
-            # above: nothing named `band` exists there at all.
+            # same gesture, not a new one. But the file itself is no
+            # longer `remote.serve()`'s doing: since 2026-09-06 it is
+            # `Enrolment.abrir` that writes this path, per person, at
+            # the exact moment their window opens — there is nothing
+            # here at startup any more. `band` only exists from
+            # `do_activate` onward, which is why this cannot sit beside
+            # `_SWITCHES_OFF` and the other module-level switches above:
+            # nothing named `band` exists there at all.
             #
-            # The QR itself is harmless — it encodes only a LAN URL, no
-            # secret — so its going away with the band's own fade
-            # (`photo.FADE_S`, 15 s) is not what protects anything.
-            # Opening the window itself — who it is FOR — is the
-            # caller's job now (`enrolment.abrir`): what does need
-            # bounding is the plain-HTTP page the QR points at, which
-            # hands over that person's secret to whoever asks, and the
-            # window it opens starts at the exact moment the QR becomes
-            # something a phone could scan, not at `serve()`'s startup.
+            # The QR is no longer harmless: it now carries that
+            # person's token (`enrol.sobre`), not a bare LAN URL, so
+            # whoever holds the PNG holds the credential. That makes
+            # the band's own fade (`photo.FADE_S`, 15 s) part of what
+            # bounds exposure now, alongside the enrolment window
+            # itself (`ENROLMENT_SECONDS`) and the plain-HTTP page the
+            # old QR used to point at.
             band.show_photo(str(Path.home() / ".jarvis" / "enrol-qr.png"), "alta")
             return False  # GLib.SOURCE_REMOVE
 
