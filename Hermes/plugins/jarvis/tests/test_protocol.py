@@ -379,3 +379,29 @@ def test_an_unknown_kind_is_refused_here_rather_than_on_the_strip() -> None:
 def test_the_strip_still_never_sends_one() -> None:
     with pytest.raises(ProtocolError):
         decode_client(json.dumps({"type": "ficha", "md": "x", "tipo": "plan"}))
+
+
+# ── the `working` frame ───────────────────────────────────────────────
+#
+# The wave has had a WORKING state since the widget was built — drawn,
+# tuned, and never once switched on, because nothing in the gateway ever
+# said "he is doing something rather than composing a sentence". This is
+# the frame that says it.
+
+
+def test_working_carries_the_flag_and_nothing_else() -> None:
+    from Hermes.plugins.jarvis.protocol import working
+
+    assert json.loads(working(True)) == {"type": "working", "on": True}
+    assert json.loads(working(False)) == {"type": "working", "on": False}
+
+
+def test_working_coerces_to_a_real_bool() -> None:
+    """The callers are hook handlers counting outstanding tool calls, so
+    what arrives here is an `int` as often as a `bool`. A frame carrying
+    `"on": 2` would be read as truthy by the strip today and could stop
+    being read that way tomorrow — the wire says true or false."""
+    from Hermes.plugins.jarvis.protocol import working
+
+    assert json.loads(working(2))["on"] is True
+    assert json.loads(working(0))["on"] is False

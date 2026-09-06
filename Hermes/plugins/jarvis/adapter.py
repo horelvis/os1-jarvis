@@ -27,6 +27,7 @@ Two things a reader should know before changing anything here:
 from __future__ import annotations
 
 import asyncio
+import threading
 import errno
 import os
 import uuid
@@ -52,7 +53,24 @@ from .protocol import (
     photo,
     silence,
     token,
+    working,
 )
+
+# Every adapter with a live socket, so the synchronous `pre_tool_call`
+# hooks in `__init__.py` can reach one. A module-level registry is how
+# Hermes' own `plugins/platforms/raft/adapter.py` solves exactly this —
+# a hook is a free function with no handle on the platform it belongs
+# to — and it is a set rather than a single slot because nothing
+# promises there is only ever one.
+_VIVOS: "set[JarvisAdapter]" = set()
+_VIVOS_LOCK = threading.Lock()
+
+
+def adaptadores_vivos() -> "list[JarvisAdapter]":
+    """A snapshot of the adapters currently serving a socket."""
+    with _VIVOS_LOCK:
+        return list(_VIVOS)
+
 
 try:
     from gateway.config import Platform
@@ -662,6 +680,41 @@ class JarvisAdapter(BasePlatformAdapter):
         """Write lines into the strip's terminal. False when nothing took it."""
         return await self._push(console(text, done=done, reset=reset))
 
+    async def push_working(self, on: bool) -> bool:
+        """Tell the strip he is doing something, or has stopped.
+
+        False when nothing took it, which is not worth acting on: a
+        strip that is not connected has no wave to pulse.
+        """
+        return await self._push(working(on))
+
+    def push_working_threadsafe(self, on: bool) -> None:
+        """`push_working` from a SYNCHRONOUS caller on any thread.
+
+        The one caller is `__init__`'s `pre_tool_call` / `post_tool_call`
+        hooks, which Hermes invokes synchronously inside a turn — not
+        necessarily on the loop this adapter's socket lives on. Hopping
+        through `call_soon_threadsafe` is the same crossing
+        `EnrolmentSite.open_soon` makes in the widget, and for the same
+        reason.
+
+        Fire and forget, deliberately: a hook that waited on a future
+        here would block a tool call on a socket write, and the frame is
+        a hint about a wave. Nothing raises out of it — a hook that
+        raised would surface inside somebody else's tool call.
+        """
+        loop = getattr(self, "loop", None)
+        if loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(self.push_working(on))
+            )
+        except RuntimeError as exc:
+            # The loop is closed or closing — the gateway is going down,
+            # and a wave frame is the least important thing in flight.
+            logger.debug(f"jarvis: working frame not scheduled — {exc}")
+
     async def push_asking(self, open_: bool) -> bool:
         """Tell the strip whether something waits for the user's answer.
 
@@ -854,6 +907,11 @@ class JarvisAdapter(BasePlatformAdapter):
         # watcher thread and needs one that will still be alive when it
         # does; see `LiveSession.open`.
         self.loop = asyncio.get_running_loop()
+        # Joins the registry the hooks read only once there is a loop to
+        # schedule onto — an adapter with no loop cannot take a frame,
+        # and `push_working_threadsafe` would silently drop it.
+        with _VIVOS_LOCK:
+            _VIVOS.add(self)
         previous, self._ws = self._ws, ws
         if previous is not None and not previous.closed:
             await previous.close()
@@ -887,6 +945,12 @@ class JarvisAdapter(BasePlatformAdapter):
             # log line at all.
             if self._ws is ws:
                 self._ws = None
+                # Leaves the registry with the socket. An adapter kept
+                # in it after its strip is gone would have every hook
+                # schedule a frame into a closed connection, once per
+                # tool call, for the life of the process.
+                with _VIVOS_LOCK:
+                    _VIVOS.discard(self)
         return ws
 
     def _should_divert(self, decoded: Dict[str, Any]) -> bool:

@@ -39,6 +39,7 @@ _SERVER_TYPES = {
     "live_end",
     "console",
     "asking",
+    "working",
 }
 
 # Said out loud when the gateway is unreachable. Silence would leave the
@@ -173,6 +174,7 @@ class GatewayClient:
         # Not part of a turn and not shown: it only decides whether an
         # unnamed sentence is still worth sending on. See `wake.hold`.
         self.on_asking: Callable[[bool], None] = lambda _open: None
+        self.on_working: Callable[[bool], None] = lambda _on: None
         # The connection to an established session was just lost — the
         # gateway closed the socket, or the read raised. Nothing here
         # ends a TURN by itself (there is no `chat_id` to end one
@@ -313,6 +315,10 @@ class GatewayClient:
                 self.on_console_done()
         elif kind == "asking":
             self.on_asking(bool(msg.get("open")))
+        elif kind == "working":
+            # Like `asking`, this changes what the strip DRAWS and never
+            # what he says — it must not fall through to the token path.
+            self.on_working(bool(msg.get("on")))
         elif kind == "photo":
             path = msg.get("path", "")
             if isinstance(path, str) and path:

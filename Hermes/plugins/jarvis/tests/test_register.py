@@ -24,6 +24,12 @@ from Hermes.plugins.jarvis import register
 class _StubCtx:
     """Just enough of the plugin registration context to call register()."""
 
+    def __init__(self):
+        self.hooks = {}
+
+    def register_hook(self, name, fn):
+        self.hooks[name] = fn
+
     def register_platform(self, **kwargs):
         self.kwargs = kwargs
 
@@ -105,3 +111,82 @@ def test_register_platform_is_still_called_with_the_new_env_names(monkeypatch):
 
     assert ctx.kwargs["allowed_users_env"] == "JARVIS_ALLOWED_USERS"
     assert ctx.kwargs["allow_all_env"] == "JARVIS_ALLOW_ALL_USERS"
+
+
+# ── the wave's WORKING state, driven from the tool hooks ──────────────
+
+
+def test_register_wires_both_tool_hooks():
+    ctx = _StubCtx()
+
+    register(ctx)
+
+    assert set(ctx.hooks) == {"pre_tool_call", "post_tool_call"}
+
+
+def test_two_tools_at_once_announce_once_and_clear_once(monkeypatch):
+    """Not a hypothetical. One real turn dispatched `web_search` and
+    `web_extract` ONE MILLISECOND apart (measured 2026-09-06), so a flag
+    would switch the wave off when the first finished, with the second
+    still running. The count is what makes the wave mean anything."""
+    import Hermes.plugins.jarvis as plugin
+
+    anuncios = []
+
+    class _Adaptador:
+        def push_working_threadsafe(self, on):
+            anuncios.append(on)
+
+    monkeypatch.setattr(plugin, "adaptadores_vivos", lambda: [_Adaptador()])
+    ctx = _StubCtx()
+    register(ctx)
+    pre, post = ctx.hooks["pre_tool_call"], ctx.hooks["post_tool_call"]
+
+    pre(tool_name="web_search")
+    pre(tool_name="web_extract")
+    assert anuncios == [True], "the second tool must not re-announce"
+
+    post(tool_name="web_extract")
+    assert anuncios == [True], "one tool finishing is not the turn finishing"
+
+    post(tool_name="web_search")
+    assert anuncios == [True, False]
+
+
+def test_a_stray_post_cannot_drive_the_count_negative(monkeypatch):
+    """A `post` with no `pre` behind it is reachable — `model_tools` has
+    a `skip_pre_tool_call_hook` argument. Without the floor, the count
+    would go to -1 and the next real tool would leave the wave still."""
+    import Hermes.plugins.jarvis as plugin
+
+    anuncios = []
+
+    class _Adaptador:
+        def push_working_threadsafe(self, on):
+            anuncios.append(on)
+
+    monkeypatch.setattr(plugin, "adaptadores_vivos", lambda: [_Adaptador()])
+    ctx = _StubCtx()
+    register(ctx)
+
+    ctx.hooks["post_tool_call"](tool_name="huerfano")
+    ctx.hooks["pre_tool_call"](tool_name="de verdad")
+
+    assert anuncios == [True]
+
+
+def test_an_adapter_that_raises_cannot_take_the_tool_call_with_it(monkeypatch):
+    """These run INSIDE somebody's tool call. A hook that raised would
+    surface as that tool failing, for a frame about a wave."""
+    import Hermes.plugins.jarvis as plugin
+
+    class _Roto:
+        def push_working_threadsafe(self, on):
+            raise RuntimeError("el socket se fue")
+
+    monkeypatch.setattr(plugin, "adaptadores_vivos", lambda: [_Roto()])
+    ctx = _StubCtx()
+    register(ctx)
+
+    ctx.hooks["pre_tool_call"](tool_name="lo que sea")
+    ctx.hooks["post_tool_call"](tool_name="lo que sea")

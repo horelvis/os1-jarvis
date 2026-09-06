@@ -37,6 +37,10 @@ class TurnMachine:
         # one measured turn carried six — so `done` alone is not a turn
         # boundary. See docs/…-widget-gateway-probe.md §4.
         self._heard_token = False
+        # Whether a tool is outstanding, per the gateway's hooks. Only
+        # ever cleared by `_settle` or by an explicit off — see
+        # `working`.
+        self._working = False
 
     def _go(self, state: WaveState) -> None:
         if state is self.state:
@@ -93,6 +97,37 @@ class TurnMachine:
         self._heard_token = False
         self._go(WaveState.THINKING)
 
+    def working(self, on: bool) -> None:
+        """He is doing something, or has stopped doing it.
+
+        Driven from the gateway's `pre_tool_call` / `post_tool_call`
+        hooks, not from anything the strip can see: looking at a camera,
+        searching the web or filing a reminder are invisible from here,
+        and until 2026-09-06 a turn that spent thirty seconds on two
+        searches looked exactly like one that was slow to answer.
+
+        `WORKING` has existed in `wave_model` since the widget was
+        built — drawn, and its pulses tuned (`wave.py`) — and nothing
+        had ever switched it on.
+
+        **Off returns to THINKING, never to IDLE.** The tool finished;
+        the turn did not, and he is about to answer. Dropping to IDLE
+        here would say the exchange is over a second before he speaks.
+        The guard on the current state matters for the same reason: a
+        `post_tool_call` that lands after he has already started
+        speaking must not drag the wave backwards.
+
+        Nothing here trusts the count to come back. `_settle` clears
+        this flag, so a lost `post_tool_call` on the gateway side costs
+        a wave that pulses until the turn ends — not one that pulses
+        for ever.
+        """
+        self._working = bool(on)
+        if on:
+            self._go(WaveState.WORKING)
+        elif self.state is WaveState.WORKING:
+            self._go(WaveState.THINKING)
+
     def token(self, text: str) -> None:
         """A real token — system frames are filtered before they get here."""
         del text
@@ -132,4 +167,8 @@ class TurnMachine:
     def _settle(self) -> None:
         self.interrupted = False
         self._heard_token = False
+        # The safety net for the whole feature: whatever the gateway
+        # last said about a tool, a turn that has ended is not working.
+        # A dropped `post_tool_call` must cost one turn, never the wave.
+        self._working = False
         self._go(WaveState.IDLE)

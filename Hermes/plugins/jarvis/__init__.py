@@ -1,7 +1,11 @@
 """jarvis — the strip on the desktop, as a Hermes platform."""
 
 import os
+import threading
 from pathlib import Path
+from typing import Any
+
+from loguru import logger
 
 from .adapter import (
     DEFAULT_USER_ID,
@@ -9,6 +13,7 @@ from .adapter import (
     ENV_ALLOWED_USERS,
     JarvisAdapter,
     _env,
+    adaptadores_vivos,
 )
 
 __all__ = ["JarvisAdapter", "register"]
@@ -210,6 +215,64 @@ def register(ctx):
     _legacy_allow_all = _env(ENV_ALLOW_ALL_USERS)
     if _legacy_allow_all is not None:
         os.environ.setdefault(ENV_ALLOW_ALL_USERS, _legacy_allow_all)
+
+    # ── the wave learns he is doing something ─────────────────────────
+    #
+    # A turn reaches the strip as ONE frame, the finished answer
+    # (measured 2026-09-06), so looking at a camera, searching the web
+    # or filing a reminder are invisible from there: thirty seconds
+    # spent on two searches looked exactly like thirty seconds spent
+    # thinking. `WaveState.WORKING` has been in the widget since it was
+    # built — drawn, its pulses tuned — and nothing had ever switched it
+    # on. These two hooks are what switch it on.
+    #
+    # `pre_tool_call` and not `pre_llm_call`, deliberately: the latter
+    # fires before EVERY model call, including the first of an ordinary
+    # "¿qué hora es?", and would collapse the one distinction the state
+    # exists to make — THINKING is the pause before an answer, WORKING
+    # is doing something.
+    #
+    # **A counter, not a flag**, and that is a measurement rather than
+    # caution: one real turn dispatched `web_search` and `web_extract`
+    # ONE MILLISECOND apart (2026-09-06). With a flag, the first tool's
+    # `post` would switch the wave off while the second was still
+    # running.
+    estado = {"abiertas": 0}
+    candado = threading.Lock()
+
+    def _anunciar(on: bool) -> None:
+        """Tell every connected strip, and never raise into a tool call."""
+        try:
+            for adaptador in adaptadores_vivos():
+                adaptador.push_working_threadsafe(on)
+        except Exception:  # noqa: BLE001 — a hook may not take a turn down
+            logger.debug("jarvis: no he podido anunciar el trabajo", exc_info=True)
+
+    def _on_pre_tool_call(**_kwargs: Any) -> None:
+        with candado:
+            estado["abiertas"] += 1
+            primera = estado["abiertas"] == 1
+        if primera:
+            _anunciar(True)
+
+    def _on_post_tool_call(**_kwargs: Any) -> None:
+        with candado:
+            # A `post` with no `pre` behind it is reachable — a hook
+            # registered mid-turn, or a tool whose `pre` was suppressed
+            # (`model_tools.skip_pre_tool_call_hook` is a real argument).
+            # Returning rather than clamping to zero: clamping keeps the
+            # count honest but still announces an "off" for something
+            # that was never on, which is a frame on the wire for
+            # nothing. Nothing was open; there is nothing to close.
+            if estado["abiertas"] == 0:
+                return
+            estado["abiertas"] -= 1
+            ultima = estado["abiertas"] == 0
+        if ultima:
+            _anunciar(False)
+
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
+    ctx.register_hook("post_tool_call", _on_post_tool_call)
 
     ctx.register_platform(
         name="jarvis",

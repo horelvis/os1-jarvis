@@ -1726,6 +1726,19 @@ class JARVISApp(Gtk.Application):
             _apply_asking_to_wake(wake, open_, time.monotonic())
 
         client.on_asking = on_asking
+
+        def on_working(on: bool) -> None:
+            """He picked up a tool, or put the last one down.
+
+            Straight to the turn machine and nowhere else: this changes
+            what the wave DRAWS and never what he says. `GLib.idle_add`
+            because the frame arrives on the gateway's own loop thread
+            and the wave belongs to GTK — the same crossing every other
+            frame here makes.
+            """
+            GLib.idle_add(machine.working, on)
+
+        client.on_working = on_working
         client.on_photo = on_photo
         client.on_ficha = on_ficha
         client.on_live_open = on_live_open

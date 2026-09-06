@@ -248,6 +248,29 @@ def asking(open_: bool) -> str:
     return json.dumps({"type": "asking", "open": bool(open_)})
 
 
+def working(on: object) -> str:
+    """Whether he is DOING something, server to client.
+
+    The fifth server-only frame, and it says the one thing the strip
+    cannot see for itself. Looking at a camera, searching the web or
+    filing a reminder leave no trace on this socket until the answer
+    arrives, so a turn that spent thirty seconds on two searches looked
+    exactly like one that was slow to think.
+
+    `WaveState.WORKING` has been in the widget since it was built,
+    drawn and its pulses tuned, and nothing ever switched it on. This
+    is what switches it on. Driven from `pre_tool_call` /
+    `post_tool_call` (see `__init__._on_pre_tool_call`), never from a
+    model deciding to mention what it is doing.
+
+    `bool(on)` rather than `on`: the callers count outstanding tool
+    calls, so what arrives here is as often an `int` as a `bool`, and
+    the wire says true or false. An older strip drops the frame and
+    behaves exactly as it did before.
+    """
+    return json.dumps({"type": "working", "on": bool(on)})
+
+
 def error(message: str, chat_id: str | None = None) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     frame: Dict[str, Any] = {"type": "error", "error": message}

@@ -282,3 +282,57 @@ def test_an_empty_error_settles_the_line_with_nothing_said() -> None:
 
     assert machine.state is WaveState.IDLE
     assert states[-1] is WaveState.IDLE
+
+
+# ── WORKING: he is doing something, not composing a sentence ──────────
+
+
+def test_working_puts_the_wave_in_working() -> None:
+    machine, seen = _machine()
+
+    machine.working(True)
+
+    assert seen[-1] is WaveState.WORKING
+
+
+def test_working_off_goes_back_to_thinking_not_idle() -> None:
+    """The tool finished; the turn did not. Dropping to IDLE here would
+    say he is done when he is about to answer."""
+    machine, seen = _machine()
+    _up_to_thinking(machine)
+
+    machine.working(True)
+    machine.working(False)
+
+    assert seen[-1] is WaveState.THINKING
+
+
+def test_a_turn_that_ends_clears_working_whatever_the_gateway_said() -> None:
+    """The safety net, and the reason this is worth building at all: a
+    lost `post_tool_call` on the gateway side must not leave the wave
+    pulsing for ever. `done` and `error` end the turn, so they end
+    WORKING too — the strip never trusts the counter to come back."""
+    machine, seen = _machine()
+    _up_to_thinking(machine)
+    machine.token("hola")
+    machine.working(True)
+
+    assert machine.done() is True
+    assert seen[-1] is WaveState.IDLE
+
+    machine.working(True)
+    machine.error("se rompió")
+
+    assert seen[-1] is WaveState.IDLE
+
+
+def test_working_does_not_survive_into_speaking() -> None:
+    """A token means he has started answering. If WORKING outlived that,
+    the wave would pulse over his own voice."""
+    machine, seen = _machine()
+    _up_to_thinking(machine)
+    machine.working(True)
+
+    machine.token("ya está")
+
+    assert seen[-1] is WaveState.SPEAKING

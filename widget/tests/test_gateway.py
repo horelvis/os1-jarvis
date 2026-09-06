@@ -647,3 +647,27 @@ async def test_a_send_on_a_dead_socket_settles_the_turn_instead_of_raising() -> 
     await client.send_chat("¿me oyes?")  # must not raise
 
     assert said and said[0]  # he says something rather than going quiet
+
+
+def test_a_working_frame_reaches_the_working_handler() -> None:
+    client = GatewayClient()
+    seen: list[bool] = []
+    client.on_working = seen.append
+
+    client._dispatch(json.dumps({"type": "working", "on": True}))
+    client._dispatch(json.dumps({"type": "working", "on": False}))
+
+    assert seen == [True, False]
+
+
+def test_a_working_frame_is_never_spoken() -> None:
+    """It changes what the strip DRAWS, not what he says — the same rule
+    the `asking` frame already lives by. A leak here would have him read
+    "working true" out loud in the middle of a search."""
+    client = GatewayClient()
+    said: list[str] = []
+    client.on_token = lambda text, chat_id=None: said.append(text)
+
+    client._dispatch(json.dumps({"type": "working", "on": True}))
+
+    assert said == []
