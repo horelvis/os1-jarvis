@@ -318,6 +318,70 @@ def test_a_partial_wipe_is_reported_honestly_not_claimed_as_clean(tmp_path):
     assert "sigue en el disco" in r.habla.casefold()
 
 
+def test_pidiendo_shows_a_reading_before_the_first_sample(tmp_path):
+    enc, _registro = _hasta_borrando(tmp_path, n_muestras=3)
+
+    r = enc.oye(CONFIRMACION_BORRADO)
+
+    assert enc.estado is Estado.PIDIENDO
+    assert r is not None
+    assert r.lectura is not None and r.lectura.strip()
+    assert "primera de tres" in r.habla.casefold()
+
+
+def test_pidiendo_offers_a_different_reading_for_each_new_sample(tmp_path):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=3)
+    vector = _v(1.0, 0.0, 0.0)
+
+    # Each response asks for the NEXT slot: after the 1st accepted
+    # sample, he is asking for the 2nd reading; after the 2nd, the 3rd.
+    tras_primera = enc.oye("una frase", vector)
+    assert enc.estado is Estado.PIDIENDO
+    tras_segunda = enc.oye("otra frase", vector)
+    assert enc.estado is Estado.PIDIENDO
+
+    assert tras_primera.lectura is not None
+    assert tras_segunda.lectura is not None
+    assert tras_primera.lectura != tras_segunda.lectura
+    assert "segunda de tres" in tras_primera.habla.casefold()
+    assert "tercera de tres" in tras_segunda.habla.casefold()
+
+
+def test_a_refused_sample_says_why_and_keeps_the_same_reading(tmp_path):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=3)
+
+    primera = enc.oye("algo dicho", None)  # no vector: refused
+
+    assert enc.estado is Estado.PIDIENDO
+    assert primera is not None
+    assert "no he cogido bastante" in primera.habla.casefold()
+    # Still the FIRST reading — nothing was recorded, so the slot (and
+    # its passage) has not advanced.
+    assert "primera de tres" in primera.habla.casefold()
+
+    otra_vez = enc.oye("algo dicho de nuevo", None)
+    assert primera.lectura == otra_vez.lectura
+
+
+def test_the_reading_count_advances_correctly_through_every_slot(tmp_path):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=3)
+    vector = _v(1.0, 0.0, 0.0)
+
+    # `_hasta_pidiendo` already consumed the "primera de tres" ask (the
+    # transition out of `BORRANDO`); from here, each accepted sample
+    # asks for the NEXT slot.
+    r1 = enc.oye("frase uno", vector)
+    assert "segunda de tres" in r1.habla.casefold()
+    r2 = enc.oye("frase dos", vector)
+    assert "tercera de tres" in r2.habla.casefold()
+    r3 = enc.oye("frase tres", vector)
+    # The third accepted sample reaches the floor: no more readings,
+    # he moves on to asking for a name.
+    assert enc.estado is Estado.PIDIENDO
+    assert r3.lectura is None
+    assert "cómo le llamo" in r3.habla.casefold()
+
+
 def test_pidiendo_counts_only_usable_vectors(tmp_path):
     enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=3)
     vector = _v(1.0, 0.0, 0.0)

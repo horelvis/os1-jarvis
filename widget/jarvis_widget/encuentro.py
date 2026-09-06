@@ -49,7 +49,24 @@ says next is not assumed success: `borrar.ejecutar` returns a
 `Resultado` rather than raising, precisely so a node that survived the
 attempt (a permissions error, an unremovable child) can be told to the
 person instead of silently left on disk while he claims a clean slate —
-see `_texto_tras_borrado` and `Resultado.completo`.
+see `_texto_prefijo_borrado` and `Resultado.completo`.
+
+**`PIDIENDO` hands over something to read, not a blank prompt.** Added
+after a requirement change from the project's owner: "say anything"
+leaves a person improvising with no idea whether three words are
+enough, `locutor.Locutor.vector()` refuses anything under about a
+second, and the old prompt gave no way to know either how much to say
+or how many times. `lecturas.elegir` picks one short passage per sample
+slot when `PIDIENDO` is entered (`self._lecturas_muestra`, indexed by
+`len(self._muestras)`), and `Respuesta.lectura` carries the current
+one — separately from `habla`, since a person cannot read a passage off
+what they just heard spoken over it. He also says which one it is out
+loud ("es la primera de tres"), answering the other half of the
+complaint: how many samples this pairing needs. A refused sample (an
+unusable vector) says why (`_TEXTO_MUESTRA_NO_SERVIDA`, "no he cogido
+bastante") and asks for the SAME reading again — the slot index does
+not advance on a refusal, so no passage is spent on an attempt that
+produced no sample.
 
 **Dispatch is by CURRENT state, and that is what stops the passphrase
 from advancing twice.** `oye()` looks at `self.estado` once and routes
@@ -130,7 +147,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from . import borrar
+from . import borrar, lecturas
 from .casa import Registro
 from .frase import parecida
 from .personas import CASA, id_desde_nombre
@@ -268,11 +285,45 @@ _TEXTO_BORRADO_PARCIAL_PREFIJO = (
     "el disco. Se lo digo tal cual es."
 )
 
-_TEXTO_PIDE_PRIMERA_MUESTRA = "Dígame algo, lo que quiera, para conocer su voz."
+# "la primera", "la segunda"... of the ordinal, spoken so a person
+# knows how many samples this pairing needs, not only how much to say
+# for each one — the owner's complaint had two halves, and `lecturas`
+# answers the other one. Refers to the READING itself ("la [ordinal]
+# [lectura]"), grammatically feminine because "lectura" is, never to
+# the person — no gendering risk, same reasoning as `_TEXTO_MUESTRA_NO_SERVIDA`
+# below and the review round that fixed `_TEXTO_PIDE_NOMBRE`.
+_ORDINALES = (
+    "primera",
+    "segunda",
+    "tercera",
+    "cuarta",
+    "quinta",
+    "sexta",
+    "séptima",
+    "octava",
+    "novena",
+    "décima",
+)
 
-_TEXTO_PIDE_UNA_MUESTRA_MAS = "Dígame algo más."
+# For "de tres", not "de 3" — `n_muestras` is a handful in practice, and
+# spelling it out reads like something said, not a field in a form.
+_CARDINALES = (
+    "uno",
+    "dos",
+    "tres",
+    "cuatro",
+    "cinco",
+    "seis",
+    "siete",
+    "ocho",
+    "nueve",
+    "diez",
+)
 
-_TEXTO_MUESTRA_NO_SERVIDA = "Esa no la he oído bien. Dígame algo más, cuando quiera."
+# What a refused sample is told, instead of the request repeated
+# unchanged: "no he cogido bastante" says what to do differently
+# (louder, slower, from the start of the line); a bare re-ask does not.
+_TEXTO_MUESTRA_NO_SERVIDA = "No he cogido bastante."
 
 # Neither gendered: "su voz" is the object (a feminine noun, but not a
 # person), and "le llamo" is peninsular leísmo for a personal direct
@@ -292,21 +343,35 @@ _TEXTO_EMPAREJAR_FALLIDO = (
 )
 
 
-def _texto_tras_borrado(resultado: borrar.Resultado) -> str:
+def _texto_prefijo_borrado(resultado: borrar.Resultado) -> str:
     """What he says once the wipe has actually run — honest about
     whether it fully succeeded, per `resultado.completo`, and never
     assumed from the fact that nothing raised. See `borrar.ejecutar`'s
     own docstring: `-> None` used to make a partial failure invisible
     here, exactly the case that matters (a previous owner's `teacher/`
     or `personas.json` surviving on disk) — this is the branch that
-    closes it.
+    closes it. Only the wipe report: what comes after it (the first
+    reading) is `_respuesta_pide_muestra`'s job.
     """
-    prefijo = (
+    return (
         _TEXTO_BORRADO_COMPLETO_PREFIJO
         if resultado.completo
         else _TEXTO_BORRADO_PARCIAL_PREFIJO
     )
-    return f"{prefijo} {_TEXTO_PIDE_PRIMERA_MUESTRA}"
+
+
+def _texto_orden(ordinal: int, total: int) -> str:
+    palabra_total = (
+        _CARDINALES[total - 1] if 1 <= total <= len(_CARDINALES) else str(total)
+    )
+    if 1 <= ordinal <= len(_ORDINALES):
+        return f"la {_ORDINALES[ordinal - 1]} de {palabra_total}"
+    return f"la número {ordinal} de {palabra_total}"
+
+
+def _texto_pide_lectura(ordinal: int, total: int, *, otra_vez: bool) -> str:
+    pregunta = "¿Me la lee otra vez?" if otra_vez else "¿Me lee esto?"
+    return f"{pregunta} Es {_texto_orden(ordinal, total)}."
 
 
 def _texto_confirma_nombre(nombre: str) -> str:
@@ -327,10 +392,22 @@ class Estado(str, Enum):
 
 @dataclass(frozen=True)
 class Respuesta:
-    """What he says, and whether this is the last thing he will say."""
+    """What he says, whether this is the last thing he will say, and —
+    during `PIDIENDO` — what the strip should show while it waits.
+
+    `lectura` is `None` for every `Respuesta` except the ones asking
+    for a voice sample: it carries the passage to read, kept separate
+    from `habla` on purpose. `habla` is what reaches the speakers; a
+    person cannot read a passage off what they just heard spoken over
+    it, so the passage is something to look at, not something spoken.
+    Optional and defaulting to `None` so every existing caller — most
+    pointedly whoever is wiring `Respuesta` into `__main__.py` right
+    now — keeps working unchanged.
+    """
 
     habla: str
     terminado: bool = False
+    lectura: str | None = None
 
 
 class Encuentro:
@@ -361,6 +438,13 @@ class Encuentro:
         self.estado = Estado.ESPERANDO
         self._muestras: list[np.ndarray] = []
         self._nombre_candidato: str | None = None
+        # One reading per sample slot, chosen once when `PIDIENDO` is
+        # entered (`lecturas.elegir`) and indexed by `len(self._muestras)`
+        # — see `_respuesta_pide_muestra`. Fixed per slot rather than
+        # re-picked on every call: a retry after a refused sample shows
+        # the SAME passage again, never a fresh one wasted on an attempt
+        # that produced no sample at all.
+        self._lecturas_muestra: list[str] = []
         # `ESPERANDO`'s own little state: whether he has already
         # greeted whoever is talking to him. See `_en_esperando` — the
         # full greeting is said once, not on every utterance that is
@@ -452,21 +536,38 @@ class Encuentro:
 
         self.estado = Estado.PIDIENDO
         self._muestras = []
-        return Respuesta(habla=_texto_tras_borrado(resultado), terminado=False)
+        self._lecturas_muestra = lecturas.elegir(self._n_muestras)
+        return self._respuesta_pide_muestra(prefijo=_texto_prefijo_borrado(resultado))
 
     # --- PIDIENDO --------------------------------------------------------
 
+    def _respuesta_pide_muestra(
+        self, *, prefijo: str | None = None, motivo: str | None = None
+    ) -> Respuesta:
+        """Ask for the sample at the current slot (`len(self._muestras)`),
+        handing over the reading for that slot and saying which one it
+        is — how many are left is the other half of what "say anything"
+        never answered. `motivo`, when given (a sample was just
+        refused), is said before the question, and turns the question
+        itself into "again" rather than a fresh ask — the SAME reading,
+        since nothing was recorded for this slot yet.
+        """
+        ordinal = len(self._muestras) + 1
+        lectura = self._lecturas_muestra[len(self._muestras)]
+        pregunta = _texto_pide_lectura(
+            ordinal, self._n_muestras, otra_vez=motivo is not None
+        )
+        habla = " ".join(parte for parte in (prefijo, motivo, pregunta) if parte)
+        return Respuesta(habla=habla, terminado=False, lectura=lectura)
+
     def _en_pidiendo(self, texto: str, vector: "np.ndarray | None") -> Respuesta:
         if len(self._muestras) < self._n_muestras:
-            if _vector_usable(vector):
+            aceptada = _vector_usable(vector)
+            if aceptada:
                 self._muestras.append(vector)
             if len(self._muestras) < self._n_muestras:
-                habla = (
-                    _TEXTO_PIDE_UNA_MUESTRA_MAS
-                    if _vector_usable(vector)
-                    else _TEXTO_MUESTRA_NO_SERVIDA
-                )
-                return Respuesta(habla=habla, terminado=False)
+                motivo = None if aceptada else _TEXTO_MUESTRA_NO_SERVIDA
+                return self._respuesta_pide_muestra(motivo=motivo)
             return Respuesta(habla=_TEXTO_PIDE_NOMBRE, terminado=False)
 
         # Enough samples already: this utterance is the candidate name,
