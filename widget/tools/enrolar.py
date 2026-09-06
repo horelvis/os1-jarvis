@@ -39,7 +39,13 @@ def main(argv: list[str]) -> int:
     PENDIENTE.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(PENDIENTE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
-        json.dump({"persona": persona, "escrito": time.time()}, handle)
+        json.dump(
+            # "consola": having a shell here is the gate, and always
+            # was. The widget applies its amo check only to the
+            # spoken path — see `__main__.pendiente_de_alta`.
+            {"persona": persona, "escrito": time.time(), "origen": "consola"},
+            handle,
+        )
 
     subprocess.run(
         ["systemctl", "--user", "kill", "-s", "USR1", "jarvis-widget.service"],

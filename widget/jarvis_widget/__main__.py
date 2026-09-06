@@ -178,6 +178,15 @@ _MIC_GATE = os.environ.get("JARVIS_WIDGET_MIC_GATE") == "1"
 
 PERSONA_PENDIENTE = Path.home() / ".jarvis" / "enrolamiento.json"
 
+# How the pending enrolment arrived, filled in by `_persona_pendiente`
+# as it reads the file and read back by `pendiente_de_alta`. A module
+# global for the same reason `ULTIMO_HABLANTE` is one: the reader is
+# already written, already consumes the file on every path out of
+# itself, and threading a second return value through it would change a
+# function whose failure modes are carefully enumerated. Defaults to the
+# strict answer.
+_ORIGEN_PENDIENTE: dict[str, str] = {"origen": "voz"}
+
 # Who the last dispatched turn was attributed to (`persona_de`), which
 # is the only first-hand answer this process has to "who is asking".
 # Module level because the two places that need it — the voice loop that
@@ -236,12 +245,34 @@ def _persona_pendiente(ruta: Path = PERSONA_PENDIENTE) -> str:
             return CASA
         if not isinstance(datos, dict):
             return CASA
+        origen = datos.get("origen")
+        _ORIGEN_PENDIENTE["origen"] = "consola" if origen == "consola" else "voz"
         return normalizar(datos.get("persona"))
     finally:
         try:
             ruta.unlink()
         except OSError:
             pass
+
+
+def pendiente_de_alta(ruta: Path = PERSONA_PENDIENTE) -> tuple[str, str]:
+    """`(persona, origen)` for a pending enrolment, consumed once.
+
+    The origin is what tells the console apart from a voice, and that
+    distinction is a REGRESSION FIX, not a feature (2026-09-06). Adding
+    a spoken `emparejar` tool meant the amo check had to live somewhere,
+    and putting it on the SIGUSR1 handler put it on both paths at once —
+    so `tools/enrolar.py`, which needs a shell on this box and was the
+    original gate precisely because of that, stopped working for the
+    operator sitting at the machine. Minutes after shipping it.
+
+    `"consola"` only when the file says so. Anything else — an older
+    file, a hand-written one, a missing key — reads as `"voz"`, the
+    path that has to prove who is asking. The permissive answer is
+    never the default.
+    """
+    persona = _persona_pendiente(ruta)
+    return persona, _ORIGEN_PENDIENTE.get("origen", "voz")
 
 
 def _apply_error_to_wake_window(wake: WakeWord, message: str, now: float) -> None:
@@ -1670,22 +1701,29 @@ class JARVISApp(Gtk.Application):
             exists because a request ARRIVING here is not evidence of
             who sent it, and only this process saw the voice.
             """
+            persona_pendiente, origen = pendiente_de_alta()
             duenyo = registro.amo
             quien = ULTIMO_HABLANTE.get("persona")
-            if duenyo is not None and quien != duenyo:
+            # The console keeps its old free pass: `tools/enrolar.py`
+            # needs a shell on this box, and that has always BEEN the
+            # gate. Only the spoken path has to prove who asked.
+            if origen != "consola" and duenyo is not None and quien != duenyo:
                 print(
                     f"alta: rechazada, el último turno fue de {quien!r}"
                     f" y el amo es {duenyo!r}",
                     file=sys.stderr,
                     flush=True,
                 )
-                # Consumed anyway: a name left on disk would be
-                # picked up by the NEXT signal, whoever sent that one.
-                _persona_pendiente()
+                # Already consumed by `pendiente_de_alta` above: a name
+                # left on disk would be picked up by the NEXT signal,
+                # whoever sent that one.
                 return
 
             def _abrir_y_mostrar() -> bool:
-                enrolment.abrir(_persona_pendiente(), time.monotonic())
+                # The name read above, not a second read: the file is
+                # consumed on the first one, so reading again would open
+                # the window for nobody.
+                enrolment.abrir(persona_pendiente, time.monotonic())
                 return _mostrar_qr()
 
             GLib.idle_add(_abrir_y_mostrar)

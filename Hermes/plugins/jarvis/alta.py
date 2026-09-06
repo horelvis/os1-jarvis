@@ -110,7 +110,13 @@ def hacer_alta(
     destino.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(destino, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
-        json.dump({"persona": persona, "escrito": time.time()}, handle)
+        json.dump(
+            # "voz": asked for out loud, so the widget checks who
+            # asked before it opens anything. The console marks
+            # itself differently and keeps its own gate.
+            {"persona": persona, "escrito": time.time(), "origen": "voz"},
+            handle,
+        )
 
     (señal or _señal_al_widget)()
     return f"{_HECHO} Es para {persona}."
