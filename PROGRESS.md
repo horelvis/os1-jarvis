@@ -122,6 +122,64 @@ real queda para otra tarea.
 
 Tests: 676 → 688.
 
+**Medido contra la caja en marcha (tarea 6), sin iPhone.** `pyzbar` no
+está instalado y no se ha añadido como dependencia para una comprobación
+de un solo uso — el sobre se leyó con una línea temporal en
+`_dibujar_qr` (imprime el payload sin el token, sólo su longitud y un
+hash truncado, para no dejar la credencial en el journal), lanzada,
+medida y revertida con `git checkout` antes de seguir; `git diff` quedó
+limpio.
+
+- **El hueco que dejó abierto la revisión — dos personas, dos sobres
+  distintos, de verdad.** Se abrió la ventana para «nata» y, seis
+  segundos después, para «pepe», sin cerrar la primera. Las dos
+  aperturas funcionaron: `Enrolment.abrir()` no bloquea una segunda
+  llamada dentro de los 300 s de la primera, simplemente reasigna de
+  quién es la ventana y redibuja el PNG (hay una sola tira, un solo QR
+  a la vez — no es un fallo, es el contrato). Los dos sobres:
+  `{"v":1,"url":"wss://brain.local:8443/ws","ca":"sha256//J1gN…zWs="}`
+  en ambos, con el token distinto en cada uno (32 caracteres los dos;
+  hash truncado del token, no el token — `82cf5a33` para nata,
+  `61154aff` para pepe). `url` y `ca` iguales, `token` distinto: el
+  cierre que pedía la revisión, contra el proceso real y no sólo contra
+  el callback que ya probaba el test unitario.
+- **La huella coincide con la CA que sirve la caja, y NO con la hoja.**
+  La SPKI de la hoja (`YHiKR+43HtKhkXIUHTU7+WrW+IH6jxFUO/QVSgBLG/I=`) es
+  distinta de la que lleva el sobre — esperado, es la clave de la CA la
+  que se fija. La hoja verifica contra `~/.jarvis/certs/ca.pem`:
+  `Verify return code: 0 (ok)`. Contra una CA de un solo uso generada al
+  vuelo, `openssl` devuelve `Verify return code: 21 (unable to verify
+  the first certificate)` — el caso negativo, que es el que demuestra
+  que fijar la clave vale para algo.
+- **`brain.local` no sirve para esta comprobación, en esta caja.** El
+  mDNS de la máquina lo resuelve a direcciones link-local IPv6 y a
+  `172.17.0.1` — uno de los doce puentes Docker de §2.1 — nunca a
+  `192.168.100.58`, así que un cliente en la propia caja que conecte por
+  nombre recibe `ConnectionRefusedError`. El certificado lleva la IP en
+  el SAN (`DNS:brain.local, IP Address:192.168.100.58`) precisamente
+  para esto: conectando por IP, con `Origin: https://192.168.100.58:8443`
+  (el segundo origen que registra `Guard`, §2.8), el saludo llega:
+  `{"type": "enrolled", "name": "nata"}` y `{"type": "enrolled", "name":
+  "pepe"}` — un nombre por token, resuelto en el servidor, y ninguno de
+  los dos con nombre en mayúsculas porque ninguno de los dos está dado
+  de alta en `casa.json` (el único dueño de la casa hoy es «orelvis»); lo
+  que sí queda probado es la caída a `nombre_para()` devolviendo el id
+  cuando el registro no conoce a la persona, no el capitalizado. No se
+  enroló a `orelvis` para cerrar ese último punto — es el amo real de la
+  casa, y la tarea pide expresamente no volver a emparejar a nadie.
+- **Lo que esto dejó en el disco de una caja real, y se deshizo.** Las
+  dos aperturas de prueba escribieron `nata` y `pepe` en
+  `~/.jarvis/personas.json` con un secreto cada uno — dos credenciales
+  válidas para un agente con `terminal`, que no tenían motivo para
+  seguir vivas después de medir. Se retiraron del roster con
+  `save_roster()` tras la medición y se reinició el widget; el fichero
+  quedó con únicamente la entrada que ya tenía antes de esta tarea.
+- **No verificado:** el nombre capitalizado que devuelve `nombre_para()`
+  para una persona SÍ dada de alta (el camino que toma con `orelvis`),
+  y el propio decodificado del PNG por cámara — ninguno de los dos se
+  pudo ejercitar sin tocar al amo real o instalar `pyzbar`/`zbar`
+  (ausente del sistema, no sólo del venv).
+
 ## 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 
 Parte A del plan `docs/superpowers/plans/2026-09-06-primer-encuentro.md`,
