@@ -14,6 +14,7 @@
 **Septiembre de 2026 — aquí abajo, entero.**
 
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
+- 2026-09-06 (noche) — La onda sabe que está trabajando ✅
 - 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 - 2026-09-06 — Varias conversaciones a la vez, y cada una con nombre ✅
 - 2026-09-03 — Modo profesor: JARVIS enseña, apoyado en fuentes que él mismo trajo ✅⏸
@@ -179,6 +180,58 @@ limpio.
   y el propio decodificado del PNG por cámara — ninguno de los dos se
   pudo ejercitar sin tocar al amo real o instalar `pyzbar`/`zbar`
   (ausente del sistema, no sólo del venv).
+
+## 2026-09-06 (noche) — La onda sabe que está trabajando ✅
+
+Cuatro costuras nuevas y una medición que costó tres intentos inválidos
+antes de valer. `WaveState.WORKING` llevaba en el widget desde que se
+construyó —dibujado, con sus pulsos calibrados en `wave.py:54`— y **nadie
+lo había encendido nunca**. Ahora lo encienden los enganches
+`pre_tool_call` / `post_tool_call` de la pasarela, que empujan un marco
+`working` por el socket que la tira ya tiene.
+
+**Vino de revisar un repo ajeno.** `jakimli/cloe-desktop` usa la misma
+pasarela Hermes y la misma CosyVoice, y resuelve con enganches lo que
+esta tarde yo había dado por «necesitaría fontanería que no existe».
+Comprobado contra nuestro Hermes fijado: están los once eventos
+(`pre_tool_call`, `post_tool_call`, `pre_llm_call`, `post_llm_call`,
+`on_session_*`, `pre/post_api_request`, `subagent_stop`).
+
+**`pre_tool_call` y no `pre_llm_call`**, que era lo que se pidió: el
+segundo dispara antes de *cada* llamada al modelo, también la de un
+«¿qué hora es?», y borraría la única distinción que el estado existe
+para hacer — THINKING es la pausa antes de contestar, WORKING es estar
+haciendo algo.
+
+**Un contador, no un booleano**, y eso es una medición: un turno real
+despachó `web_search` y `web_extract` con **1 milisegundo** de
+diferencia. Con un booleano, el `post` del primero apagaría la onda con
+el segundo corriendo.
+
+**Medido en vivo, con sesión limpia**, un turno con tres herramientas:
+
+| | |
+|---|---|
+| 31,69 s → 31,70 s | on/off en **10 ms** |
+| 34,66 s → 37,13 s | 2,5 s |
+| 43,13 s → 44,85 s | 1,7 s |
+| 49,08 s | «He estado buscando sobre eso…» |
+
+**Tres intentos anteriores no midieron nada, y las tres causas eran
+mías:** un turno atascado que plegaba todo lo que llegaba después (§5,
+`/stop`), respuestas sacadas del contexto de la sesión sin llamar a
+ninguna herramienta, y —la peor— haber parado la tira para sondear, con
+lo que no había nadie conectado a quien mandar el marco (`vivos=0` en la
+instrumentación). El código estaba bien desde el principio.
+
+**Cabo suelto, visto al medir:** una herramienta de 10 ms enciende y
+apaga la onda en un parpadeo invisible. Un mínimo de encendido lo
+arreglaría; no está puesto.
+
+**Y lo que no se ha visto todavía:** la onda en pantalla durante una
+búsqueda. Lo probado es el cable —los marcos, emparejados y en orden— y
+los tests cubren el dibujo. Faltó por dos cortes de luz, a las 21:27 y
+las 22:13.
 
 ## 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 
