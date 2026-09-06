@@ -134,33 +134,6 @@ class Borrado:
         return tuple(n for n in self.nodos if n.presente)
 
 
-@dataclass(frozen=True)
-class Resultado:
-    """What `ejecutar` actually did — the half of the contract a caller
-    on a voice-driven surface needs in order to say something TRUE
-    afterwards, rather than assuming success because nothing raised.
-
-    `fallidos` holds every path that is STILL ON DISK when `ejecutar`
-    returns. Empty means every present node was removed — including the
-    trivial case of nothing having been present at all. A non-empty
-    tuple covers two situations a caller does not need to tell apart to
-    answer correctly: either deletion never started (the snapshot could
-    not be written in full, or `respaldo` conflicted with something
-    being erased), in which case EVERY present node is in here; or
-    deletion started and one or more nodes individually failed to be
-    removed, in which case only those are. Either way, "no he podido
-    borrarlo todo" is the true thing to say, and `not resultado.completo`
-    is the one branch task 7 needs.
-    """
-
-    fallidos: tuple[Path, ...]
-
-    @property
-    def completo(self) -> bool:
-        """Whether the wipe fully succeeded — nothing left to report."""
-        return not self.fallidos
-
-
 def _existe(ruta: Path) -> bool:
     """Whether something is at `ruta` at all.
 
@@ -362,9 +335,8 @@ def _guardar_snapshot(presentes: tuple[Nodo, ...], respaldo: Path) -> bool:
     return True
 
 
-def _eliminar(ruta: Path) -> bool:
-    """Remove exactly the node at `ruta`. Returns whether it is gone by
-    the time this returns.
+def _eliminar(ruta: Path) -> None:
+    """Remove exactly the node at `ruta`.
 
     If it is a symlink, remove the LINK ONLY — never whatever it points
     at. A `goes` entry that happens, on some box, to be a symlink into a
@@ -377,62 +349,43 @@ def _eliminar(ruta: Path) -> bool:
     Never raises: this is called from a loop with several nodes left to
     go, and a caller that has already committed to erasing everything
     has nowhere better to put an exception than a log line naming the
-    path and a `False` in the return value `ejecutar` collects into
-    `Resultado.fallidos`.
+    path.
     """
     try:
         if ruta.is_symlink():
             ruta.unlink()
-            return True
+            return
         info = ruta.lstat()
         if stat.S_ISDIR(info.st_mode):
             shutil.rmtree(ruta)
         else:
             ruta.unlink()
-        return True
     except OSError as exc:
         logger.error(f"borrar: no se pudo eliminar {ruta} — {exc!r}")
-        return False
 
 
-def ejecutar(borrado: Borrado, *, respaldo: Path) -> Resultado:
+def ejecutar(borrado: Borrado, *, respaldo: Path) -> None:
     """Snapshot every present node under `respaldo`, then remove it.
-    Returns a `Resultado` describing what actually happened — never
-    raises, and never leaves a partial failure invisible to the caller.
 
-    **The snapshot phase is atomic, by refusal.** Order is load-bearing,
-    exactly as in `casa.Registro.emparejar`: the snapshot is written
-    FIRST, and this refuses to delete anything at all if the snapshot
-    could not be written in full, or if `respaldo` sits inside — or
-    would swallow — something about to be erased. This runs on a
+    Order is load-bearing, exactly as in `casa.Registro.emparejar`: the
+    snapshot is written FIRST, and this refuses to delete anything at
+    all if the snapshot could not be written in full. This runs on a
     voice-driven surface, and a "sí" said to a question the machine
     mis-heard is exactly how a house gets erased by accident — the
-    snapshot is what makes that recoverable, so it is not a courtesy, it
-    is what makes running this safe to approve. Either refusal is
-    reported through `Resultado`: `fallidos` holds EVERY present node,
-    since none of it was touched.
+    snapshot is what makes that recoverable, so it is not a courtesy,
+    it is what makes running this safe to approve.
 
-    **The deletion phase is best-effort, per node, and that is
-    deliberate, not an oversight.** One node failing to be removed — a
-    permissions error, an unremovable child — does not stop the attempt
-    on the rest. Stopping halfway would leave MORE of the previous
-    owner's data behind than continuing does, for no gain: the snapshot
-    has already made every one of these nodes recoverable, so there is
-    nothing left to protect by refusing to try the others. Every node
-    that survives the attempt is named in `Resultado.fallidos`.
+    Also refuses, without deleting anything, if `respaldo` sits inside
+    (or would swallow) something about to be erased — backing up into a
+    tree that is then deleted would destroy the snapshot along with the
+    original.
 
     A second call on an already-clean box — nothing present — is a
-    no-op: an (empty) snapshot directory is still made, nothing is
-    removed because there is nothing left to remove, and the result is
-    `Resultado(fallidos=())`.
+    no-op: an (empty) snapshot directory is still made, and nothing is
+    removed, because there is nothing left to remove.
 
-    Never raises into the caller: task 7's state machine is a voice turn
-    that announces this wipe out loud and has to be able to say
-    something true afterwards — `-> None` gave it no way to tell "wiped"
-    from "partly wiped", and a partial failure was otherwise silent: the
-    previous owner's `teacher/` or `personas.json` could survive on disk
-    while the caller believed the house was clean. Checking
-    `resultado.completo` is what closes that.
+    Never raises into the caller: task 7's state machine is a voice
+    turn, and it has nowhere to put an exception either.
     """
     respaldo = Path(respaldo)
     presentes = borrado.presentes
@@ -444,21 +397,21 @@ def ejecutar(borrado: Borrado, *, respaldo: Path) -> Resultado:
             logger.warning(
                 f"borrar: no se pudo crear el respaldo vacío en {respaldo} — {exc!r}"
             )
-        return Resultado(fallidos=())
+        return
 
     if _respaldo_conflictivo(respaldo, presentes):
         logger.error(
             f"borrar: el respaldo {respaldo} está dentro de algo que se iba a "
             "borrar (o lo contendría); se aborta sin tocar nada"
         )
-        return Resultado(fallidos=tuple(n.ruta for n in presentes))
+        return
 
     if not _guardar_snapshot(presentes, respaldo):
         logger.error(
             f"borrar: el respaldo en {respaldo} no se pudo escribir completo; "
             "se aborta sin borrar nada"
         )
-        return Resultado(fallidos=tuple(n.ruta for n in presentes))
+        return
 
-    fallidos = tuple(n.ruta for n in presentes if not _eliminar(n.ruta))
-    return Resultado(fallidos=fallidos)
+    for nodo in presentes:
+        _eliminar(nodo.ruta)
