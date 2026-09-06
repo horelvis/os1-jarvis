@@ -176,11 +176,25 @@ close to a one-to-one match with the states this project already
 publishes. Wan2.7 is needed only to author NEW expressions, so §1.1
 holds at install time and at run time.
 
-**Electron gets measured, not assumed.** §2.3 rejected Electron for the
-strip on numbers (~389 MB resident for the whole widget against
-Electron's baseline). Cloe is Electron plus an app, as a second process.
-That measurement is a task of this work, and its result may end layer 3
-— which costs nothing, because layers 1 and 2 stand alone.
+**Cloe is wanted for its own sake** (user, 2026-09-06: *"la quiero
+aunque existan paneles, es la guinda del pastel"*). This matters because
+it changes what a measurement can do. §2.3 rejected Electron for the
+STRIP on numbers (~389 MB resident for the whole widget against
+Electron's baseline), and Cloe is Electron plus an app as a second
+process — so the number is still worth having, and this work still takes
+it. But it **informs rather than gates**: the owner has decided he wants
+the face, and a cost he has been told is a cost he has accepted. What
+the measurement is for is knowing whether it has to share the box with
+the 27B comfortably, and what to turn off if it does not.
+
+**And Cloe is NOT the road to floating panels.** That was checked rather
+than assumed: `ewmh.add_state(xid, …)` and `move_resize(xid, …)` already
+take the window id as an argument and assume nothing about there being
+one window, and WebKitGTK 6.0 has been in this process since
+2026-09-03. A second transparent, always-above panel is a second
+`Gtk.ApplicationWindow` plus those two existing calls. Electron would
+add a runtime, not a capability. Panels are a separate line of work,
+in-process, and nothing in this spec depends on them.
 
 ## What this does not touch
 
