@@ -63,6 +63,47 @@ the amo, which is the point.
 **Until the amo exists, nobody has tools** — not the strip, not a phone,
 not `casa`. An unpaired JARVIS talks and nothing else.
 
+## Pairing wipes everything before it
+
+**The user's decision, 2026-09-06: a pairing means erasing all previous
+memory.** It is what lets this box change hands. A new amo does not
+inherit the last one's conversations, their courses, what he learned
+about them — or, and this is the part that is easy to miss, **their
+enrolled phones**. A device that was trusted by the previous owner must
+not still be trusted by the machine after it changes owner.
+
+What a pairing destroys, and it must be all of it or none:
+
+- every Hermes profile under `~/.hermes/profiles/` — memories, sessions,
+  cron jobs;
+- the house register and every voiceprint;
+- **`~/.jarvis/personas.json`, the phone secrets** — every phone is
+  de-enrolled and must be enrolled again;
+- the teacher's courses and everything filed under them.
+
+It is irreversible, so it is announced out loud before it happens and
+confirmed, and the passphrase gate is what stands in front of it: this
+is the second reason the founding act is gated, and the stronger one.
+Pairing with whoever speaks first would not merely hand over the house —
+it would erase it first.
+
+### And therefore: re-enrolling a voice is NOT a pairing
+
+These are two operations and confusing them would be expensive. A cold,
+a new microphone, a voiceprint that has drifted — none of that is a new
+owner, and none of it should cost the house its memory.
+
+- **Pairing** is rare, deliberate and destructive: a new owner, a clean
+  slate.
+- **Re-enrolling a voice** adds or replaces a voiceprint for a person
+  who already exists and keeps everything else. Cheap, and the ordinary
+  answer to "he has stopped recognising me".
+
+The recovery path this spec names below — regenerating the passphrase
+from this box's keyboard — therefore belongs to **re-enrolment**, not to
+pairing. If the only way back in were to pair again, laryngitis would
+cost you every conversation you have ever had with him.
+
 ## What a person is
 
 Four things, and the separation between the third and the fourth is
@@ -157,7 +198,13 @@ outcome, not a failure.
   buy a new microphone: there must be a way back in that is not "edit
   the database by hand". Regenerating the passphrase from the keyboard
   of this box is the obvious one, and it is deliberately the same
-  physical-access assumption as the founding act.
+  physical-access assumption as the founding act — but it must lead to
+  **re-enrolment, not to pairing**, or the way back in costs everything
+  it was meant to recover (see above).
+- **A destructive operation on a voice-driven surface.** Everything else
+  here is reversible; this is not. It needs a confirmation that cannot
+  be given by accident, and "yes" said to a machine that mis-heard the
+  question is exactly how it would be.
 
 ## Out of scope, deliberately
 
