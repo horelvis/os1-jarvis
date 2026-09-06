@@ -24,8 +24,8 @@ from typing import Callable, Protocol
 from aiohttp import WSMsgType, web
 from loguru import logger
 
-from .certs import ensure_certificate, lan_address
-from .enrol import mobileconfig, write_qr
+from .certs import ensure_certificate, lan_address, spki_fingerprint
+from .enrol import mobileconfig, sobre, write_qr
 from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
@@ -93,6 +93,11 @@ class Enrolment:
         # The listening socket, raised and dropped with the window. See
         # `attach`; `None` in every test that only drives the clock.
         self._site: EnrolmentSite | None = None
+        # How to draw this person's QR, injected by `serve()`. A
+        # callback rather than the real thing, so the clock tests below
+        # need no CA, no openssl and no filesystem — the same reason
+        # `attach` exists for the socket.
+        self._escribir_qr: Callable[[str], None] | None = None
 
     def attach(self, site: EnrolmentSite) -> None:
         """The socket to raise with this window and drop with it.
@@ -101,6 +106,14 @@ class Enrolment:
         handlers ask `is_open` too. `serve()` is the only caller.
         """
         self._site = site
+
+    def attach_qr(self, escribir: Callable[[str], None]) -> None:
+        """How to write the QR for whoever the window is opened for.
+
+        Optional: without it a window still opens, and the welcome page
+        is still served. `serve()` is the only caller.
+        """
+        self._escribir_qr = escribir
 
     def open_enrolment(self, now: float | None = None) -> None:
         self._opened_at = time.monotonic() if now is None else now
@@ -118,6 +131,16 @@ class Enrolment:
         """
         self._persona = normalizar(persona)
         self.open_enrolment(now)
+        if self._escribir_qr is not None:
+            try:
+                self._escribir_qr(self._persona)
+            except Exception as exc:
+                # The window stays open. This runs off a file watcher
+                # (`tools/enrolar.py`) and an unwritable QR is a worse
+                # outcome as an exception than as a missing image: the
+                # welcome page is still a way in, and the journal says
+                # what happened.
+                logger.warning(f"alta: no he podido escribir el QR — {exc}")
 
     def persona(self, now: float | None = None) -> str | None:
         """Who the open window is for, or None when it is shut.
@@ -584,12 +607,36 @@ async def serve(
     await welcome_runner.setup()
     enrolment.attach(EnrolmentSite(welcome_runner, lan_address(), PORT + 1, loop))
 
-    qr = write_qr(
-        f"http://{lan_address()}:{PORT + 1}/",
-        Path.home() / ".jarvis" / "enrol-qr.png",
-    )
+    huella = spki_fingerprint(ca)
+
+    def _dibujar_qr(persona: str) -> None:
+        """This person's envelope, as a PNG, drawn as their window opens.
+
+        Mints the secret if they have none yet — the disk leads, exactly
+        as `_welcome` does it, so a failed write is not followed by a
+        phone that works until the next restart. `_welcome` mints too
+        and that is not a duplicate path: a phone with no app never
+        passes through here, and `guard.secretos` is the one place both
+        look, so whichever runs second finds the secret already made.
+        """
+        secreto = guard.secretos.get(persona)
+        if secreto is None:
+            nuevo = new_secret()
+            save_roster({**guard.secretos, persona: nuevo})
+            guard.secretos[persona] = nuevo
+            secreto = nuevo
+        write_qr(
+            sobre(
+                url=f"wss://{HOSTNAME}:{PORT}/ws",
+                token=secreto,
+                ca=huella,
+            ),
+            Path.home() / ".jarvis" / "enrol-qr.png",
+        )
+
+    enrolment.attach_qr(_dibujar_qr)
     print(
-        f"móvil: alta (cerrada) en http://{lan_address()}:{PORT + 1}/ · QR {qr}",
+        f"móvil: alta cerrada · el QR se dibuja al abrir la ventana · CA {huella}",
         file=sys.stderr,
         flush=True,
     )

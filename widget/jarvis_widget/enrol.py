@@ -61,20 +61,21 @@ def sobre(*, url: str, token: str, ca: str) -> str:
     )
 
 
-def write_qr(url: str, path: Path) -> Path:
-    """A PNG of `url`, via pypng (`qrcode[png]`'s `PyPNGImage`).
+def write_qr(payload: str, path: Path) -> Path:
+    """A PNG of `payload`, via pypng (`qrcode[png]`'s `PyPNGImage`).
 
-    Written 0600 for consistency with `certs.py` and `remote_auth.py` —
-    not because this file holds anything sensitive (it does not: `url`
-    is a LAN address, never the secret), but a QR that is world-readable
-    while its neighbours are locked down invites the wrong guess about
-    which of the two matters.
+    Written 0600 because this file IS sensitive, which reverses what
+    this docstring said until 2026-09-06: the payload used to be a LAN
+    URL and is now an envelope carrying one person's token. Anyone who
+    can read this PNG can be that person. The mode is the same; only the
+    reason changed, and the reason is the part that decides whether
+    somebody later "tidies" it.
     """
     import qrcode
     from qrcode.image.pure import PyPNGImage
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    qrcode.make(url, image_factory=PyPNGImage, box_size=8, border=2).save(str(path))
+    qrcode.make(payload, image_factory=PyPNGImage, box_size=8, border=2).save(str(path))
     os.chmod(path, 0o600)
     return path
 

@@ -649,3 +649,50 @@ def test_the_enrolment_window_can_be_moved_without_touching_code(monkeypatch) ->
         importlib.reload(remote)
 
     assert remote.ENROLMENT_SECONDS == 300.0
+
+
+def test_opening_a_window_writes_that_persons_qr() -> None:
+    """The QR is per-person now: two people opening the window in turn
+    must not get the same image, or the second phone enrols as the
+    first — which the box would then be unable to tell apart, since the
+    token IS the identity."""
+    from jarvis_widget.remote import Enrolment
+
+    escritos: list[str] = []
+    enrolment = Enrolment()
+    enrolment.attach_qr(escritos.append)
+
+    enrolment.abrir("Nata", now=0.0)
+    enrolment.abrir("Orelvis", now=1.0)
+
+    assert len(escritos) == 2
+    assert escritos[0] != escritos[1]
+
+
+def test_a_window_with_no_qr_writer_still_opens() -> None:
+    """`attach_qr` is optional the way `attach` already is: the unit
+    tests that only drive the clock must not need a CA on disk."""
+    from jarvis_widget.remote import Enrolment
+
+    enrolment = Enrolment()
+    enrolment.abrir("Nata", now=0.0)
+
+    assert enrolment.persona(now=1.0) == "nata"
+
+
+def test_the_qr_is_not_rewritten_when_writing_it_fails() -> None:
+    """An unwritable QR must not take the window down with it: the
+    welcome page is still a way in, and a raised exception here would
+    reach `tools/enrolar.py`'s file watcher, which has nowhere to put
+    one."""
+    from jarvis_widget.remote import Enrolment
+
+    def explota(_payload: str) -> None:
+        raise OSError("disco lleno")
+
+    enrolment = Enrolment()
+    enrolment.attach_qr(explota)
+
+    enrolment.abrir("Nata", now=0.0)
+
+    assert enrolment.persona(now=1.0) == "nata"
