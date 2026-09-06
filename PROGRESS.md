@@ -188,6 +188,17 @@ Un dispositivo real intentó emparejarse y falló cinco veces por cinco
 causas distintas. Ninguna era de la app. Y **cada una era invisible desde
 aquí por su propio motivo**, que es la parte que merece quedar escrita.
 
+> **Corregido por el dueño al día siguiente: «el problema sólo era de
+> fechas».** Lo que le desbloqueó fue el punto 2, y sólo el 2. El punto 1
+> era real —la caja objetivamente servía un solo certificado— pero iOS
+> rechaza por la validez **antes** de llegar a mirar la cadena, así que
+> era un síntoma tapado y no la causa. Yo lo presenté como *el* arreglo,
+> lo verifiqué de punta a punta y lo puse el primero de esta lista; y una
+> vez aplicados los dos cambios ya no hay forma de separarlos hacia
+> atrás. Servir la cadena se queda porque es correcto por sí mismo —un
+> cliente que ancla la clave del emisor necesita ver ese certificado—,
+> no porque fuera lo que fallaba.
+
 **1. La caja servía un solo certificado.** La hoja, nunca la CA. Un
 teléfono recibe en su QR la huella SHA-256 de la clave pública de la CA
 y la ancla; sin la CA en el cable no tiene contra qué compararla, y sólo
