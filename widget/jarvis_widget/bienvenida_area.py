@@ -87,10 +87,14 @@ def _alto_renderizado(texto: str, fuente: Pango.FontDescription, ancho_max: int)
 
 
 class BienvenidaArea(Gtk.Box):
-    """The band above the wave, showing the passphrase or nothing.
+    """The band above the wave, showing what he is waiting for, or nothing.
 
-    Zero pixels tall until `mostrar` is called, and gone for good once
-    `ocultar` is — there is no third state and no way back in from here.
+    Zero pixels tall until `mostrar` is called. `ocultar` is NOT a
+    one-way door: the pairing flow hides the band mid-way (the moment
+    it stops asking for something to read and asks for a name) and
+    shows it again with the candidate name a turn later, so both
+    directions run more than once per pairing. What is on it is decided
+    entirely by `encuentro.Respuesta.lectura`, never by this class.
     """
 
     def __init__(self, on_resize: Callable[[int], None]) -> None:

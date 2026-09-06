@@ -1075,23 +1075,25 @@ class JARVISApp(Gtk.Application):
                     GLib.idle_add(bienvenida_area.ocultar)
                     consumir(RUTA_FRASE)
                 elif respuesta.lectura is not None:
-                    # `PIDIENDO` asking for a voice sample: the band
-                    # shows the passage to read, in place of the
-                    # passphrase — reusing the same widget rather than
-                    # building a second band.
+                    # `Respuesta.lectura` is set, deliberately, by every
+                    # handler in `encuentro.py` — the passphrase in
+                    # `ESPERANDO`, the confirmation sentence in
+                    # `BORRANDO`, the numbered passage in `PIDIENDO`, the
+                    # candidate name in `CONFIRMANDO` — never left to
+                    # default by omission. This is now the ONLY source
+                    # of what the band shows; `frase_actual` is not
+                    # read here at all any more.
                     GLib.idle_add(bienvenida_area.mostrar, respuesta.lectura)
                 else:
-                    # No reading in this reply: the band goes back to
-                    # what it was showing before one appeared — the
-                    # passphrase, still correct for as long as there is
-                    # no amo. (Known gap, reported rather than patched
-                    # here: once BORRANDO has run, showing the now-spent
-                    # passphrase again — during the name question or its
-                    # yes/no confirmation — gives a person no idea which
-                    # step they are on. Fixing that needs `Encuentro` to
-                    # say what step it is in, which is out of this
-                    # file's reach.)
-                    GLib.idle_add(bienvenida_area.mostrar, frase_actual)
+                    # `lectura is None` here means exactly "nothing to
+                    # show" — `encuentro.py`'s own docstring is explicit
+                    # that this is deliberate at the one moment it fires
+                    # outside `terminado` (PIDIENDO, samples done, now
+                    # asking for a name): showing the last passage, or
+                    # the long-spent passphrase, would repeat the
+                    # owner's own reported bug in miniature. Hide, not
+                    # "leave whatever was there".
+                    GLib.idle_add(bienvenida_area.ocultar)
             return True
 
         def on_typed(text: str) -> None:

@@ -3,13 +3,20 @@
 `bienvenida_area.py` is the GTK half, the way `photo_area.py` sits over
 `photo.py`. This is deliberately its own pair rather than a third thing
 bolted onto either of those: a photo fades on a clock and a card pages
-and expires, and this has none of that — it shows until it is told not
-to, once, and never again. Nothing here knows why. `casa.Registro` is
-what actually decides — an amo, once founded, does not go away for this
-box to reconsider showing the phrase again (`casa.py`'s founding write)
-— and this module does not import it: whoever wires the two together
-(task 9) is the one who reads `registro.amo` and calls `mostrar` or
-`ocultar` accordingly.
+and expires, and this has none of that — it shows exactly what it was
+last told to, until it is told something else or told nothing. Nothing
+here knows why. `casa.Registro` is what actually decides whether the
+pairing flow is running at all — an amo, once founded, does not go away
+for this box to reconsider (`casa.py`'s founding write) — and this
+module does not import it: whoever wires the two together (`__main__`'s
+unpaired seam) is the one who reads `registro.amo` and drives `mostrar`
+/ `ocultar` from each `encuentro.Respuesta.lectura`.
+
+**Both directions run more than once per pairing**, which the first
+version of this file assumed they would not: the band carries the
+passphrase, then the wipe confirmation, then each reading passage in
+turn, then NOTHING while a name is being asked for, then the candidate
+name — so a `mostrar` after an `ocultar` is ordinary, not a mistake.
 
 **`height` is summed from real measurements, not guessed** (fix round,
 2026-09-06). The first version fitted `ALTO` to one screenshot; a
@@ -137,10 +144,13 @@ class BienvenidaModel:
         return self.height != before
 
     def ocultar(self) -> bool:
-        """Nothing left to show. True when the strip has to change size.
+        """Nothing to show right now. True when the strip has to change size.
 
         Idempotent: calling this with nothing showing is not an error,
-        it is what the box that has always had an amo does at boot.
+        it is what the box that has always had an amo does at boot. Nor
+        is it final — mid-pairing there is one moment with genuinely
+        nothing to look at (he is asking for a name), and the band comes
+        back a turn later with the name he heard.
         """
         before = self.height
         self._frase = None
