@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from jarvis_widget.bienvenida import ALTO, BIENVENIDA, NECESIDAD, BienvenidaModel
+from jarvis_widget.bienvenida import (
+    ESPACIADO,
+    NECESIDAD,
+    RELLENO,
+    BIENVENIDA,
+    BienvenidaModel,
+)
 
 
 def test_starts_hidden() -> None:
@@ -17,14 +23,47 @@ def test_mostrar_makes_it_visible_and_reports_the_resize() -> None:
     assert modelo.mostrar("gato ventana lento roble") is True
     assert modelo.visible
     assert modelo.frase == "gato ventana lento roble"
-    assert modelo.height == ALTO
+    assert modelo.height > 0
 
 
-def test_mostrar_again_with_the_same_height_reports_no_change() -> None:
+def test_height_is_summed_from_what_was_measured_not_a_fixed_number() -> None:
+    # The whole point of the fix (2026-09-06 review): a phrase that
+    # rendered taller — because it wrapped — must make the band taller
+    # by exactly that much, not by nothing. No GTK/Pango involved here:
+    # the model only sums the numbers it is handed.
+    modelo = BienvenidaModel()
+    modelo.mostrar("una frase corta", alto_instruccion=56, alto_frase=59)
+    corta = modelo.height
+    assert corta == RELLENO + 56 + ESPACIADO + 59
+
+    modelo.mostrar("una frase que en la pantalla real ocupa dos lineas", alto_frase=118)
+    larga = modelo.height
+    assert larga == RELLENO + 56 + ESPACIADO + 118
+    assert larga > corta
+    assert larga - corta == 118 - 59
+
+
+def test_mostrar_without_measurements_keeps_whatever_was_recorded() -> None:
+    # A caller with no display (a test, or the instant before the first
+    # real measurement) still gets a sane, testable number — never zero,
+    # which would silently reproduce the bug this file exists to fix.
     modelo = BienvenidaModel()
     modelo.mostrar("gato ventana lento roble")
-    # A different phrase, same size band: the height does not move.
-    assert modelo.mostrar("roble lento ventana gato") is False
+    assert modelo.height > 0
+    antes = modelo.height
+    # Showing a second phrase with no new measurement keeps the old one.
+    assert modelo.mostrar("otra frase distinta") is False
+    assert modelo.height == antes
+
+
+def test_mostrar_again_with_the_same_measured_height_reports_no_change() -> None:
+    modelo = BienvenidaModel()
+    modelo.mostrar("gato ventana lento roble", alto_instruccion=56, alto_frase=59)
+    # A different phrase, same measured size: the height does not move.
+    assert (
+        modelo.mostrar("roble lento ventana gato", alto_instruccion=56, alto_frase=59)
+        is False
+    )
     assert modelo.frase == "roble lento ventana gato"
 
 
