@@ -137,6 +137,23 @@ window decoration {{
   opacity: 0.35;
 }}
 
+/* The passphrase band: the one sentence a box with no memory ever
+   gives, and the phrase itself underneath it. One colour, the strip's
+   own typography pair — the phrase is the larger of the two, since it
+   is the one thing here somebody actually has to read out loud. */
+.jarvis-bienvenida-instruccion {{
+  font-family: "Inter Tight", sans-serif;
+  font-size: 15px;
+  color: {TERRACOTTA};
+}}
+
+.jarvis-bienvenida-frase {{
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 600;
+  font-size: 32px;
+  color: {TERRACOTTA};
+}}
+
 
 """
 

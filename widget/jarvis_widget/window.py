@@ -117,7 +117,9 @@ class StripWindow(Gtk.ApplicationWindow):
         self._prompt_extra = 0
         self._console_extra = 0
         self._ficha_extra = 0
+        self._bienvenida_extra = 0
         self._ficha: Gtk.Widget | None = None
+        self._bienvenida: Gtk.Widget | None = None
 
         self._frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._frame.add_css_class("jarvis-strip")
@@ -250,6 +252,23 @@ class StripWindow(Gtk.ApplicationWindow):
 
     def resize_ficha(self, extra: int) -> None:
         self._ficha_extra = max(0, extra)
+        self._resize()
+
+    def set_bienvenida(self, widget: Gtk.Widget) -> None:
+        """The passphrase band: a box with no amo has nothing else to
+        show, so this is the first thing anybody sees.
+
+        Only the room for it is made here — whether it has anything to
+        show is `BienvenidaModel`'s question, asked and answered by
+        whoever holds `casa.Registro` (task 9), not by this window.
+        """
+        if self._bienvenida is not None:
+            self._frame.remove(self._bienvenida)
+        self._bienvenida = widget
+        self._frame.prepend(widget)
+
+    def resize_bienvenida(self, extra: int) -> None:
+        self._bienvenida_extra = max(0, extra)
         self._resize()
 
     # ── the lines something working is writing ────────────────────────
@@ -432,6 +451,7 @@ class StripWindow(Gtk.ApplicationWindow):
             + self._prompt_extra
             + self._console_extra
             + self._ficha_extra
+            + self._bienvenida_extra
         )
         wanted = (x, y - extra, w, h + extra)
         # What the strip is currently trying to be. A verify still in

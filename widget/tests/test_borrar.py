@@ -188,6 +188,38 @@ def test_voces_and_voices_are_not_confused():
     assert "voices" in borrar._PROTEGIDOS_JARVIS
 
 
+def test_comprobar_seguro_fires_if_the_fixed_list_ever_grows_a_protected_name(
+    tmp_path, monkeypatch
+):
+    """`_comprobar_seguro` is the line that stops a future edit to
+    `_JARVIS_FIJOS` from wiping 87 GB of model weights. The 17 tests
+    around it prove it does not fire under today's constants — the easy
+    half. This proves it DOES fire when it must, by making the mistake
+    on purpose."""
+    monkeypatch.setattr(borrar, "_JARVIS_FIJOS", (*borrar._JARVIS_FIJOS, "models"))
+    raiz_jarvis = tmp_path / "jarvis"
+    raiz_hermes = tmp_path / "hermes"
+
+    with pytest.raises(RuntimeError):
+        borrar.inventario(raiz_jarvis, raiz_hermes)
+
+
+def test_comprobar_seguro_fires_if_the_dump_glob_ever_matches_a_protected_name(
+    tmp_path, monkeypatch
+):
+    """A careless glob is the likelier way this actually breaks — not a
+    typo in the fixed list, but a wildcard someone widens without
+    noticing what else it now matches."""
+    raiz_jarvis = tmp_path / "jarvis"
+    raiz_hermes = tmp_path / "hermes"
+    raiz_jarvis.mkdir()
+    (raiz_jarvis / "voices").mkdir()
+    monkeypatch.setattr(borrar, "_JARVIS_DUMP_GLOB", "vo*")
+
+    with pytest.raises(RuntimeError):
+        borrar.inventario(raiz_jarvis, raiz_hermes)
+
+
 # --- ejecutar: the snapshot comes first ---------------------------------
 
 
@@ -202,8 +234,10 @@ def test_ejecutar_writes_the_snapshot_before_removing_anything(tmp_path):
     borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
     respaldo = tmp_path / "respaldo"
 
-    borrar.ejecutar(borrado, respaldo=respaldo)
+    resultado = borrar.ejecutar(borrado, respaldo=respaldo)
 
+    assert resultado.completo
+    assert resultado.fallidos == ()
     assert not (raiz_jarvis / "personas.json").exists()
     assert not (raiz_hermes / "state.db").exists()
     copia = respaldo / "jarvis" / "personas.json"
@@ -230,8 +264,10 @@ def test_ejecutar_refuses_to_delete_if_the_snapshot_directory_cannot_be_made(
     bloqueador.write_text("soy un archivo, no un directorio")
     respaldo_imposible = bloqueador / "respaldo"
 
-    borrar.ejecutar(borrado, respaldo=respaldo_imposible)
+    resultado = borrar.ejecutar(borrado, respaldo=respaldo_imposible)
 
+    assert not resultado.completo
+    assert objetivo in resultado.fallidos
     assert objetivo.exists()
     assert objetivo.read_text() == "no debe borrarse"
     assert "respaldo" in captured_logs.getvalue().casefold()
@@ -250,12 +286,14 @@ def test_ejecutar_refuses_when_respaldo_is_inside_something_being_erased(
     borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
     respaldo = raiz_jarvis / "memory" / "respaldo"
 
-    borrar.ejecutar(borrado, respaldo=respaldo)
+    resultado = borrar.ejecutar(borrado, respaldo=respaldo)
 
     # Nothing was removed: the backup destination was inside the tree
     # being erased, which would have destroyed the snapshot along with
     # the original.
     assert (raiz_jarvis / "memory" / "algo.json").exists()
+    assert not resultado.completo
+    assert raiz_jarvis / "memory" in resultado.fallidos
 
 
 def test_a_second_ejecutar_on_an_already_clean_box_is_a_no_op(tmp_path):
@@ -267,7 +305,8 @@ def test_a_second_ejecutar_on_an_already_clean_box_is_a_no_op(tmp_path):
 
     respaldo = tmp_path / "respaldo"
     primera = borrar.inventario(raiz_jarvis, raiz_hermes)
-    borrar.ejecutar(primera, respaldo=respaldo)
+    resultado_1 = borrar.ejecutar(primera, respaldo=respaldo)
+    assert resultado_1.completo
 
     # The box is now clean. A second inventory finds nothing present.
     segunda = borrar.inventario(raiz_jarvis, raiz_hermes)
@@ -278,8 +317,9 @@ def test_a_second_ejecutar_on_an_already_clean_box_is_a_no_op(tmp_path):
     (raiz_jarvis / "models").mkdir()
     (raiz_jarvis / "models" / "peso.bin").write_bytes(b"87GB, en teoria")
 
-    borrar.ejecutar(segunda, respaldo=respaldo)
+    resultado_2 = borrar.ejecutar(segunda, respaldo=respaldo)
 
+    assert resultado_2.completo
     assert (raiz_jarvis / "models" / "peso.bin").exists()
 
 
@@ -295,8 +335,9 @@ def test_ejecutar_never_touches_what_stays(tmp_path):
     (raiz_jarvis / "personas.json").write_text("{}")
 
     borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
-    borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
+    resultado = borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
 
+    assert resultado.completo
     for nombre in ("models", "cosyvoice3", "qwen3-tts", "xtts-cache", "voices"):
         assert (raiz_jarvis / nombre / "peso.bin").exists()
     assert not (raiz_jarvis / "personas.json").exists()
@@ -318,8 +359,9 @@ def test_a_goes_symlink_into_stays_removes_only_the_link(tmp_path):
     (raiz_jarvis / "certs").symlink_to(modelos, target_is_directory=True)
 
     borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
-    borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
+    resultado = borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
 
+    assert resultado.completo
     assert not (raiz_jarvis / "certs").exists()
     assert not (raiz_jarvis / "certs").is_symlink()
     # The target survives untouched.
@@ -366,17 +408,22 @@ def test_a_broken_symlink_in_goes_is_removed_without_raising(tmp_path):
     nodo = next(n for n in borrado.nodos if n.ruta == raiz_jarvis / "remote.token")
     assert nodo.presente is True
 
-    borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
+    resultado = borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
 
+    assert resultado.completo
     assert not (raiz_jarvis / "remote.token").is_symlink()
 
 
 # --- a directory that is not writable -------------------------------------
 
 
-def test_a_node_that_cannot_be_removed_is_logged_and_does_not_raise(
+def test_ejecutar_reports_a_node_that_could_not_be_removed_while_still_removing_the_rest(
     tmp_path, captured_logs
 ):
+    """The test the fix-round review asked for: one node undeletable
+    must not stop the rest, and the failure must be visible to the
+    caller through the return value — not only a log line nobody on a
+    voice-driven surface will ever read."""
     raiz_jarvis = tmp_path / "jarvis"
     raiz_hermes = tmp_path / "hermes"
     raiz_jarvis.mkdir()
@@ -384,36 +431,43 @@ def test_a_node_that_cannot_be_removed_is_logged_and_does_not_raise(
     intocable = raiz_jarvis / "teacher"
     intocable.mkdir()
     (intocable / "curso.json").write_text("{}")
-    padre_bloqueado = raiz_jarvis
-    modo_original = os.stat(padre_bloqueado).st_mode
-    canario = raiz_jarvis / "canario"
-    canario.mkdir()
+    # A sibling of `teacher`, present at the same time, that CAN be
+    # removed — this is what proves the failure is per-node rather than
+    # aborting the whole run.
+    (raiz_jarvis / "personas.json").write_text("{}")
+
+    modo_original = os.stat(intocable).st_mode
+    canario = intocable / "canario"
+    canario.write_text("")
     try:
-        # Removing an entry from a directory needs write on the PARENT,
-        # not on the entry itself — this is what actually makes
-        # `shutil.rmtree` fail with PermissionError as this box's own
-        # user, unless run as root or under a sandbox that does not
-        # enforce Unix permission bits at all. Proved directly, on a
-        # throwaway sibling, rather than guessed from `os.access` (which
-        # answers a different question — can I write INSIDE this
-        # directory — not "can this directory be unlinked from its
-        # parent").
-        os.chmod(padre_bloqueado, 0o500)
+        # Blocking write on `teacher` ITSELF — not its parent — is what
+        # isolates the failure to this one node: removing a CHILD of
+        # `teacher` (`curso.json`, during `shutil.rmtree`) needs write on
+        # `teacher`, while removing `personas.json` — a SIBLING of
+        # `teacher` — needs write only on their shared parent
+        # (`raiz_jarvis`), which stays untouched. Proved directly with a
+        # throwaway file inside `teacher`, rather than guessed from
+        # `os.access`.
+        os.chmod(intocable, 0o500)
         try:
-            canario.rmdir()
+            canario.unlink()
             pytest.skip("this environment does not enforce permission bits on removal")
         except PermissionError:
             pass
 
         borrado = borrar.inventario(raiz_jarvis, raiz_hermes)
-        borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
+        resultado = borrar.ejecutar(borrado, respaldo=tmp_path / "respaldo")
     finally:
-        os.chmod(padre_bloqueado, modo_original)
+        os.chmod(intocable, modo_original)
 
-    # `shutil.rmtree` removes bottom-up, and only unlinking `teacher`
-    # ITSELF needs write on the blocked parent — its own children were
-    # still removable, so `curso.json` is gone but the directory node
-    # survives, unremoved, right where it was. Either way this must not
-    # raise into the caller: the failure is logged once, by path.
+    # The blocked node survives, named in `fallidos` — the caller can
+    # say "no he podido borrarlo todo" instead of assuming success from
+    # a bare `None`.
+    assert not resultado.completo
+    assert resultado.fallidos == (intocable,)
     assert intocable.exists()
+
+    # Everything else still went: best-effort per node, not
+    # all-or-nothing, is the point of continuing past one failure.
+    assert not (raiz_jarvis / "personas.json").exists()
     assert captured_logs.getvalue() != ""
