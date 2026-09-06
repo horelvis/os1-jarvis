@@ -1258,13 +1258,29 @@ class JARVISApp(Gtk.Application):
                     respuesta = turno_del_encuentro(
                         encuentro, text, vector, lambda habla: say(habla, phone)
                     )
-                    if respuesta is not None and respuesta.terminado:
-                        # This utterance is the one that finished
-                        # pairing: the band's phrase is spent, and the
-                        # file behind it must go too, or a restart
-                        # would show — and accept — it again.
-                        GLib.idle_add(bienvenida_area.ocultar)
-                        consumir(RUTA_FRASE)
+                    if respuesta is not None:
+                        if respuesta.terminado:
+                            # This utterance is the one that finished
+                            # pairing: the band's phrase is spent, and
+                            # the file behind it must go too, or a
+                            # restart would show — and accept — it
+                            # again.
+                            GLib.idle_add(bienvenida_area.ocultar)
+                            consumir(RUTA_FRASE)
+                        elif respuesta.lectura is not None:
+                            # `PIDIENDO` asking for a voice sample: the
+                            # band shows the passage to read, in place
+                            # of the passphrase — reusing the same
+                            # widget rather than building a second band
+                            # (`bienvenida_area` already knows how to
+                            # display text and measure its height).
+                            GLib.idle_add(bienvenida_area.mostrar, respuesta.lectura)
+                        else:
+                            # No reading in this reply: the band goes
+                            # back to what it was showing before one
+                            # appeared — the passphrase, still correct
+                            # for as long as there is no amo.
+                            GLib.idle_add(bienvenida_area.mostrar, frase_actual)
                     settle_turn(phone, remote_desk)
                     return
                 # A phone's press IS the address, and ONLY a phone's.
