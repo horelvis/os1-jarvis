@@ -59,6 +59,21 @@ to exactly one handler. Saying the passphrase again while already in
 against the passphrase, and (not matching) sends the flow back to
 `ESPERANDO` instead of skipping ahead.
 
+**`ESPERANDO` greets once, then goes quiet about it.** Added after a
+requirement change from the project's owner: while nobody owns the
+house, a person talking to him and not saying the passphrase must be
+greeted and told, as a fact rather than an apology or a repeated
+instruction, that nothing else can happen until the pairing does. That
+greeting is said once per `Encuentro` (`self._saludado`, the one bit of
+extra state `ESPERANDO` now carries) — every later utterance that is
+still not the passphrase gets a short reminder instead, never the same
+paragraph again; a presence that repeats a paragraph at every stray
+sentence is a kiosk (CLAUDE.md §1.5), not what he is. Neither message
+mentions erasing memory — that belongs strictly after the passphrase,
+in `BORRANDO`, where there is an actual confirmation to give; warning
+someone about destruction before they have asked for anything would be
+a threat, not an explanation.
+
 **The security property, restated as code:** `ESPERANDO`'s handler
 checks `self._registro.amo` — read fresh from disk, per `Registro`'s own
 contract, never cached — BEFORE it ever compares `texto` against the
@@ -80,6 +95,14 @@ name if it happened to be `Lucía` or `Martín`. A name is refused only
 when it folds all the way down to `personas.CASA`, the one id that must
 never belong to a person.
 
+**Answering "¿cómo la llamo?" is usually a sentence, not a word.**
+`_nombre_desde_texto` strips the ordinary Spanish carriers — "me llamo
+X", "soy X", "X, a secas" — before `id_desde_nombre` ever sees the
+result, so "me llamo Marta" becomes the same candidate "Marta" a bare
+answer would have given. It only strips the CARRIER; it never invents a
+name, and anything it does not recognise is passed through unchanged to
+the same refusal a bare bad answer already gets.
+
 **What `oye()` does and does not swallow.** Every failure this module
 can provoke through ordinary voice input is caught and turned into
 something to say: `casa.Registro.emparejar` can raise `ValueError`
@@ -98,6 +121,7 @@ from any transcript or vector a person could produce; only editing
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from enum import Enum
@@ -176,12 +200,55 @@ def _vector_usable(vector: "np.ndarray | None") -> bool:
     return vector is not None
 
 
+# Asked "¿cómo la llamo?", a person answers with a bare name about half
+# the time and with one of these ordinary sentences the other half.
+# Handling them here — rather than sending "me-llamo-marta" straight to
+# `id_desde_nombre`, which folds spaces out of nothing and refuses the
+# whole sentence as a person id — is what lets "me llamo Marta" and "soy
+# Marta" register exactly as "Marta" would. What genuinely does not
+# survive `id_desde_nombre` (an unintelligible answer, silence) is still
+# refused after this: this only strips the CARRIER phrase, it does not
+# invent a name that was not said.
+_PREFIJOS_NOMBRE = re.compile(
+    r"^\s*(?:me\s+llamo|mi\s+nombre\s+es|soy)\s+(.+)$", re.IGNORECASE
+)
+
+# "Marta, a secas" — the colloquial way of saying "just Marta, nothing
+# more" — carries the name at the front and this filler at the end.
+_SUFIJO_A_SECAS = re.compile(r"\s*,?\s*a\s+secas\s*$", re.IGNORECASE)
+
+
+def _nombre_desde_texto(texto: str) -> str:
+    """The candidate name inside `texto`, stripped of the ordinary
+    Spanish phrases that carry it. Never invents a name and never
+    raises: given nothing it recognises, it returns `texto` itself,
+    trimmed — exactly what used to be handed to `id_desde_nombre`
+    directly, so a name it does not need to touch is untouched.
+    """
+    candidato = texto.strip()
+    coincidencia = _PREFIJOS_NOMBRE.match(candidato)
+    if coincidencia:
+        candidato = coincidencia.group(1)
+    candidato = _SUFIJO_A_SECAS.sub("", candidato)
+    return candidato.strip(_PUNTUACION + " ")
+
+
 # --- what he says --------------------------------------------------------
 # Every string below is his: Spanish, courteous, dry, no exclamation
 # marks, never servile, no emoji — read against `Hermes/jarvis-soul.md`
 # before changing any of them. He is not walking anyone through a setup;
 # he is meeting the person whose house this is, about to forget
 # everything he knew before.
+
+_TEXTO_SALUDO_INICIAL = (
+    "Buenas. Todavía no sé de quién es esta casa, y no puedo hacer nada "
+    "por usted hasta que eso quede claro: diga la frase que tiene "
+    "delante para empezar."
+)
+
+_TEXTO_RECORDATORIO_ESPERA = (
+    "Sigo sin saber de quién es esta casa. La frase, cuando quiera."
+)
 
 _TEXTO_ANUNCIO_BORRADO = (
     "Antes de seguir, olvidaré todo lo que sé hasta ahora, y no hay forma "
@@ -287,6 +354,11 @@ class Encuentro:
         self.estado = Estado.ESPERANDO
         self._muestras: list[np.ndarray] = []
         self._nombre_candidato: str | None = None
+        # `ESPERANDO`'s own little state: whether he has already
+        # greeted whoever is talking to him. See `_en_esperando` — the
+        # full greeting is said once, not on every utterance that is
+        # not the passphrase.
+        self._saludado = False
 
     def oye(self, texto: str, vector: "np.ndarray | None" = None) -> Respuesta | None:
         """One utterance in. What he should say, or `None` for silence.
@@ -321,13 +393,34 @@ class Encuentro:
             # `Encuentro` (or `emparejar` called directly) founded the
             # house a moment ago.
             return None
-        if not parecida(texto, self._frase):
-            # A stranger talking, or nothing recognisable — answered
-            # with silence, not advanced. The passphrase is still on
-            # the screen; nothing here needs saying twice.
+        if parecida(texto, self._frase):
+            self.estado = Estado.BORRANDO
+            return Respuesta(habla=_TEXTO_ANUNCIO_BORRADO, terminado=False)
+        if not texto.strip():
+            # Nothing was actually said — not "somebody talking to him
+            # and it was not the passphrase", just silence. Answered
+            # with silence in kind, and the greeting below is not
+            # spent on it.
             return None
-        self.estado = Estado.BORRANDO
-        return Respuesta(habla=_TEXTO_ANUNCIO_BORRADO, terminado=False)
+
+        # Somebody is talking to a machine that knows nobody. He greets
+        # once — this is the first thing he has ever said to anybody —
+        # and says, as a fact about his situation rather than an
+        # apology or a repeated instruction, that nothing else is
+        # possible yet. What he must NOT say here is anything about
+        # erasing memory: that warning belongs after the passphrase,
+        # where there is an actual confirmation to give (`BORRANDO`) —
+        # here nobody has asked for anything yet, so raising it would
+        # be a threat, not an explanation.
+        #
+        # Every later utterance that is still not the passphrase gets a
+        # short reminder instead of the same paragraph again: a
+        # presence that repeats itself on every stray sentence is a
+        # kiosk (CLAUDE.md §1.5), not what he is.
+        if not self._saludado:
+            self._saludado = True
+            return Respuesta(habla=_TEXTO_SALUDO_INICIAL, terminado=False)
+        return Respuesta(habla=_TEXTO_RECORDATORIO_ESPERA, terminado=False)
 
     # --- BORRANDO ------------------------------------------------------
 
@@ -369,8 +462,9 @@ class Encuentro:
                 return Respuesta(habla=habla, terminado=False)
             return Respuesta(habla=_TEXTO_PIDE_NOMBRE, terminado=False)
 
-        # Enough samples already: this utterance is the candidate name.
-        nombre = texto.strip()
+        # Enough samples already: this utterance is the candidate name,
+        # said plainly or wrapped in "me llamo…" / "soy…" / "…, a secas".
+        nombre = _nombre_desde_texto(texto)
         if id_desde_nombre(nombre) == CASA:
             return Respuesta(habla=_TEXTO_NOMBRE_INVALIDO, terminado=False)
         self._nombre_candidato = nombre

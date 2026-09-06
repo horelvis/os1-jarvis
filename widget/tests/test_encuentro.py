@@ -75,9 +75,11 @@ def _hasta_confirmando(
 def test_nothing_but_the_passphrase_leaves_esperando(tmp_path):
     enc, _registro = _nuevo(tmp_path)
 
-    assert enc.oye("hola, buenos días") is None
+    # A stranger's talk is answered (greeted), but it does not advance.
+    assert enc.oye("hola, buenos días") is not None
     assert enc.estado is Estado.ESPERANDO
 
+    # True silence stays silence — nothing was actually said.
     assert enc.oye("") is None
     assert enc.estado is Estado.ESPERANDO
 
@@ -87,8 +89,64 @@ def test_a_stranger_talking_is_answered_without_advancing(tmp_path):
 
     r = enc.oye("qué tal, cómo estás por aquí")
 
-    assert r is None
+    assert r is not None and r.habla
     assert enc.estado is Estado.ESPERANDO
+
+
+def test_the_first_stranger_utterance_is_greeted_and_told_why_he_cannot_help(
+    tmp_path,
+):
+    enc, _registro = _nuevo(tmp_path)
+
+    r = enc.oye("¿qué hora es?")
+
+    assert r is not None
+    assert enc.estado is Estado.ESPERANDO
+    habla = r.habla.casefold()
+    # A greeting, and the fact that nothing else is possible yet.
+    assert "buenas" in habla
+    assert "casa" in habla
+    # Never a threat about erasing memory — that belongs after the
+    # passphrase, where there is a confirmation to give.
+    assert "borra" not in habla
+    assert "memoria" not in habla
+    assert "olvid" not in habla
+
+
+def test_a_later_stranger_utterance_gets_a_shorter_reminder_not_the_greeting_again(
+    tmp_path,
+):
+    enc, _registro = _nuevo(tmp_path)
+
+    primera = enc.oye("¿qué hora es?")
+    segunda = enc.oye("hola, hay alguien ahí")
+
+    assert enc.estado is Estado.ESPERANDO
+    assert segunda is not None and segunda.habla
+    # Not the same paragraph twice — the second answer is shorter and
+    # different text, never a repeat of the full greeting.
+    assert segunda.habla != primera.habla
+    assert len(segunda.habla) < len(primera.habla)
+    assert "borra" not in segunda.habla.casefold()
+    assert "memoria" not in segunda.habla.casefold()
+
+    # And it keeps being the short reminder on a third stray utterance,
+    # not escalating or reverting to the long one.
+    tercera = enc.oye("perdona, no te entiendo")
+    assert tercera is not None
+    assert tercera.habla == segunda.habla
+
+
+def test_the_passphrase_still_works_after_a_greeting(tmp_path):
+    enc, _registro = _nuevo(tmp_path)
+
+    enc.oye("hola")
+    assert enc.estado is Estado.ESPERANDO
+
+    r = enc.oye(FRASE)
+
+    assert enc.estado is Estado.BORRANDO
+    assert r is not None
 
 
 def test_the_passphrase_advances_esperando_to_borrando(tmp_path):
@@ -305,6 +363,36 @@ def test_pidiendo_accepts_an_accented_name(tmp_path):
 
     assert enc.estado is Estado.CONFIRMANDO
     assert "Lucía" in r.habla
+
+
+@pytest.mark.parametrize(
+    "respuesta",
+    ["Marta", "me llamo Marta", "Me llamo Marta.", "soy Marta", "Marta, a secas"],
+)
+def test_pidiendo_extracts_the_name_from_ordinary_spanish_answers(tmp_path, respuesta):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=1)
+    vector = _v(1.0, 0.0, 0.0)
+    enc.oye("una frase", vector)
+
+    r = enc.oye(respuesta)
+
+    assert enc.estado is Estado.CONFIRMANDO
+    assert "Marta" in r.habla
+
+    enc.oye("sí")
+    assert enc.estado is Estado.HECHO
+    assert _registro.amo == "marta"
+
+
+def test_pidiendo_still_refuses_what_does_not_survive_after_extraction(tmp_path):
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=1)
+    vector = _v(1.0, 0.0, 0.0)
+    enc.oye("una frase", vector)
+
+    r = enc.oye("me llamo !!!")
+
+    assert enc.estado is Estado.PIDIENDO
+    assert r is not None and r.habla
 
 
 # --- CONFIRMANDO -----------------------------------------------------------
