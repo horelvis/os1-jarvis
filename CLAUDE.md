@@ -697,8 +697,9 @@ on every drop after.
   out of 5, even when one was named.~~ **Fixed 2026-09-03**: the cause
   was our own schema shape, not the model and not Hermes — §12's
   2026-08-26 entry carries it. Measured after the fix, a course opened
-  live received its `tema` and filed an eleven-point syllabus. §12 (2026-08-26) carries the measurement. **Corrected 2026-08-26:** the "no
-  camera 5 times out of 5" was measured through `mirar`, whose handler
+  live received its `tema` and filed an eleven-point syllabus; `mirar`
+  itself has not been asked again since. **Corrected 2026-08-26:** the
+  "no camera 5 times out of 5" was measured through `mirar`, whose handler
   reads the whole argument dict. `ver_en_vivo` named that parameter
   `camara` and crashed on it instead — `'dict' object has no attribute
   'casefold'` — which is why the live view answered "la imagen en

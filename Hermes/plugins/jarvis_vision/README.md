@@ -208,14 +208,9 @@ reason for both numbers.
 
 ### What he does with it, measured on the live gateway
 
-Three things, all reported rather than fixed, because each is a decision
+Two things, both reported rather than fixed, because each is a decision
 somebody has to make rather than a bug:
 
-- **He calls `mirar` with no argument, 5 times out of 5**, even when the
-  user named a camera. So "enséñame la entrada" is answered with a survey
-  of every camera. Spelling out "omitir SOLO si no se ha nombrado
-  ninguna" in the schema changed nothing across three further asks and
-  was reverted: a prompt edit that does not work is noise in the file.
 - **He invents visual detail he cannot see.** "Puerta cerrada, el porche
   vacío", against a tool that had said only "En la entrada no hay nadie."
   He is text-only and never sees the JPEG; anything beyond the eight
@@ -226,6 +221,24 @@ somebody has to make rather than a bug:
   repairs it. Fixing it properly means camera names gaining a spoken form
   in the config, which is a schema change and a decision about how the
   places in this house are named.
+
+**The third one was ours, and it is fixed.** Until 2026-09-03 he called
+`mirar` with no argument, 5 times out of 5, even when the user had named
+a camera, so "enséñame la entrada" was answered with a survey of every
+camera. The cause was not the model and not Hermes:
+`register_tool(schema=…)` wants the OpenAI **function** object, and this
+plugin was handing it `SCHEMA` — the parameters — so the tool reached the
+model with no `parameters` and no description, and `{}` was the only call
+it could make (§12, 2026-08-26, corrected 2026-09-03; the same note now
+sits over each `register_tool` call in `__init__.py`). Spelling the rule
+out in the schema text, which was tried first and reverted, could not
+have worked: the model never saw the schema.
+
+**Measured after the fix on the teacher's tools**, which carried the same
+defect — a course opened live took its `tema` and filed an eleven-point
+syllabus. **`mirar` itself has not been asked again against a live
+gateway since**, so what is verified here is the cause and the fix, not
+this tool's behaviour after it.
 
 ## The quiet rules, and their numbers
 
