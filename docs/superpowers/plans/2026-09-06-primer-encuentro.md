@@ -384,7 +384,7 @@ git commit -m "feat(widget): an utterance becomes a vector, or nothing at all"
 
 ---
 
-### Task 4: The measurement — do the sisters separate?
+### Task 4: The measurements — is it him, and are they two?
 
 **Files:**
 - Create: `widget/tools/medir_voces.py`
@@ -394,15 +394,24 @@ git commit -m "feat(widget): an utterance becomes a vector, or nothing at all"
 - Consumes: tasks 2 and 3.
 - Produces: a number, and a decision about part B.
 
-**This is the gate, and it needs people in the room.** Everything after it in part A proceeds regardless — one voice against nobody is the easy case — but part B lives or dies here.
+**This is TWO measurements with two different requirements, and separating them is what lets part A finish without waiting for anybody** (the user's own observation, 2026-09-06):
+
+- **4a — the amo, and it needs only him.** Does his voice get recognised as his, reliably, across a day: different distances, a cold, the television on, a shout, a whisper? One voice against nobody is the easy case, and this is the half that gates the founding act. **It can be done today, by one person, without arranging anything.**
+- **4b — sister against sister, and it needs both of them present.** Same age, same sex, same house, same accent: the hard case. It gates part B and nothing else.
+
+Do 4a first and do not let 4b hold part A up. If 4b eventually fails, part A still works and the family half falls back to phones — which the spec names a supported outcome rather than a failure.
 
 - [ ] **Step 1: Write the tool**
 
 It records N utterances per person (prompting in Spanish, one person at a time), embeds each with `Locutor`, and prints: the centroid-to-centroid cosine between every pair of people, the within-person spread, and — the number that matters — **how many utterances would be attributed to the wrong person** at a range of floors. It writes the raw vectors to `~/.jarvis/medicion/` so the calculation can be redone without gathering everyone again.
 
-- [ ] **Step 2: Run it with the real people**
+- [ ] **Step 2a: Run it with the amo alone — this is the one that unblocks part A**
 
-At minimum: the amo, and both sisters. Ten short utterances each, of the length he will actually hear — *"Jarvis, ¿qué hora es?"*, not a paragraph. **Measure what the system will meet, not what flatters it.**
+Ten short utterances of the length he will actually hear — *"Jarvis, ¿qué hora es?"*, not a paragraph. **Measure what the system will meet, not what flatters it.** Then ten more under the conditions it will actually meet: from across the room, with the television on, tired, and one whispered. What matters here is not telling him from somebody else — there is nobody else yet — but that the same person clears the floor consistently. A floor he fails in his own living room is a floor that will refuse him at the founding act.
+
+- [ ] **Step 2b: Run it with both sisters, when both are available**
+
+Ten each, same conditions. This gates part B only. If it cannot be scheduled, record that and move on — part A does not wait for it.
 
 - [ ] **Step 3: Write the finding**
 
