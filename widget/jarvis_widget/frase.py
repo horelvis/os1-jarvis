@@ -14,17 +14,34 @@ of one name in a single morning before it worked. So `parecida` never
 compares strings for equality; it asks how close they sound, the way
 `wake.py` already does for his own name.
 
-**Matching is looser than a password and stricter than a wake word.**
-`wake.py`'s single ratio is right for one word said at the start of a
-sentence, where a false negative costs a repeat and a false positive
-costs one unwanted answer. Handing over the whole house is not that: the
-same 0.6 ratio is kept per word, because it is measured (it is what the
-four real mis-transcriptions of "Jarvis" passed at), but a second rule is
-added that wake.py has no use for — at least three of the four words
-must match individually, and not only the phrase as a whole. Without it
-a long, unrelated sentence that happens to share letters with the phrase
-could pass on overall similarity alone; a stray word from a distracted
-retry cannot bring the whole phrase down either.
+**Matching is an ordered subsequence, not a bag of words.** `wake.py`'s
+single 0.6 ratio is right for one word said at the start of a sentence.
+Handing over the whole house — and erasing everything the machine
+remembers, in the same motion — is not that, and the first version of
+this function got it wrong: it required only that three of the four
+words each turn up somewhere, plus the whole two sentences be similar as
+strings. Three-of-four-plus-a-ratio permits exactly what three-of-four
+alone permits (three correct words already clear the ratio on their
+own), so a missing word, a substituted word, or three overheard words
+recited in whatever order all authenticated. A houseguest who overheard
+three words owned the house.
+
+What `parecida` does instead: every word of `frase`, in order, must be
+found among `dicho`'s words, consumed left to right, each match decided
+by the same 0.6 ratio. A missing word has nothing left to match against
+by the time its turn comes. A substituted word is not close enough to
+what it replaced. A reordered phrase runs out of `dicho` to search
+before its later words are found, because the words that would have
+matched them were already consumed matching something earlier out of
+place. Extra words — before, after, or between — are not merely
+tolerated but required to be: Whisper prepends his own name, and a
+person reading the phrase off a screen says "vale" first and narrates as
+they go. No whole-string ratio runs alongside this any more: it added
+nothing the subsequence rule does not already give more strictly, and
+keeping it would have worked against the one requirement above — a
+sentence with real filler around the phrase reads as less similar to the
+bare phrase as strings, so an AND with a ratio would start rejecting the
+exact "vale, gato ventana lento roble" case this design exists to allow.
 """
 
 from __future__ import annotations
@@ -78,52 +95,47 @@ def generar(n: int = 4) -> str:
     return " ".join(elegidas)
 
 
+def _es_similar(candidato: str, objetivo: str) -> bool:
+    return (
+        candidato == objetivo
+        or SequenceMatcher(None, candidato, objetivo).ratio() >= THRESHOLD
+    )
+
+
 def parecida(dicho: str, frase: str) -> bool:
     """Was `dicho` somebody saying `frase` out loud?
 
-    Never an equality check: see the module docstring for why. Two
-    conditions, both required — the second is the one wake word matching
-    does not need:
-
-    1. The two sentences, folded and taken as a whole, are similar at
-       `wake.py`'s own 0.6 ratio.
-    2. At least `len(frase) - 1` of `frase`'s own words each have a
-       similar word somewhere in `dicho` — three of four, for the
-       four-word phrase this module actually produces. Condition 1 alone
-       would let a long sentence that happens to overlap heavily with
-       the phrase's letters pass without anyone having said the words;
-       condition 2 alone would let the four right words, buried in an
-       unrelated sentence, pass on overall similarity that isn't there.
-       Together, neither loophole is open on its own.
-
-    Order matters, as a consequence of condition 1 rather than a rule
-    added on purpose: the same four words said in a different order
-    usually fail the whole-sentence ratio even though every word still
-    matches individually under condition 2. That is the intended
-    reading — the person is asked to say the phrase as it is shown, not
-    merely to know the four words it is made of.
+    An ordered subsequence match. `frase`'s words are folded and taken in
+    order; `dicho`'s are folded and scanned left to right, once, never
+    backtracking. For each word of `frase` in turn, scanning resumes
+    where the previous match left off and advances until a word similar
+    enough is found (`_es_similar`, the same 0.6 ratio `wake.py` uses) or
+    `dicho` runs out. Running out at any word means `frase` was not said:
+    that is what rejects a missing word, a substituted word, and a
+    reordered phrase alike (reordering strands the words that would have
+    matched later targets behind the point already consumed matching an
+    earlier one out of place). Words in `dicho` that are skipped over
+    while scanning are never rejected on their own — that is what a
+    prefix like "vale, ..." or a mid-phrase "eh" needs, and what a name
+    Whisper prepends needs too.
     """
     palabras_dicho = _palabras_normalizadas(dicho)
     palabras_frase = _palabras_normalizadas(frase)
     if not palabras_frase or not palabras_dicho:
         return False
 
-    texto_dicho = " ".join(palabras_dicho)
-    texto_frase = " ".join(palabras_frase)
-    if SequenceMatcher(None, texto_dicho, texto_frase).ratio() < THRESHOLD:
-        return False
-
-    coincidencias = sum(
-        1
-        for objetivo in palabras_frase
-        if any(
-            candidato == objetivo
-            or SequenceMatcher(None, candidato, objetivo).ratio() >= THRESHOLD
-            for candidato in palabras_dicho
-        )
-    )
-    necesarias = max(1, len(palabras_frase) - 1)
-    return coincidencias >= necesarias
+    idx = 0
+    for objetivo in palabras_frase:
+        encontrado = False
+        while idx < len(palabras_dicho):
+            candidato = palabras_dicho[idx]
+            idx += 1
+            if _es_similar(candidato, objetivo):
+                encontrado = True
+                break
+        if not encontrado:
+            return False
+    return True
 
 
 def cargar_o_crear(path: Path | str) -> str:

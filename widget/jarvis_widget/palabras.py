@@ -20,12 +20,19 @@ that four of them, drawn with `secrets.choice`, give at least 36 bits.
 3. **Nothing whose accent changes the word.** Not "papa"/"papá", not
    "esta"/"está". Rather than police every such pair by hand, no word
    here carries a written accent or dieresis at all — every word is
-   plain lowercase ASCII, with "ñ" as the one addition, because "ñ" is
-   its own letter, not a diacritic on "n" (`unicodedata.normalize` does
-   not decompose it under NFC, only under a deliberate NFD that then
-   also strips it, which nothing here does). Two real words that
-   otherwise needed a dieresis to be pronounced correctly — "pingüino",
-   "cigüeña" — are simply not on the list, rather than written wrong.
+   plain lowercase ASCII, with "ñ" as the one addition kept for
+   readability. **"ñ" is not protected from this rule by being its own
+   letter** — `frase.py`'s `_fold`, the fold used everywhere matching
+   actually happens, normalises to NFD and strips every combining mark,
+   and "ñ" decomposes to "n" plus one, so `_fold("año") == _fold("ano")`.
+   A future `pañal` sitting beside an existing `panal` would collide
+   exactly like an unwritten "papá" would. What protects the list is
+   `test_no_word_is_an_accented_form_of_another_once_folded` in
+   `tests/test_frase.py`, which applies that same fold to every word and
+   fails if two of them land on the same string — not any property of
+   the letter itself. Two real words that otherwise needed a dieresis to
+   be pronounced correctly — "pingüino", "cigüeña" — are simply not on
+   the list, rather than written wrong.
 4. **Nothing that could be heard as an instruction, and nothing coarse.**
    Somebody reads this off a screen, possibly in front of their
    children.

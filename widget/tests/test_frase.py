@@ -27,6 +27,50 @@ def test_it_is_matched_the_way_the_wake_word_is_matched():
     assert not parecida("hola qué tal", "gato ventana lento roble")
 
 
+def test_a_missing_word_fails():
+    # Three of the four words, in order, and nothing said for the fourth.
+    # Fix round 1: this used to pass — the old rule only asked for three
+    # of four to match individually, which a missing word still clears.
+    assert not parecida("gato ventana lento", "gato ventana lento roble")
+
+
+def test_a_substituted_word_fails():
+    # An unrelated word standing in for one of the four. Not on the
+    # wordlist, and not close to "roble" under the 0.6 ratio either.
+    assert not parecida("gato ventana lento xilofono", "gato ventana lento roble")
+
+
+def test_a_scrambled_order_fails():
+    # A couple of orderings, not one: the old whole-string ratio check
+    # made order matter as an accident of how SequenceMatcher scores two
+    # strings: the new ordered-subsequence rule makes it matter on
+    # purpose, and must keep doing so.
+    assert not parecida("roble lento ventana gato", "gato ventana lento roble")
+    assert not parecida("ventana gato roble lento", "gato ventana lento roble")
+    assert not parecida("lento gato roble ventana", "gato ventana lento roble")
+
+
+def test_extra_words_around_and_between_still_pass():
+    # Required, not merely permitted: Whisper prepends "Jarvis", and a
+    # person reading the phrase off the screen says "vale" first and
+    # narrates as they go.
+    assert parecida(
+        "vale, gato ventana lento roble, genial", "gato ventana lento roble"
+    )
+    assert parecida(
+        "jarvis gato eh ventana pues lento y roble",
+        "gato ventana lento roble",
+    )
+
+
+def test_a_word_whisper_splits_in_two_still_matches_its_head():
+    # "destornillador" transcribed as two tokens — the tail need not
+    # match anything; the head alone clears 0.6 against the real word.
+    assert parecida(
+        "gato destornilla dor lento roble", "gato destornillador lento roble"
+    )
+
+
 def test_it_is_made_once_and_reused_until_consumed(tmp_path):
     ruta = tmp_path / "frase.txt"
     primera = cargar_o_crear(ruta)
