@@ -274,14 +274,21 @@ _TEXTO_PIDE_UNA_MUESTRA_MAS = "Dígame algo más."
 
 _TEXTO_MUESTRA_NO_SERVIDA = "Esa no la he oído bien. Dígame algo más, cuando quiera."
 
-_TEXTO_PIDE_NOMBRE = "Ya la conozco. ¿Cómo la llamo?"
+# Neither gendered: "su voz" is the object (a feminine noun, but not a
+# person), and "le llamo" is peninsular leísmo for a personal direct
+# object — the amo could be the father or either daughter in this
+# house, and nothing here should guess which before he even has a name.
+_TEXTO_PIDE_NOMBRE = "Ya conozco su voz. ¿Cómo le llamo?"
 
 _TEXTO_NOMBRE_INVALIDO = "Ese nombre no me sirve. Dígame otro."
 
 _TEXTO_PIDE_NOMBRE_DE_NUEVO = "Entonces, ¿cómo se llama?"
 
 _TEXTO_EMPAREJAR_FALLIDO = (
-    "No he podido completarlo: puede que esta casa ya tenga dueño. No voy a insistir."
+    # "amo" — the module's own domain term (`casa.Registro.amo`), not
+    # "dueño": a role name used throughout this codebase regardless of
+    # who holds it, rather than a synonym that carries its own gender.
+    "No he podido completarlo: puede que esta casa ya tenga amo. No voy a insistir."
 )
 
 
@@ -474,6 +481,19 @@ class Encuentro:
     # --- CONFIRMANDO -----------------------------------------------------
 
     def _en_confirmando(self, texto: str) -> Respuesta:
+        if self._nombre_candidato is None:
+            # Unreachable under normal operation — `CONFIRMANDO` is only
+            # ever entered from `_en_pidiendo`, immediately after it
+            # sets this — but `oye()`'s contract is that it never
+            # raises, and an `assert` is exactly the construct that can
+            # break that promise silently: `python -O` strips it. Treat
+            # a broken invariant the same way a lost `emparejar` race is
+            # treated below — log it once, and recover to `ESPERANDO`
+            # with something to say, rather than crash on it.
+            logger.warning("encuentro: CONFIRMANDO reached with no candidate name")
+            self.estado = Estado.ESPERANDO
+            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, terminado=False)
+
         if _es_negativo(texto):
             # Wrong answer -> the previous state ("asking"), with
             # something to say. The samples already gathered are kept;
@@ -484,13 +504,11 @@ class Encuentro:
         if not _es_afirmativo(texto):
             # Neither a yes nor a no: repeat the question rather than
             # guess. Still `CONFIRMANDO`, still something to say.
-            assert self._nombre_candidato is not None
             return Respuesta(
                 habla=_texto_confirma_nombre(self._nombre_candidato),
                 terminado=False,
             )
 
-        assert self._nombre_candidato is not None
         try:
             persona = self._registro.emparejar(self._nombre_candidato, self._muestras)
         except (ValueError, OSError) as exc:

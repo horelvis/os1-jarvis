@@ -398,6 +398,35 @@ def test_pidiendo_still_refuses_what_does_not_survive_after_extraction(tmp_path)
 # --- CONFIRMANDO -----------------------------------------------------------
 
 
+def test_pidiendo_asks_for_a_name_without_gendering_the_person(tmp_path):
+    # This house has a father and two daughters; the amo is whoever
+    # says the phrase, so nothing here may guess a gender before he
+    # even has a name.
+    enc, _registro = _hasta_pidiendo(tmp_path, n_muestras=1)
+
+    r = enc.oye("una frase", _v(1.0, 0.0, 0.0))
+
+    assert enc.estado is Estado.PIDIENDO
+    habla = r.habla.casefold()
+    assert "cómo la llamo" not in habla
+    assert "cómo lo llamo" not in habla
+
+
+def test_confirmando_recovers_if_the_candidate_name_is_somehow_missing(tmp_path):
+    """Pins the defensive branch that replaced an `assert`: unreachable
+    through the public API today (`CONFIRMANDO` is only entered right
+    after `_nombre_candidato` is set), but `python -O` strips asserts,
+    and `oye()`'s contract is that it never raises."""
+    enc, registro = _hasta_confirmando(tmp_path, nombre="Marta")
+    enc._nombre_candidato = None  # force the broken invariant by hand
+
+    r = enc.oye("sí")
+
+    assert enc.estado is Estado.ESPERANDO
+    assert r is not None and r.habla
+    assert registro.amo is None
+
+
 def test_confirmando_requires_an_affirmative(tmp_path):
     enc, _registro = _hasta_confirmando(tmp_path, nombre="Marta")
 
