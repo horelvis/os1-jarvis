@@ -80,12 +80,42 @@ Adding a state becomes one entry. That is the deliverable of this layer
 and the measurement it will be judged on: **the next state must cost one
 file, not ten.**
 
-**The existing frames do not move.** They keep working, they keep their
-tests, and nothing is migrated as part of this. What changes is that no
-new bespoke frame is ever added again. Migration, if it ever happens, is
-a separate decision — this spec explicitly does not ask for it, because
-a rewrite of seven working frames buys nothing today and risks the two
-(`live`, `photo`) that carry binary payloads and their own lifecycles.
+**The existing frames DO move, once the new path is proven** (user,
+2026-09-06: *"una vez revisamos que funciona la nueva arquitectura se
+migran los marcos para no dejar código basura"*). Two ways of saying the
+same thing, kept side by side for ever, is how a codebase accumulates
+exactly the junk this layer exists to remove. So migration is in scope —
+as a LATER phase, gated on the new path working, never as a big-bang
+rewrite in the same breath as introducing it.
+
+**But not every frame is an action, and the line is not a matter of
+taste.** `protocol.py` holds three families, and only one of them is
+commands to a surface:
+
+| family | frames | what they are |
+|---|---|---|
+| **The turn** | `token`, `done`, `error`, `silence`, `transcription` | the conversation itself, not an instruction to draw |
+| **Actions** | `photo`, `ficha`, `console`, `asking`, `working` | "make the surface do this" |
+| **Bytes** | `live_frame` (via `_push_bytes`), `live`, `live_end` | raw video — ~1,200 packets in two minutes |
+
+**The five actions migrate.** They are the family this layer is about,
+they are the ones a future capability would have joined, and once they
+are gone `protocol.py` stops being a place new frames get added.
+
+**The turn does not.** `token` is the hottest path in the system —
+every clause of every reply — and wrapping it in an action envelope adds
+indirection to it for no gain. It is also not an instruction: it is what
+he said.
+
+**The byte stream does not.** `live_frame` goes out through
+`_push_bytes` because it carries a raw packet; it cannot become a JSON
+action for the same reason a photograph cannot become a sentence.
+`live` / `live_end` open and close that stream and belong with it.
+
+**Migration is done frame by frame, each with its tests green before the
+next**, and the old builder is deleted in the same commit that moves its
+last caller. A migration that leaves the old path in "just in case" has
+not migrated anything.
 
 **Where the table lives.** In its own module (`acciones.py`), not in
 `__main__.py`. `__main__.py` is already the largest file in the widget
