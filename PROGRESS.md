@@ -13,6 +13,8 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
+- 2026-09-06 — Varias conversaciones a la vez, y cada una con nombre ✅
 - 2026-09-03 — Modo profesor: JARVIS enseña, apoyado en fuentes que él mismo trajo ✅⏸
 - 2026-09-01 (noche) — JARVIS sale del escritorio, y un teléfono de verdad encontró lo que ningún test vio ✅
 - 2026-09-01 (tarde) — Le quitamos el arnés, y medimos qué cuesta ✅
@@ -61,6 +63,136 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 ---
+
+## 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
+
+Parte A del plan `docs/superpowers/plans/2026-09-06-primer-encuentro.md`,
+nueve tareas más una ronda de arreglos, todo mezclado en `development`.
+El diseño (`…/specs/2026-09-06-primer-encuentro-design.md`) **redefine el
+cimiento** del plan del 5: la identidad ya no viene de configuración,
+viene de conversación. Sus tareas 11 y 12 quedan sustituidas por ésta.
+
+Lo que hace: **una caja que arranca sin memoria no adivina de quién es y
+no sirve a nadie.** Espera, y dice cómo empezar. Alguien lee en voz alta
+una frase que esta instalación generó una vez y enseña en la tira; JARVIS
+pide unas cuantas lecturas, aprende esa voz, dice en voz alta a quién
+cree tener delante — y esa persona es el amo. Revive dos entradas que
+CLAUDE.md §10 arrastraba desde v1 sin construir: *onboarding / primer
+encuentro* y *huella de voz*.
+
+**La sonda decidía si el plan existía, y salió bien por sus propios
+méritos.** `pyannote/embedding` exportado a ONNX (17,6 MB, MIT): coge
+audio crudo a 16 kHz, **sin fbank, sin `kaldi-native-fbank`, sin código
+de features escrito a mano y sin torch en toda la cadena**, y saca 512
+dimensiones en aproximadamente un octavo de lo que tardaba CAM++ contando
+su extracción de features. **Ni una línea nueva en `pyproject.toml`** —
+`onnxruntime` y numpy ya estaban. CAM++ no quedó descalificado y sigue
+documentado como recambio. Dos alternativas autosupervisadas (WavLM-SV,
+UniSpeech-SAT-SV) se cayeron sólo por licencia: ninguna publica una en
+sitio localizable, y la regla de la tarea trata «no se puede determinar»
+como descalificación, no como «seguramente vale».
+
+**Por qué una frase y no un código.** Whisper transcribe lenguaje, no
+cadenas: `X7K-9QM` vuelve como «equis siete ka» o peor. Son tres o cuatro
+palabras españolas corrientes de una lista, y se comparan con la misma
+tolerancia de subsecuencia ordenada que ya usaba la palabra de
+activación. Se gasta en cuanto funciona. Rechazado por escrito:
+emparejar con la primera voz que oye — se lee mejor y le entrega la casa
+a un invitado, a un niño o a la televisión.
+
+**Emparejar borra todo lo anterior, y eso se midió antes de escribirlo.**
+Se van ~24 MB: sesiones, `state.db`, lo que apuntó sobre quien vivía
+aquí, los cursos, el secreto y el certificado de cada teléfono, y ~7 MB
+de grabaciones de las voces de la casa — que en un cambio de dueño son
+justo lo que no puede sobrevivir. Se quedan **87 GB de pesos de
+modelos**, y borrar cualquiera de ellos sería un defecto y no minucia:
+convierte la pizarra limpia en tres días de descarga. Hay un test que
+nombra las rutas protegidas **una por una**, para que un futuro «bueno,
+vaciamos `~/.jarvis` y ya» no pueda pasar. El borrado se anuncia antes de
+ocurrir y pide una confirmación que no se puede decir por accidente, y
+`ejecutar` devuelve qué nodos no pudo borrar en vez de callarlo.
+
+**Tres cambios de requisito del propio dueño, todos mientras se
+emparejaba de verdad**, y los tres del mismo tipo — la pantalla decía una
+cosa y la voz preguntaba otra:
+
+1. *«Di algo»* no sirve: nadie sabe si tres palabras bastan ni cuántas
+   veces hay que hablar. Ahora **entrega un pasaje que leer**, uno por
+   ranura, y dice cuál es de cuántas. Una muestra rechazada repite el
+   MISMO pasaje: la ranura no avanza, así que ningún texto se gasta en un
+   intento que no dejó muestra.
+2. La tira **enseñaba el pasaje a nadie** — `Respuesta.lectura` existía y
+   no lo dibujaba nadie («No lo veo»).
+3. La banda seguía enseñando la frase de emparejamiento —ya gastada—
+   durante todo el intercambio del nombre, así que **contestó a la
+   pantalla en vez de a la pregunta, dos veces**. La máquina de estados
+   nunca estuvo atascada. Arreglado en tres pasos: cada estado fija su
+   `lectura` explícitamente y nunca por omisión; `__main__` deja de tener
+   un respaldo que reponía la frase gastada; y el **rótulo** de encima
+   —dos líneas que eran una constante— pasa a decir para qué es lo que
+   hay debajo, estado por estado. Verificado en pantalla, que es el único
+   sitio donde esto se puede probar (§2.3): los cuatro estados
+   fotografiados, ninguno recortado, y el pasaje de dos líneas hace
+   crecer la banda a 189 px contra 144 de los demás.
+
+**Y un agujero que no venía del plan: el teclado no tenía puerta.** Una
+línea escrita en la tira iba directa a `client.send_chat` con la caja sin
+emparejar, y de ahí salió que Hermes improvisara «anotado» para un nombre
+que nada había guardado. Ahora hay **una sola copia** de «¿hay amo?» en
+todo el proceso, y la voz, el móvil y el teclado pasan por ella.
+
+**Lo que queda pendiente, y es lo que decidía la parte B:**
+
+- **La medición con voces de verdad no se ha hecho.** La herramienta está
+  (`widget/tools/medir_voces.py`), pero nadie la ha corrido: ni «¿es él
+  contra el resto de la casa?» ni «¿se separan dos hermanas de 16 y 17?».
+  Pide gente en la habitación. El plan la marcaba como la que desbloquea
+  la parte A, y la parte A se ha entregado sin ella.
+- **Nadie se ha emparejado todavía en esta caja.** `personas.json` tiene
+  sólo `casa`; el dueño lo intentó en vivo y ese intento es lo que
+  encontró los tres fallos de arriba.
+- La parte B —presentar a la familia, «Jarvis, soy Natalia» desde el
+  móvil, y qué hace con una voz que no conoce— sigue sin empezar.
+
+674 tests en verde, ruff limpio.
+
+## 2026-09-06 — Varias conversaciones a la vez, y cada una con nombre ✅
+
+El plan `…/plans/2026-09-05-identidad-por-persona.md` (parte 1, los
+teléfonos), tareas 1 a 10, empezado la noche del 5 y terminado el 6. Sus
+tareas 11 y 12 no se hicieron: el diseño del primer encuentro las
+sustituye.
+
+**Lo que había antes:** un socket, una sesión, un turno. Tres iPhones en
+casa hablando con un único JARVIS que no distinguía cuál era cuál, y una
+respuesta que podía salir por el altavoz equivocado.
+
+**Lo que hay ahora:** `personas.py` da un id por persona y `casa` cuando
+no se sabe quién habla; cada teléfono lleva **su propio secreto** y un
+guardia que contesta *quién*, no sólo *sí*; enrolar un teléfono nombra a
+la persona para la que es; el marco del chat lleva `chat_id`, así que un
+solo socket sostiene varias conversaciones etiquetadas; y hay **una sola
+cola de síntesis con un destino por cláusula**, para que dos turnos
+simultáneos no se mezclen en la misma boca.
+
+**La sonda que podía tumbar el plan no lo tumbó.** La frontera de
+herramientas —el `config.yaml` de un perfil decide qué pueden llamar sus
+turnos— es real en el Hermes que tenemos fijado, no aspiracional: gestor
+de plugins por *home* y overlay del registro de herramientas por *home*,
+leído en su fuente. **Con una salvedad que hay que arrastrar:** está
+verificado leyendo, no corriendo. Esta caja tiene un solo perfil, así que
+nadie ha servido dos a la vez ni ha comprobado en vivo que a un perfil le
+falte `terminal`. Antes de tratar «el perfil de la hija no tiene
+terminal» como probado y no como diseñado, hay que montar ese banco.
+
+**Cuatro arreglos que sólo aparecen cuando hay más de uno**, todos del
+mismo error de forma: un estado que era global y tenía que ser por
+conversación — el buffer de cláusulas, `interrupt()`, el «ya ha
+terminado» de la onda y el endpoint de un teléfono, que viajaba en una
+ranura compartida en vez de ir con la llamada. Y una regla que se
+escribió al aprenderla: **la lista de permitidos es autorización, no la
+lista de la familia**; confundirlas es cómo un invitado con wifi acaba
+siendo alguien.
 
 ## 2026-09-03 — Modo profesor: JARVIS enseña, apoyado en fuentes que él mismo trajo ✅⏸
 
