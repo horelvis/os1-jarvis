@@ -456,6 +456,67 @@ git commit -m "feat(widget): who lives here, on disk, and only once"
 
 ---
 
+### Task 5b: The clean slate — what a pairing destroys
+
+**Files:**
+- Create: `widget/jarvis_widget/borrar.py`
+- Test: `widget/tests/test_borrar.py`
+- Modify: `widget/README.md`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `inventario(raiz_jarvis, raiz_hermes) -> Borrado` describing exactly what would go, and `ejecutar(borrado, *, respaldo: Path) -> None`. Task 7's flow calls it; nothing else may.
+
+**The user's decision, 2026-09-06: a pairing erases all previous memory.** It is what lets this box change hands — a new amo inherits neither the last one's conversations nor their courses nor their enrolled phones. It also gives the passphrase gate its stronger justification: pairing with whoever speaks first would not merely hand the house over, it would erase it first.
+
+**The distinction that makes this safe to build, measured on this box 2026-09-06.** "Everything" is 24 MB of memory, not 87 GB of model weights, and confusing them turns a clean slate into three days of downloading.
+
+**Goes** (all of it, or none):
+
+| path | what it is | size today |
+|---|---|---|
+| `~/.hermes/state.db` | sessions | 9.9 MB |
+| `~/.hermes/sessions/` | session bodies | 12 MB |
+| `~/.hermes/home/memories/*.md` | what he wrote down about them | small — **confirm this path, not `~/.hermes/memories/`, which is 4 KB and holds no `.md`** |
+| `~/.hermes/profiles/` | every per-person profile, once they exist | — |
+| `~/.jarvis/memory/` | the old store | 1.7 MB |
+| `~/.jarvis/teacher/` | courses and everything filed under them | 60 KB |
+| `~/.jarvis/personas.json`, `remote.token`, `certs/` | **every phone is de-enrolled** | 36 KB |
+| `~/.jarvis/dump*/`, `ref-candidates/` | **recordings of the household's voices** | ~7 MB |
+| `~/.jarvis/casa.json`, `voces/` | the register and the voiceprints (task 5) | — |
+
+**Stays, and wiping any of it is a defect, not thoroughness:**
+
+`~/.jarvis/models/` (69 GB), `cosyvoice3/` (9.1 GB), `qwen3-tts/` (8.5 GB), `xtts-cache/` (1.8 GB), `~/.jarvis/voices/` (136 MB) — model weights, not memory. And `voices/jarvis-ref.wav` in the repository, which is the clip his cloned voice comes from: it is not user data and it is not in `~/.jarvis` at all.
+
+- [ ] **Step 1: Write the failing test**
+
+Cover: `inventario` lists every path in the first table and **none** in the second; a path that does not exist is reported as absent rather than raising; `ejecutar` writes the snapshot BEFORE removing anything and refuses to proceed if the snapshot failed; a second `ejecutar` on an already-clean box is a no-op; and — the test that matters — **`inventario` never returns a path under `models/`, `cosyvoice3/`, `qwen3-tts/`, `xtts-cache/` or `~/.jarvis/voices/`**, asserted explicitly by name so that a later "let's just clear ~/.jarvis" cannot pass.
+
+- [ ] **Step 2: Implement**
+
+`inventario` is pure inspection and takes its roots as arguments so the tests never touch a real home directory. `ejecutar` takes an explicit `respaldo` path, writes there first, and only then removes. Follow `remote_auth.py` for the file handling: check a node's kind by `stat` before touching it, catch `(OSError, UnicodeDecodeError)` together, and never raise into a caller that has nowhere to put it.
+
+**The snapshot is not optional and it is not a courtesy.** This runs on a voice-driven surface, and a "sí" said to a question the machine mis-heard is exactly how a house gets erased by accident. The snapshot is what makes that recoverable.
+
+- [ ] **Step 3: Document the two operations, because confusing them is expensive**
+
+In `widget/README.md`: **pairing** is rare, deliberate and destructive — a new owner, a clean slate. **Re-enrolling a voice** adds or replaces a voiceprint for somebody who already exists and keeps everything. A cold, a new microphone or a drifted voiceprint is not a new owner. The recovery path — regenerating the passphrase from this box's keyboard — leads to **re-enrolment**, never to pairing; if it led to pairing, laryngitis would cost every conversation ever had with him.
+
+- [ ] **Step 4: Do NOT run it on this box yet**
+
+The wipe is the first act of the first encounter, and the first encounter does not exist yet. Running it today leaves an amnesiac JARVIS for however long part A takes to build, and destroys the only evidence that the wipe worked — which is that **he** did it, as part of the ceremony that justifies it. It runs when task 7 calls it.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd widget && .venv/bin/ruff format . && .venv/bin/ruff check .
+cd .. && git add widget/jarvis_widget/borrar.py widget/tests/test_borrar.py widget/README.md
+git commit -m "feat(widget): what a pairing destroys, and what it must not"
+```
+
+---
+
 ### Task 6: The passphrase
 
 **Files:**
@@ -533,12 +594,12 @@ git commit -m "feat(widget): a passphrase you can say out loud"
 - Test: `widget/tests/test_encuentro.py`
 
 **Interfaces:**
-- Consumes: `frase.parecida`, `voz`, `casa.Registro`.
+- Consumes: `frase.parecida`, `voz`, `casa.Registro`, `borrar.inventario` / `borrar.ejecutar`.
 - Produces: `Encuentro(registro, frase)` with `.estado`, `.oye(texto, vector) -> Respuesta | None`, and `Respuesta` carrying what he should say and whether he is finished.
 
 **This is the project's first FLOW rather than a turn**, and it is written pure so it can be driven entirely from tests: no audio, no GTK, no clock but the one you pass in. `turn.py` has no notion of a multi-step conversation and is not touched.
 
-The states: `ESPERANDO` (no amo; only the passphrase advances it) → `PIDIENDO` (asking for sentences; counts them) → `CONFIRMANDO` (says the name back and waits for a yes) → `HECHO`. A wrong answer at any point returns to the previous state with something to say, never to a dead end.
+The states: `ESPERANDO` (no amo; only the passphrase advances it) → `BORRANDO` (says what will be erased and waits for a confirmation that cannot be given by accident) → `PIDIENDO` (asking for sentences; counts them) → `CONFIRMANDO` (says the name back and waits for a yes) → `HECHO`. The wipe happens once, between the passphrase and the first sentence, and it is announced before it happens rather than reported after. A wrong answer at any point returns to the previous state with something to say, never to a dead end.
 
 - [ ] **Step 1: Write the failing tests**
 
