@@ -12,6 +12,9 @@ a strip, a socket or a display.
 import json
 import stat
 
+import numpy as np
+
+from jarvis_widget import casa
 from jarvis_widget.__main__ import (
     _apply_asking_to_wake,
     _apply_error_to_wake_window,
@@ -21,12 +24,17 @@ from jarvis_widget.__main__ import (
     _persona_pendiente,
     _serve_quietly,
     destino_de,
+    huellas_actualizadas,
+    persona_de,
     settle_turn,
     spoken_text,
+    turno_del_encuentro,
 )
+from jarvis_widget.encuentro import Encuentro
 from jarvis_widget.ficha import ESPERA_S, FichaModel
 from jarvis_widget.personas import CASA
 from jarvis_widget.remote import RemoteDesk
+from jarvis_widget.voz import Huellas
 from jarvis_widget.wake import WakeWord
 
 
@@ -761,6 +769,181 @@ async def test_the_phone_surface_failing_does_not_take_the_widget_down(capsys):
     await _serve_quietly(refuses())
 
     assert "sin superficie" in capsys.readouterr().err
+
+
+# ── the first encounter, wired (task 9) ─────────────────────────────────
+#
+# `dispatch` is a closure and cannot be imported (see the module
+# docstring); `_decidir_turno` below is the same convention
+# `test_two_conversations_dones_interleaved_release_both_claims` already
+# uses for `on_done` — a local harness built from the real pure
+# functions the two seams are extracted into (`turno_del_encuentro`,
+# `huellas_actualizadas`, `persona_de`), minus GTK/asyncio/whisper.
+
+FRASE = "gato ventana lento roble"
+
+
+def _decidir_turno(
+    *,
+    registro: casa.Registro,
+    encuentro: Encuentro,
+    huellas_cache: dict[str, object],
+    texto: str,
+    vector: np.ndarray | None,
+    phone: object | None,
+    enviados: list[tuple[str, str]],
+    dichos: list[str] | None = None,
+) -> None:
+    """`dispatch`'s two seams, minus everything a test cannot reach:
+    unpaired goes to `Encuentro` and never appends to `enviados`;
+    paired resolves a `persona` through `persona_de` and appends to
+    it."""
+    if registro.amo is None:
+        decir = dichos.append if dichos is not None else (lambda _habla: None)
+        turno_del_encuentro(encuentro, texto, vector, decir)
+        return
+    huellas = huellas_actualizadas(registro, huellas_cache)
+    persona = persona_de(phone, vector, huellas)
+    enviados.append((texto, persona))
+
+
+def test_an_unpaired_box_answers_but_never_reaches_the_gateway(tmp_path):
+    """He is not deaf while unpaired — he answers — but nothing said to
+    him becomes a turn, so no tool exists and no memory is written."""
+    registro = casa.Registro(tmp_path / "casa.json")
+    encuentro = Encuentro(registro, FRASE)
+    enviados: list[tuple[str, str]] = []
+    dichos: list[str] = []
+
+    _decidir_turno(
+        registro=registro,
+        encuentro=encuentro,
+        huellas_cache={"amo": None, "huellas": None},
+        texto="hola, buenos días",
+        vector=None,
+        phone=None,
+        enviados=enviados,
+        dichos=dichos,
+    )
+
+    assert enviados == []
+    assert dichos  # he answered — a stranger's talk is greeted, not ignored
+
+
+def test_a_paired_box_sends_the_recognised_person_as_the_chat_id(tmp_path):
+    registro = casa.Registro(tmp_path / "casa.json")
+    vector = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    registro.emparejar("Papá", [vector])  # id_desde_nombre("Papá") == "papa"
+    encuentro = Encuentro(registro, FRASE)  # never consulted once amo exists
+    enviados: list[tuple[str, str]] = []
+
+    _decidir_turno(
+        registro=registro,
+        encuentro=encuentro,
+        huellas_cache={"amo": None, "huellas": None},
+        texto="¿qué hora es?",
+        vector=vector,
+        phone=None,
+        enviados=enviados,
+    )
+
+    assert enviados == [("¿qué hora es?", "papa")]
+
+
+def test_an_unrecognised_voice_is_casa_and_still_gets_a_turn(tmp_path):
+    """`casa` is a person with no tools, not a refusal: he answers."""
+    registro = casa.Registro(tmp_path / "casa.json")
+    registro.emparejar("Papá", [np.array([1.0, 0.0, 0.0], dtype=np.float32)])
+    encuentro = Encuentro(registro, FRASE)
+    enviados: list[tuple[str, str]] = []
+    vector_ajeno = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # orthogonal
+
+    _decidir_turno(
+        registro=registro,
+        encuentro=encuentro,
+        huellas_cache={"amo": None, "huellas": None},
+        texto="hola",
+        vector=vector_ajeno,
+        phone=None,
+        enviados=enviados,
+    )
+
+    assert enviados == [("hola", "casa")]
+
+
+def test_a_broken_embedder_costs_identity_and_not_the_turn(tmp_path):
+    """The whole point. A model that fails must not make him deaf — the
+    failure CLAUDE.md §2.8 records costing three days in August."""
+    registro = casa.Registro(tmp_path / "casa.json")
+    registro.emparejar("Papá", [np.array([1.0, 0.0, 0.0], dtype=np.float32)])
+    encuentro = Encuentro(registro, FRASE)
+    enviados: list[tuple[str, str]] = []
+
+    _decidir_turno(
+        registro=registro,
+        encuentro=encuentro,
+        huellas_cache={"amo": None, "huellas": None},
+        texto="hola",
+        vector=None,  # `locutor.Locutor.vector` never raises; this is
+        # exactly what a failed model, or a too-short utterance, hands
+        # back here.
+        phone=None,
+        enviados=enviados,
+    )
+
+    assert enviados == [("hola", "casa")]
+
+
+def test_persona_de_a_phone_press_ignores_voice_entirely():
+    """A phone's press is already an identity that cannot lie; voice
+    adds nothing there and is never even consulted."""
+    huellas = Huellas({"papa": np.array([1.0, 0.0, 0.0], dtype=np.float32)})
+    telefono = FakePhone(persona="marta")
+
+    assert persona_de(telefono, None, huellas) == "marta"
+
+
+def test_huellas_actualizadas_is_read_once_while_amo_does_not_change():
+    class _RegistroFijo:
+        def __init__(self, amo: str, huellas: Huellas) -> None:
+            self.amo = amo
+            self._huellas = huellas
+            self.llamadas = 0
+
+        def huellas(self) -> Huellas:
+            self.llamadas += 1
+            return self._huellas
+
+    fijo = _RegistroFijo("papa", Huellas({}))
+    cache: dict[str, object] = {"amo": None, "huellas": None}
+
+    huellas_actualizadas(fijo, cache)
+    huellas_actualizadas(fijo, cache)
+    huellas_actualizadas(fijo, cache)
+
+    assert fijo.llamadas == 1
+
+
+def test_huellas_actualizadas_rereads_when_the_amo_changes():
+    class _RegistroCambiante:
+        def __init__(self) -> None:
+            self.amo: str | None = None
+            self.llamadas = 0
+
+        def huellas(self) -> Huellas:
+            self.llamadas += 1
+            return Huellas({self.amo: np.array([1.0, 0.0], dtype=np.float32)})
+
+    cambiante = _RegistroCambiante()
+    cache: dict[str, object] = {"amo": None, "huellas": None}
+
+    cambiante.amo = "papa"
+    primera = huellas_actualizadas(cambiante, cache)
+    assert cambiante.llamadas == 1
+
+    segunda = huellas_actualizadas(cambiante, cache)
+    assert cambiante.llamadas == 1  # unchanged amo: not re-read
+    assert segunda is primera
 
 
 # ── the card, wired ─────────────────────────────────────────────────────

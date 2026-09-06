@@ -17,6 +17,7 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,8 +37,13 @@ from .wake import WINDOW_SECONDS, WakeWord  # noqa: E402
 from .wave_model import WaveState  # noqa: E402
 
 if TYPE_CHECKING:
+    import numpy as np
+
+    from .casa import Registro
+    from .encuentro import Encuentro, Respuesta
     from .ficha import FichaModel
     from .photo_area import PhotoArea
+    from .voz import Huellas
 
 # Set to any of the four state names to freeze the wave there and skip
 # the voice loop entirely — how each state gets photographed, since
@@ -171,6 +177,14 @@ _MIC_GATE = os.environ.get("JARVIS_WIDGET_MIC_GATE") == "1"
 
 
 PERSONA_PENDIENTE = Path.home() / ".jarvis" / "enrolamiento.json"
+
+# Where the house register and the passphrase live — the same
+# `~/.jarvis` root every other module in this package uses
+# (`vad.py`, `remote_auth.py`, `PERSONA_PENDIENTE` above). `casa.py`
+# derives its own voiceprints directory (`voces/`) as a SIBLING of
+# `RUTA_CASA`, so nothing here needs to name it separately.
+RUTA_CASA = Path.home() / ".jarvis" / "casa.json"
+RUTA_FRASE = Path.home() / ".jarvis" / "frase.txt"
 
 
 def _persona_pendiente(ruta: Path = PERSONA_PENDIENTE) -> str:
@@ -614,6 +628,84 @@ def settle_turn(phone: object | None, desk) -> None:
     desk.release(phone)
 
 
+def huellas_actualizadas(registro: "Registro", cache: dict[str, object]) -> "Huellas":
+    """The register's voiceprints, re-read from disk only when
+    `registro.amo` has changed since the last utterance — not on every
+    one, which would mean reading every enrolled person's `.npy` file
+    off disk on every single desk turn for a floor that essentially
+    never moves once the house has its first amo: the founding act
+    happens exactly once (`casa.Registro.emparejar`'s own docstring),
+    so `amo` itself only ever transitions `None` -> a person id, a
+    single time, for the life of this process.
+
+    `cache` is passed in rather than read from a module-level global —
+    the same reason `build_may_close`/`build_is_a_person` take their
+    state as an argument instead of closing over one: a test can drive
+    this with its own dict and never leak state into another test.
+    """
+    amo = registro.amo
+    if cache.get("amo") != amo:
+        cache["amo"] = amo
+        cache["huellas"] = registro.huellas()
+    return cache["huellas"]  # type: ignore[return-value]
+
+
+def persona_de(
+    phone: object | None, vector: "np.ndarray | None", huellas: "Huellas | None"
+) -> str:
+    """Who a desk utterance belongs to, or a phone's own identity.
+
+    A phone's press already carries an identity that cannot lie — the
+    button IS the address, the same reasoning `spoken_text` uses for
+    skipping the wake word — so a phone's `persona` is returned
+    directly and `vector`/`huellas` are never even consulted (voice
+    identification on a phone is out of this plan's scope entirely —
+    see `encuentro.py`'s own module docstring and the plan's "what part
+    A does not do").
+
+    At the desk, `CASA` covers every reason a voice cannot be
+    attributed: nobody enrolled yet, nobody close enough, two people
+    equally close (`voz.Huellas.quien`'s own three-in-one contract), or
+    `vector` itself being `None` — an utterance too short to embed, a
+    speaker model that never loaded, or one that raised when asked to
+    run (`locutor.Locutor.vector` never raises; `None` is its whole
+    failure mode). This function cannot and must not tell those apart:
+    treating a broken embedder differently from an honest "I don't
+    know" is exactly how a guess turns into an identity.
+    """
+    if phone is not None:
+        return phone.persona  # type: ignore[attr-defined]
+    if vector is None or huellas is None:
+        return CASA
+    return huellas.quien(vector)
+
+
+def turno_del_encuentro(
+    encuentro: "Encuentro",
+    texto: str,
+    vector: "np.ndarray | None",
+    decir: Callable[[str], None],
+) -> "Respuesta | None":
+    """The whole of "no amo -> he answers, and nothing is ever sent".
+
+    `dispatch` calls this INSTEAD of `client.send_chat` for as long as
+    `registro.amo` is `None`: nothing here touches the gateway, and
+    there is no `chat_id` to carry even if it tried — `decir` is a
+    plain `str -> None` callable, not `speaker.say(clause, destino)`,
+    so a test can hand it a list to append to and assert nothing else
+    happened.
+
+    Returns whatever `Encuentro.oye` returned, so the caller can act on
+    `.terminado` — the phrase's file must be consumed, and the band
+    must go away, on the exact utterance that finishes pairing —
+    without re-reading `registro.amo` a second time to find out.
+    """
+    respuesta = encuentro.oye(texto, vector)
+    if respuesta is not None:
+        decir(respuesta.habla)
+    return respuesta
+
+
 async def _serve_quietly(coro) -> None:
     """Await `coro`, and survive it failing.
 
@@ -682,6 +774,53 @@ class JARVISApp(Gtk.Application):
         band = PhotoArea(on_resize=window.resize_to)
         window.set_band(band)
 
+        # The passphrase band: the first thing anybody sees on a box
+        # with no amo, gone for good once one exists. Built here,
+        # alongside the ficha and the photo band, so it is up and
+        # already showing (or not) the moment the window is presented
+        # — not only once `_start_voice_loop` finishes wiring the
+        # gateway and the microphone, which can take a while longer.
+        from .bienvenida_area import BienvenidaArea
+        from .casa import Registro
+        from .frase import cargar_o_crear
+
+        registro = Registro(RUTA_CASA)
+        bienvenida_area = BienvenidaArea(on_resize=window.resize_bienvenida)
+        window.set_bienvenida(bienvenida_area)
+
+        # Loaded once, at boot, and only while there is still no amo:
+        # `cargar_o_crear` reuses whatever phrase is already on disk,
+        # so restarting the strip mid-onboarding shows the exact same
+        # phrase, never a fresh one that would strand whoever already
+        # read the old one off the screen. A box that already has an
+        # amo has no reason to mint one at all.
+        frase_actual = cargar_o_crear(RUTA_FRASE) if registro.amo is None else ""
+
+        # NOT called here, synchronously — that is exactly the trap
+        # task 8's own report hit during its verification: before
+        # `window.present()`, `_ewmh`/`_xid`/`_rect` are still `None`
+        # (they are set in `StripWindow._on_map`, which has not fired
+        # yet), so `resize_bienvenida`'s call into `window._resize()`
+        # returns early and does nothing — the band still SHOWS (GTK's
+        # own natural-size layout draws it) but the window is never
+        # actually grown to hold it, which squeezes the wave — the only
+        # sign he is listening at all — out of the visible strip
+        # entirely. Deferred onto the window's own "map" signal
+        # instead: `StripWindow.__init__` connects its OWN "map"
+        # handler first (in `__init__`, before this line ever runs),
+        # and GTK calls handlers in the order they were connected, so
+        # by the time this one runs `_ewmh`/`_xid`/`_rect` are already
+        # set and the real EWMH resize path — the one `resize_ficha`/
+        # `resize_to` already use in production — runs instead of a
+        # guess at how long mapping takes.
+        def _mostrar_bienvenida(*_args: object) -> None:
+            if registro.amo is None:
+                bienvenida_area.mostrar(frase_actual)
+            else:
+                bienvenida_area.ocultar()
+
+        window.connect("map", _mostrar_bienvenida)
+
         self._add_demo_keys(window, wave)
         window.present()
 
@@ -727,7 +866,16 @@ class JARVISApp(Gtk.Application):
             wave.model.set_level(0.7 if state in _LIVE else 0.0)
             return
 
-        self._start_voice_loop(wave, band, window, ficha_model, ficha_area)
+        self._start_voice_loop(
+            wave,
+            band,
+            window,
+            ficha_model,
+            ficha_area,
+            registro,
+            frase_actual,
+            bienvenida_area,
+        )
 
     # ── the demo half ─────────────────────────────────────────────────
 
@@ -760,11 +908,25 @@ class JARVISApp(Gtk.Application):
 
     # ── the real half ─────────────────────────────────────────────────
 
-    def _start_voice_loop(self, wave, band, window, ficha_model, ficha_area) -> None:
+    def _start_voice_loop(
+        self,
+        wave,
+        band,
+        window,
+        ficha_model,
+        ficha_area,
+        registro: "Registro",
+        frase_actual: str,
+        bienvenida_area,
+    ) -> None:
         import numpy as np
 
         from .audio import Microphone, Player, SpectrumAnalyser, describe_devices
+        from .bienvenida import BIENVENIDA, NECESIDAD
+        from .encuentro import Encuentro
+        from .frase import consumir
         from .gateway import GatewayClient
+        from .locutor import Locutor
         from .speech import (
             Speaker,
             TurnChunkers,
@@ -793,6 +955,22 @@ class JARVISApp(Gtk.Application):
         # `stt.build_hint`.
         transcriber = Transcriber(hint=build_hint(_WAKE_WORD))
         client = GatewayClient()
+
+        # The first encounter: while `registro.amo` is `None`, every
+        # utterance goes here instead of the gateway (see `dispatch`,
+        # below). `frase_actual` was loaded once at boot in
+        # `do_activate` — passed straight through rather than reloaded
+        # here, so a restart mid-onboarding and this live attempt never
+        # disagree about which phrase is the right one.
+        encuentro = Encuentro(registro, frase_actual)
+        # The impure half of speaker identification (`locutor.py`):
+        # loaded once, lazily, inside its own constructor, and never
+        # raises afterwards — `.vector()` returning `None` is the whole
+        # of its failure mode (CLAUDE.md §2.8).
+        locutor = Locutor()
+        # Re-read from the register only when `registro.amo` changes —
+        # see `huellas_actualizadas`'s own docstring.
+        huellas_cache: dict[str, object] = {"amo": None, "huellas": None}
 
         def on_switch(name: str, on: bool) -> None:
             """One of the two switches on the strip was pressed."""
@@ -1021,7 +1199,33 @@ class JARVISApp(Gtk.Application):
                 )
                 if _DUMP_DIR:
                     _dump_utterance(pcm)
-                text = await asyncio.to_thread(transcriber.transcribe, pcm)
+                # Whisper and the speaker embedder, back to back, in the
+                # ONE thread hop this already pays for transcription —
+                # identification must never sit in FRONT of the answer
+                # (§1.4), which a second `asyncio.to_thread` round trip
+                # would. Skipped for a phone (`vector` stays `None`): a
+                # phone's press is already an identity that cannot lie,
+                # and voice adds nothing there (`persona_de`'s own
+                # docstring).
+                necesita_voz = phone is None
+
+                def _oir_e_identificar() -> tuple[str, "np.ndarray | None", float]:
+                    texto = transcriber.transcribe(pcm)
+                    inicio = time.monotonic()
+                    vector = locutor.vector(pcm) if necesita_voz else None
+                    return texto, vector, (time.monotonic() - inicio) * 1000.0
+
+                text, vector, embed_ms = await asyncio.to_thread(_oir_e_identificar)
+                if necesita_voz:
+                    # The number task 9's report is built from: the
+                    # milliseconds this adds between the end of the
+                    # utterance and `send_chat`, measured on every desk
+                    # turn rather than assumed once and left stale.
+                    print(
+                        f"identificación de voz: {embed_ms:.1f} ms",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 if not text:
                     # Either Whisper is not up yet, or it heard nothing it
                     # believed. Both end the turn quietly; neither is an
@@ -1045,6 +1249,24 @@ class JARVISApp(Gtk.Application):
                     machine.error("")
                     settle_turn(phone, remote_desk)
                     return
+                # Unpaired: nothing reaches Hermes, and this branch
+                # never even tries. `registro.amo` is read fresh from
+                # disk (never cached — `casa.Registro`'s own contract),
+                # so a pairing that finished on an EARLIER utterance is
+                # seen immediately, with no restart needed.
+                if registro.amo is None:
+                    respuesta = turno_del_encuentro(
+                        encuentro, text, vector, lambda habla: say(habla, phone)
+                    )
+                    if respuesta is not None and respuesta.terminado:
+                        # This utterance is the one that finished
+                        # pairing: the band's phrase is spent, and the
+                        # file behind it must go too, or a restart
+                        # would show — and accept — it again.
+                        GLib.idle_add(bienvenida_area.ocultar)
+                        consumir(RUTA_FRASE)
+                    settle_turn(phone, remote_desk)
+                    return
                 # A phone's press IS the address, and ONLY a phone's.
                 # This asked `remote_desk.busy` until 2026-09-01, which
                 # made the room a wake-word-free microphone for the
@@ -1062,13 +1284,21 @@ class JARVISApp(Gtk.Application):
                     print("(no era para él)", file=sys.stderr, flush=True)
                     machine.error("")
                     return
-                # None for the desk, exactly what every build before
-                # today sent. The room does not become multi-person
-                # here — only a phone's turn carries a person, and only
-                # because the Endpoint that answered for it already
-                # knows who they are (task 5's roster, not the words
-                # they said).
-                persona = phone.persona if phone is not None else None
+                # Who this was: a phone's own identity, the voice
+                # embedded above, or `casa` when unsure — see
+                # `persona_de`. `huellas` is re-read from the register
+                # only when it changes (`huellas_actualizadas`), never
+                # on every utterance. This moves a desk turn's `chat_id`
+                # from ABSENT to a person id (`casa` at minimum) — a
+                # DIFFERENT Hermes chat than before (CLAUDE.md §5,
+                # `adapter.py`'s `CHAT_ID_DEFAULT`), by design: per
+                # -person memory is the point.
+                huellas = (
+                    None
+                    if phone is not None
+                    else huellas_actualizadas(registro, huellas_cache)
+                )
+                persona = persona_de(phone, vector, huellas)
                 await client.send_chat(spoken, wake=wake.named, chat_id=persona)
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
@@ -1581,6 +1811,95 @@ class JARVISApp(Gtk.Application):
                 # detector forgot; forget with it".
                 vosk.run(partials.turn.reset)
 
+        # How many times, and how far apart, `_saludar_sin_amo` checks
+        # whether CosyVoice has started answering before giving up
+        # quietly. 10 x 2s = 20s of grace for a container this widget
+        # does not control the startup order of; past that, the band
+        # stays correct and this run simply says nothing.
+        _SALUDO_INTENTOS = 10
+        _SALUDO_ESPERA_S = 2.0
+
+        async def _saludar_sin_amo() -> None:
+            """Say the band's own welcome once, out loud — the owner's
+            ruling of 2026-09-06: "veo el mensaje pero no habla Jarvis"
+            is the exact complaint this closes, and they chose speaking
+            on every login over a quieter "first time ever" flag,
+            knowing that cost.
+
+            Reuses `BIENVENIDA`/`NECESIDAD` — the two lines the band
+            already shows — rather than a third wording of the same
+            fact, so the screen and the voice can never say two
+            different things.
+
+            **Never the phrase itself.** That is not a style choice: the
+            phrase's entire value is that saying it PROVES the speaker
+            has read this machine's own screen. A JARVIS who reads it
+            aloud hands the house to anybody within earshot, to a
+            recording, to a phone left running in the room — so this
+            function must never import, read or touch `frase_actual` /
+            `RUTA_FRASE`, and neither should whatever replaces it later.
+
+            Waits for an actual response from CosyVoice rather than a
+            fixed delay — a sentence spoken into a server that has not
+            answered yet is a lost sentence, which is the exact bug
+            being fixed here, aimed at a container instead of at
+            silence. The probe is a plain GET to CosyVoice's own base
+            URL: there is no `/health` route to ask (measured
+            2026-09-06 — the container's OWN Docker healthcheck fails
+            for the same reason, `curl` missing from its image), so any
+            response at all — even an error page — is treated as
+            "listening", and only a connection failure is retried.
+
+            Called exactly once, from `_boot`, which itself runs exactly
+            once per process — see `_boot`'s own single call site. Every
+            `registro.amo` check inside is a fresh disk read (never
+            cached), so pairing completing WHILE this waits or retries
+            still cancels it.
+
+            Wrapped whole, like every other coroutine `_boot` spawns
+            (`_serve_quietly`): nothing here may raise into `_boot`
+            (CLAUDE.md §2.8) — a greeting that crashes the strip is a
+            far worse bug than a silent one.
+            """
+            if registro.amo is not None:
+                return
+            try:
+                from Hermes.plugins.jarvis_voice import tts
+                from Hermes.plugins.jarvis_voice.tts_config import config
+
+                probe = tts.new_client()
+                try:
+                    llegó = False
+                    for _intento in range(_SALUDO_INTENTOS):
+                        if registro.amo is not None:
+                            return  # paired while this was waiting
+                        try:
+                            await probe.get(config.url, timeout=2.0)
+                            llegó = True
+                            break
+                        except Exception:
+                            await asyncio.sleep(_SALUDO_ESPERA_S)
+                    if not llegó:
+                        print(
+                            "saludo inicial: CosyVoice no respondió; no se dice nada",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        return
+                finally:
+                    await probe.aclose()
+
+                if registro.amo is not None:
+                    return  # paired in the instant between the probe and here
+                print(
+                    "saludo inicial: diciendo la bienvenida",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                say(f"{BIENVENIDA} {NECESIDAD}", None)
+            except Exception as exc:
+                print(f"saludo inicial falló: {exc!r}", file=sys.stderr, flush=True)
+
         def _boot() -> None:
             # All three run for the lifetime of the process, on the loop
             # that owns them.
@@ -1598,6 +1917,10 @@ class JARVISApp(Gtk.Application):
                 f"https://{lan_address()}:{PORT}",
             )
             self._spawn(_serve_quietly(serve(remote_desk, guard, enrolment, loop)))
+            # Once per process — this function's own single call site.
+            # If an amo already exists, `_saludar_sin_amo` returns
+            # immediately without saying anything.
+            self._spawn(_saludar_sin_amo())
 
         def _drive_speaking_level() -> bool:
             """Make the line follow her own voice while she talks.
