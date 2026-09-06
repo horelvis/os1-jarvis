@@ -24,7 +24,12 @@ from typing import TYPE_CHECKING, Callable, Protocol
 from aiohttp import WSMsgType, web
 from loguru import logger
 
-from .certs import ensure_certificate, lan_address, spki_fingerprint
+from .certs import (
+    cadena_servida,
+    ensure_certificate,
+    lan_address,
+    spki_fingerprint,
+)
 from .enrol import mobileconfig, sobre, write_qr
 from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
@@ -712,7 +717,11 @@ async def serve(
 
     ca, cert, key = ensure_certificate(CERT_DIR, HOSTNAME, lan_address())
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(str(cert), str(key))
+    # The leaf AND the CA, not the leaf alone. A phone pins the CA's
+    # public key from its QR and has no copy of the certificate to check
+    # it against unless this sends one — see `certs.cadena_servida`,
+    # which carries what that cost and why no test here caught it.
+    context.load_cert_chain(str(cadena_servida(CERT_DIR, cert, ca)), str(key))
     # access_log=None, structurally: aiohttp's default access logger
     # formats %r — the whole request line, which here is
     # "GET /ws?t=<the shared secret>". It is silent today only because

@@ -256,3 +256,153 @@ def test_the_fingerprint_is_stable_across_calls(tmp_path) -> None:
     ca_pem, _cert, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
 
     assert spki_fingerprint(ca_pem) == spki_fingerprint(ca_pem)
+
+
+def test_the_served_chain_carries_the_ca_not_only_the_leaf(tmp_path) -> None:
+    """The bug an iPhone found on 2026-09-06, and the reason it was
+    invisible here.
+
+    A phone enrolling with JARVIS is handed the SHA-256 of the house
+    CA's PUBLIC KEY in its QR (`enrol.sobre`'s `ca`), and pins it. To
+    check that pin it has to SEE the CA certificate — the leaf alone
+    carries a different key, by design. The box was serving exactly one
+    certificate, so the app had nothing to compare against and reported
+    that the certificate did not match.
+
+    It passed every test here because every test supplied the CA from a
+    local file (`-CAfile`, `cafile=`), which is precisely what a phone
+    does not have.
+    """
+    from jarvis_widget.certs import cadena_servida, ensure_certificate
+
+    ca_pem, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    cadena = cadena_servida(tmp_path, cert_pem, ca_pem)
+
+    texto = cadena.read_text()
+    assert texto.count("BEGIN CERTIFICATE") == 2, "leaf and CA, in that order"
+    # The leaf must come first: TLS requires the server's own
+    # certificate to be the first in the chain.
+    assert texto.index(cert_pem.read_text().strip()[:60]) < texto.index(
+        ca_pem.read_text().strip()[:60]
+    )
+
+
+def test_the_chain_is_rebuilt_when_the_certificate_changes(tmp_path) -> None:
+    """A stale chain would serve a leaf that no longer matches the key,
+    which fails in a way that looks like the bug it replaced."""
+    from jarvis_widget.certs import cadena_servida, ensure_certificate
+
+    ca_pem, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    cadena = cadena_servida(tmp_path, cert_pem, ca_pem)
+    cadena.write_text("basura de antes")
+
+    de_nuevo = cadena_servida(tmp_path, cert_pem, ca_pem)
+
+    assert de_nuevo.read_text().count("BEGIN CERTIFICATE") == 2
+
+
+def test_the_chain_is_not_world_readable(tmp_path) -> None:
+    from jarvis_widget.certs import cadena_servida, ensure_certificate
+
+    ca_pem, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert cadena_servida(tmp_path, cert_pem, ca_pem).stat().st_mode & 0o077 == 0
+
+
+def _dias_de_validez(pem) -> int:
+    import datetime
+
+    salida = subprocess.run(
+        ["openssl", "x509", "-in", str(pem), "-noout", "-dates"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    fechas = dict(linea.split("=", 1) for linea in salida.strip().splitlines())
+    leer = lambda s: datetime.datetime.strptime(s.strip(), "%b %d %H:%M:%S %Y %Z")  # noqa: E731
+    return (leer(fechas["notAfter"]) - leer(fechas["notBefore"])).days
+
+
+def test_the_leaf_lives_no_longer_than_apple_allows(tmp_path) -> None:
+    """398 days, and it is not a preference.
+
+    iOS and macOS refuse any TLS server certificate whose validity
+    exceeds 398 days. This box issued its leaf for ten years, so every
+    iPhone rejected it before looking at anything else — which is what
+    an app reported on 2026-09-06 as "the certificate does not match",
+    after the missing chain had already been fixed.
+    """
+    from jarvis_widget.certs import DIAS_HOJA, ensure_certificate
+
+    _ca, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert DIAS_HOJA <= 398
+    assert _dias_de_validez(cert_pem) <= 398
+
+
+def test_the_ca_keeps_its_long_life(tmp_path) -> None:
+    """Apple's limit is for SERVER certificates. The root is pinned by
+    the public key in the QR, not served as a leaf, and reissuing it
+    would strand every enrolled phone — the exact cost
+    `spki_fingerprint` exists to avoid."""
+    from jarvis_widget.certs import ensure_certificate
+
+    ca_pem, _cert, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert _dias_de_validez(ca_pem) > 398
+
+
+def test_a_leaf_about_to_expire_is_reissued_and_the_ca_is_not(tmp_path) -> None:
+    """The half that matters more than the number. A 398-day leaf with
+    no renewal is a box that stops answering phones in thirteen months,
+    silently, with nothing in any log at the moment it breaks.
+
+    The CA must survive the reissue: the phones pinned ITS key, and
+    replacing it means re-enrolling every one of them.
+    """
+    from jarvis_widget.certs import ensure_certificate, spki_fingerprint
+
+    # A leaf with one day of life, which is inside the renewal window.
+    ca_pem, cert_pem, _key = ensure_certificate(
+        tmp_path, "brain.local", "192.168.1.40", dias_hoja=1
+    )
+    huella_antes = spki_fingerprint(ca_pem)
+    primera = cert_pem.read_text()
+
+    ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    segunda = cert_pem.read_text()
+
+    assert segunda != primera, "an expiring leaf must be replaced"
+    assert spki_fingerprint(ca_pem) == huella_antes, "the CA's key must not move"
+
+
+def test_a_healthy_leaf_is_left_alone(tmp_path) -> None:
+    """Reissuing on every boot would churn the serial and the file for
+    nothing, and would hide a renewal that had genuinely stopped."""
+    from jarvis_widget.certs import ensure_certificate
+
+    _ca, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    primera = cert_pem.read_text()
+
+    ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert cert_pem.read_text() == primera
+
+
+def test_deleting_the_leaf_does_not_move_the_ca(tmp_path) -> None:
+    """The gesture an operator reaches for when a certificate looks
+    wrong — delete it and restart — must not invalidate every enrolled
+    phone. It did, on the live box, on 2026-09-06: the reuse guard
+    required all three files, so a missing leaf fell through to the full
+    path and regenerated the root with it.
+    """
+    from jarvis_widget.certs import ensure_certificate, spki_fingerprint
+
+    ca_pem, cert_pem, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    huella = spki_fingerprint(ca_pem)
+    cert_pem.unlink()
+
+    ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert cert_pem.is_file(), "the leaf must be reissued"
+    assert spki_fingerprint(ca_pem) == huella, "the CA must not move"

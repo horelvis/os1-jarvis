@@ -27,7 +27,7 @@ from gi.repository import Gdk, GLib, Graphene, Gtk  # noqa: E402
 
 from .live import LiveModel  # noqa: E402
 from .live_decode import LiveDecoder  # noqa: E402
-from .photo import PhotoModel, hits, tile_rects  # noqa: E402
+from .photo import encajar, PhotoModel, hits, tile_rects  # noqa: E402
 
 # How often the band asks whether it is time to fade. Four times a
 # second: nobody can see the difference against a 15 s timer, and it is
@@ -336,6 +336,9 @@ class PhotoArea(Gtk.Widget):
         for texture, (x, y, w, h) in zip(
             textures, tile_rects(width, height, len(textures))
         ):
+            # The texture's own shape inside the tile, not stretched
+            # into it: the band's tiles are 16:9 and the enrolment QR is
+            # square (`photo.encajar`).
             rect = Graphene.Rect()
-            rect.init(x, y, w, h)
+            rect.init(*encajar((x, y, w, h), texture.get_width(), texture.get_height()))
             snapshot.append_texture(texture, rect)

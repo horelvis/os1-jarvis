@@ -58,3 +58,32 @@ def test_a_nan_vector_is_similar_to_nothing_and_answers_casa():
     # returning a person even though coseno said it was garbage.
     huellas = Huellas({"papa": _v(1, 0), "marta": _v(0, 1)})
     assert huellas.quien(np.array([np.nan, 0], dtype=np.float32), piso=0.5) == CASA
+
+
+def test_the_floor_admits_his_real_speech_and_still_refuses_a_stranger():
+    """The placeholder floor was 0.6 and said so in its own comment.
+    Measured 2026-09-06 against seven real utterances from the amo, the
+    MEAN of his own speech against his enrolled centroid was 0.583 —
+    below the floor. More than half his turns were answered `CASA`,
+    which is what made `emparejar` refuse the owner of the house.
+
+    0.45 is where those measurements put it: it admits everything from
+    2.3 s upward (0.614 at worst) and still sits well above the 0.0-0.3
+    band a different speaker occupies for this model.
+    """
+    import numpy as np
+
+    from jarvis_widget.voz import PISO_POR_DEFECTO, Huellas
+
+    centroide = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    huellas = Huellas({"orelvis": centroide})
+
+    # 0.614 — his worst passing utterance. Must be attributed.
+    casi = np.array([0.614, 0.789, 0.0], dtype=np.float32)
+    assert huellas.quien(casi) == "orelvis"
+
+    # 0.307 — his own 1.5 s utterance, and a stranger's range. Must not.
+    lejos = np.array([0.307, 0.952, 0.0], dtype=np.float32)
+    assert huellas.quien(lejos) == CASA
+
+    assert PISO_POR_DEFECTO == 0.45

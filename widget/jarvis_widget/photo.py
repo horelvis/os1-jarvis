@@ -171,6 +171,40 @@ def tile_rects(
     return [(x + i * (tile_w + GAP), y, tile_w, tile_h) for i in range(count)]
 
 
+def encajar(
+    tile: tuple[float, float, float, float], ancho: int, alto: int
+) -> tuple[float, float, float, float]:
+    """The largest rect with the texture's own shape, centred in `tile`.
+
+    `Gtk.Snapshot.append_texture` stretches whatever it is given into
+    the rect it is given, and the band's tiles are a fixed 16:9
+    (`ASPECT`). Every picture that reaches this band had been 16:9 too —
+    the cameras, the live view — so nothing ever looked wrong, until the
+    enrolment QR arrived on 2026-09-06. A square code drawn 1.78 times
+    wider than tall is a distortion some decoders survive and none
+    should be asked to.
+
+    A source that already matches the tile comes back unchanged, to the
+    pixel: this is a fix for one picture, not a redesign of the band.
+
+    A texture reporting no size returns the tile untouched rather than
+    dividing by zero. This runs inside a draw callback, where an
+    exception is swallowed and the strip simply stops drawing.
+    """
+    x, y, w, h = tile
+    if ancho <= 0 or alto <= 0 or w <= 0 or h <= 0:
+        return tile
+    escala = min(w / ancho, h / alto)
+    ancho_final = ancho * escala
+    alto_final = alto * escala
+    return (
+        x + (w - ancho_final) / 2,
+        y + (h - alto_final) / 2,
+        ancho_final,
+        alto_final,
+    )
+
+
 def hits(x: float, y: float, rects: list[tuple[float, float, float, float]]) -> bool:
     """Did a press at (x, y) land on one of these photos?
 

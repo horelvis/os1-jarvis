@@ -191,3 +191,46 @@ def test_only_the_picture_answers_a_press():
 
 def test_a_press_with_nothing_on_the_band_hits_nothing():
     assert hits(450, 50, tile_rects(900, THUMB, 0)) is False
+
+
+# ── a square picture in a 16:9 tile ───────────────────────────────────
+#
+# Found on a real iPhone, 2026-09-06. The enrolment QR is square and the
+# band's tiles are a fixed 16:9, and `append_texture` stretches whatever
+# it is given into the rect it is given. So the code was drawn 1.78
+# times wider than tall — a distortion some decoders survive and none
+# should be asked to.
+
+
+def test_a_square_texture_keeps_its_shape_inside_the_tile() -> None:
+    from jarvis_widget.photo import encajar
+
+    # A 16:9 tile, 320x180, and a square source.
+    assert encajar((0.0, 0.0, 320.0, 180.0), 512, 512) == (70.0, 0.0, 180.0, 180.0)
+
+
+def test_a_matching_aspect_is_left_exactly_alone() -> None:
+    """Every camera photo and the live view are already 16:9. This
+    change must be invisible for them, or it is a redesign of the band
+    rather than a fix to one picture."""
+    from jarvis_widget.photo import encajar
+
+    assert encajar((10.0, 20.0, 320.0, 180.0), 1920, 1080) == (10.0, 20.0, 320.0, 180.0)
+
+
+def test_a_texture_wider_than_the_tile_is_letterboxed_vertically() -> None:
+    from jarvis_widget.photo import encajar
+
+    x, y, w, h = encajar((0.0, 0.0, 320.0, 180.0), 400, 100)
+
+    assert (w, h) == (320.0, 80.0)
+    assert (x, y) == (0.0, 50.0)
+
+
+def test_a_texture_with_no_size_is_not_a_division_by_zero() -> None:
+    """`Gdk.Texture` always reports a size, but this runs in a draw
+    callback where an exception is swallowed and the strip simply stops
+    drawing (CLAUDE.md §2.3)."""
+    from jarvis_widget.photo import encajar
+
+    assert encajar((0.0, 0.0, 320.0, 180.0), 0, 0) == (0.0, 0.0, 320.0, 180.0)

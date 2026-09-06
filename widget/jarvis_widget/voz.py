@@ -24,9 +24,33 @@ import numpy as np
 
 from .personas import CASA
 
-# Where "sure enough" sits. Calibrated against real voices in task 4;
-# until then it is a placeholder that fails safe by being high.
-PISO_POR_DEFECTO = 0.6
+# Where "sure enough" sits. **Calibrated 2026-09-06**, which is what
+# this comment promised and did not have until a real iPhone and a real
+# owner found the gap. It was 0.6, a placeholder that "fails safe by
+# being high" — and it failed the owner of the house instead.
+#
+# Seven utterances from the amo, embedded and compared against his own
+# enrolled centroid (`~/.jarvis/voces/orelvis.npy`):
+#
+#     1.5 s -> 0.307      3.0 s -> 0.614
+#     2.0 s -> 0.446      3.8 s -> 0.652, 0.678
+#     2.3 s -> 0.635      5.5 s -> 0.746
+#
+# **The mean of his own speech was 0.583 — below the old floor.** More
+# than half his turns came back `CASA`, which is why he could not ask
+# his own house to pair a phone. 0.45 admits every utterance from 2.3 s
+# upward (0.614 at worst) and still sits well clear of the 0.0-0.3 band
+# a different speaker occupies for this model.
+#
+# **This number does not stand alone.** `locutor._MINIMO_SEGUNDOS`
+# refuses to embed anything shorter than the measurements support: his
+# OWN voice at 1.5 s scores 0.307, so a low floor without that duration
+# guard would be an open door rather than a calibration.
+#
+# Calibrated on one person and seven utterances. That is enough to
+# replace a placeholder and not enough to be final: re-measure with
+# `widget/tools/medir_voces.py` when a second person is enrolled.
+PISO_POR_DEFECTO = 0.45
 
 # How much clearer the winner must be than the runner-up.
 MARGEN_POR_DEFECTO = 0.05

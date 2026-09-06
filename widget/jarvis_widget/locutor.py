@@ -53,7 +53,17 @@ _SAMPLE_RATE = 16000
 # what the graph itself will accept (measured floor: 0.30 s — see the
 # module docstring). This project's typical utterance is short enough
 # that the margin above the graph's own floor matters.
-_MINIMO_SEGUNDOS = 1.0
+# Below this, refuse to embed at all. Raised from 1.0 s on 2026-09-06,
+# and not for performance: measured against seven of the amo's own
+# utterances, HIS voice at 1.5 s scores 0.307 against his own enrolled
+# centroid — the range a different person occupies for this model. The
+# embedding of a very short utterance does not carry enough to tell one
+# person from another, so answering with one is a guess dressed as an
+# identity. 2.2 s sits between the two measured groups: everything at
+# 2.3 s and above scored 0.614 or better, everything at 2.0 s and below
+# scored 0.446 or worse. See `voz.PISO_POR_DEFECTO` for the table; the
+# two numbers were calibrated together and neither is safe alone.
+_MINIMO_SEGUNDOS = 2.2
 _MINIMO_MUESTRAS = int(_MINIMO_SEGUNDOS * _SAMPLE_RATE)
 
 
