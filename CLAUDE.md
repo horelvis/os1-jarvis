@@ -179,17 +179,25 @@ as the primary interaction mode.
    does not narrate steps. If a request would make her sound like a task
    runner, she talks instead.
 
-   **She does say what she is about to do, and what she found**, since
-   2026-09-06 — but only at two moments: before something that will take
-   a while or that LEAVES THIS HOUSE ("voy a buscar en internet sobre
-   eso"), and when what came back is the point ("he encontrado varios
-   vídeos"). The owner asked for it in those words, and the reason it is
-   a principle rather than a concession is the second half: a web search
-   is the only thing here that goes outside (§1.1), so saying it out loud
-   is the only signal a person gets that it did. What stays forbidden is
-   the machinery — tool names, step counts, "ejecutando 3 de 5", routine
+   **She does say that she went outside, and what she found**, since
+   2026-09-06: "He estado buscando sobre eso y he encontrado varios
+   vídeos…", at the head of the answer, before the result. The reason it
+   is a principle and not a courtesy is that a web search is the only
+   thing here that leaves the house (§1.1), and that sentence is the only
+   way anybody in the room learns it did. What stays forbidden is the
+   machinery — tool names, step counts, "ejecutando 3 de 5", routine
    successes. The test survives unchanged: someone watching should not be
    able to tell where the conversation ended and the task began.
+
+   **It is in the past tense, and that is a constraint rather than a
+   preference** (measured 2026-09-06). Announcing it BEFORE — "voy a
+   buscar en internet" — cannot be done from the persona at all: a turn
+   reaches the strip as exactly ONE frame, the finished answer, measured
+   three times over search turns. Nothing a model might say before a
+   tool call has a path to the screen. `jarvis_code`'s live milestones
+   are not a counter-example — they come from the A2A bridge's own event
+   stream on `:9910`, not from a Hermes hook, and `jarvis/adapter.py`
+   has no tool hook of any kind.
 
    Revised on 2026-08-23 — this principle used to end at "not for
    productivity", and §12 has the reasoning.
@@ -964,7 +972,15 @@ never sees it.
 persona file, the hint or the memory does not touch a session that
 already exists, and restarting the gateway does not either — the session
 lives in `state.db` and resumes exactly as it was. Send **`/new`, then
-`/approve`** through the strip after any persona change. Hermes Desktop
+`/approve`** through the strip after any persona change.
+
+**And restarting the gateway is necessary as well** — this line used to
+say only that it "is not enough", which reads as "do not bother", and
+that cost a measurement on 2026-09-06. `plugins/jarvis/__init__.py`
+builds the hint at REGISTRATION time (`platform_hint=_platform_hint()`,
+evaluated once when `register()` runs), so a `/new` alone opens a fresh
+session around the persona the process read at boot. The order is:
+**restart `jarvis-hermes.service`, then `/new`, then `/approve`.** Hermes Desktop
 appears to obey instantly only because it opens a session of its own,
 and that discrepancy is the clue if you ever see it again.
 

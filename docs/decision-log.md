@@ -48,10 +48,34 @@ costs nothing to build, because the thing that decides what he says is
 the persona, not our code. The whole change is one bullet in
 `jarvis-soul.md` and the two CLAUDE.md rules that contradicted it.
 
-**Where the line now falls.** Two moments, and only two: **what he is
-about to do**, when it will take a while or when it LEAVES THIS HOUSE,
-and **what he found**, when the finding is the point. Still forbidden:
-tool names, step counts, "ejecutando 3 de 5", routine successes.
+**Where the line now falls.** Two things, both at the head of the
+answer: **that he went outside**, whenever he searched, and **what he
+found**, when the finding is the point. Still forbidden: tool names,
+step counts, "ejecutando 3 de 5", routine successes.
+
+**It is in the past tense because the future tense is not reachable,
+and that was measured rather than assumed.** The first version of this
+change asked him for the owner's own words — "voy a buscar en internet
+sobre eso", before the search. He never said it, three turns running,
+with the persona confirmed loaded. The cause is not the model and not
+the persona: **a turn reaches the strip as exactly one frame**, the
+finished answer. There is no path for anything mid-turn to arrive.
+`jarvis_code` looks like a counter-example and is not — its milestones
+ride the A2A bridge's own event stream on `:9910`, and it is the ONLY
+caller of `push_console` in the tree; `jarvis/adapter.py` has no tool
+hook at all. Announcing BEFORE would need a Hermes-level tool-call
+callback that nobody here has looked for yet. The owner's other
+constraint — *no necesito verlo en vivo* — is what makes the past tense
+the right answer rather than a consolation.
+
+**Measured after the fix**, same session, four questions:
+
+| asked | said |
+|---|---|
+| el tiempo mañana en Murcia | «He estado mirando el pronóstico.» + el parte |
+| vídeos de arroz caldoso | «He estado buscando sobre eso y he encontrado varios vídeos» |
+| el tráfico en la A-30 | contesta con lo que hay (medido antes del cambio, sin mención) |
+| días de febrero bisiesto | «Veintinueve, señor.» — no salió fuera, no lo menciona |
 
 **The half of this that is a privacy control, not a courtesy.**
 `jarvis-config.yaml` has carried a note since 2026-08-26 that the `web`
