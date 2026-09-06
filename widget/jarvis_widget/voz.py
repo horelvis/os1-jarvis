@@ -33,16 +33,32 @@ MARGEN_POR_DEFECTO = 0.05
 
 
 def coseno(a: np.ndarray, b: np.ndarray) -> float:
-    """Cosine similarity, and 0.0 rather than a division by zero.
+    """Cosine similarity: 0.0 for zero, shape mismatch, or non-finite result.
 
-    A silent or clipped utterance can produce a zero vector, and this is
-    called from the audio path where an exception has nowhere to go.
+    A silent or clipped utterance can produce a zero vector, an embedding
+    with non-finite values can appear on the audio path, and a centroid
+    stored by a different model has a different width. This function is
+    called from the audio path where an exception has nowhere to go, so it
+    returns 0.0 instead of raising.
     """
+    # Shape mismatch: treat as similar to nothing
+    if a.shape != b.shape:
+        return 0.0
+
     na = float(np.linalg.norm(a))
     nb = float(np.linalg.norm(b))
-    if na == 0.0 or nb == 0.0:
+
+    # Zero vectors or non-finite norms: treat as similar to nothing
+    if na == 0.0 or nb == 0.0 or not (np.isfinite(na) and np.isfinite(nb)):
         return 0.0
-    return float(np.dot(a, b) / (na * nb))
+
+    result = float(np.dot(a, b) / (na * nb))
+
+    # Non-finite result: treat as similar to nothing
+    if not np.isfinite(result):
+        return 0.0
+
+    return result
 
 
 class Huellas:

@@ -41,3 +41,20 @@ def test_two_people_too_close_together_is_reported_rather_than_guessed():
 
 def test_the_default_floor_is_a_number_somebody_chose():
     assert 0.0 < PISO_POR_DEFECTO < 1.0
+
+
+def test_a_shape_mismatch_is_similar_to_nothing_and_does_not_raise():
+    # A centroid stored by one embedding model has a different width than
+    # a query from another. This is a shape mismatch, not a bug in the
+    # caller, and it must degrade to CASA, never raise.
+    huellas = Huellas({"papa": _v(1, 0, 0)})  # 3-dimensional centroid
+    assert huellas.quien(_v(1, 0), piso=0.5) == CASA  # 2-dimensional query
+
+
+def test_a_nan_vector_is_similar_to_nothing_and_answers_casa():
+    # A non-finite embedding can appear on the audio path. It is neither
+    # zero nor a valid direction, and must degrade to CASA. Before the
+    # fix, NaN compared False to every threshold, so quien fell through to
+    # returning a person even though coseno said it was garbage.
+    huellas = Huellas({"papa": _v(1, 0), "marta": _v(0, 1)})
+    assert huellas.quien(np.array([np.nan, 0], dtype=np.float32), piso=0.5) == CASA
