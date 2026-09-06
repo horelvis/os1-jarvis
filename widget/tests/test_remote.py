@@ -497,14 +497,21 @@ async def test_the_enrolment_socket_is_up_only_while_the_window_is() -> None:
         await runner.cleanup()
 
 
-async def _socket(desk: RemoteDesk) -> tuple[TestClient, web.Application]:
+async def _socket(
+    desk: RemoteDesk, guard: Guard | None = None, registro=None
+) -> tuple[TestClient, web.Application]:
+    """The one way any test here stands up a live `/ws` socket.
+
+    Defaults reproduce the two byte-ceiling tests' original fixture
+    exactly (a single `casa` secret, no register), so passing neither
+    argument changes nothing for them. A test that needs a real person
+    behind the socket — the wire-level `enrolled` test below — passes
+    its own `guard` and `registro` instead of standing up a second app.
+    """
+    if guard is None:
+        guard = Guard({"casa": "s" * 32}, "https://brain.local:8443")
     app = web.Application()
-    app.router.add_get(
-        "/ws",
-        _handler(
-            desk, Guard({"casa": "s" * 32}, "https://brain.local:8443"), None, None
-        ),
-    )
+    app.router.add_get("/ws", _handler(desk, guard, registro, None))
     client = TestClient(TestServer(app))
     await client.start_server()
     return client, app
@@ -743,3 +750,33 @@ def test_a_register_that_cannot_be_read_does_not_break_the_handshake(tmp_path) -
             raise OSError("ilegible")
 
     assert nombre_para(Roto(), "nata") == "nata"
+
+
+async def test_the_enrolled_frame_names_the_phone_before_anything_else(
+    tmp_path,
+) -> None:
+    """The wire contract, not `nombre_para` in isolation: a real socket,
+    through the real `_handler`, must say whose phone this is — by
+    DISPLAY name, not the id `persona_for` resolves to — before any
+    other frame. The ordering matters because the iPhone app is being
+    written against it; the exact value matters because a typo in the
+    key, the wrong value, or sending the id instead of the name would
+    otherwise still pass the whole suite (`nombre_para`'s own tests
+    never touch a socket at all)."""
+    import numpy as np
+
+    from jarvis_widget.casa import Registro
+
+    registro = Registro(tmp_path / "casa.json")
+    registro.emparejar("Orelvis", [np.array([1.0, 0.0, 0.0], dtype=np.float32)])
+
+    secreto = "o" * 32
+    guard = Guard({"orelvis": secreto}, "https://brain.local:8443")
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    client, _ = await _socket(desk, guard=guard, registro=registro)
+    try:
+        ws = await client.ws_connect("/ws?t=" + secreto)
+        first = await asyncio.wait_for(ws.receive_json(), timeout=5)
+        assert first == {"type": "enrolled", "name": "Orelvis"}
+    finally:
+        await client.close()

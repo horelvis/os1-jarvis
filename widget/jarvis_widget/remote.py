@@ -26,7 +26,7 @@ from loguru import logger
 
 from .certs import ensure_certificate, lan_address, spki_fingerprint
 from .enrol import mobileconfig, sobre, write_qr
-from .personas import id_desde_nombre, normalizar
+from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
 
@@ -665,7 +665,7 @@ def nombre_para(registro, persona: str) -> str:
     """
     try:
         for quien in registro.personas():
-            if id_desde_nombre(quien.nombre) == persona:
+            if quien.id == persona:
                 return quien.nombre
     except Exception:
         logger.debug("alta: no he podido leer el registro para nombrar a %s", persona)
