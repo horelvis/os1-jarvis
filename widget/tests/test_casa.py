@@ -89,7 +89,7 @@ def test_a_second_pairing_when_an_amo_exists_raises(tmp_path):
     assert [p.id for p in registro.personas()] == ["marta"]
 
 
-def test_a_name_that_does_not_survive_normalizar_is_refused(tmp_path):
+def test_a_name_that_survives_to_nothing_is_refused(tmp_path):
     registro = casa.Registro(tmp_path / "casa.json")
 
     with pytest.raises(ValueError):
@@ -100,16 +100,23 @@ def test_a_name_that_does_not_survive_normalizar_is_refused(tmp_path):
     assert registro.personas() == []
 
 
-def test_an_accented_name_is_refused_for_the_same_reason(tmp_path):
-    """`normalizar` is ASCII-only by design (`personas.py`): 'lucía'
-    casefolds but does not match the id grammar, so it becomes `CASA`
-    and is refused here exactly like '!!!' is. Turning a spoken,
-    accented name into an ASCII id is a problem for whoever calls this
-    (the founding flow), not for the register."""
+def test_an_accented_name_pairs_with_an_ascii_id_and_keeps_its_accent(tmp_path):
+    """Corrected: this used to assert the opposite — that an accented
+    name was refused exactly like '!!!' is. It was wrong, and not a
+    small wrong: 'lucía', 'martín' and 'josé' cover most of the names in
+    this house, and the amo himself could easily be one of them, which
+    would have meant the owner of the machine could not give his own
+    name at the founding act. `emparejar` now derives the id through
+    `personas.id_desde_nombre`, which strips diacritics before handing
+    the result to `normalizar` — so the id folds to plain ASCII while
+    `Persona.nombre` keeps the accent exactly as spoken."""
     registro = casa.Registro(tmp_path / "casa.json")
 
-    with pytest.raises(ValueError):
-        registro.emparejar("Lucía", [_v(1, 0, 0)])
+    persona = registro.emparejar("Lucía", [_v(1, 0, 0)])
+
+    assert persona.id == "lucia"
+    assert persona.nombre == "Lucía"
+    assert registro.amo == "lucia"
 
 
 def test_pairing_as_the_reserved_name_casa_is_refused(tmp_path):

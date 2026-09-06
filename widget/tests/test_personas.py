@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from jarvis_widget.personas import CASA, es_valida, normalizar
+from jarvis_widget.personas import CASA, es_valida, id_desde_nombre, normalizar
 
 
 def test_casa_is_the_fallback_for_nothing_at_all():
@@ -51,6 +51,37 @@ def test_non_string_inputs_to_normalizar_return_casa():
     assert normalizar(123) == CASA
     assert normalizar(["a"]) == CASA
     assert normalizar(b"marta") == CASA
+
+
+def test_id_desde_nombre_strips_diacritics_that_normalizar_would_refuse():
+    # A NAME, not a chat_id off the wire — most names in this house have
+    # an accent, and `normalizar` alone would send every one of them to
+    # CASA (see test_a_name_is_folded_and_trimmed above).
+    assert id_desde_nombre("Lucía") == "lucia"
+    assert id_desde_nombre("Martín") == "martin"
+    assert id_desde_nombre("José") == "jose"
+    assert id_desde_nombre("Papá") == "papa"
+
+
+def test_id_desde_nombre_still_refuses_a_name_that_survives_to_nothing():
+    # Stripping diacritics does not rescue a name that was never a name
+    # to begin with — the founding act must still refuse these exactly
+    # as `normalizar` refuses them on its own.
+    assert id_desde_nombre("!!!") == CASA
+    assert id_desde_nombre("...") == CASA
+    assert id_desde_nombre("") == CASA
+
+
+def test_id_desde_nombre_does_not_change_what_normalizar_does_with_a_chat_id():
+    # The one thing this function must NOT do is quietly become a second
+    # way to reach `normalizar`'s job: an accented chat_id off the phone
+    # socket still folds to CASA through `normalizar` itself, unchanged.
+    assert normalizar("Lucía") == CASA
+
+
+def test_id_desde_nombre_non_string_input_is_casa():
+    assert id_desde_nombre(123) == CASA
+    assert id_desde_nombre(None) == CASA
 
 
 def test_the_grammar_is_hermes_own_profile_grammar():

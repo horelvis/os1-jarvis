@@ -26,6 +26,7 @@ sandboxed from tools or from another person's memory.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # Not a person. The shared identity a turn falls back to.
 CASA = "casa"
@@ -67,3 +68,37 @@ def normalizar(raw: str | None) -> str:
         return CASA
     limpio = raw.strip().casefold()
     return limpio if es_valida(limpio) else CASA
+
+
+def id_desde_nombre(nombre: str) -> str:
+    """A person id from a NAME — as opposed to `normalizar`, which is a
+    id from a `chat_id` off the wire. The two must not be the same
+    function.
+
+    A display name keeps its accents on purpose (`casa.Persona.nombre`
+    is what he calls someone out loud), and most names in this house
+    have one: `Lucía`, `Martín`, `José`, `Papá`. Refusing all of them
+    the way `normalizar` refuses `'!!!'` would mean the amo himself
+    could not found the house with his own name. So this strips
+    diacritics first — NFKD decomposition, then drop the combining
+    marks — and only THEN hands the result to `normalizar`: `Lucía` →
+    `lucia`, `Martín` → `martin`, `José` → `jose`, `Papá` → `papa`.
+
+    This never touches `normalizar` itself, which guards `chat_id`s
+    arriving off the phone socket and is deliberately NOT transliterated
+    — changing that would change the wire's behaviour, and this
+    function exists so that decision does not have to move.
+
+    The trade this makes, on purpose: `Adrián` and `Adrian` (the same
+    name, with and without the accent) now fold to the same id, so a
+    second person who collides on the stripped form is refused (by the
+    caller, via the ordinary "id already taken" path) rather than
+    silently getting a suffix. A visible, recoverable collision is a
+    smaller cost than the one this function exists to avoid — the amo
+    being unable to say his own name.
+    """
+    if not isinstance(nombre, str):
+        return CASA
+    descompuesto = unicodedata.normalize("NFKD", nombre)
+    sin_diacriticos = "".join(c for c in descompuesto if not unicodedata.combining(c))
+    return normalizar(sin_diacriticos)

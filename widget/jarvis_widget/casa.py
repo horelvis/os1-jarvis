@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from .personas import CASA, es_valida, normalizar
+from .personas import CASA, es_valida, id_desde_nombre
 from .voz import Huellas
 
 
@@ -47,8 +47,8 @@ def _estado_vacio() -> dict:
 
 @dataclass(frozen=True)
 class Persona:
-    """One entry in the register. `id` is what `normalizar` produced —
-    ASCII, a valid Hermes profile name, a valid file name. `nombre` is
+    """One entry in the register. `id` is what `id_desde_nombre` produced
+    — ASCII, a valid Hermes profile name, a valid file name. `nombre` is
     what he calls her out loud, kept exactly as given, accent and all.
     """
 
@@ -182,30 +182,48 @@ class Registro:
         only amo, from `nombre` and the voice samples gathered while
         pairing.
 
+        The id is `id_desde_nombre(nombre)`, not `normalizar(nombre)`
+        directly: most names in this house carry an accent — `Lucía`,
+        `Martín`, the amo's own — and `normalizar` alone would send
+        every one of them to `CASA`, since it guards `chat_id`s off the
+        wire and is deliberately not the place diacritics get stripped.
+        `nombre` itself is kept exactly as given, accent and all, as
+        `Persona.nombre` — that is what he calls this person out loud.
+
         Raises `ValueError` rather than proceeding when: an amo already
         exists (the founding act happens once — see the module
-        docstring); `nombre` does not survive `normalizar` — which
-        includes `nombre` literally being `casa`, the one id this must
-        never produce, since it is the shared identity an unattributed
-        turn falls back to, not a person; or `vectores` is empty, which
-        would found an amo whose voiceprint can never clear any floor
-        `Huellas.quien` sets — a broken amo, not merely an unverified
-        one.
+        docstring); `nombre` does not survive `id_desde_nombre` even
+        after diacritics are stripped — which includes `nombre` folding
+        to `casa`, the one id this must never produce, since it is the
+        shared identity an unattributed turn falls back to, not a
+        person; or `vectores` is empty, which would found an amo whose
+        voiceprint can never clear any floor `Huellas.quien` sets — a
+        broken amo, not merely an unverified one.
         """
         estado = _leer(self._path)
         if estado["amo"] is not None:
             raise ValueError("an amo already exists; emparejar does not repeat")
 
-        persona_id = normalizar(nombre)
+        persona_id = id_desde_nombre(nombre)
         if persona_id == CASA:
             raise ValueError(f"not a usable person name: {nombre!r}")
         if not vectores:
             raise ValueError("emparejar needs at least one voice sample")
 
+        # Order is load-bearing: the voiceprint is written FIRST. If
+        # writing it fails partway, `casa.json` is untouched and there
+        # is simply no amo yet — recoverable by pairing again. The
+        # reverse order is not symmetric: a `casa.json` write that
+        # succeeds while the voiceprint write then fails would leave an
+        # amo who exists, whose passphrase has already been consumed,
+        # and who can never be recognised again — a locked box, with no
+        # recovery flow yet. Vectors with no amo are harmless orphans
+        # the next pairing simply overwrites; an amo with no vectors is
+        # not. Do not reorder this to "look" more natural.
+        self._guardar_vectores(persona_id, np.asarray(vectores, dtype=np.float32))
         estado["personas"][persona_id] = {"nombre": nombre}
         estado["amo"] = persona_id
         _escribir(self._path, estado)
-        self._guardar_vectores(persona_id, np.asarray(vectores, dtype=np.float32))
         return Persona(id=persona_id, nombre=nombre, amo=True)
 
     def recordar(self, persona_id: str, vector: np.ndarray) -> None:
