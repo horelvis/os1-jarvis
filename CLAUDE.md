@@ -579,7 +579,8 @@ chosen and why it was dropped are both in the decision log (2026-05-13,
 ```
 os1-jarvis/
 ├── CLAUDE.md               ← This file. Read first.
-├── PROGRESS.md             ← The log, newest first (you append to this)
+├── PROGRESS.md             ← The log: this month in full, and the index
+│                             of every entry (you append to this)
 ├── README.md               ← The short version, for humans
 │
 ├── widget/                 ← HIM. The GTK4 strip and everything it does.
@@ -625,6 +626,8 @@ os1-jarvis/
 │                             llamacpp
 ├── docs/
 │   ├── decision-log.md     ← §12: why things are the way they are
+│   ├── progress-2026-08.md ← the log, August: the widget era
+│   ├── progress-kiosk-era.md ← the log, to June: phases 0–10, v1–v3
 │   └── superpowers/        ← designs and plans, dated
 │
 
@@ -729,7 +732,7 @@ Phases 0–9 built the Chromium kiosk: FastAPI backend, React frontend,
 llama.cpp, STT/TTS, ChromaDB memory, systemd deployment, the UI redesign
 and the Hermes-Agent integration. All ✅, all superseded as a *surface*
 by the widget — the LLM, TTS and Hermes work carried straight over.
-`PROGRESS.md` has each one.
+`docs/progress-kiosk-era.md` has each one; `PROGRESS.md` indexes them.
 
 ### Since (dated, not numbered)
 
