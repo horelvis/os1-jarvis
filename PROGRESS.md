@@ -14,6 +14,7 @@
 **Septiembre de 2026 — aquí abajo, entero.**
 
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
+- 2026-09-06 (madrugada) — Un iPhone de verdad encontró cinco cosas ✅
 - 2026-09-06 (noche) — La onda sabe que está trabajando ✅
 - 2026-09-06 — El primer encuentro: la casa aprende de quién es ✅⏸
 - 2026-09-06 — Varias conversaciones a la vez, y cada una con nombre ✅
@@ -180,6 +181,102 @@ limpio.
   y el propio decodificado del PNG por cámara — ninguno de los dos se
   pudo ejercitar sin tocar al amo real o instalar `pyzbar`/`zbar`
   (ausente del sistema, no sólo del venv).
+
+## 2026-09-06 (madrugada) — Un iPhone de verdad encontró cinco cosas ✅
+
+Un dispositivo real intentó emparejarse y falló cinco veces por cinco
+causas distintas. Ninguna era de la app. Y **cada una era invisible desde
+aquí por su propio motivo**, que es la parte que merece quedar escrita.
+
+**1. La caja servía un solo certificado.** La hoja, nunca la CA. Un
+teléfono recibe en su QR la huella SHA-256 de la clave pública de la CA
+y la ancla; sin la CA en el cable no tiene contra qué compararla, y sólo
+puede decir «el certificado no coincide». Lo que me lo ocultó fue mi
+propia medición de la tarde: pasó porque le di la CA **desde un fichero
+local** (`-CAfile`), que es exactamente lo que un iPhone no tiene.
+
+**2. La hoja duraba diez años, y Apple rechaza más de 398 días.** iOS lo
+descarta antes de mirar la cadena siquiera. El SAN, el `extendedKeyUsage`
+y el `basicConstraints` ya estaban bien; sólo sobraba la vida. La CA
+conserva la suya: el límite es para certificados de servidor, y la raíz
+se ancla por clave, no se sirve.
+
+**3. Y por tanto, la renovación** — que es la mitad que un número solo no
+arregla. Una hoja de 398 días sin nada que la renueve es una caja que
+deja de contestar a los teléfonos dentro de trece meses, en silencio. Se
+reemite dentro de una ventana de 30 días, **desde la misma CA**, así que
+a ningún teléfono hay que decirle nada.
+
+**4. La CA no sobrevivía al primer instinto de un operador.** La guarda
+de reutilización exigía los tres ficheros, así que borrar la hoja —lo
+que cualquiera hace cuando un certificado parece roto— caía al camino
+completo y **regeneraba también la raíz**, invalidando todos los
+teléfonos. Lo encontré haciendo exactamente eso en la caja encendida, lo
+que significa que ocurrió: **la CA de esta casa se movió esa noche**, y
+cualquier QR escaneado antes de `b4aeb9f` está muerto.
+
+**5. El QR no era grande: estaba estirado.** Las casillas de la banda son
+16:9 fijas y `append_texture` estira lo que le des, así que un código
+cuadrado se dibujaba **1,78 veces más ancho que alto** — 654×368 en vez
+de 368×368. Nunca se había notado porque todo lo que había pasado por esa
+banda era 16:9: las cámaras, la vista en vivo.
+
+**Y antes de todo eso, lo que bloqueaba pedirlo hablando.** Se añadió una
+herramienta `emparejar`, porque dar de alta un teléfono era un ritual de
+línea de comandos y a un JARVIS al que se le habla debería podérsele
+pedir. El shell **era** la puerta, así que la puerta se reconstruyó en
+dos capas independientes: la pasarela resuelve quién pregunta desde sus
+turnos abiertos —nunca del modelo, y hay un test que lo fija— y la tira
+se niega por su cuenta según a quién atribuyó el último turno.
+
+Y entonces rechazó al amo, una y otra vez. **No le reconocía la voz.**
+
+**El umbral llevaba desde el principio un comentario que decía
+«provisional, calibrar en la tarea 4», y la tarea 4 nunca se corrió** —
+es el cabo que este mismo fichero anotó por la mañana. Volcando siete
+frases suyas reales y midiéndolas contra su propio centroide:
+
+| duración | coseno | |
+|---|---|---|
+| 1,5 s | 0,307 | ❌ |
+| 2,0 s | 0,446 | ❌ |
+| 3,0 s | 0,614 | ✅ |
+| 2,3 s | 0,635 | ✅ |
+| 3,8 s | 0,652 · 0,678 | ✅ |
+| 5,5 s | 0,746 | ✅ |
+
+**La media de su propia voz era 0,583 y el piso 0,6**: el umbral estaba
+clavado en mitad de su distribución, así que le reconocía la mitad de las
+veces y los aciertos pasaban por dos centésimas. Pero el patrón que
+importa es el otro: **los dos fallos son las dos frases más cortas, y su
+propia voz en 1,5 s puntúa 0,307** — el rango donde vive otra persona
+para este modelo. Bajar el piso sin más habría sido abrir la puerta.
+
+Van los dos juntos, calibrados uno contra el otro: **piso 0,45 y no
+intentar identificar por debajo de 2,2 s**, devolviendo «no lo sé» en vez
+de adivinar. Reproducido sobre las ocho frases guardadas: le reconoce en
+6 de 8, y las dos que no son las cortas, que ahora se declaran no
+atribuibles a propósito.
+
+**Cuatro hipótesis descartadas antes de llegar ahí**, y ninguna era: que
+el fichero guardara cinco vectores y se compararan mal las formas
+(`casa.py` promedia), que `coseno` no normalizara (sí lo hace), que el
+embebedor no cargara (carga), y que la caché de huellas no se rellenara
+(se rellena). Y una medición mía que no medía lo que yo creía: las cinco
+muestras del enrolamiento contra sí mismas dan 0,657-0,765, pero son
+pasajes leídos del tirón en una sola sesión — el caso fácil.
+
+**Deuda anotada:** ese centroide viene de cinco lecturas seguidas. El
+arreglo de verdad es reenrolarle con habla natural, y esto es la
+calibración honesta de lo que hay. Calibrado además sobre **una persona
+y siete frases**: suficiente para sustituir un valor provisional, no para
+ser definitivo.
+
+**Y un desliz de proceso, para que conste:** la calibración de voz viajó
+dentro de `b4aeb9f`, cuyo mensaje habla sólo de certificados y del QR.
+`git add -A` con dos trabajos abiertos a la vez. El razonamiento está
+entero en los comentarios de `voz.py` y `locutor.py`; lo que faltaba era
+que el mensaje describiera su propio diff.
 
 ## 2026-09-06 (noche) — La onda sabe que está trabajando ✅
 
