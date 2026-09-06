@@ -1,20 +1,64 @@
 """Getting a phone enrolled, without typing a token on a touchscreen.
 
-One QR, pointing at a welcome page served over PLAIN HTTP — deliberately,
-because of a chicken-and-egg: HTTPS cannot be used before the certificate
-it depends on is trusted. The QR itself is harmless — it encodes only a
-LAN URL. The page behind it is not: it embeds the shared secret,
-in cleartext, in its second link's href. That is exactly why serving
-the page at all is bounded to a short window rather than the life of
-the process — see `remote.Enrolment` and `remote.ENROLMENT_SECONDS`.
+One QR, and since 2026-09-06 it carries an ENVELOPE rather than a link:
+where the box is, the person's token, and the fingerprint of the key
+their phone must pin (`sobre`). That is what lets a phone be added
+without recompiling the app, which is what the address and the
+certificate living inside it used to cost.
+
+**The QR is now a secret.** It was not before — it encoded a LAN URL —
+and every comment that said so has been corrected. It holds a token
+that authenticates one person to this house, so it is written 0600, it
+is shown only while the enrolment window is open, and a photograph of
+the strip taken by somebody else in the room IS a credential leak. The
+window (`remote.ENROLMENT_SECONDS`) is what bounds that, and it matters
+more now than it did when it only bounded a page.
+
+The plain-HTTP welcome page still exists for a phone with no app, but it
+is no longer reachable by scanning: its address is typed. It is on its
+way out (owner, 2026-09-06).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import plistlib
 import uuid
 from pathlib import Path
+
+# The envelope's format version. The app rejects a version it does not
+# know, so this number is a promise: change it only when a field
+# changes meaning, never when one is added.
+VERSION_SOBRE = 1
+
+
+def sobre(*, url: str, token: str, ca: str) -> str:
+    """Everything a phone needs, as the JSON that goes inside the QR.
+
+    Four mandatory fields and no defaults, deliberately: the app
+    rejects an incomplete envelope outright rather than falling back to
+    the system's own certificate validation, which is the property that
+    makes pinning worth anything. So a missing field has to fail HERE,
+    where there is a traceback and a journal, and not on a phone whose
+    only symptom is a scan that does nothing.
+
+    `wss` is checked for the same reason. A QR offering `ws://` is a
+    box that has been misconfigured into plaintext, and the app drops it
+    before connecting — so it must never be written.
+    """
+    if not url or not token or not ca:
+        raise ValueError(
+            "un sobre incompleto no se escribe: url, token y ca son obligatorios"
+        )
+    if not url.startswith("wss://"):
+        raise ValueError(f"el sobre exige wss, no {url!r}")
+    return json.dumps(
+        {"v": VERSION_SOBRE, "url": url, "token": token, "ca": ca},
+        # Compact and stable: a QR's size is its scannability, and a
+        # sorted, space-free payload is also diffable in a log.
+        separators=(",", ":"),
+    )
 
 
 def write_qr(url: str, path: Path) -> Path:

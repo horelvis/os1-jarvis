@@ -97,3 +97,54 @@ def test_the_profile_identifies_itself_recognisably(tmp_path) -> None:
     profile = plistlib.loads(mobileconfig(ca))
 
     assert "JARVIS" in profile["PayloadDisplayName"]
+
+
+def test_the_envelope_carries_the_four_fields_and_the_version() -> None:
+    import json
+
+    from jarvis_widget.enrol import sobre
+
+    texto = sobre(
+        url="wss://brain.local:8443/ws",
+        token="un-secreto",
+        ca="sha256/AAAA",
+    )
+    datos = json.loads(texto)
+
+    assert datos == {
+        "v": 1,
+        "url": "wss://brain.local:8443/ws",
+        "token": "un-secreto",
+        "ca": "sha256/AAAA",
+    }
+
+
+def test_the_envelope_refuses_to_be_written_incomplete() -> None:
+    """The app rejects a partial envelope rather than falling back to
+    system validation (contract). The box must therefore never produce
+    one: an empty token or a missing fingerprint is a bug HERE, and a
+    QR that a person scans and that silently does nothing is the worst
+    possible way to find out."""
+    import pytest
+
+    from jarvis_widget.enrol import sobre
+
+    for kwargs in (
+        {"url": "", "token": "t", "ca": "sha256/A"},
+        {"url": "wss://x/ws", "token": "", "ca": "sha256/A"},
+        {"url": "wss://x/ws", "token": "t", "ca": ""},
+    ):
+        with pytest.raises(ValueError):
+            sobre(**kwargs)
+
+
+def test_the_envelope_refuses_a_url_that_is_not_wss() -> None:
+    """`wss` is mandatory in the contract, and the app drops a `ws://`
+    QR before connecting. A box that writes one has misconfigured
+    itself — say so here rather than shipping a QR nothing will accept."""
+    import pytest
+
+    from jarvis_widget.enrol import sobre
+
+    with pytest.raises(ValueError):
+        sobre(url="ws://brain.local:8443/ws", token="t", ca="sha256/A")
