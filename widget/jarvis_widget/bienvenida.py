@@ -37,10 +37,14 @@ ESPACIADO = 6
 # Room around the whole block, top and bottom together — a deliberate
 # aesthetic choice, the way `ficha.py`'s COMPACTA/AMPLIA are, never a
 # measurement: without it the band would be exactly as tall as its text
-# and read as cramped rather than a panel. Picked so an ordinary,
-# unwrapped phrase keeps close to the 170px total this band already
-# shipped once and was reviewed as legible and well-proportioned
-# (2026-09-06) — not because 49 means anything on its own.
+# and read as cramped rather than a panel. Calibrated once against the
+# real, measured heights on this box (2026-09-06 fix round) so an
+# ordinary phrase keeps a comfortable margin above and below the block
+# — screenshotted and reviewed as legible and well-proportioned at the
+# total this produces, not because 49 means anything on its own. A box
+# whose fallback font resolves differently will get a different total
+# from the same RELLENO, which is the point: the number that has to
+# stay right is the content's real height, not this one.
 RELLENO = 49
 
 # What a box with no amo says, in the order it reads: a greeting to a
