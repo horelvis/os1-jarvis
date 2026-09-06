@@ -489,37 +489,44 @@ def _turn_bookkeeping(was_on: bool, is_on: bool) -> tuple[bool, bool]:
 
 
 class TurnOrigin:
-    """Whether the turn in flight was asked for on a phone, and by which.
+    """The hand-off from the microphone thread into `dispatch`, and
+    nothing past it.
 
-    Nothing else in the process knows. `dispatch` is one function
-    serving two mouths, and until this existed it asked
-    `remote_desk.busy` — "is SOME phone holding the turn" — which is a
-    different question and answers it wrongly in both directions:
+    Until 2026-09-06 this also held `current` — a SECOND slot, written
+    by `take()` and read back by `settle()` — because `on_done` and
+    `on_error` arrive long after `dispatch` has returned and had no
+    other way to learn whose turn they were closing. That stopped being
+    true once reply frames started carrying their own `chat_id` (task
+    9): a closer now asks `destino_de(remote_desk, chat_id)`, which
+    resolves the ANSWERING endpoint through `RemoteDesk.endpoint_for`
+    instead of through a slot here. `current` is gone, and with it the
+    bug task 14 exists for — two phones overlap by design now
+    (`RemoteDesk` is per-person), and a single shared `current` meant a
+    SECOND phone's `arriving()`/`take()` before the FIRST phone's turn
+    had settled overwrote it, so the first phone's close released the
+    second phone's claim instead of its own.
 
-    - a sentence said at the DESK while a phone held the turn skipped
-      the wake word, so for the whole of every phone turn the room was
-      an open microphone dispatching turns to an agent that holds a
-      terminal;
-    - and a desk turn settling — an empty transcription and an
-      all-echo one, the two commonest desk outcomes — called
-      `route_home()` and `release()`, which freed the phone's claim
-      MID-ANSWER and sent every clause queued after it into the room. A
-      question asked privately on a phone, finished out loud in the
+    What is left is genuinely single-slot: `arriving()` then `take()`
+    happen back to back, inside one call, on the way INTO `dispatch` —
+    microseconds, never read by anything that outlives that call. Both
+    `None` means the desk, which is also what an UNPROMPTED turn is: a
+    cron reminder or a camera alert never calls `arriving()` at all, so
+    it carries no `chat_id` either, and `destino_de` resolves it to the
+    room the same way. Two bugs this shape must keep closed, both
+    measured on 2026-09-01 against the OLDER `remote_desk.busy` design
+    this replaced and never reintroduced since:
+
+    - a sentence said at the DESK while a phone held a turn skipping
+      the wake word, leaving the room an open microphone in front of an
+      agent that holds a terminal;
+    - a desk turn settling — an empty transcription and an all-echo
+      one, the two commonest desk outcomes — freeing a phone's claim
+      MID-ANSWER and finishing a private question out loud in the
       house.
-
-    One turn runs at a time, so one slot each is enough and no turn
-    identity has to travel over the wire. `pending` is written the
-    instant a phone's audio is handed up and read-and-cleared by
-    `dispatch`; `current` is what that turn is, for as long as it is
-    settling — `on_done` and `on_error` arrive long after `dispatch`
-    has returned. Both `None` means the desk, which is also what an
-    UNPROMPTED turn is: a cron reminder or a camera alert now settles
-    without touching a phone's claim, which it used to take away.
     """
 
     def __init__(self) -> None:
         self.pending: object | None = None
-        self.current: object | None = None
 
     def arriving(self, endpoint: object) -> None:
         """A phone's utterance is on its way into `dispatch`."""
@@ -527,13 +534,7 @@ class TurnOrigin:
 
     def take(self) -> object | None:
         """The endpoint this turn belongs to, or None for the desk."""
-        self.current = self.pending
-        self.pending = None
-        return self.current
-
-    def settle(self) -> object | None:
-        """The endpoint the turn being settled belonged to, and forget it."""
-        current, self.current = self.current, None
+        current, self.pending = self.pending, None
         return current
 
 
@@ -1006,7 +1007,7 @@ class JARVISApp(Gtk.Application):
                     # Only if it WAS the phone's turn, though — an empty
                     # desk transcription is the commonest event in the
                     # room, and it used to end a phone's answer halfway.
-                    settle_turn(origin.settle(), remote_desk)
+                    settle_turn(phone, remote_desk)
                     return
                 print(f"→ {text}", file=sys.stderr, flush=True)
                 text = echo.clean(text, time.monotonic())
@@ -1014,7 +1015,7 @@ class JARVISApp(Gtk.Application):
                     # All of it was him. Not a turn, and not an error.
                     print("(era su propio eco)", file=sys.stderr, flush=True)
                     machine.error("")
-                    settle_turn(origin.settle(), remote_desk)
+                    settle_turn(phone, remote_desk)
                     return
                 # A phone's press IS the address, and ONLY a phone's.
                 # This asked `remote_desk.busy` until 2026-09-01, which
@@ -1028,12 +1029,10 @@ class JARVISApp(Gtk.Application):
                     # Ending the turn the same way an empty transcription
                     # does: the wave goes back to listening and he never
                     # knew. Only ever reached at the desk — a phone turn
-                    # never asks the wake word — but the origin is
-                    # forgotten here too, or the NEXT turn to settle
-                    # would inherit it.
+                    # never asks the wake word, so `phone` is always
+                    # `None` here and there is no claim to give back.
                     print("(no era para él)", file=sys.stderr, flush=True)
                     machine.error("")
-                    origin.settle()
                     return
                 # None for the desk, exactly what every build before
                 # today sent. The room does not become multi-person
@@ -1046,7 +1045,7 @@ class JARVISApp(Gtk.Application):
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
-                settle_turn(origin.settle(), remote_desk)
+                settle_turn(phone, remote_desk)
 
         def on_disconnect() -> None:
             """The gateway connection itself was lost, mid-turn or not.
@@ -1122,15 +1121,20 @@ class JARVISApp(Gtk.Application):
                 # desk before the real tokens ever arrive — a question
                 # asked on a phone, answered out loud in the room.
                 #
-                # And gated on the ORIGIN of the turn being settled: a
-                # desk turn gives nothing back, so an unprompted one — a
-                # cron reminder, a camera alert — no longer takes a
-                # phone's claim away either.
-                settle_turn(origin.settle(), remote_desk)
+                # And it settles the endpoint this SAME callback already
+                # resolved above, from this turn's own `chat_id` — never
+                # a shared slot. An unprompted turn — a cron reminder, a
+                # camera alert — carries no `chat_id` at all, so
+                # `destino` is already `None` here and gives nothing
+                # back; a desk turn is the same. Two phones overlapping
+                # cannot cross here either, because each `on_done` only
+                # ever asks after ITS OWN `chat_id`.
+                settle_turn(destino, remote_desk)
 
         def on_error(message: str, chat_id: str | None = None) -> None:
+            destino = destino_de(remote_desk, chat_id)
             if message:
-                say(message, destino_de(remote_desk, chat_id))
+                say(message, destino)
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
             # This is the OTHER way a turn ends, and its buffer is just
@@ -1148,7 +1152,7 @@ class JARVISApp(Gtk.Application):
                     file=sys.stderr,
                     flush=True,
                 )
-            settle_turn(origin.settle(), remote_desk)
+            settle_turn(destino, remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
             # Straight to the GTK thread. Everything else the gateway

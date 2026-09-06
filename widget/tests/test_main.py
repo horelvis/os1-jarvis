@@ -526,44 +526,78 @@ def test_a_settle_from_a_turn_that_is_no_longer_the_holders_is_ignored():
     assert desk.holders.get(CASA) is new
 
 
+def test_two_overlapping_phone_turns_release_the_right_claim_each():
+    """Task 14. Until 2026-09-06 `TurnOrigin` also kept `current` — a
+    SECOND shared slot, written by `take()` and read back by a since
+    -removed `settle()` — because `on_done`/`on_error` arrive long
+    after `dispatch` has returned and had no other way to learn whose
+    turn they were closing. A second phone's utterance arriving (and
+    being `take()`n) before the first phone's turn had settled
+    overwrote that slot, so the FIRST phone's close resolved to the
+    SECOND phone's endpoint and released the wrong claim.
+
+    Each closer now resolves its own endpoint from its own turn's
+    `chat_id`, through `destino_de` — there is no shared slot left to
+    overwrite, so the two turns below cannot cross regardless of which
+    one settles first.
+    """
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    marta, lucia = FakePhone(persona="marta"), FakePhone(persona="lucía")
+    desk.claim(marta, now=0.0)
+    desk.claim(lucia, now=0.0)
+
+    # Both turns are in flight at once — the overlap two per-person
+    # claims are meant to allow. Marta's is the one whose reply
+    # finishes and settles first, resolved from HER OWN chat_id.
+    settle_turn(destino_de(desk, "marta"), desk)
+
+    assert desk.holders.get("marta") is None  # her own claim, given back
+    assert desk.holders.get("lucía") is lucia  # Lucía's, untouched
+
+    # Lucía's settles afterwards, from HER OWN chat_id, and is
+    # unaffected by Marta's having already gone.
+    settle_turn(destino_de(desk, "lucía"), desk)
+
+    assert desk.holders.get("lucía") is None
+
+
 def test_an_unprompted_turn_does_not_take_a_phones_claim():
-    """A cron reminder and a camera alert arrive with no utterance of
-    their own, so nothing ever marked them, so they settle as the desk
-    — which is what they are. They used to send the sink home and free
-    whichever phone was mid-answer."""
-    origin = TurnOrigin()
+    """A cron reminder and a camera alert carry no `chat_id` of their
+    own, so `destino_de` resolves them to the room exactly as a desk
+    turn does. They used to send the sink home and free whichever
+    phone was mid-answer."""
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     phone = FakePhone()
     desk.claim(phone, now=0.0)
 
-    settle_turn(origin.settle(), desk)  # the reminder's own `done`
+    settle_turn(destino_de(desk, None), desk)  # the reminder's own `done`
 
     assert desk.holders.get(CASA) is phone
 
 
 def test_the_marker_is_one_shot():
-    """Read and cleared at the top of the turn it belongs to. A marker
-    that survived would make the NEXT desk turn look like a phone's."""
+    """Read and cleared the instant `dispatch` takes it — the only
+    state `TurnOrigin` keeps now. A marker that survived would make the
+    NEXT desk turn look like the previous phone's."""
     origin = TurnOrigin()
     phone = FakePhone()
     origin.arriving(phone)
 
     assert origin.take() is phone
-    assert origin.settle() is phone
     assert origin.take() is None
-    assert origin.settle() is None
 
 
 def test_a_turn_from_a_phone_carries_its_person():
-    """`TurnOrigin` stores the endpoint itself, so whatever the endpoint
-    knows about its person travels with it — no separate identity has
-    to cross the wire."""
+    """`TurnOrigin.take()` hands back the endpoint itself, so whatever
+    it knows about its person travels with it — no separate identity
+    has to cross the wire."""
     origin = TurnOrigin()
     telefono = FakePhone(persona="marta")
     origin.arriving(telefono)
 
-    assert origin.take() is telefono
-    assert origin.current.persona == "marta"
+    taken = origin.take()
+    assert taken is telefono
+    assert taken.persona == "marta"
 
 
 def test_a_desk_turn_has_no_endpoint_and_therefore_no_person():
