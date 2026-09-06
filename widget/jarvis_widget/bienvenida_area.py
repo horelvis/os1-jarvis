@@ -3,11 +3,12 @@
 State lives in `bienvenida.py`, which imports no `gi` and is therefore
 testable. This is the part that cannot be: two `Gtk.Label`s, styled
 through `theme.CSS` the same way the console's own label already is.
-The top label carries two lines of text (`BIENVENIDA` and `NECESIDAD`,
-joined by "\\n") rather than being a third `Gtk.Label` — the owner
-asked for a welcome and a reason to bother, not a third weight or a
-second colour (2026-09-06), so both share the one small style the
-original instruction line already had.
+The top label carries two lines of text joined by "\\n" rather than
+being a third `Gtk.Label` — the owner asked for a welcome and a reason
+to bother, not a third weight or a second colour (2026-09-06), so both
+share the one small style the original instruction line already had.
+Which two lines they are is `encuentro.ROTULO_*`'s business, per state,
+and reaches here through `mostrar`.
 
 No GSK snapshot and no Cairo context here, unlike `photo_area.py` (a
 texture) or `ficha_area.py` (a webview): this band draws no pixels of
@@ -39,7 +40,7 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Pango, PangoCairo  # noqa: E402
 
 from . import theme  # noqa: E402
-from .bienvenida import ESPACIADO, BIENVENIDA, NECESIDAD, BienvenidaModel  # noqa: E402
+from .bienvenida import ESPACIADO, BienvenidaModel  # noqa: E402
 
 # Font descriptions for measurement, built to match `theme.py`'s
 # `.jarvis-bienvenida-instruccion` / `.jarvis-bienvenida-frase` CSS
@@ -89,7 +90,9 @@ def _alto_renderizado(texto: str, fuente: Pango.FontDescription, ancho_max: int)
 class BienvenidaArea(Gtk.Box):
     """The band above the wave, showing what he is waiting for, or nothing.
 
-    Zero pixels tall until `mostrar` is called. `ocultar` is NOT a
+    Zero pixels tall until `mostrar` is called. Both what it shows and
+    the line labelling it come from `encuentro.Respuesta` — nothing here
+    is a constant any more. `ocultar` is NOT a
     one-way door: the pairing flow hides the band mid-way (the moment
     it stops asking for something to read and asks for a name) and
     shows it again with the candidate name a turn later, so both
@@ -107,10 +110,13 @@ class BienvenidaArea(Gtk.Box):
         self.set_valign(Gtk.Align.CENTER)
         self.set_visible(False)
 
-        # The welcome and the reason to bother, in the two smaller lines
-        # read before the phrase: one label, not two, so there is no
-        # second weight or colour for either to carry.
-        self._instruccion = Gtk.Label(label=f"{BIENVENIDA}\n{NECESIDAD}")
+        # What the phrase below is FOR, in the two smaller lines read
+        # before it: one label, not two, so there is no second weight or
+        # colour for either to carry. Empty until `mostrar` is given a
+        # `rotulo` — this label used to hold the welcome as a constant,
+        # which is how it went on instructing a person to say the
+        # passphrase while the phrase under it was a reading passage.
+        self._instruccion = Gtk.Label()
         self._instruccion.add_css_class("jarvis-bienvenida-instruccion")
         self._instruccion.set_justify(Gtk.Justification.CENTER)
         self._instruccion.set_wrap(True)
@@ -126,20 +132,25 @@ class BienvenidaArea(Gtk.Box):
 
         self.set_size_request(-1, 0)
 
-    def mostrar(self, frase: str) -> None:
-        """The phrase to put on the strip, while there is still no amo.
+    def mostrar(self, frase: str, rotulo: str) -> None:
+        """The phrase to put on the strip, and what it is for.
+
+        `rotulo` is required rather than defaulted, and both come from
+        the same `encuentro.Respuesta` — a phrase whose header was left
+        over from a previous state is the bug this pair exists to close,
+        and a default is exactly how one gets left over.
 
         Measures both blocks at the band's real width before asking the
         model for a height — `theme.STRIP_MAX_WIDTH`, the same 900px
         figure the strip itself is fixed to (`theme.py`), so what is
         measured here is what will actually be laid out, not a guess at
-        it.
+        it. The header is measured too, not assumed: it is no longer a
+        constant, and the states differ in how tall theirs renders.
         """
+        self._instruccion.set_text(rotulo)
         self._frase.set_text(frase)
         ancho = theme.STRIP_MAX_WIDTH
-        alto_instruccion = _alto_renderizado(
-            f"{BIENVENIDA}\n{NECESIDAD}", _FUENTE_INSTRUCCION, ancho
-        )
+        alto_instruccion = _alto_renderizado(rotulo, _FUENTE_INSTRUCCION, ancho)
         alto_frase = _alto_renderizado(frase, _FUENTE_FRASE, ancho)
         self._apply(
             self.model.mostrar(

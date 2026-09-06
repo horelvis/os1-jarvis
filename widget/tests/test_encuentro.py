@@ -12,8 +12,10 @@ import numpy as np
 import pytest
 
 from jarvis_widget import casa
+from jarvis_widget.bienvenida import NECESIDAD
 from jarvis_widget.encuentro import (
     CONFIRMACION_BORRADO,
+    ROTULO_ESPERANDO,
     Encuentro,
     Estado,
     Respuesta,
@@ -659,3 +661,83 @@ def test_hecho_answers_nothing_further(tmp_path):
 
     assert r is None
     assert enc.estado is Estado.HECHO
+
+
+# ── the band's HEADER, not only its phrase ────────────────────────────
+#
+# The half of the owner's own bug that the `lectura` round left open:
+# the two small lines above the phrase were a fixed constant
+# ("Hasta que no la diga, no puedo hacer nada"), so the screen kept
+# instructing a person to say the passphrase while the voice was asking
+# them to read a passage, or asking whether their name was Orelvis.
+
+
+def test_esperando_labels_the_band_with_the_welcome(tmp_path):
+    enc, _registro = _nuevo(tmp_path)
+
+    saludo = enc.oye("hola")
+
+    assert saludo.rotulo == ROTULO_ESPERANDO
+    assert NECESIDAD in saludo.rotulo
+
+
+def test_every_state_that_shows_something_labels_it_differently(tmp_path):
+    """No two consecutive states may leave the same header over a
+    different phrase — that is exactly what made the strip contradict
+    the question being asked out loud."""
+    enc, _registro = _nuevo(tmp_path, n_muestras=2)
+    vector = _v(1.0, 0.0, 0.0)
+
+    esperando = enc.oye("hola")
+    borrando = enc.oye(FRASE)
+    pidiendo = enc.oye(CONFIRMACION_BORRADO)
+    pidiendo_2 = enc.oye("una frase leída", vector)
+    sin_nada = enc.oye("otra frase leída", vector)
+    confirmando = enc.oye("me llamo Marta")
+
+    # Each state that puts a phrase on the band says what the phrase is
+    # for, and no two of these four say the same thing.
+    rotulos = [
+        esperando.rotulo,
+        borrando.rotulo,
+        pidiendo.rotulo,
+        confirmando.rotulo,
+    ]
+    assert all(r is not None and r.strip() for r in rotulos)
+    assert len(set(rotulos)) == 4
+
+    # The two slots of PIDIENDO share one header: same job, same words.
+    assert pidiendo.rotulo == pidiendo_2.rotulo
+
+    # Nothing to show, nothing to label.
+    assert sin_nada.lectura is None
+    assert sin_nada.rotulo is None
+
+
+def test_the_passphrase_instruction_never_outlives_the_passphrase(tmp_path):
+    """The bug itself, pinned: past ESPERANDO, no reply may carry the
+    "until you say it" line while the band shows something that is not
+    the passphrase."""
+    enc, _registro = _nuevo(tmp_path, n_muestras=1)
+    vector = _v(1.0, 0.0, 0.0)
+
+    respuestas = [
+        enc.oye(FRASE),  # BORRANDO: the wipe confirmation
+        enc.oye(CONFIRMACION_BORRADO),  # PIDIENDO: the first passage
+        enc.oye("una frase leída", vector),  # PIDIENDO: asking for a name
+        enc.oye("me llamo Marta"),  # CONFIRMANDO: the name heard
+    ]
+
+    for r in respuestas:
+        if r.lectura != FRASE:
+            assert r.rotulo != ROTULO_ESPERANDO
+            assert r.rotulo is None or NECESIDAD not in r.rotulo
+
+
+def test_a_cancelled_wipe_puts_the_welcome_back_over_the_passphrase(tmp_path):
+    enc, _registro = _hasta_borrando(tmp_path)
+
+    r = enc.oye("esto no es la confirmación")
+
+    assert r.lectura == FRASE
+    assert r.rotulo == ROTULO_ESPERANDO

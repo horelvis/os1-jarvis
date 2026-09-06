@@ -782,6 +782,7 @@ class JARVISApp(Gtk.Application):
         # gateway and the microphone, which can take a while longer.
         from .bienvenida_area import BienvenidaArea
         from .casa import Registro
+        from .encuentro import ROTULO_ESPERANDO
         from .frase import cargar_o_crear
 
         registro = Registro(RUTA_CASA)
@@ -815,7 +816,11 @@ class JARVISApp(Gtk.Application):
         # guess at how long mapping takes.
         def _mostrar_bienvenida(*_args: object) -> None:
             if registro.amo is None:
-                bienvenida_area.mostrar(frase_actual)
+                # The one call that does not come from a `Respuesta`:
+                # nobody has said anything yet, so the state is
+                # `ESPERANDO` by construction and its header is the one
+                # to show.
+                bienvenida_area.mostrar(frase_actual, ROTULO_ESPERANDO)
             else:
                 bienvenida_area.ocultar()
 
@@ -1082,8 +1087,13 @@ class JARVISApp(Gtk.Application):
                     # candidate name in `CONFIRMANDO` — never left to
                     # default by omission. This is now the ONLY source
                     # of what the band shows; `frase_actual` is not
-                    # read here at all any more.
-                    GLib.idle_add(bienvenida_area.mostrar, respuesta.lectura)
+                    # read here at all any more. `rotulo` — the line
+                    # saying what that phrase is for — travels with it
+                    # from the same `Respuesta`, so the header can never
+                    # be left over from the previous state.
+                    GLib.idle_add(
+                        bienvenida_area.mostrar, respuesta.lectura, respuesta.rotulo
+                    )
                 else:
                     # `lectura is None` here means exactly "nothing to
                     # show" — `encuentro.py`'s own docstring is explicit

@@ -183,6 +183,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from . import borrar, lecturas
+from .bienvenida import BIENVENIDA, NECESIDAD
 from .casa import Registro
 from .frase import parecida
 from .personas import CASA, id_desde_nombre
@@ -211,6 +212,34 @@ N_MUESTRAS_POR_DEFECTO = 5
 # module docstring for why this is a sentence, checked the way the
 # passphrase itself is checked, and not a bare "sí".
 CONFIRMACION_BORRADO = "adelante, borra toda tu memoria"
+
+# What the band says ABOVE the phrase, per state — the small pair of
+# lines a person reads before the big one. This used to be a single
+# constant baked into `bienvenida_area.py`, which is how the strip ended
+# up telling somebody "hasta que no la diga, no puedo hacer nada" while
+# the voice was asking them to read a passage, and again while it was
+# asking whether their name was Orelvis. Each state now says what its
+# own phrase is FOR, and `Respuesta.rotulo` carries it out.
+#
+# `ESPERANDO` reuses `bienvenida.BIENVENIDA` / `NECESIDAD` rather than a
+# fourth wording of the same fact: those two lines are also what he SAYS
+# at boot (`__main__`'s welcome), and a screen that worded it its own way
+# would be a second voice.
+ROTULO_ESPERANDO = f"{BIENVENIDA}\n{NECESIDAD}"
+
+# The one that erases the house. It says what saying it does — the band
+# is the only place that fact is written down rather than spoken once —
+# and "tal cual" because `frase.parecida` wants the words in order.
+ROTULO_BORRANDO = "Esto borra todo lo que recuerdo.\nSi está seguro, dígamelo tal cual."
+
+# Shared by every sample slot: the job does not change between the first
+# reading and the third, and the count that DOES change is already on
+# the phrase itself (`_lectura_pantalla_muestra`).
+ROTULO_PIDIENDO = "Estoy aprendiendo su voz.\nLéame esto en voz alta."
+
+# The whole question at this point is whether the name was heard right,
+# so the header asks exactly that and says what answer closes it.
+ROTULO_CONFIRMANDO = "¿Le he oído bien?\nDígame sí o no."
 
 _AFIRMATIVOS = frozenset({"si", "vale", "correcto", "exacto", "afirmativo"})
 _NEGATIVOS = frozenset({"no", "negativo", "incorrecto"})
@@ -452,6 +481,15 @@ class Respuesta:
     on a stale value surviving from a previous `Respuesta`, which is
     exactly the bug this field's every-state coverage exists to close.
 
+    `rotulo` is the small line ABOVE it — what the phrase is for —
+    and travels with `lectura` for the same reason: it used to be a
+    fixed constant on the band ("Hasta que no la diga, no puedo hacer
+    nada"), which meant the screen kept giving the passphrase
+    instruction over a reading passage and over a name. The two are
+    always set together: a `lectura` with no `rotulo` is a phrase
+    nobody is told what to do with, and a `rotulo` with no `lectura`
+    labels an empty band.
+
     Optional and defaulting to `None` so a caller that does not care
     about it — most pointedly whoever is wiring `Respuesta` into
     `__main__.py` — keeps working unchanged.
@@ -460,6 +498,7 @@ class Respuesta:
     habla: str
     terminado: bool = False
     lectura: str | None = None
+    rotulo: str | None = None
 
 
 class Encuentro:
@@ -544,7 +583,11 @@ class Encuentro:
             # between, so there is never a turn where the band shows
             # nothing at all for a state that IS waiting for something.
             self.estado = Estado.BORRANDO
-            return Respuesta(habla=_TEXTO_ANUNCIO_BORRADO, lectura=CONFIRMACION_BORRADO)
+            return Respuesta(
+                habla=_TEXTO_ANUNCIO_BORRADO,
+                lectura=CONFIRMACION_BORRADO,
+                rotulo=ROTULO_BORRANDO,
+            )
         if not texto.strip():
             # Nothing was actually said — not "somebody talking to him
             # and it was not the passphrase", just silence. Answered
@@ -570,8 +613,16 @@ class Encuentro:
         # is waiting for, said once or said again.
         if not self._saludado:
             self._saludado = True
-            return Respuesta(habla=_TEXTO_SALUDO_INICIAL, lectura=self._frase)
-        return Respuesta(habla=_TEXTO_RECORDATORIO_ESPERA, lectura=self._frase)
+            return Respuesta(
+                habla=_TEXTO_SALUDO_INICIAL,
+                lectura=self._frase,
+                rotulo=ROTULO_ESPERANDO,
+            )
+        return Respuesta(
+            habla=_TEXTO_RECORDATORIO_ESPERA,
+            lectura=self._frase,
+            rotulo=ROTULO_ESPERANDO,
+        )
 
     # --- BORRANDO ------------------------------------------------------
 
@@ -583,7 +634,11 @@ class Encuentro:
             # `BORRANDO` from the top. The band switches back to it
             # too — `ESPERANDO` is waiting for it again.
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_BORRADO_CANCELADO, lectura=self._frase)
+            return Respuesta(
+                habla=_TEXTO_BORRADO_CANCELADO,
+                lectura=self._frase,
+                rotulo=ROTULO_ESPERANDO,
+            )
 
         # The wipe happens here, once, between the passphrase and the
         # first sentence — announced already (`_TEXTO_ANUNCIO_BORRADO`,
@@ -620,7 +675,12 @@ class Encuentro:
         )
         habla = " ".join(parte for parte in (prefijo, motivo, pregunta) if parte)
         lectura = _lectura_pantalla_muestra(pasaje, ordinal, self._n_muestras)
-        return Respuesta(habla=habla, terminado=False, lectura=lectura)
+        return Respuesta(
+            habla=habla,
+            terminado=False,
+            lectura=lectura,
+            rotulo=ROTULO_PIDIENDO,
+        )
 
     def _en_pidiendo(self, texto: str, vector: "np.ndarray | None") -> Respuesta:
         if len(self._muestras) < self._n_muestras:
@@ -635,7 +695,7 @@ class Encuentro:
             # is genuinely nothing to look at while he asks for a name,
             # and showing stale reading material here is exactly the
             # bug this round exists to fix.
-            return Respuesta(habla=_TEXTO_PIDE_NOMBRE, lectura=None)
+            return Respuesta(habla=_TEXTO_PIDE_NOMBRE, lectura=None, rotulo=None)
 
         # Enough samples already: this utterance is the candidate name,
         # said plainly or wrapped in "me llamo…" / "soy…" /
@@ -648,13 +708,17 @@ class Encuentro:
         # than acceptance": it already does, for every candidate alike.
         nombre = _nombre_desde_texto(texto)
         if id_desde_nombre(nombre) == CASA:
-            return Respuesta(habla=_TEXTO_NOMBRE_INVALIDO, lectura=None)
+            return Respuesta(habla=_TEXTO_NOMBRE_INVALIDO, lectura=None, rotulo=None)
         self._nombre_candidato = nombre
         self.estado = Estado.CONFIRMANDO
         # The band shows the name exactly as heard — seeing "Orelvis"
         # spelled out is worth more than hearing it, since the whole
         # question at this point is whether it was heard correctly.
-        return Respuesta(habla=_texto_confirma_nombre(nombre), lectura=nombre)
+        return Respuesta(
+            habla=_texto_confirma_nombre(nombre),
+            lectura=nombre,
+            rotulo=ROTULO_CONFIRMANDO,
+        )
 
     # --- CONFIRMANDO -----------------------------------------------------
 
@@ -670,7 +734,11 @@ class Encuentro:
             # with something to say, rather than crash on it.
             logger.warning("encuentro: CONFIRMANDO reached with no candidate name")
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, lectura=self._frase)
+            return Respuesta(
+                habla=_TEXTO_EMPAREJAR_FALLIDO,
+                lectura=self._frase,
+                rotulo=ROTULO_ESPERANDO,
+            )
 
         if _es_negativo(texto):
             # Wrong answer -> the previous state ("asking"), with
@@ -678,7 +746,9 @@ class Encuentro:
             # only the name is asked again — nothing to read while that
             # happens, same as the first time it was asked.
             self.estado = Estado.PIDIENDO
-            return Respuesta(habla=_TEXTO_PIDE_NOMBRE_DE_NUEVO, lectura=None)
+            return Respuesta(
+                habla=_TEXTO_PIDE_NOMBRE_DE_NUEVO, lectura=None, rotulo=None
+            )
 
         if not _es_afirmativo(texto):
             # Neither a yes nor a no: repeat the question rather than
@@ -687,6 +757,7 @@ class Encuentro:
             return Respuesta(
                 habla=_texto_confirma_nombre(self._nombre_candidato),
                 lectura=self._nombre_candidato,
+                rotulo=ROTULO_CONFIRMANDO,
             )
 
         try:
@@ -701,10 +772,17 @@ class Encuentro:
             # goes back to showing the passphrase along with it.
             logger.warning(f"encuentro: emparejar failed — {exc!r}")
             self.estado = Estado.ESPERANDO
-            return Respuesta(habla=_TEXTO_EMPAREJAR_FALLIDO, lectura=self._frase)
+            return Respuesta(
+                habla=_TEXTO_EMPAREJAR_FALLIDO,
+                lectura=self._frase,
+                rotulo=ROTULO_ESPERANDO,
+            )
 
         self.estado = Estado.HECHO
         # HECHO: nothing left to show — the band is done.
         return Respuesta(
-            habla=_texto_bienvenida(persona.nombre), terminado=True, lectura=None
+            habla=_texto_bienvenida(persona.nombre),
+            terminado=True,
+            lectura=None,
+            rotulo=None,
         )
