@@ -14,16 +14,26 @@ box to reconsider showing the phrase again (`casa.py`'s founding write)
 
 from __future__ import annotations
 
-# Room above the wave: two lines of centred text and the padding around
-# them. A product decision, the way `ficha.py`'s COMPACTA/AMPLIA are —
-# fixed rather than measured, because a label's natural height depends
-# on Pango's font metrics, which nothing here has any business knowing.
-ALTO = 140
+# Room above the wave: three lines of centred text and the padding
+# around them. A product decision, the way `ficha.py`'s COMPACTA/AMPLIA
+# are — fixed rather than measured, because a label's natural height
+# depends on Pango's font metrics, which nothing here has any business
+# knowing. Grown by 30px over the original two-line figure (140) for
+# the welcome line the owner asked for on 2026-09-06 — one more short
+# line at the small size, plus the spacing next to it, deliberately
+# rather than recomputed from font metrics.
+ALTO = 170
 
-# The sentence is the whole of the instruction (CLAUDE.md, this plan):
-# there is no second screen and no settings for it to point at, so it
-# has to stand on its own.
-INSTRUCCION = "Dígame esta frase para que sepa quién es usted."
+# What a box with no amo says, in the order it reads: a greeting to a
+# stranger, then the one fact that matters — nothing happens here until
+# the phrase below is said — and only then the phrase itself, which
+# stays the largest thing on the band (`bienvenida_area.py`) and the
+# last line read. Neither of these two says anything about what saying
+# the phrase actually does (founding the house, erasing what came
+# before it): that belongs to the spoken confirmation later in the
+# flow, not to a strip nobody has spoken to yet.
+BIENVENIDA = "Buenas. Aún no sé quién es usted."
+NECESIDAD = "Hasta que no la diga, no puedo hacer nada."
 
 
 class BienvenidaModel:

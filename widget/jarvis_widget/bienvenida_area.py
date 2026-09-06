@@ -3,6 +3,11 @@
 State lives in `bienvenida.py`, which imports no `gi` and is therefore
 testable. This is the part that cannot be: two `Gtk.Label`s, styled
 through `theme.CSS` the same way the console's own label already is.
+The top label carries two lines of text (`BIENVENIDA` and `NECESIDAD`,
+joined by "\\n") rather than being a third `Gtk.Label` — the owner
+asked for a welcome and a reason to bother, not a third weight or a
+second colour (2026-09-06), so both share the one small style the
+original instruction line already had.
 
 No GSK snapshot and no Cairo context here, unlike `photo_area.py` (a
 texture) or `ficha_area.py` (a webview): this band draws no pixels of
@@ -21,7 +26,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gtk  # noqa: E402
 
-from .bienvenida import INSTRUCCION, BienvenidaModel  # noqa: E402
+from .bienvenida import BIENVENIDA, NECESIDAD, BienvenidaModel  # noqa: E402
 
 
 class BienvenidaArea(Gtk.Box):
@@ -41,10 +46,10 @@ class BienvenidaArea(Gtk.Box):
         self.set_valign(Gtk.Align.CENTER)
         self.set_visible(False)
 
-        # The sentence: the whole of the instruction, so it has to be
-        # legible on its own, but smaller — the phrase below it is what
-        # matters once it has been read once.
-        self._instruccion = Gtk.Label(label=INSTRUCCION)
+        # The welcome and the reason to bother, in the two smaller lines
+        # read before the phrase: one label, not two, so there is no
+        # second weight or colour for either to carry.
+        self._instruccion = Gtk.Label(label=f"{BIENVENIDA}\n{NECESIDAD}")
         self._instruccion.add_css_class("jarvis-bienvenida-instruccion")
         self._instruccion.set_justify(Gtk.Justification.CENTER)
         self._instruccion.set_wrap(True)
