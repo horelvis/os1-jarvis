@@ -84,6 +84,22 @@ def id_desde_nombre(nombre: str) -> str:
     marks — and only THEN hands the result to `normalizar`: `Lucía` →
     `lucia`, `Martín` → `martin`, `José` → `jose`, `Papá` → `papa`.
 
+    **This does more than strip accents, on purpose, and it is worth
+    saying plainly rather than leaving it to be discovered.** NFKD is
+    COMPATIBILITY decomposition, not accent-stripping: `ñ` is not an
+    "n with a mark" the way `á` is an "a with a mark", yet it still
+    decomposes and still folds — `Begoña` → `begona`, `Ñoño` → `nono` —
+    and so do symbols that happen to have a compatibility decomposition
+    at all, unrelated to accents: `™` → `tm`, `Ⅷ` → `viii`. The
+    behaviour stays, because the alternative is worse: an id is an
+    ASCII directory name, `ñ` cannot survive in one regardless of which
+    normalisation form is used, and refusing every name that contains
+    one would be exactly the failure this function exists to fix. The
+    letter itself is not lost — it is kept where it is actually seen,
+    in `Persona.nombre`, which is what he says out loud; only the id,
+    which nobody reads, is folded down to something a filesystem and a
+    Hermes profile name can hold.
+
     This never touches `normalizar` itself, which guards `chat_id`s
     arriving off the phone socket and is deliberately NOT transliterated
     — changing that would change the wire's behaviour, and this

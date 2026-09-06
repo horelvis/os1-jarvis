@@ -241,6 +241,93 @@ def test_an_unreadable_register_is_logged_by_path_not_by_contents(
     assert "un-nombre-que-no-debe-salir" not in logged
 
 
+def test_corrupting_an_already_founded_register_does_not_let_a_second_amo_in(
+    tmp_path,
+):
+    """Fix round 2 — the exact sequence the reviewer ran live. Before
+    the fix, `_leer` treated an unreadable file exactly like a missing
+    one, so `emparejar` saw "no amo yet", discarded Marta's entry, and
+    installed the intruder — an amo who reaches this path twice used to
+    be able to erase the house. Corrupting `casa.json` after a real
+    pairing must refuse the second `emparejar`, not clear the way for
+    it, and Marta's voiceprint on disk must be untouched."""
+    ruta = tmp_path / "casa.json"
+    registro = casa.Registro(ruta)
+    registro.emparejar("Marta", [_v(1, 0, 0)])
+
+    ruta.write_text("{esto ya no es json en absoluto")
+
+    with pytest.raises(ValueError):
+        registro.emparejar("Intruder", [_v(0, 1, 0)])
+
+    # The corrupted file is left exactly as it was — never overwritten
+    # to smuggle the intruder in, never deleted to make room.
+    assert ruta.read_text() == "{esto ya no es json en absoluto"
+    # And Marta's voiceprint, written before the corruption, is still
+    # exactly what it was.
+    huella_marta = np.load(tmp_path / "voces" / "marta.npy")
+    assert huella_marta.shape == (1, 3)
+    np.testing.assert_array_equal(huella_marta[0], _v(1, 0, 0))
+
+
+def test_a_directory_at_the_path_also_refuses_a_second_amo(tmp_path):
+    """The same property, forced through the OTHER corruption shape
+    `_leer_bruto` recognises — a directory left where the register
+    expects a file — rather than only the JSON-parse failure above."""
+    ruta = tmp_path / "casa.json"
+    registro = casa.Registro(ruta)
+    registro.emparejar("Marta", [_v(1, 0, 0)])
+
+    ruta.unlink()
+    ruta.mkdir()
+
+    with pytest.raises(ValueError):
+        registro.emparejar("Intruder", [_v(0, 1, 0)])
+
+    assert ruta.is_dir()
+
+
+def test_concurrent_emparejar_exactly_one_founds_the_house(tmp_path):
+    """Fix round 2 — eight threads race `emparejar` against a fresh
+    register. The once-only property is now enforced by the kernel
+    (`os.O_CREAT | os.O_EXCL` in `_crear_registro`), not by a
+    check-then-act, so exactly one call may succeed, the register must
+    end up holding exactly that winner's id, and nobody may raise
+    anything other than the `ValueError` every loser gets. Before the
+    fix, two of eight crashed on a shared temp file name, and among the
+    "successes" the `Persona` handed back was not always the one the
+    register actually held."""
+    ruta = tmp_path / "casa.json"
+    registro = casa.Registro(ruta)
+    n = 8
+    ganadores: list[casa.Persona] = []
+    fallos: list[BaseException] = []
+    candado = threading.Lock()
+
+    def intentar(i: int) -> None:
+        try:
+            persona = registro.emparejar(f"Persona{i}", [_v(float(i), 0, 0)])
+        except BaseException as exc:  # every kind must be seen, not just ValueError
+            with candado:
+                fallos.append(exc)
+        else:
+            with candado:
+                ganadores.append(persona)
+
+    hilos = [threading.Thread(target=intentar, args=(i,)) for i in range(n)]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.join(timeout=10)
+
+    assert not any(hilo.is_alive() for hilo in hilos), "a thread hung"
+    assert len(ganadores) == 1, f"exactly one winner expected, got {ganadores}"
+    assert len(fallos) == n - 1
+    assert all(isinstance(exc, ValueError) for exc in fallos), fallos
+    assert registro.amo == ganadores[0].id
+    assert [p.id for p in registro.personas()] == [ganadores[0].id]
+
+
 # --- recordar ----------------------------------------------------------
 
 

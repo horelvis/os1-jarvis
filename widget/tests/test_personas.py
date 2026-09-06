@@ -84,6 +84,28 @@ def test_id_desde_nombre_non_string_input_is_casa():
     assert id_desde_nombre(None) == CASA
 
 
+def test_id_desde_nombre_folds_more_than_accents():
+    # Disclosed, not hidden (see the function's own docstring): NFKD is
+    # COMPATIBILITY decomposition, not accent-stripping. `ñ` is not "n
+    # with a mark" the way `á` is, yet it still folds to `n` — and so do
+    # symbols with no accent involved at all. This is the trade that
+    # makes the founding act possible for names like `Begoña` and
+    # `Ñoño`, not a bug to "fix" by switching to NFD.
+    assert id_desde_nombre("Begoña") == "begona"
+    assert id_desde_nombre("Ñoño") == "nono"
+    assert id_desde_nombre("™") == "tm"
+    assert id_desde_nombre("Ⅷ") == "viii"
+
+
+def test_id_desde_nombre_folds_an_accented_and_unaccented_spelling_together():
+    # The disclosed collision, spelled out: this is not two different
+    # people who happen to share an id, it is the SAME id on purpose —
+    # a visible, recoverable collision (refused at the ordinary "id
+    # already taken" path) traded deliberately against the amo being
+    # unable to say his own name (see the function's own docstring).
+    assert id_desde_nombre("Adrián") == id_desde_nombre("Adrian") == "adrian"
+
+
 def test_the_grammar_is_hermes_own_profile_grammar():
     # Read from the live vendored source rather than copying the
     # pattern: a copy only catches OUR drift, and the drift that
