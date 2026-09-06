@@ -1034,16 +1034,81 @@ class JARVISApp(Gtk.Application):
 
         wave.on_switch = on_switch
 
+        def _atendido_por_encuentro(
+            texto: str, vector: "np.ndarray | None", destino: object | None
+        ) -> bool:
+            """THE gate every entrance to `client.send_chat` must pass
+            through. `True` means `texto` was handled by `Encuentro` and
+            the caller must send it nowhere else; `False` means a house
+            already exists and the caller is free to proceed to the
+            gateway.
+
+            There is exactly one copy of "is there an amo" in this
+            process, and this is it — `dispatch` (voice, and a phone's
+            own turn) and `on_typed` (the keyboard) both call ONLY this,
+            never their own check. The keyboard used to have no check at
+            all: a typed line went straight to `client.send_chat` on an
+            unpaired box, which is how Hermes ended up improvising
+            "anotado en mi lugar" for a name nothing had actually
+            recorded. `registro.amo` is read fresh from disk on every
+            call (never cached — `casa.Registro`'s own contract), so a
+            pairing that finishes on one path is seen by the other on
+            its very next line.
+            """
+            if registro.amo is not None:
+                return False
+            respuesta = turno_del_encuentro(
+                encuentro, texto, vector, lambda habla: say(habla, destino)
+            )
+            # One line per state, in the journal that already carries
+            # every other turn's `oído:`/`→` — without this, a stuck
+            # flow is invisible: `_en_pidiendo` refusing an invalid name
+            # and asking again looks, from the log alone, identical to
+            # nothing having happened at all.
+            print(f"encuentro: {encuentro.estado.value}", file=sys.stderr, flush=True)
+            if respuesta is not None:
+                if respuesta.terminado:
+                    # This utterance is the one that finished pairing:
+                    # the band's phrase is spent, and the file behind it
+                    # must go too, or a restart would show — and
+                    # accept — it again.
+                    GLib.idle_add(bienvenida_area.ocultar)
+                    consumir(RUTA_FRASE)
+                elif respuesta.lectura is not None:
+                    # `PIDIENDO` asking for a voice sample: the band
+                    # shows the passage to read, in place of the
+                    # passphrase — reusing the same widget rather than
+                    # building a second band.
+                    GLib.idle_add(bienvenida_area.mostrar, respuesta.lectura)
+                else:
+                    # No reading in this reply: the band goes back to
+                    # what it was showing before one appeared — the
+                    # passphrase, still correct for as long as there is
+                    # no amo. (Known gap, reported rather than patched
+                    # here: once BORRANDO has run, showing the now-spent
+                    # passphrase again — during the name question or its
+                    # yes/no confirmation — gives a person no idea which
+                    # step they are on. Fixing that needs `Encuentro` to
+                    # say what step it is in, which is out of this
+                    # file's reach.)
+                    GLib.idle_add(bienvenida_area.mostrar, frase_actual)
+            return True
+
         def on_typed(text: str) -> None:
             """A line typed on the strip. Sent exactly as if it were said.
 
             Two things the spoken path does are deliberately skipped: the
             wake word (a button was pressed — he is being addressed) and
             the echo filter (nothing was heard, so nothing can be his
-            own voice coming back).
+            own voice coming back). The gate is NOT one of them —
+            unpaired, this goes to `Encuentro` exactly like a spoken
+            line, through `_atendido_por_encuentro`.
             """
             print(f"⌨ {text}", file=sys.stderr, flush=True)
             machine.typed()
+
+            if _atendido_por_encuentro(text, None, None):
+                return
 
             async def _send() -> None:
                 # Wrapped so a failure is a line in the journal instead
@@ -1250,37 +1315,9 @@ class JARVISApp(Gtk.Application):
                     settle_turn(phone, remote_desk)
                     return
                 # Unpaired: nothing reaches Hermes, and this branch
-                # never even tries. `registro.amo` is read fresh from
-                # disk (never cached — `casa.Registro`'s own contract),
-                # so a pairing that finished on an EARLIER utterance is
-                # seen immediately, with no restart needed.
-                if registro.amo is None:
-                    respuesta = turno_del_encuentro(
-                        encuentro, text, vector, lambda habla: say(habla, phone)
-                    )
-                    if respuesta is not None:
-                        if respuesta.terminado:
-                            # This utterance is the one that finished
-                            # pairing: the band's phrase is spent, and
-                            # the file behind it must go too, or a
-                            # restart would show — and accept — it
-                            # again.
-                            GLib.idle_add(bienvenida_area.ocultar)
-                            consumir(RUTA_FRASE)
-                        elif respuesta.lectura is not None:
-                            # `PIDIENDO` asking for a voice sample: the
-                            # band shows the passage to read, in place
-                            # of the passphrase — reusing the same
-                            # widget rather than building a second band
-                            # (`bienvenida_area` already knows how to
-                            # display text and measure its height).
-                            GLib.idle_add(bienvenida_area.mostrar, respuesta.lectura)
-                        else:
-                            # No reading in this reply: the band goes
-                            # back to what it was showing before one
-                            # appeared — the passphrase, still correct
-                            # for as long as there is no amo.
-                            GLib.idle_add(bienvenida_area.mostrar, frase_actual)
+                # never even tries — see `_atendido_por_encuentro`, the
+                # ONE gate this and `on_typed` both call.
+                if _atendido_por_encuentro(text, vector, phone):
                     settle_turn(phone, remote_desk)
                     return
                 # A phone's press IS the address, and ONLY a phone's.

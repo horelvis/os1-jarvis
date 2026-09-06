@@ -830,6 +830,37 @@ def test_an_unpaired_box_answers_but_never_reaches_the_gateway(tmp_path):
     assert dichos  # he answered — a stranger's talk is greeted, not ignored
 
 
+def test_a_typed_line_on_an_unpaired_box_never_reaches_the_gateway(tmp_path):
+    """`on_typed` must go through the SAME gate as a spoken utterance.
+
+    The regression this pins: the keyboard path had no `registro.amo`
+    check at all, so a typed line on an unpaired box went straight to
+    `client.send_chat` — Hermes then improvised an agreeable reply
+    ("anotado en mi lugar") for a name nothing had actually recorded.
+    A typed line carries no voice, so `vector` is `None` here exactly
+    as the real keyboard path passes it — the same shape
+    `turno_del_encuentro` already handles for a phone with no usable
+    sample."""
+    registro = casa.Registro(tmp_path / "casa.json")
+    encuentro = Encuentro(registro, FRASE)
+    enviados: list[tuple[str, str]] = []
+    dichos: list[str] = []
+
+    _decidir_turno(
+        registro=registro,
+        encuentro=encuentro,
+        huellas_cache={"amo": None, "huellas": None},
+        texto="Me llamo Horelvis",
+        vector=None,
+        phone=None,
+        enviados=enviados,
+        dichos=dichos,
+    )
+
+    assert enviados == []
+    assert dichos  # he answered — even a typed line is not ignored
+
+
 def test_a_paired_box_sends_the_recognised_person_as_the_chat_id(tmp_path):
     registro = casa.Registro(tmp_path / "casa.json")
     vector = np.array([1.0, 0.0, 0.0], dtype=np.float32)
