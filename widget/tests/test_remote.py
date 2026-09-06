@@ -874,3 +874,30 @@ async def test_the_enrolled_frame_names_the_phone_before_anything_else(
         assert first == {"type": "enrolled", "name": "Orelvis"}
     finally:
         await client.close()
+
+
+def test_the_envelope_points_at_the_address_not_the_name(monkeypatch) -> None:
+    """The owner's decision, 2026-09-06, after a real iPhone reported it
+    could not reach the box at all.
+
+    `brain.local` depends on mDNS resolving on the phone, and that is a
+    second thing to go wrong on top of everything else — on THIS box the
+    name resolves to a Docker bridge, never to the LAN. The leaf's SAN
+    carries `DNS:brain.local, IP Address:<lan>`, so either verifies; the
+    address removes a dependency, at the price the owner accepted: a
+    DHCP change means re-enrolling.
+    """
+    from jarvis_widget.remote import host_del_sobre
+
+    monkeypatch.delenv("JARVIS_WIDGET_ENVELOPE_HOST", raising=False)
+    assert host_del_sobre(lambda: "192.168.1.40") == "192.168.1.40"
+
+
+def test_the_envelope_host_can_be_overridden(monkeypatch) -> None:
+    """One switch for the envelope alone. `JARVIS_WIDGET_REMOTE_NAME`
+    cannot do this job: it moves the certificate's CN and SAN with it,
+    so there was no way to serve a name and hand out an address."""
+    from jarvis_widget.remote import host_del_sobre
+
+    monkeypatch.setenv("JARVIS_WIDGET_ENVELOPE_HOST", "brain.local")
+    assert host_del_sobre(lambda: "192.168.1.40") == "brain.local"

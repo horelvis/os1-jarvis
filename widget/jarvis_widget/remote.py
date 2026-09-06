@@ -45,6 +45,34 @@ if TYPE_CHECKING:
 
 PORT = int(os.getenv("JARVIS_WIDGET_REMOTE_PORT", "8443"))
 HOSTNAME = os.getenv("JARVIS_WIDGET_REMOTE_NAME", "brain.local")
+
+
+def host_del_sobre(direccion: "Callable[[], str] | None" = None) -> str:
+    """What goes in the enrolment envelope's `url`: the ADDRESS, not the name.
+
+    Changed on 2026-09-06 at the owner's instruction, after a real
+    iPhone could not reach the box at all. `brain.local` needs mDNS to
+    resolve on the phone, which is one more thing to go wrong on top of
+    a certificate, a pin and a token — and on THIS box the name resolves
+    to a Docker bridge and never to the LAN (`getaddrinfo` returns
+    172.17.0.1), so it is not even reliable here.
+
+    The leaf's SAN carries BOTH (`DNS:brain.local, IP Address:<lan>`),
+    so either one verifies. What the address costs is the price the
+    owner accepted knowingly: a DHCP change means re-enrolling every
+    phone, where a name would have survived it.
+
+    `JARVIS_WIDGET_ENVELOPE_HOST` puts the name back for a box where
+    mDNS is dependable. It exists separately because
+    `JARVIS_WIDGET_REMOTE_NAME` moves the certificate's CN and SAN with
+    it — there was no way to serve a name and hand out an address.
+    """
+    puesto = os.getenv("JARVIS_WIDGET_ENVELOPE_HOST")
+    if puesto:
+        return puesto
+    return (direccion or lan_address)()
+
+
 CERT_DIR = Path.home() / ".jarvis" / "certs"
 # One fixed path, one PNG at a time — `_mostrar_qr` (`__main__.py`) shows
 # whatever is here with no idea whose it is. That is exactly why
@@ -782,7 +810,7 @@ async def serve(
         try:
             write_qr(
                 sobre(
-                    url=f"wss://{HOSTNAME}:{PORT}/ws",
+                    url=f"wss://{host_del_sobre()}:{PORT}/ws",
                     token=secreto,
                     ca=huella,
                 ),
