@@ -169,6 +169,53 @@ adding people to the allowlist, or enrolling their own phone
 wire and nothing more. If per-person memory or tool isolation ever
 lands, this is where its configuration will be documented.
 
+## Pairing versus re-enrolling a voice
+
+Two operations touch who this box knows, and confusing them is
+expensive in opposite directions — one loses nobody's memory and one
+loses everybody's.
+
+- **Pairing** (`casa.Registro.emparejar`, `jarvis_widget/borrar.py`) is
+  rare, deliberate and destructive. It is the founding act of a first
+  encounter: a box with no owner shows a passphrase, whoever speaks it
+  becomes the amo, and — the user's decision of 2026-09-06 — **every
+  previous memory is erased first**: sessions, what he had written down
+  about anyone, every course, every enrolled phone, every voiceprint.
+  That is what lets this box change hands. It happens once per amo, by
+  design (`casa.py`'s own docstring: "the founding act happens once"),
+  and the only thing that repeats it is a deliberate, gated reset — not
+  a cold, not a new microphone, not laryngitis.
+- **Re-enrolling a voice** (`tools/medir_voces.py`, `casa.Registro.recordar`)
+  adds or replaces a voiceprint for somebody who already exists in the
+  register, and keeps everything else exactly as it was — every session,
+  every course, every other person's voiceprint. It is what a cold, a new
+  microphone, or a voiceprint that has drifted with age calls for: none
+  of those make somebody a new owner, so none of them should erase a
+  single byte belonging to anyone else in the house.
+- **The recovery path — regenerating the passphrase from this box's own
+  keyboard — leads to re-enrolment, never to pairing.** If it led to
+  pairing, losing your voice for a week would cost you every
+  conversation you had ever had with him: the recovery flow exists so a
+  drifted or damaged voiceprint can be fixed without paying that price.
+  Only the spoken passphrase, on a box with no amo yet, reaches
+  `emparejar` and the wipe behind it.
+
+`jarvis_widget/borrar.py` is the inventory and the execution of that
+wipe: `inventario(raiz_jarvis, raiz_hermes)` reports, without touching
+anything, exactly what a pairing would erase; `ejecutar(borrado,
+respaldo=...)` writes a full snapshot first and only then removes what
+`inventario` found, refusing outright if the snapshot could not be
+written in full. It is deliberately narrow about what it lists:
+`~/.jarvis/models/`, `cosyvoice3/`, `qwen3-tts/`, `xtts-cache/` and
+`~/.jarvis/voices/` — 87 GB, model weights and not memory — must never
+appear in that inventory, so a pairing does not cost this box three days
+of re-downloading, and are checked against by name so a future "let's
+just clear `~/.jarvis`" cannot slip one of them in. One letter matters
+here: `~/.jarvis/voces/` (the voiceprints `casa.py` writes) goes, and
+`~/.jarvis/voices/` (136 MB of TTS reference audio) stays — the two are
+not the same directory and must never be treated as one. Task 7's
+first-encounter flow is the only caller; nothing else should be.
+
 ## The cameras are not here any more
 
 This program watched the house's cameras until 2026-08-24. It does not
