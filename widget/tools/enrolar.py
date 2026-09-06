@@ -3,10 +3,10 @@
     PYTHONNOUSERSITE=1 widget/.venv/bin/python widget/tools/enrolar.py marta
 
 Writes who it is for and signals the running widget, which puts the QR
-on the strip. Deliberately a deliberate act at this keyboard: the page
-behind that QR hands out a secret in cleartext to whoever asks, and with
-a roster that secret belongs to a named person — the father's holds
-`terminal`.
+on the strip. Deliberately a deliberate act at this keyboard: the QR
+itself now carries that person's token in cleartext (`enrol.sobre`),
+and with a roster that secret belongs to a named person — the father's
+holds `terminal`.
 
 An already-enrolled phone never needs this again.
 """

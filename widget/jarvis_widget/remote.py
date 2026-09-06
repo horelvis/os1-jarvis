@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from aiohttp import WSMsgType, web
 from loguru import logger
@@ -30,9 +30,46 @@ from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
 from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
 
+if TYPE_CHECKING:
+    # Only for the annotation below: `casa` does not import `remote`, so
+    # this is not a cycle, but a real import would still make every
+    # test that imports this module also import numpy transitively
+    # through `casa.py`'s own `Huellas`, for a type nothing here
+    # constructs.
+    from .casa import Registro
+
 PORT = int(os.getenv("JARVIS_WIDGET_REMOTE_PORT", "8443"))
 HOSTNAME = os.getenv("JARVIS_WIDGET_REMOTE_NAME", "brain.local")
 CERT_DIR = Path.home() / ".jarvis" / "certs"
+# One fixed path, one PNG at a time — `_mostrar_qr` (`__main__.py`) shows
+# whatever is here with no idea whose it is. That is exactly why
+# `Enrolment.abrir` deletes it before minting the next person's QR: see
+# its docstring for the failure this closes.
+QR_PATH = Path.home() / ".jarvis" / "enrol-qr.png"
+
+
+class RosterWriteError(RuntimeError):
+    """`save_roster` failed while minting a NEW person's secret.
+
+    No credential exists for them anywhere — not on disk, not in
+    `guard.secretos` — so there is nothing yet for the welcome page to
+    hand out either. Its own subclass, distinct from `QrWriteError`,
+    because `Enrolment.abrir`'s journal line has to say which of the
+    two happened: this one means "try minting again", the other means
+    "the secret is fine, only the picture is missing".
+    """
+
+
+class QrWriteError(RuntimeError):
+    """The QR image itself failed to write, AFTER the secret was
+    already minted and persisted.
+
+    The credential is real — it is in `personas.json` and in
+    `guard.secretos` — even though nothing landed on the strip to scan.
+    A phone can still reach it through the plain-HTTP welcome page's
+    typed address.
+    """
+
 
 # A held turn expires: a phone that presses and never releases — a
 # vanished network, an app killed mid-utterance — must not lock out
@@ -62,7 +99,10 @@ ANSWERING_SECONDS = 600.0
 # at all therefore has to be a WINDOW, not a standing service: 300 s is
 # long enough to walk to a phone and scan the QR, and not a minute
 # longer that the secret sits readable by anyone else on the wifi with
-# a browser.
+# a browser. Since 2026-09-06 this window gates the QR draw itself too
+# (`Enrolment.abrir`), not only the page — but in both cases what it
+# bounds is how long the SECRET is reachable to be picked up, never how
+# long it remains valid once somebody has it.
 #
 # `JARVIS_WIDGET_ENROLMENT_SECONDS` moves it, at the user's asking
 # (2026-09-01): five minutes is short if you are not already standing at
@@ -75,12 +115,19 @@ ENROLMENT_SECONDS = float(os.environ.get("JARVIS_WIDGET_ENROLMENT_SECONDS", "300
 
 
 class Enrolment:
-    """Whether the plain-HTTP welcome page (and `/jarvis.mobileconfig`) may answer.
+    """Whether the plain-HTTP welcome page (and `/jarvis.mobileconfig`) may
+    answer, AND — since 2026-09-06 — who `abrir()` mints and draws a QR
+    for.
 
-    Closed until something opens it — showing the QR on the strip,
-    today (`JARVIS_WIDGET_SHOW_QR=1`) — and closed again on its own
-    `ENROLMENT_SECONDS` later. `now` is a monotonic clock reading,
-    injectable for tests, the same way `RemoteDesk.claim` is.
+    `abrir()` does both in one call: draw this person's QR (via
+    `_escribir_qr`), then open the same window this class already
+    tracked for the page. Closed until something opens it — showing the
+    QR on the strip, today (`JARVIS_WIDGET_SHOW_QR=1`) — and closed
+    again on its own `ENROLMENT_SECONDS` later. That window bounds only
+    how long the page answers and how long the QR is on screen to be
+    scanned — not the token inside it, which does not expire on its
+    own. `now` is a monotonic clock reading, injectable for tests, the
+    same way `RemoteDesk.claim` is.
     """
 
     def __init__(self) -> None:
@@ -98,6 +145,11 @@ class Enrolment:
         # need no CA, no openssl and no filesystem — the same reason
         # `attach` exists for the socket.
         self._escribir_qr: Callable[[str], None] | None = None
+        # Where that callback actually lands its PNG, so `abrir` can
+        # clear it before calling it — see `attach_qr` and `abrir`.
+        # `None` in every test that only drives the clock, exactly like
+        # `_escribir_qr` itself.
+        self._qr_path: Path | None = None
 
     def attach(self, site: EnrolmentSite) -> None:
         """The socket to raise with this window and drop with it.
@@ -107,13 +159,21 @@ class Enrolment:
         """
         self._site = site
 
-    def attach_qr(self, escribir: Callable[[str], None]) -> None:
-        """How to write the QR for whoever the window is opened for.
+    def attach_qr(
+        self, escribir: Callable[[str], None], path: Path | None = None
+    ) -> None:
+        """How to write the QR for whoever the window is opened for, and
+        where it lands.
 
-        Optional: without it a window still opens, and the welcome page
-        is still served. `serve()` is the only caller.
+        `path` is optional — every existing unit test that only drives
+        the clock calls this with one argument — but `serve()`, the
+        real caller, always passes `QR_PATH`. Without it `abrir` has no
+        file to delete before minting the next person's QR, which is
+        harmless for a test double that never touches disk and would be
+        a bug for the real one.
         """
         self._escribir_qr = escribir
+        self._qr_path = path
 
     def open_enrolment(self, now: float | None = None) -> None:
         self._opened_at = time.monotonic() if now is None else now
@@ -140,18 +200,59 @@ class Enrolment:
         one burned into the QR just drawn is not the one that survives.
         Minting first means the plain-HTTP page can only ever find the
         secret already on disk.
+
+        `_qr_path`, when set, is deleted BEFORE the write is even
+        attempted — and that ordering is the whole of what stops a
+        failure from being silent in the worst way. `_dibujar_qr` writes
+        to one fixed path forever, and nothing else ever deleted it: if
+        Marta's QR is enrolled Tuesday and `hijo`'s enrolment on Friday
+        raises — a full disk, a dangling symlink, a read-only mount, all
+        of which `save_roster` and `write_qr` already handle elsewhere
+        as ordinary failures — the file `_mostrar_qr` shows next would,
+        without this, still be Marta's live token, on `hijo`'s window,
+        for `hijo`'s phone to scan and connect as her. Deleting first
+        means a failed write below leaves nothing, not something wrong:
+        `photo_area._texture` already treats a missing file as "no
+        photo" to show, which is the correct, safe shape of this
+        failure — a blank band, not somebody else's credential. A
+        missing file at the start (the very first enrolment, or a clean
+        boot) is not an error either.
         """
         self._persona = normalizar(persona)
         if self._escribir_qr is not None:
+            if self._qr_path is not None:
+                self._qr_path.unlink(missing_ok=True)
             try:
                 self._escribir_qr(self._persona)
+            except RosterWriteError as exc:
+                # No credential exists for this person at all yet — the
+                # roster write itself failed. Retrying means minting
+                # again, not just redrawing a picture.
+                logger.warning(
+                    f"alta: no existe credencial para {self._persona} "
+                    f"todavía, no se pudo guardar — {exc}"
+                )
+            except QrWriteError as exc:
+                # The opposite shape: the secret IS on disk and in
+                # memory now, only the PNG failed. A phone could still
+                # reach it through the plain-HTTP welcome page's typed
+                # address; only the strip has nothing to show.
+                logger.warning(
+                    f"alta: el token de {self._persona} ya existe pero "
+                    f"el QR no se ha podido dibujar — {exc}"
+                )
             except Exception as exc:
-                # The window still opens. This runs off a file watcher
+                # Neither of the two typed failures above: an injected
+                # test double, or anything outside `_dibujar_qr` itself,
+                # can still raise something else. The window still
+                # opens either way. This runs off a file watcher
                 # (`tools/enrolar.py`) and an unwritable QR is a worse
                 # outcome as an exception than as a missing image: the
                 # welcome page is still a way in, and the journal says
                 # what happened.
-                logger.warning(f"alta: no he podido escribir el QR — {exc}")
+                logger.warning(
+                    f"alta: no he podido escribir el QR de {self._persona} — {exc}"
+                )
         self.open_enrolment(now)
 
     def persona(self, now: float | None = None) -> str | None:
@@ -569,7 +670,7 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
 
 
 async def serve(
-    desk: RemoteDesk, guard: Guard, enrolment: Enrolment, registro, loop
+    desk: RemoteDesk, guard: Guard, enrolment: Enrolment, registro: "Registro", loop
 ) -> web.AppRunner:
     """Start the HTTPS server. Returns the runner so it can be stopped.
 
@@ -630,23 +731,36 @@ async def serve(
         and that is not a duplicate path: a phone with no app never
         passes through here, and `guard.secretos` is the one place both
         look, so whichever runs second finds the secret already made.
+
+        Raises `RosterWriteError` or `QrWriteError` rather than letting
+        `save_roster`'s `OSError` or `write_qr`'s escape untyped:
+        `Enrolment.abrir`'s journal line needs to say which of the two
+        happened, because they mean different things to whoever reads
+        it — no credential at all, or one that exists but is not on the
+        strip.
         """
         secreto = guard.secretos.get(persona)
         if secreto is None:
             nuevo = new_secret()
-            save_roster({**guard.secretos, persona: nuevo})
+            try:
+                save_roster({**guard.secretos, persona: nuevo})
+            except OSError as exc:
+                raise RosterWriteError(str(exc)) from exc
             guard.secretos[persona] = nuevo
             secreto = nuevo
-        write_qr(
-            sobre(
-                url=f"wss://{HOSTNAME}:{PORT}/ws",
-                token=secreto,
-                ca=huella,
-            ),
-            Path.home() / ".jarvis" / "enrol-qr.png",
-        )
+        try:
+            write_qr(
+                sobre(
+                    url=f"wss://{HOSTNAME}:{PORT}/ws",
+                    token=secreto,
+                    ca=huella,
+                ),
+                QR_PATH,
+            )
+        except Exception as exc:
+            raise QrWriteError(str(exc)) from exc
 
-    enrolment.attach_qr(_dibujar_qr)
+    enrolment.attach_qr(_dibujar_qr, QR_PATH)
     print(
         f"móvil: alta cerrada · el QR se dibuja al abrir la ventana · CA {huella}",
         file=sys.stderr,
@@ -655,7 +769,7 @@ async def serve(
     return runner
 
 
-def nombre_para(registro, persona: str) -> str:
+def nombre_para(registro: "Registro", persona: str) -> str:
     """The display name for a person id, or the id when nobody knows it.
 
     `Guard.persona_for` answers with an id and a human reads a name.
@@ -668,11 +782,11 @@ def nombre_para(registro, persona: str) -> str:
             if quien.id == persona:
                 return quien.nombre
     except Exception:
-        logger.debug("alta: no he podido leer el registro para nombrar a %s", persona)
+        logger.debug("alta: no he podido leer el registro para nombrar a {}", persona)
     return persona
 
 
-def _handler(desk: RemoteDesk, guard: Guard, registro, loop):
+def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
     async def handle(request: web.Request) -> web.WebSocketResponse:
         if not guard.origin_ok(request.headers.get("Origin", "")):
             raise web.HTTPForbidden()
@@ -778,11 +892,14 @@ __all__ = [
     "HELD_TURN_SECONDS",
     "HOSTNAME",
     "PORT",
+    "QR_PATH",
     "Endpoint",
     "Enrolment",
     "EnrolmentSite",
     "Guard",
+    "QrWriteError",
     "RemoteDesk",
+    "RosterWriteError",
     "WebEndpoint",
     "build_welcome_app",
     "load_or_create_secret",

@@ -11,8 +11,11 @@ and every comment that said so has been corrected. It holds a token
 that authenticates one person to this house, so it is written 0600, it
 is shown only while the enrolment window is open, and a photograph of
 the strip taken by somebody else in the room IS a credential leak. The
-window (`remote.ENROLMENT_SECONDS`) is what bounds that, and it matters
-more now than it did when it only bounded a page.
+window (`remote.ENROLMENT_SECONDS`) bounds only how long the code is on
+screen to be photographed — nothing bounds the token itself once it
+exists: it is valid forever, and revoking one today means editing
+`personas.json` by hand to remove that person's entry. It matters more
+now than it did when the window only bounded a page.
 
 The plain-HTTP welcome page still exists for a phone with no app, but it
 is no longer reachable by scanning: its address is typed. It is on its
@@ -56,7 +59,9 @@ def sobre(*, url: str, token: str, ca: str) -> str:
     return json.dumps(
         {"v": VERSION_SOBRE, "url": url, "token": token, "ca": ca},
         # Compact and stable: a QR's size is its scannability, and a
-        # sorted, space-free payload is also diffable in a log.
+        # space-free payload with a fixed key order — insertion order,
+        # not `sort_keys=True`, but deterministic either way for the
+        # same inputs — is also diffable in a log.
         separators=(",", ":"),
     )
 

@@ -84,7 +84,7 @@ it she runs and is simply mute.
 | `JARVIS_WIDGET_ENROLMENT_SECONDS` | How long the enrolment page answers after `SIGUSR1` opens it (default 300). Not an arbitrary number: it is how long the shared secret sits readable, in cleartext, to anyone on the wifi with a browser — that page cannot ask for authentication, because it exists for the moment before a phone has any reason to trust this box. **A phone already enrolled never needs this window again**; it bounds only adding one. |
 | `JARVIS_WIDGET_REMOTE_TOKEN` | Where the **pre-roster** shared secret lives (default `~/.jarvis/remote.token`, 0600). Read exactly once now — the moment `~/.jarvis/personas.json` is first created — to adopt an already-enrolled house's secret as `casa`'s. **Deleting it afterwards does nothing**: nothing reads it again, so it does not rotate anything. See `JARVIS_WIDGET_REMOTE_ROSTER` below for what rotation actually is today. |
 | `JARVIS_WIDGET_REMOTE_ROSTER` | Where the roster lives (default `~/.jarvis/personas.json`, 0600): `{persona: secret}`, one entry per enrolled person plus `casa` for whoever the system cannot attribute. **This is the authority now, not `JARVIS_WIDGET_REMOTE_TOKEN` above.** On a box that already had a `remote.token` and no roster yet, the roster is created carrying that secret forward as `casa`'s, so every phone enrolled before the upgrade keeps working with no re-enrolment. Rotating one person is removing their entry by hand and enrolling them again (`tools/enrolar.py <persona>`, below) — a fresh secret for them, nobody else touched. Rotating everyone means deleting this file **and** `remote.token`: delete only this one and `casa` re-adopts the old secret from `remote.token` on the next boot, unrotated. |
-| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start, open for `casa` — never a named person; see the ritual below for that. **The QR is a credential since 2026-09-06**, not a bare LAN URL: it carries `casa`'s token inside the envelope (`enrol.sobre`), and the enrolment WINDOW (`remote.ENROLMENT_SECONDS`, 300 s) is what bounds how long it is worth anything, on screen or in a photo of the screen. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
+| `JARVIS_WIDGET_SHOW_QR=1` | Put the enrolment QR on the strip a few seconds after start, open for `casa` — never a named person; see the ritual below for that. **The QR is a credential since 2026-09-06**, not a bare LAN URL: it carries `casa`'s token inside the envelope (`enrol.sobre`). The enrolment WINDOW (`remote.ENROLMENT_SECONDS`, 300 s) bounds only how long the CODE is on screen (or in a photo of it) to be scanned — it does not bound the token itself, which stays valid until somebody edits `personas.json` by hand. `SIGUSR1` opens the same window with no flag and no restart — see the ritual below. |
 
 ### The models it needs
 
@@ -122,8 +122,13 @@ here only until the app replaces it.
 > **El QR es ahora una credencial.** Antes era una URL de la red local y
 > daba igual quién lo viera; ahora lleva el token de una persona. Una
 > foto de la tira hecha por otro en la habitación es una fuga. La
-> ventana de alta (`JARVIS_WIDGET_ENROLMENT_SECONDS`, 300 s) es lo único
-> que la acota.
+> ventana de alta (`JARVIS_WIDGET_ENROLMENT_SECONDS`, 300 s) acota
+> cuánto tiempo el CÓDIGO está en pantalla para poder ser fotografiado —
+> no acota el crédito en sí. El token que lleva dentro no caduca solo:
+> sigue siendo válido para siempre, y revocarlo hoy significa editar
+> `personas.json` a mano y borrar esa entrada. Quien fotografíe la tira
+> durante esos 300 s puede volver semanas después, en la misma wifi, y
+> conectar como esa persona.
 
 > **Rotar la clave de la CA obliga a reenrolar todos los teléfonos.**
 > Renovar el certificado conservando la clave, no. Es la contrapartida

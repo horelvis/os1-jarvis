@@ -108,7 +108,23 @@ Con esto puedes verificar el lado de la caja sin tener un iPhone delante:
 2. **Rechaza `ws://`.** Un QR con TLS desactivado se descarta antes de conectar.
 3. **Rechaza sobres incompletos** o de versión desconocida, diciendo cuál de las
    dos cosas es.
-4. **Presenta el token** tal y como lo hace hoy la página.
+4. **Presenta el token** tal y como lo hace hoy la página: como parámetro de
+   consulta `t` en la propia URL de conexión — `wss://host:puerto/ws?t=<token>`
+   —, nunca en una cabecera `Authorization` ni en un mensaje aparte tras
+   conectar. `remote.py`'s `_handler` lo lee exactamente de
+   `request.query.get("t")` y de ningún otro sitio; cualquiera de las otras
+   dos formas recibe un `403` sin nada en el registro que lo explique — la
+   comprobación falla antes de que se escriba una sola línea, y
+   `access_log=None` es deliberado (evita que el propio token acabe en el
+   registro de acceso).
+
+   **Si la app manda cabecera `Origin`**, tiene que ser exactamente el mismo
+   origen que la `url` del sobre — esquema, host y puerto los tres, comparados
+   enteros por `Guard.origin_ok` (`remote_auth.py`). Si la app no manda
+   ninguna, la caja también acepta la conexión: `origin_ok` trata la ausencia
+   de `Origin` como válida a propósito, porque es así como distingue un
+   cliente que no es un navegador — que es lo que la app es — de uno que sí lo
+   es y por tanto sujeto a esta comprobación.
 5. Si más adelante la caja **rechaza el token** —revocado, o la IP cambió—, la
    app vuelve a la pantalla de emparejamiento explicando qué pasó, en lugar de
    reintentar en silencio.

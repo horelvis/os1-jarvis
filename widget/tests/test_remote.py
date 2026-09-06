@@ -713,6 +713,74 @@ def test_the_qr_is_not_rewritten_when_writing_it_fails() -> None:
     assert enrolment.persona(now=1.0) == "nata"
 
 
+def test_a_failed_qr_write_does_not_leave_the_previous_persons_qr_readable(
+    tmp_path,
+) -> None:
+    """Marta is enrolled Tuesday; her QR lands at the one fixed path
+    `_mostrar_qr` always shows. If `hijo`'s enrolment on Friday fails to
+    write a new one — a full disk, a dangling symlink, all failures
+    `save_roster`/`write_qr` already handle elsewhere as ordinary — the
+    strip must not go on showing Marta's PNG on `hijo`'s window: that is
+    her live credential, and his phone would connect as her.
+
+    `Enrolment.abrir` is fixed to delete whatever is at the QR path
+    BEFORE attempting the write, so a failure below leaves nothing
+    rather than something wrong — the file the band would show simply
+    is not there any more."""
+    from jarvis_widget.remote import Enrolment
+
+    qr_path = tmp_path / "enrol-qr.png"
+    qr_path.write_bytes(b"la credencial en vivo de marta")
+
+    def explota(_payload: str) -> None:
+        raise OSError("disco lleno")
+
+    enrolment = Enrolment()
+    enrolment.attach_qr(explota, qr_path)
+
+    enrolment.abrir("hijo", now=0.0)
+
+    assert not qr_path.exists()
+
+
+def test_the_journal_says_which_of_two_failures_happened(tmp_path) -> None:
+    """A `save_roster` failure means no credential exists at all for this
+    person; a `write_qr` failure means one exists on disk while the
+    strip has nothing to show. Different next steps for whoever reads
+    the journal, so the log line must say which one happened rather than
+    one generic message for both."""
+    import io
+
+    from loguru import logger
+
+    from jarvis_widget.remote import Enrolment, QrWriteError, RosterWriteError
+
+    sink = io.StringIO()
+    handler = logger.add(sink, level="DEBUG")
+    try:
+        no_credential = Enrolment()
+
+        def sin_credencial(_persona: str) -> None:
+            raise RosterWriteError("disco lleno")
+
+        no_credential.attach_qr(sin_credencial, tmp_path / "a.png")
+        no_credential.abrir("hijo", now=0.0)
+
+        credential_exists = Enrolment()
+
+        def sin_dibujar(_persona: str) -> None:
+            raise QrWriteError("disco lleno")
+
+        credential_exists.attach_qr(sin_dibujar, tmp_path / "b.png")
+        credential_exists.abrir("hijo", now=0.0)
+    finally:
+        logger.remove(handler)
+
+    logged = sink.getvalue()
+    assert "no existe credencial" in logged
+    assert "ya existe pero" in logged
+
+
 def test_the_display_name_comes_from_the_register(tmp_path) -> None:
     """`persona_for` answers with an id; a person reads a name. The
     contract's whole purpose is somebody enrolling four phones in a row

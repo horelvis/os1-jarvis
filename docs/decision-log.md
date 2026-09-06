@@ -45,10 +45,16 @@ There is no partial version of either direction.
 costs.** It used to encode a LAN URL that was nobody's secret — anyone
 could have it, it named a place, not a person. Now it carries one
 person's token, and a photo of the strip taken by somebody else in the
-room is a leak of that person's access, not a curiosity. The only thing
-that bounds it is `JARVIS_WIDGET_ENROLMENT_SECONDS` (300 s): the window
-during which the QR is worth anything at all, on screen or in a photo of
-the screen. Both `enrol.write_qr` and `__main__._mostrar_qr` used to say
+room is a leak of that person's access, not a curiosity.
+`JARVIS_WIDGET_ENROLMENT_SECONDS` (300 s) bounds only how long the CODE
+is on screen (or in a photo of the screen) to be scanned in the first
+place — it bounds *display*, not the credential itself. The token
+inside it is valid forever once minted: nothing expires it, and nothing
+in this codebase revokes one short of a person editing `personas.json`
+by hand and removing the entry. A guest who photographs the strip
+during those 300 s can come back three weeks later, on the same wifi,
+and connect as that person for as long as `personas.json` still holds
+their secret. Both `enrol.write_qr` and `__main__._mostrar_qr` used to say
 the opposite in as many words — the second one in the very file that
 draws the code on screen, arguing that the band's 15-second fade "is not
 what protects anything." Both were wrong the moment the payload changed,

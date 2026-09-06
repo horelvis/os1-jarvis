@@ -1225,7 +1225,7 @@ class JARVISApp(Gtk.Application):
         )
 
         from .certs import lan_address
-        from .remote import HOSTNAME, PORT, Enrolment, RemoteDesk, serve
+        from .remote import HOSTNAME, PORT, QR_PATH, Enrolment, RemoteDesk, serve
         from .remote_auth import Guard, load_or_create_roster
 
         def on_remote_utterance(pcm: bytes, endpoint) -> None:
@@ -1286,9 +1286,12 @@ class JARVISApp(Gtk.Application):
             # one secret per person (`tools/enrolar.py <persona>`).
             on_release=lambda endpoint: chunkers.drop(endpoint.persona),
         )
-        # Closed until the QR is actually shown (below) — the welcome
-        # page it points at hands the shared secret to whoever asks,
-        # over plain HTTP, with no check of its own (remote.py).
+        # Closed until the QR is actually shown (below). The QR itself
+        # carries the token now (`enrol.sobre`) rather than pointing at
+        # a page that hands one out; the plain-HTTP welcome page still
+        # exists as a typed-address fallback for a phone with no app,
+        # and it is this same window that gates whether IT answers too
+        # (remote.py).
         enrolment = Enrolment()
 
         async def dispatch(pcm: bytes, phone: object | None = None) -> None:
@@ -1599,12 +1602,13 @@ class JARVISApp(Gtk.Application):
             #
             # The QR is no longer harmless: it now carries that
             # person's token (`enrol.sobre`), not a bare LAN URL, so
-            # whoever holds the PNG holds the credential. That makes
-            # the band's own fade (`photo.FADE_S`, 15 s) part of what
-            # bounds exposure now, alongside the enrolment window
-            # itself (`ENROLMENT_SECONDS`) and the plain-HTTP page the
-            # old QR used to point at.
-            band.show_photo(str(Path.home() / ".jarvis" / "enrol-qr.png"), "alta")
+            # whoever holds the PNG holds the credential. The band's
+            # own fade (`photo.FADE_S`, 15 s) and the enrolment window
+            # (`ENROLMENT_SECONDS`) only bound how long the CODE is on
+            # screen to be scanned or photographed — neither bounds the
+            # TOKEN itself, which stays valid forever once minted.
+            # Revoking one today means editing `personas.json` by hand.
+            band.show_photo(str(QR_PATH), "alta")
             return False  # GLib.SOURCE_REMOVE
 
         if os.getenv("JARVIS_WIDGET_SHOW_QR") == "1":
