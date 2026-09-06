@@ -210,3 +210,49 @@ def test_the_root_may_only_vouch_for_this_box(tmp_path) -> None:
     )
     assert refused.returncode != 0
     assert "permitted subtree violation" in (refused.stdout + refused.stderr)
+
+
+@pytest.mark.skipif(
+    subprocess.run(["which", "openssl"], capture_output=True).returncode != 0,
+    reason="openssl is not installed",
+)
+def test_the_fingerprint_is_of_the_public_key_not_the_certificate(tmp_path) -> None:
+    """The whole point of pinning SPKI rather than the certificate:
+    reissuing the leaf from the SAME key must not invalidate a phone.
+    A test that only checked "returns a string" would not notice the
+    day somebody switches this to `openssl x509 -fingerprint`."""
+    from jarvis_widget.certs import spki_fingerprint
+
+    ca_pem, _cert, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+    huella = spki_fingerprint(ca_pem)
+
+    assert huella.startswith("sha256/")
+    # Base64 of 32 bytes: 44 characters, the last one '='.
+    assert len(huella) == len("sha256/") + 44
+    assert huella.endswith("=")
+
+    # The independent computation: the exact pipeline the contract
+    # gives operators, run here rather than trusted.
+    esperado = subprocess.run(
+        "openssl x509 -in %s -pubkey -noout "
+        "| openssl pkey -pubin -outform der "
+        "| openssl dgst -sha256 -binary "
+        "| openssl base64" % ca_pem,
+        shell=True,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert huella == f"sha256/{esperado}"
+
+
+@pytest.mark.skipif(
+    subprocess.run(["which", "openssl"], capture_output=True).returncode != 0,
+    reason="openssl is not installed",
+)
+def test_the_fingerprint_is_stable_across_calls(tmp_path) -> None:
+    from jarvis_widget.certs import spki_fingerprint
+
+    ca_pem, _cert, _key = ensure_certificate(tmp_path, "brain.local", "192.168.1.40")
+
+    assert spki_fingerprint(ca_pem) == spki_fingerprint(ca_pem)

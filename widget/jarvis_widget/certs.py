@@ -13,7 +13,9 @@ wants to do that twice.
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
 import os
 import socket
 import subprocess
@@ -58,6 +60,17 @@ def _run(args: list[str]) -> None:
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"openssl failed: {' '.join(args)}\n{result.stderr}")
+
+
+def _capture(args: list[str], stdin: bytes | None = None) -> bytes:
+    """`_run`'s sibling for the two steps whose OUTPUT is the point.
+
+    `_run` exists for commands that either work or must raise; these two
+    are pipes. Same `check=True` posture: a failure here must not become
+    an empty fingerprint, which would produce an envelope the app
+    accepts and then cannot verify against anything.
+    """
+    return subprocess.run(args, input=stdin, capture_output=True, check=True).stdout
 
 
 def ensure_certificate(
@@ -169,3 +182,25 @@ def ensure_certificate(
     )
     csr.unlink(missing_ok=True)
     return ca_pem, cert_pem, key_pem
+
+
+def spki_fingerprint(ca_pem: Path) -> str:
+    """The CA's public key, SHA-256, in the HPKP form the phone pins.
+
+    **The key, not the certificate**, and that is the whole design: a
+    leaf reissued from the same key keeps every enrolled phone working,
+    where pinning the certificate would strand all of them on the day it
+    is renewed. The cost, and it belongs written down next to the code
+    rather than only in the contract: ROTATING THE CA KEY means
+    re-enrolling every phone in the house.
+
+    Shells out to `openssl` rather than reaching for `cryptography`,
+    because this module already does exactly that for every other
+    certificate operation and adding a second way to do the same job is
+    how two of them drift apart. Four processes, once per QR — the cost
+    is invisible next to `openssl req`, which this module already runs.
+    """
+    pubkey = _capture(["openssl", "x509", "-in", str(ca_pem), "-pubkey", "-noout"])
+    der = _capture(["openssl", "pkey", "-pubin", "-outform", "der"], stdin=pubkey)
+    digest = hashlib.sha256(der).digest()
+    return "sha256/" + base64.b64encode(digest).decode("ascii")
