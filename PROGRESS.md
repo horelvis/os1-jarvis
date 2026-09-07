@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
 - 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
 - 2026-09-06 (madrugada) — Un iPhone de verdad encontró cinco cosas ✅
@@ -67,6 +68,85 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+
+---
+
+## 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
+
+Con el emparejamiento ya resuelto, el teléfono conectaba y se quedaba
+mudo. **El fallo estaba en los dos lados a la vez, y era el mismo**: cada
+uno descartaba en silencio lo que el otro mandaba.
+
+- La app mandaba `user_audio_start` / `user_audio_end`; la caja espera
+  `start` / `end`. Un `type` desconocido cae en un `continue` sin log y
+  sin cerrar el socket, así que la pulsación entraba y no hacía nada.
+- Y al revés: la app descartaba **todos** nuestros binarios de voz porque
+  esperaba un frame que le declarase la tasa antes de abrir su buffer de
+  salida. Sin él, cada chunk se tiraba sin decir nada.
+
+Ninguno de los dos logs enseñaba nada. **Cuatro veces en un día la misma
+forma de fallo** —el token en el query string, los nombres de frame, sus
+binarios, y su `send()` que descartaba con el socket caído—: la cosa
+correcta, tirada sin dejar rastro. De ahí la única regla que sale de
+esto para los dos repos: **ninguna rama de descarte silencioso**.
+
+**Tres añadidos al contrato, los tres pedidos por la app y aprobados por
+el dueño** (`9ed1801`, `42faf19`):
+
+- **`{"type":"done"}`**, tras el último binario. El teléfono no puede oír
+  que ha terminado: «acabó» y «está sintetizando la siguiente cláusula»
+  son el mismo silencio en su socket, así que se quedaba esperando tras
+  la PRIMERA respuesta. No se dispara desde `on_done` —que llega con
+  CosyVoice todavía trabajando— sino que se encola en la **misma FIFO**
+  detrás de la última cláusula de ese destino: con un solo trabajador,
+  alcanzar la marca es imposible sin haber escrito antes el último byte.
+  Garantía estructural, no temporizador.
+- **`{"type":"interrupt"}`**, que la app ya mandaba y caía en el descarte
+  silencioso. Va a `Speaker.interrupt`, que es por destino desde el
+  2026-09-06 — escrito para que el barge-in de la habitación no vaciara
+  la respuesta de un móvil, y resulta ser exactamente la propiedad que
+  hacía falta en el otro sentido.
+- **`{"type":"text"}`**, la respuesta en palabras, entera y antes del
+  audio, para que la app pueda dibujar un transcript en vez de burbujas
+  vacías.
+
+**La decisión que costó pensar: `interrupt` NO devuelve el turno.**
+Liberarlo haría que `destino_de` resolviese el resto del turno a «la
+habitación», así que la cola de una respuesta cortada en el móvil se
+terminaría de decir **en voz alta en la casa**. Se paga con una ventana
+en la que una pulsación recibe `busy`, y la app la enseña en vez de
+tratarla como fallo.
+
+**Y el `close_code` en la línea de despedida**, porque «se ha ido» y «lo
+matamos» eran la misma frase.
+
+**El ciclo de caídas cada 40 s: iOS suspendiendo la app.** Mi hipótesis
+era otra —que `URLSessionWebSocketTask` no contestara los pings sin un
+`receive()` en vuelo— y **el otro agente la falsificó con una
+reproducción**: cien segundos vivos con nuestro mismo patrón. La pista
+buena era un dato que yo mismo había mandado sin verlo: huecos de 3, 18,
+54 y **122 s** entre reconexiones, imposibles con un backoff que topa en
+30. Confirmado poniendo la app en primer plano: **el socket pasó de dos
+minutos** y cruzó dos ventanas de heartbeat enteras.
+
+**Medido, en vivo, desde el iPhone:**
+
+- Primera pulsación real del día a las 11:40:00. Se distingue de un turno
+  de escritorio porque **no lleva línea de identificación de voz**:
+  `dispatch` la salta para un teléfono, ya que una pulsación es una
+  identidad que no puede mentir.
+- Latencia de pulsación a respuesta: **90 s** el primer turno de la
+  sesión, **14 s** el siguiente (con búsqueda web incluida), 37 s en otro
+  de la mañana. Varianza enorme; no es lentitud de fondo, es el arranque
+  en frío.
+- Turno completo, ida y vuelta, oído en el teléfono.
+
+Tests: 715 → 721.
+
+**Sin medir todavía:** el hueco máximo entre binarios de una misma
+respuesta. Se abortó dos veces —la sonda y el dueño son la misma persona
+(`orelvis`) y el socket le habría robado la respuesta— y con el `done`
+adoptado ya no bloquea a nadie.
 ---
 
 ## 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
