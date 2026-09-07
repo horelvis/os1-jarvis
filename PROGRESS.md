@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-07 (noche) — La validación Realtime local entra al repo ✅
 - 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
 - 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
@@ -69,6 +70,32 @@
 
 
 
+---
+
+## 2026-09-07 (noche) — La validación Realtime local entra al repo ✅
+
+La revisión externa del camino hacia conversación en tiempo real local queda
+dentro del proyecto, no como parche de producción. Se guardó en
+`docs/superpowers/specs/2026-09-07-realtime-local-validation/`:
+
+- `REPORT.md`, con los hallazgos P1/P2 y la frontera exacta de lo que se
+  midió.
+- `motor_turnos_local.py`, un núcleo aislado de turnos con cola bounded,
+  destino capturado al aceptar el turno, cancelación explícita y terminales
+  una sola vez.
+- `test_motor_turnos_local.py` y `test_jarvis_contracts.py`, las pruebas
+  reproducibles del prototipo y de los helpers actuales de JARVIS.
+
+No se integró todavía en `widget/` ni en Hermes. Eso es deliberado: los
+hallazgos tocan contrato de teléfono, correlación de turno, aislamiento por
+persona y rutas Hermes, y deben entrar por una integración incremental con
+tests del flujo real.
+
+La copia del test de contrato ya no apunta a `/home/nexus/git/os1-jarvis`;
+resuelve el checkout que contiene el spec, para que un worktree pueda
+reproducirlo.
+
+Tests: `unittest` de las 16 pruebas del spec, OK.
 ---
 
 ## 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
