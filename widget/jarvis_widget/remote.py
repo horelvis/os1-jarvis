@@ -422,6 +422,15 @@ class Endpoint(Protocol):
 
     def write(self, pcm: bytes) -> None: ...
 
+    def done(self) -> None:
+        """This turn is over — said after the last byte of his voice.
+
+        The room implements it as nothing: somebody sitting here can
+        hear him stop. A phone cannot, and `Speaker.finish` is what
+        guarantees it arrives last (2026-09-07).
+        """
+        ...
+
     def refuse(self) -> None: ...
 
 
@@ -457,8 +466,14 @@ class RemoteDesk:
         self,
         on_utterance: Callable[[bytes, Endpoint], None],
         on_release: Callable[[Endpoint], None] | None = None,
+        on_interrupt: Callable[[Endpoint], None] | None = None,
     ) -> None:
         self._on_utterance = on_utterance
+        # Barge-in FROM a phone, which could not happen until
+        # 2026-09-07: push-to-talk gave it no way to talk over him, so
+        # the app asks for it explicitly instead. Deliberately NOT a
+        # release of the claim — see `interrupt` below.
+        self._on_interrupt = on_interrupt
         # Called on EVERY way a claim ends — released, or stolen when it
         # expires — with the endpoint that let go, and it is how his
         # voice comes home with it. Only the claim used to expire: the
@@ -496,6 +511,22 @@ class RemoteDesk:
         snapshot — mutating the returned dict does not touch a claim.
         """
         return {persona: claim.endpoint for persona, claim in self._claims.items()}
+
+    def interrupt(self, endpoint: Endpoint) -> None:
+        """This phone asked him to stop talking. Stop, and nothing else.
+
+        The claim is deliberately NOT given back here, and that is a
+        privacy decision rather than an oversight. Releasing it would
+        make `destino_de` resolve this conversation to `None` — the room
+        — for the rest of the turn, so the tail of an answer the phone
+        just cut off would be finished OUT LOUD in the house. The claim
+        is released where it always was, when the turn settles.
+
+        The cost, and the app is told: a press arriving between the
+        interruption and that settle is answered `busy`.
+        """
+        if self._on_interrupt is not None:
+            self._on_interrupt(endpoint)
 
     def endpoint_for(self, persona: str) -> Endpoint | None:
         """The endpoint holding this person's turn, or None.
@@ -632,6 +663,20 @@ class WebEndpoint:
         # through call_soon_threadsafe costs nothing and makes this safe
         # from the audio thread too.
         self._loop.call_soon_threadsafe(self._send, self._ws.send_bytes(pcm))
+
+    def done(self) -> None:
+        """This turn is over — sent AFTER the last byte of his voice.
+
+        The phone cannot hear him stop: "he finished" and "he is
+        synthesising the next clause" are both silence on this socket.
+        The iOS app returns its avatar to rest and rearms the microphone
+        on this frame; without it, it stayed waiting after the first
+        answer (2026-09-07). `Speaker.finish` is what guarantees the
+        ordering — see its docstring.
+        """
+        self._loop.call_soon_threadsafe(
+            self._send, self._ws.send_json({"type": "done"})
+        )
 
     def refuse(self) -> None:
         self._loop.call_soon_threadsafe(
@@ -909,6 +954,8 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
                         truncated = False
                         if not desk.claim(endpoint, time.monotonic()):
                             continue
+                    elif frame.get("type") == "interrupt":
+                        desk.interrupt(endpoint)
                     elif (
                         frame.get("type") == "end"
                         and desk.endpoint_for(endpoint.persona) is endpoint

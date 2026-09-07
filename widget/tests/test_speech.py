@@ -756,3 +756,93 @@ async def test_raising_workers_does_not_preserve_clause_order(monkeypatch) -> No
         worker.cancel()
 
     assert [c.decode() for c in home.written] == ["dos", "tres", "uno"]
+
+
+# ── the end of a turn, said out loud on the wire ──────────────────────
+
+
+async def test_finish_tells_the_destination_after_its_last_clause(monkeypatch) -> None:
+    """A phone cannot tell "he has stopped" from "he is synthesising the
+    next clause": both are silence on the socket. So the box has to say
+    so, and it has to say so AFTER the last byte of audio — a `done`
+    that overtook a clause would rearm the microphone into the middle of
+    his own sentence."""
+    import asyncio
+
+    from Hermes.plugins.jarvis_voice import tts
+
+    from jarvis_widget.speech import Speaker
+
+    class Phone:
+        def __init__(self) -> None:
+            self.eventos: list[str] = []
+
+        def write(self, pcm: bytes) -> None:
+            self.eventos.append("audio")
+
+        def done(self) -> None:
+            self.eventos.append("fin")
+
+    async def fake_stream(_clause, client=None):
+        yield b"\x01\x02", "fake"
+
+    monkeypatch.setattr(tts, "new_client", lambda: object())
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    phone = Phone()
+    speaker = Speaker(object())
+    speaker.start()
+    speaker.say("Una.", phone)
+    speaker.say("Dos.", phone)
+    speaker.finish(phone)
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if "fin" in phone.eventos:
+            break
+
+    assert phone.eventos == ["audio", "audio", "fin"]
+
+
+async def test_an_interrupted_phone_is_told_the_turn_is_over() -> None:
+    """Otherwise barge-in leaves it waiting for a `done` that the
+    dropped clauses will never produce — `interrupt` empties this
+    destination's queue, and the end-of-turn marker sitting in it goes
+    with everything else."""
+    from jarvis_widget.speech import Speaker
+
+    class Phone:
+        def __init__(self) -> None:
+            self.fines = 0
+
+        def write(self, pcm: bytes) -> None:
+            pass
+
+        def done(self) -> None:
+            self.fines += 1
+
+    phone = Phone()
+    speaker = Speaker(object())
+    speaker.say("Una.", phone)
+    speaker.interrupt(phone)
+
+    assert phone.fines == 1
+
+
+def test_the_room_is_never_told_a_turn_ended() -> None:
+    """`None` is the room, and the room is a `Player` — it has no
+    `done()` and needs none: somebody sitting here can hear that he
+    stopped. Calling one on it would be an AttributeError inside the
+    speaker's worker, which is the shape of failure that goes mute for
+    a whole session."""
+    from jarvis_widget.speech import Speaker
+
+    class Player:
+        def write(self, pcm: bytes) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    speaker = Speaker(Player())
+    speaker.finish(None)
+    speaker.interrupt(None)

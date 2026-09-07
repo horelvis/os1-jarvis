@@ -16,6 +16,8 @@ import asyncio
 import re
 import unicodedata
 
+from loguru import logger
+
 try:
     from Hermes.plugins.jarvis_voice.markers import has_unclosed_tag
 except ImportError:  # repo root not on PYTHONPATH
@@ -309,6 +311,18 @@ class Speaker:
     # to keep arriving in the order they were said.
     _DEFAULT_WORKERS = 1
 
+    # Queued like a clause, and that IS the mechanism: the queue is FIFO
+    # and `workers` is 1, so a marker put in behind a destination's last
+    # clause cannot be reached until that clause has been synthesised
+    # and written. A boolean or a callback fired from `on_done` could
+    # not promise that — `on_done` arrives while CosyVoice is still
+    # working, which is the whole reason the marker exists.
+    #
+    # Raising `workers` breaks this exactly as it breaks clause order,
+    # and for the same reason (see `_DEFAULT_WORKERS` above): the marker
+    # would race the clause in front of it.
+    _FIN_DE_TURNO = object()
+
     def __init__(self, player, workers: int = _DEFAULT_WORKERS) -> None:
         self._player = player
         self._client = None
@@ -344,17 +358,58 @@ class Speaker:
         """
         self._queue.put_nowait((destino, self._generation_for(destino), clause))
 
+    def finish(self, destino: object | None) -> None:
+        """Say, to `destino`, that this turn is over — once its queued
+        clauses have all been spoken.
+
+        A phone cannot hear him stop. On its socket "he finished" and
+        "he is synthesising the next clause" are the same thing: no
+        bytes arriving. So it needs telling, and the telling has to come
+        after the last byte — which is why this goes through the queue
+        rather than straight to the destination (2026-09-07, at the
+        request of the iOS app: without it the phone stayed waiting
+        after the FIRST answer and never rearmed its microphone).
+
+        The room (`None`) is never told and needs no telling: somebody
+        sitting here can hear that he stopped, and the `Player` has no
+        `done()` to call.
+        """
+        if destino is None:
+            return
+        self._queue.put_nowait(
+            (destino, self._generation_for(destino), self._FIN_DE_TURNO)
+        )
+
     async def _run(self) -> None:
         while True:
             destino, generation, clause = await self._queue.get()
             if generation != self._generation_for(destino):
                 continue  # queued before an interruption of THIS destino
+            if clause is self._FIN_DE_TURNO:
+                self._decir_fin(destino)
+                continue
             try:
                 await self._synthesise(clause, destino, generation)
             except Exception:
                 # A dead CosyVoice must not kill the worker, or she goes
                 # mute for the rest of the session with no error path.
                 continue
+
+    @staticmethod
+    def _decir_fin(destino: object | None) -> None:
+        """Tell one destination its turn ended, and never raise.
+
+        A phone that dropped mid-reply is an ordinary event; letting it
+        take the worker down would leave him mute for the rest of the
+        session with no error path, which is the failure this file's
+        `_run` already guards against for synthesis.
+        """
+        if destino is None:
+            return
+        try:
+            destino.done()
+        except Exception:
+            logger.debug("fin de turno: el destino ya no escucha", exc_info=True)
 
     def interrupt(self, destino: object | None = None) -> None:
         """Stop ONE destination, now. `None` is the room, as in `say()`.
@@ -378,6 +433,13 @@ class Speaker:
         """
         self._generations[destino] = self._generation_for(destino) + 1
         self._drop_queued_for(destino)
+        # Including whatever end-of-turn marker was sitting in that
+        # queue: it is dropped with everything else, so without this the
+        # phone that just cut him off would wait forever for the `done`
+        # that rearms its microphone. A later `on_done` for the same
+        # turn queues a second marker and the phone is told twice —
+        # harmless, and much less harmful than never.
+        self._decir_fin(destino)
         if destino is None:
             self._player.stop()
         # A phone has nothing analogous to `_player.stop()` — there is

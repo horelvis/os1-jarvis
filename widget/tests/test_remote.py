@@ -967,3 +967,46 @@ def test_the_envelope_host_can_be_overridden(monkeypatch) -> None:
 
     monkeypatch.setenv("JARVIS_WIDGET_ENVELOPE_HOST", "brain.local")
     assert host_del_sobre(lambda: "192.168.1.40") == "brain.local"
+
+
+async def test_a_phone_can_cut_him_off_and_is_told_the_turn_ended() -> None:
+    """Barge-in from a phone, which did not exist until 2026-09-07: the
+    app was already sending `{"type":"interrupt"}` and this dropped it
+    in the silent default branch, so the phone stopped its speaker and
+    the chunks that kept arriving started it again by themselves.
+
+    Both halves on one wire, because they are one gesture: the frame
+    has to REACH the speaker (with the endpoint that sent it, never a
+    shared one), and the phone has to be told the turn is over or it
+    waits forever for a `done` that the dropped clauses will never
+    produce."""
+    cortados = []
+    desk = RemoteDesk(
+        on_utterance=lambda pcm, endpoint: None,
+        on_interrupt=lambda endpoint: (
+            cortados.append(endpoint),
+            endpoint.done(),
+        ),
+    )
+    guard = Guard({"casa": "c" * 32, "marta": "m" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    # A real loop, unlike the other socket tests here: `WebEndpoint`
+    # writes every frame through `call_soon_threadsafe`, so `None` —
+    # which is enough for tests that only ever read — cannot send one.
+    app.router.add_get("/ws", _handler(desk, guard, None, asyncio.get_running_loop()))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "m" * 32}
+        )
+        assert (await asyncio.wait_for(ws.receive_json(), 5))["type"] == "enrolled"
+        await ws.send_json({"type": "interrupt"})
+        recibido = await asyncio.wait_for(ws.receive_json(), 5)
+        await ws.close()
+    finally:
+        await client.close()
+
+    assert recibido == {"type": "done"}
+    assert len(cortados) == 1
+    assert cortados[0].persona == "marta"

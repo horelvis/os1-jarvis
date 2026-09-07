@@ -1290,6 +1290,13 @@ class JARVISApp(Gtk.Application):
 
         remote_desk = RemoteDesk(
             on_utterance=on_remote_utterance,
+            # Barge-in from a phone (2026-09-07). Straight to
+            # `Speaker.interrupt`, which is already per-destination —
+            # written that way so the ROOM's barge-in could not empty a
+            # phone's reply, and that is exactly the property this
+            # needs in the other direction: one phone cutting him off
+            # must not touch the room's answer or anybody else's.
+            on_interrupt=speaker.interrupt,
             # Until 2026-09-06 a claim ending — including the one
             # nobody calls: a claim that simply expires — had to send
             # the speaker's single shared sink home too, or it went on
@@ -1534,6 +1541,15 @@ class JARVISApp(Gtk.Application):
             for clause in chunkers.for_chat(chat_id).flush():
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause, destino)
+            # Behind everything this turn just queued, never before
+            # it: `Speaker.finish` goes through the same FIFO the
+            # clauses do, so the phone is told the turn ended only once
+            # its last byte of audio has been written. Called even when
+            # nothing was said and even when his voice is switched off
+            # — a phone waiting for this frame to rearm its microphone
+            # must not be left waiting by a turn that produced no
+            # sound.
+            speaker.finish(destino)
             # This conversation's buffer has said everything it had —
             # see `TurnChunkers.drop` for why it must not linger.
             chunkers.drop(chat_id)
@@ -1598,6 +1614,10 @@ class JARVISApp(Gtk.Application):
                     file=sys.stderr,
                     flush=True,
                 )
+            # A turn that died is still a turn that ended, and the
+            # phone has no other way to learn it: without this it waits
+            # for a `done` that a failed turn will never queue.
+            speaker.finish(destino)
             settle_turn(destino, remote_desk)
 
         def on_photo(path: str, camera: str) -> None:
