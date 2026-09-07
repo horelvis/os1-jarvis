@@ -1511,6 +1511,15 @@ class JARVISApp(Gtk.Application):
                 return
             machine.token(token)
             destino = destino_de(remote_desk, chat_id)
+            if destino is not None:
+                # The phone gets his words as well as his voice, so its
+                # transcript has something to draw (iOS app,
+                # 2026-09-07). Whole and unsplit, and BEFORE the audio:
+                # the clause chunker below is about how he is spoken.
+                # Sent even when his voice is switched off — a muted
+                # answer is still an answer, and a phone that only ever
+                # sees silence cannot tell it from a turn that failed.
+                destino.text(token)
             for clause in chunkers.for_chat(chat_id).push(token):
                 print(f"  dice: {clause}", file=sys.stderr, flush=True)
                 say(clause, destino)

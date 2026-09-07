@@ -422,6 +422,11 @@ class Endpoint(Protocol):
 
     def write(self, pcm: bytes) -> None: ...
 
+    def text(self, texto: str) -> None:
+        """What he just said, as text. The room implements it as
+        nothing — somebody sitting here can hear him."""
+        ...
+
     def done(self) -> None:
         """This turn is over — said after the last byte of his voice.
 
@@ -663,6 +668,24 @@ class WebEndpoint:
         # through call_soon_threadsafe costs nothing and makes this safe
         # from the audio thread too.
         self._loop.call_soon_threadsafe(self._send, self._ws.send_bytes(pcm))
+
+    def text(self, texto: str) -> None:
+        """His side of the conversation, in words, for the phone to draw.
+
+        The phone hears him and nothing more, so a transcript on the app
+        could only show empty bubbles where his answers go (iOS app,
+        2026-09-07). Sent WHOLE, exactly as the gateway delivered it —
+        the clause splitting is a detail of how he is spoken and has no
+        business shaping how he is read.
+
+        Nothing new leaves the house: the audio of this same sentence
+        already travels down this same socket. What it does add is that
+        his words end up WRITTEN on the phone, which is a different
+        thing from heard once, if that phone is ever lost.
+        """
+        self._loop.call_soon_threadsafe(
+            self._send, self._ws.send_json({"type": "text", "text": texto})
+        )
 
     def done(self) -> None:
         """This turn is over — sent AFTER the last byte of his voice.
@@ -998,8 +1021,15 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
             # ends of its visit are written down. The duration is what
             # separates them in practice: a refusal is instant, a real
             # session is not.
+            # The close code, because "it left" and "we hung up on it"
+            # are otherwise the same line — and that is exactly the
+            # open question today: three sockets of five died at
+            # 38-46 s, which is `heartbeat=20` sending its ping and
+            # closing 20 s later when no pong came back. 1000/1001 is a
+            # phone saying goodbye; 1006 is us deciding it was dead.
             logger.info(
-                f"móvil: {persona} se ha ido tras {time.monotonic() - desde:.1f}s"
+                f"móvil: {persona} se ha ido tras "
+                f"{time.monotonic() - desde:.1f}s (cierre {ws.close_code})"
             )
         return ws
 

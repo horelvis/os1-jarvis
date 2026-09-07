@@ -13,6 +13,7 @@ from aiohttp import WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from jarvis_widget.remote import (
+    WebEndpoint,
     ANSWERING_SECONDS,
     ENROLMENT_SECONDS,
     HELD_TURN_SECONDS,
@@ -1010,3 +1011,53 @@ async def test_a_phone_can_cut_him_off_and_is_told_the_turn_ended() -> None:
     assert recibido == {"type": "done"}
     assert len(cortados) == 1
     assert cortados[0].persona == "marta"
+
+
+async def test_what_he_says_reaches_the_phone_as_text_too() -> None:
+    """The phone has no transcript of HIS side: it hears him and that is
+    all, so a chat window on the app could only draw empty bubbles where
+    his answers go (iOS app, 2026-09-07). The text is sent whole, exactly
+    as the gateway delivered it — never per clause, which is a detail of
+    how he is SPOKEN and has no business shaping how he is read.
+
+    Nothing new leaves the house that was not leaving already: the audio
+    of this same sentence goes down this same socket."""
+    import asyncio as _asyncio
+
+    class FakeWS:
+        def __init__(self) -> None:
+            self.enviados: list[dict] = []
+
+        async def send_json(self, payload: dict) -> None:
+            self.enviados.append(payload)
+
+    ws = FakeWS()
+    endpoint = WebEndpoint(ws, "phone", "marta", _asyncio.get_running_loop())
+    endpoint.text("Aquí sigo, señor.")
+    await _asyncio.sleep(0.05)
+
+    assert ws.enviados == [{"type": "text", "text": "Aquí sigo, señor."}]
+
+
+async def test_the_departure_says_how_the_socket_ended(captured_logs) -> None:
+    """ "It left" and "we killed it" are the same line otherwise, and
+    today that distinction is the open question: three of five sockets
+    died at 38-46 s, which is `heartbeat=20` sending a ping and closing
+    20 s later when no pong comes back. A close code separates a phone
+    that said goodbye (1000/1001) from one we hung up on (1006)."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    guard = Guard({"casa": "c" * 32, "marta": "m" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "m" * 32}
+        )
+        await ws.close()
+        await asyncio.sleep(0.1)
+    finally:
+        await client.close()
+
+    assert "cierre" in captured_logs.getvalue()
