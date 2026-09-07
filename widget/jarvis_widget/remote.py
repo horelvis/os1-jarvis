@@ -845,6 +845,19 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
             token_de_cabecera(request.headers.get("Authorization"))
         )
         if persona is None:
+            # Said out loud, because the silence here cost a day. On
+            # 2026-09-07 an iPhone was refused three times in a row for
+            # offering its token in `Authorization` while this read
+            # `?t=`, and NOTHING anywhere recorded it — the box could
+            # not tell "it connected and dropped" from "it was refused",
+            # and the diagnosis needed a second, instrumented socket
+            # standing beside this one. Never the credential itself, not
+            # even truncated: this line exists to be readable in a
+            # journal that other people can read too.
+            logger.warning(
+                f"móvil: rechazado, el crédito no es de nadie de esta casa "
+                f"({request.remote or 'origen desconocido'})"
+            )
             raise web.HTTPForbidden()
         ws = web.WebSocketResponse(
             heartbeat=20,
@@ -870,6 +883,8 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
         # accepts one.
         await ws.send_json({"type": "enrolled", "name": nombre_para(registro, persona)})
         endpoint = WebEndpoint(ws, request.remote or "phone", persona, loop)
+        logger.info(f"móvil: {persona} conectado desde {request.remote or 'phone'}")
+        desde = time.monotonic()
         buffer = bytearray()
         rate = 48000
         ceiling = max_bytes_at(rate)
@@ -930,6 +945,15 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
             # widget restarts — a different person is unaffected either
             # way.
             desk.release(endpoint)
+            # The other half of the pair above. A phone that
+            # authenticates and then leaves without pressing anything
+            # looks exactly like one that was never let in, unless both
+            # ends of its visit are written down. The duration is what
+            # separates them in practice: a refusal is instant, a real
+            # session is not.
+            logger.info(
+                f"móvil: {persona} se ha ido tras {time.monotonic() - desde:.1f}s"
+            )
         return ws
 
     return handle

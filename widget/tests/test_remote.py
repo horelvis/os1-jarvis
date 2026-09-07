@@ -486,6 +486,74 @@ async def test_the_socket_refuses_an_unknown_token() -> None:
         await client.close()
 
 
+@pytest.fixture
+def captured_logs():
+    """Everything loguru writes during one test. Same fixture and same
+    reason as `test_remote_auth.py`'s: this project keeps paying for
+    failures that were silent, so a fix that adds a log line is only
+    proven by a test that reads it back."""
+    import io
+
+    from loguru import logger
+
+    sink = io.StringIO()
+    handler = logger.add(sink, level="DEBUG")
+    try:
+        yield sink
+    finally:
+        logger.remove(handler)
+
+
+async def test_a_refused_phone_says_so_in_the_journal(captured_logs) -> None:
+    """The box was blind to this, and it cost a day. On 2026-09-07 an
+    iPhone connected and was refused three times over, and nothing
+    anywhere said so — the diagnosis needed a second, instrumented
+    socket standing beside this one. A refusal has to name itself, and
+    must NEVER name the credential it refused."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    guard = Guard({"casa": "c" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        with pytest.raises(WSServerHandshakeError):
+            await client.ws_connect(
+                "/ws", headers={"Authorization": "Bearer " + "x" * 32}
+            )
+    finally:
+        await client.close()
+
+    escrito = captured_logs.getvalue()
+    assert "rechazado" in escrito
+    assert "x" * 32 not in escrito
+
+
+async def test_a_phone_that_connects_and_leaves_says_both(captured_logs) -> None:
+    """Open and close, both of them. "It connected and dropped" and "it
+    was refused" look identical from outside — a connection that lasts
+    two seconds — and telling them apart is the whole point."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    guard = Guard({"casa": "c" * 32, "marta": "m" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "m" * 32}
+        )
+        await ws.close()
+    finally:
+        await client.close()
+
+    escrito = captured_logs.getvalue()
+    assert "marta" in escrito
+    assert "conectado" in escrito
+    assert "se ha ido" in escrito
+    assert "m" * 32 not in escrito
+
+
 async def test_the_socket_takes_the_token_from_the_authorization_header() -> None:
     """What a real iPhone actually sends, measured on the wire on
     2026-09-07: `Authorization: Bearer <token>`, with an empty query
