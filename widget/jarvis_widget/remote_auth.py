@@ -67,6 +67,28 @@ def new_secret() -> str:
     return secrets.token_urlsafe(_SECRET_BYTES)
 
 
+def token_de_cabecera(valor: str | None) -> str | None:
+    """The credential offered in `Authorization: Bearer <token>`, or None.
+
+    This is where the phone's secret travels since 2026-09-07. It used
+    to be `?t=` in the query string, which is what a browser is forced
+    to do — a `WebSocket` cannot set a header — and the page that needed
+    that is gone. A query string is written into every access log that
+    formats the request line, and this project has paid for a credential
+    in a URL once already (§12, 2026-08-24, the RTSP password).
+
+    Never a partial parse: anything that is not exactly one Bearer
+    credential returns None, so it reaches `persona_for` as "nobody"
+    rather than as a leftover string that might match something.
+    """
+    if not valor:
+        return None
+    esquema, separador, resto = valor.partition(" ")
+    if not separador or esquema.casefold() != "bearer":
+        return None
+    return resto.strip() or None
+
+
 def _adopted_or_fresh_secret() -> str:
     """What `casa`'s secret should be the very first time a roster is
     written.

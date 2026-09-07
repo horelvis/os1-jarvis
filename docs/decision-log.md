@@ -11,6 +11,61 @@
 
 ---
 
+## 2026-09-07 — The credential moves to a header, and the web page goes
+
+**The measurement, and it took an instrumented twin socket to get it.**
+A real iPhone had been failing to pair for two days, reporting a wifi
+problem. Every suspect was eliminated in turn against the running box:
+the phone reaches it (a plain-HTTP probe on :8888 logged
+`192.168.100.46`, iOS 26.6.1), it reaches :8443 (Safari raised the
+certificate warning, which only happens after the packet arrives), the
+local-network permission was granted, the envelope in the QR carried the
+address and not the name, and the CA fingerprint it pins matches the
+chain the box serves — `openssl` validates that chain against the IP and
+against the name with the CA as its only anchor, name constraints
+included, `Verify return code: 0`.
+
+So a twin of the phone socket was stood up on :8890 with the same
+certificate and the same contract, logging every stage, and a QR pointed
+at it. The app connected on the first try and the answer was one line:
+
+    query: {}
+    Authorization: Bearer gSJ5b8757...
+    User-Agent: Jarvis/1 CFNetwork/3860.700.1 Darwin/25.6.0
+    token reconocido como: None  →  403
+
+**The app sends the token in `Authorization: Bearer`. The box read it
+from `?t=` in the query string.** The token itself was correct character
+for character. Everything else — TLS, the CA pin, the envelope, the
+WebSocket upgrade — worked, which is why nothing on this side ever
+looked broken.
+
+**The app is the one that was right**, and that decided which side moves.
+A query string is written into every access log that formats the request
+line, and this project has already paid for a credential in a URL once
+(§12, 2026-08-24, the RTSP password). `?t=` existed only because a
+browser cannot set a header on a `WebSocket` — it was `movil.html`'s
+constraint, never a choice.
+
+**So the page goes with it** (owner, asked and answered): header only, no
+fallback, and `static/movil.html` deleted along with the route that
+served it and the welcome page's link to it. The welcome page keeps the
+certificate profile — the only reason a phone with no app still types
+that address — and stops handing out a secret in a fragment, which also
+means it no longer mints one: `Enrolment.abrir` has been the only place
+that mints since 2026-09-06.
+
+**What this cost, stated plainly:** there is now exactly one way in, and
+it is the native app. A browser can no longer open the socket at all.
+That is the point rather than a side effect, but a box whose app is
+broken has no fallback path to a phone any more.
+
+**And what the same session proved in passing:** the display name comes
+back capitalised over a real socket — `{"type": "enrolled", "name":
+"Orelvis"}` — which the enrolment ledger recorded on 2026-09-06 as never
+observed live, only asserted by a test.
+
+
 ### 2026-09-06 — He gains a vault, and it is not his memory
 
 **Decision (owner, after an assessment that argued against half of it):**

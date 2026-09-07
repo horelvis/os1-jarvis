@@ -33,7 +33,13 @@ from .certs import (
 from .enrol import mobileconfig, sobre, write_qr
 from .personas import normalizar
 from .remote_audio import MAX_UTTERANCE_SECONDS, max_bytes_at, resample_to_input
-from .remote_auth import Guard, load_or_create_secret, new_secret, save_roster
+from .remote_auth import (
+    Guard,
+    load_or_create_secret,
+    new_secret,
+    save_roster,
+    token_de_cabecera,
+)
 
 if TYPE_CHECKING:
     # Only for the annotation below: `casa` does not import `remote`, so
@@ -633,8 +639,14 @@ class WebEndpoint:
         )
 
 
-def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Application:
+def build_welcome_app(enrolment: Enrolment, ca: Path) -> web.Application:
     """The plain-HTTP side: a welcome page and the CA profile it links to.
+
+    It takes no `Guard` since 2026-09-07. It used to, because the page
+    handed the enrolling person's secret to whoever asked for it — and
+    minted one if they had none. Both went with `movil.html`, the page
+    that consumed it; the app takes its credential from the QR envelope
+    now, and `Enrolment.abrir` is the one place that mints.
 
     Pulled out of `serve()` so it can be built and hit directly in a
     test — a real `aiohttp.test_utils.TestServer` around this app, no
@@ -644,37 +656,19 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
     welcome = web.Application()
 
     async def _welcome(request: web.Request) -> web.Response:
-        persona = enrolment.persona()
-        if persona is None:
+        if enrolment.persona() is None:
             # The window is shut. This is the normal state and it is not
-            # an error: the page simply is not there. Also covers the
-            # closed-window case that used to be `is_open()`'s job — a
-            # 404, not 403, which would confirm to a scanning stranger
-            # that something is listening on this port at all.
+            # an error: the page simply is not there. A 404, not a 403,
+            # which would confirm to a scanning stranger that something
+            # is listening on this port at all.
             raise web.HTTPNotFound()
-        secreto = guard.secretos.get(persona)
-        if secreto is None:
-            # A person not yet on the roster: mint their secret now, the
-            # first time their window is opened, rather than somewhere
-            # the tool that only knows the name could reach.
-            #
-            # The disk leads: build the candidate roster and persist it
-            # BEFORE touching `guard.secretos`. Mutating memory first and
-            # saving after would let a failed write pass unnoticed — the
-            # phone enrols, works for the rest of this process's life,
-            # and simply stops working at the next restart, with nothing
-            # in the log at the moment it actually broke to explain it.
-            nuevo = new_secret()
-            try:
-                save_roster({**guard.secretos, persona: nuevo})
-            except OSError as exc:
-                logger.warning(f"personas: no se pudo guardar a {persona} — {exc}")
-                raise web.HTTPServiceUnavailable(
-                    text="No he podido guardar este teléfono. Inténtalo otra vez."
-                )
-            guard.secretos[persona] = nuevo
-            secreto = nuevo
-        target = f"https://{HOSTNAME}:{PORT}/#{secreto}"
+        # One link, and it is not a way in. The page used to hand the
+        # enrolling person's secret over in a fragment, for `movil.html`
+        # to pick up; that page is deleted (owner, 2026-09-07) and the
+        # native app takes its credential from the QR envelope instead,
+        # so there is nothing here for anybody to be given. What remains
+        # is the certificate, which is the only reason a phone with no
+        # app still types this address by hand.
         return web.Response(
             content_type="text/html",
             text=(
@@ -686,11 +680,11 @@ def build_welcome_app(guard: Guard, enrolment: Enrolment, ca: Path) -> web.Appli
                 "padding:1rem;border:1px solid #d1684e;border-radius:.5rem;"
                 "color:inherit;text-decoration:none;text-align:center}</style>"
                 "<h1>JARVIS en casa</h1>"
-                "<a href='/jarvis.mobileconfig'>1 · Instalar el certificado</a>"
+                "<a href='/jarvis.mobileconfig'>Instalar el certificado</a>"
                 "<p>Después: Ajustes → General → Información → "
                 "Ajustes de confianza de certificados → activar "
                 "<b>JARVIS Home CA</b>.</p>"
-                f"<a href='{target}'>2 · Abrir JARVIS</a>"
+                "<p>Para hablar con él, abre la app y escanea su código.</p>"
             ),
         )
 
@@ -736,13 +730,6 @@ async def serve(
     app = web.Application()
     app.router.add_get("/ws", _handler(desk, guard, registro, loop))
 
-    static = Path(__file__).parent / "static"
-
-    async def page(request: web.Request) -> web.FileResponse:
-        return web.FileResponse(static / "movil.html")
-
-    app.router.add_get("/", page)
-
     ca, cert, key = ensure_certificate(CERT_DIR, HOSTNAME, lan_address())
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     # The leaf AND the CA, not the leaf alone. A phone pins the CA's
@@ -750,13 +737,14 @@ async def serve(
     # it against unless this sends one — see `certs.cadena_servida`,
     # which carries what that cost and why no test here caught it.
     context.load_cert_chain(str(cadena_servida(CERT_DIR, cert, ca)), str(key))
-    # access_log=None, structurally: aiohttp's default access logger
-    # formats %r — the whole request line, which here is
-    # "GET /ws?t=<the shared secret>". It is silent today only because
-    # the root logger sits at WARNING; any dependency or debug flag
-    # raising that to INFO would put the secret in the journal,
-    # including on the 403 path. Not worth being one config change away
-    # from a leak.
+    # access_log=None, kept after the reason for it changed. It was
+    # here because aiohttp's default formatter writes %r — the whole
+    # request line, which used to be "GET /ws?t=<the shared secret>".
+    # Since 2026-09-07 the credential travels in `Authorization`, which
+    # that formatter does not print, so this no longer stands between
+    # the journal and a leak. It stays because an access line per press
+    # is noise in a journal that is read to debug a voice turn, and
+    # because a formatter is one config change from naming a header.
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     # One interface, never 0.0.0.0: this box has twelve Docker bridges,
@@ -774,7 +762,7 @@ async def serve(
     # set up now and the SOCKET is not: it goes up with the enrolment
     # window and comes down with it (`EnrolmentSite`), so there is
     # nothing on PORT + 1 to find while enrolment is closed.
-    welcome = build_welcome_app(guard, enrolment, ca)
+    welcome = build_welcome_app(enrolment, ca)
     welcome_runner = web.AppRunner(welcome)
     await welcome_runner.setup()
     enrolment.attach(EnrolmentSite(welcome_runner, lan_address(), PORT + 1, loop))
@@ -853,7 +841,9 @@ def _handler(desk: RemoteDesk, guard: Guard, registro: "Registro", loop):
         # refusal (`None`), and it must NOT become `casa` — `casa` is
         # the identity of an unattributable turn, a different thing
         # from a wrong secret offered on the wire.
-        persona = guard.persona_for(request.query.get("t"))
+        persona = guard.persona_for(
+            token_de_cabecera(request.headers.get("Authorization"))
+        )
         if persona is None:
             raise web.HTTPForbidden()
         ws = web.WebSocketResponse(

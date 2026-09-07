@@ -53,9 +53,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["jarvis_widget*"]
 
-[tool.setuptools.package-data]
-jarvis_widget = ["static/*.html"]
-
 [tool.ruff]
 line-length = 88
 

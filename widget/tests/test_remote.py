@@ -24,7 +24,7 @@ from jarvis_widget.remote import (
 )
 from jarvis_widget.personas import CASA
 from jarvis_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
-from jarvis_widget.remote_auth import Guard, load_or_create_roster, save_roster
+from jarvis_widget.remote_auth import Guard
 
 
 class FakeEndpoint:
@@ -253,86 +253,33 @@ async def test_the_welcome_routes_404_while_the_window_is_closed(
 
     `ca` is never read on this path — the 404 fires before the handler
     would touch it — so a path that does not exist is fine here."""
-    guard = Guard({"casa": "secret"}, "https://brain.local:8443")
     enrolment = Enrolment()  # never opened
-    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+    app = build_welcome_app(enrolment, tmp_path / "unused-ca.pem")
 
     async with TestClient(TestServer(app)) as client:
         assert (await client.get("/")).status == 404
         assert (await client.get("/jarvis.mobileconfig")).status == 404
 
 
-async def test_the_welcome_page_carries_the_enrolling_persons_secret(
+async def test_the_welcome_page_hands_out_no_secret_and_no_link_to_the_page(
     tmp_path,
 ) -> None:
-    """The page has nothing to choose (task-4-brief.md): whoever the
-    window was opened FOR is who its link authenticates as, and nobody
-    else's secret is anywhere in the page."""
-    guard = Guard(
-        {"casa": "casa-secreto", "marta": "marta-secreto"},
-        "https://brain.local:8443",
-    )
+    """The web path is retired (owner, 2026-09-07). `movil.html` is
+    deleted, so the "2 · Abrir JARVIS" link pointed at a route that no
+    longer exists — and the secret it carried in its fragment was the
+    one thing on this page worth stealing. What is left is the
+    certificate, which is the only reason a phone with no app still
+    types this address."""
     enrolment = Enrolment()
-    enrolment.abrir("marta")  # real clock: the route checks it too
-    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
+    enrolment.abrir("marta")
+    app = build_welcome_app(enrolment, tmp_path / "unused-ca.pem")
 
     async with TestClient(TestServer(app)) as client:
         body = await (await client.get("/")).text()
 
-    assert "#marta-secreto" in body
+    assert "marta-secreto" not in body
     assert "casa-secreto" not in body
-
-
-async def test_the_welcome_page_mints_a_secret_for_a_new_person(
-    tmp_path, monkeypatch
-) -> None:
-    """A person opened for the first time is not on the roster yet —
-    the page mints their secret and persists it, rather than 500ing or
-    falling back to somebody else's."""
-    roster_path = tmp_path / "personas.json"
-    save_roster({"casa": "casa-secreto"}, roster_path)
-    monkeypatch.setenv("JARVIS_WIDGET_REMOTE_ROSTER", str(roster_path))
-    guard = Guard({"casa": "casa-secreto"}, "https://brain.local:8443")
-    enrolment = Enrolment()
-    enrolment.abrir("nuevo")  # real clock: the route checks it too
-    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
-
-    async with TestClient(TestServer(app)) as client:
-        response = await client.get("/")
-        assert response.status == 200
-
-    assert "nuevo" in guard.secretos
-    persisted = load_or_create_roster(roster_path)
-    assert persisted["nuevo"] == guard.secretos["nuevo"]
-
-
-async def test_a_failed_save_refuses_the_enrolment_and_does_not_adopt_it_in_memory(
-    tmp_path, monkeypatch
-) -> None:
-    """The disk has to lead. Mutating `guard.secretos` before the write
-    succeeds would let a failed save pass unnoticed here: the phone
-    would enrol, work for the rest of THIS process, and simply stop
-    working at the next widget restart, with nothing in the log at the
-    moment it actually broke. A test that only checked the status code
-    would pass against that broken shape — the second assertion below
-    is the one that catches it."""
-    import jarvis_widget.remote as remote_module
-
-    def _falla(*_args, **_kwargs) -> None:
-        raise OSError("disco lleno")
-
-    monkeypatch.setattr(remote_module, "save_roster", _falla)
-
-    guard = Guard({"casa": "casa-secreto"}, "https://brain.local:8443")
-    enrolment = Enrolment()
-    enrolment.abrir("nuevo")  # real clock: the route checks it too
-    app = build_welcome_app(guard, enrolment, tmp_path / "unused-ca.pem")
-
-    async with TestClient(TestServer(app)) as client:
-        response = await client.get("/")
-
-    assert response.status == 503
-    assert "nuevo" not in guard.secretos
+    assert "jarvis.mobileconfig" in body
 
 
 async def test_the_profile_route_advertises_a_mobileconfig_filename(
@@ -347,10 +294,9 @@ async def test_the_profile_route_advertises_a_mobileconfig_filename(
     was never tried in Safari, which is the only browser that does."""
     ca = tmp_path / "ca.pem"
     ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
-    guard = Guard({"casa": "secret"}, "https://brain.local:8443")
     enrolment = Enrolment()
     enrolment.open_enrolment()  # real clock: the route checks it too
-    app = build_welcome_app(guard, enrolment, ca)
+    app = build_welcome_app(enrolment, ca)
 
     async with TestClient(TestServer(app)) as client:
         response = await client.get("/jarvis.mobileconfig")
@@ -533,7 +479,51 @@ async def test_the_socket_refuses_an_unknown_token() -> None:
     await client.start_server()
     try:
         with pytest.raises(WSServerHandshakeError):
-            await client.ws_connect("/ws?t=" + "x" * 32)
+            await client.ws_connect(
+                "/ws", headers={"Authorization": "Bearer " + "x" * 32}
+            )
+    finally:
+        await client.close()
+
+
+async def test_the_socket_takes_the_token_from_the_authorization_header() -> None:
+    """What a real iPhone actually sends, measured on the wire on
+    2026-09-07: `Authorization: Bearer <token>`, with an empty query
+    string. The box read `?t=` and answered 403 to a token that was
+    correct character for character — which reaches the app as a
+    connection that will not prosper, and reached the owner as "it is a
+    wifi problem"."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    guard = Guard({"casa": "c" * 32, "marta": "m" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "m" * 32}
+        )
+        await ws.close()
+    finally:
+        await client.close()
+
+
+async def test_the_socket_no_longer_takes_the_token_from_the_query_string() -> None:
+    """The credential leaves the URL (owner, 2026-09-07). A query string
+    is written into every access log that formats the request line, and
+    this project has paid for that once already with the RTSP password
+    (§12, 2026-08-24). The web page that needed it is gone: a browser
+    cannot set a header on a WebSocket, which is why `?t=` existed at
+    all."""
+    desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
+    guard = Guard({"casa": "c" * 32}, "https://brain.local:8443")
+    app = web.Application()
+    app.router.add_get("/ws", _handler(desk, guard, None, None))
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        with pytest.raises(WSServerHandshakeError):
+            await client.ws_connect("/ws?t=" + "c" * 32)
     finally:
         await client.close()
 
@@ -556,7 +546,9 @@ async def test_the_connection_carries_the_person_whose_secret_it_used() -> None:
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
-        ws = await client.ws_connect("/ws?t=" + marta_secreto)
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + marta_secreto}
+        )
         await ws.send_json({"type": "start", "rate": 8000})
         await ws.send_bytes(b"\x01\x02")
         await ws.send_json({"type": "end"})
@@ -583,7 +575,9 @@ async def test_thirty_seconds_at_48k_is_thirty_seconds_not_ten() -> None:
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: seen.append(pcm))
     client, _ = await _socket(desk)
     try:
-        ws = await client.ws_connect("/ws?t=" + "s" * 32)
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "s" * 32}
+        )
         await ws.send_json({"type": "start", "rate": 48000})
         for _ in range(20):
             await ws.send_bytes(b"\x01\x02" * 50_000)  # 100 kB each, 2 MB total
@@ -615,7 +609,9 @@ async def test_the_ceiling_is_hit_at_the_real_thirty_seconds_and_says_so() -> No
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: seen.append(pcm))
     client, _ = await _socket(desk)
     try:
-        ws = await client.ws_connect("/ws?t=" + "s" * 32)
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + "s" * 32}
+        )
         # The handshake's own "enrolled" frame arrives first, ahead of
         # anything this test sends — consumed and ignored here, since
         # whose phone this is is a different task's assertion.
@@ -869,7 +865,9 @@ async def test_the_enrolled_frame_names_the_phone_before_anything_else(
     desk = RemoteDesk(on_utterance=lambda pcm, endpoint: None)
     client, _ = await _socket(desk, guard=guard, registro=registro)
     try:
-        ws = await client.ws_connect("/ws?t=" + secreto)
+        ws = await client.ws_connect(
+            "/ws", headers={"Authorization": "Bearer " + secreto}
+        )
         first = await asyncio.wait_for(ws.receive_json(), timeout=5)
         assert first == {"type": "enrolled", "name": "Orelvis"}
     finally:

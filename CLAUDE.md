@@ -1098,7 +1098,7 @@ If you encounter:
 | Testing without a microphone | `widget/jarvis_widget/fake_mic.py` |
 | The phone: socket, auth, audio, enrolment | `widget/jarvis_widget/{remote,remote_auth,remote_audio,enrol,certs}.py` |
 | What one scan hands a phone | `widget/jarvis_widget/enrol.py` (`sobre`), `certs.py` (`spki_fingerprint`) |
-| The page it serves | `widget/jarvis_widget/static/movil.html` |
+| Where the phone's credential travels | `widget/jarvis_widget/remote_auth.py` (`token_de_cabecera`) |
 | A course's state: the plan, concepts, questions | `Hermes/plugins/jarvis_teacher/curso.py` |
 | The sources, and the domain gate in front of them | `Hermes/plugins/jarvis_teacher/fuentes.py` |
 | The card, drawn and as state | `widget/jarvis_widget/{ficha_area,ficha}.py` |
@@ -1163,6 +1163,7 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-07** — The credential moves to a header, and the web page goes
 - **2026-09-06** — He gains a vault, and it is not his memory
 - **2026-09-06** — One scan carries the house, not a link to it
 - **2026-09-06** — He says what he is doing, and what he is for

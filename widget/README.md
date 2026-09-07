@@ -106,18 +106,23 @@ it she runs and is simply mute.
 
 ### Putting him on a phone
 
-**The QR is scanned by the app now, not by a camera app into Safari.**
+**The QR is scanned by the app, and the app is the only way in.**
 Since 2026-09-06 it carries an envelope (`enrol.sobre`) — where the box
 is, this person's token, and the fingerprint of the CA's public key the
-app pins — and the app is what reads it; nothing about that scan has
-been tried against a real iPhone yet, because the app is being written
-against this contract in a separate repo (`ios-jarvis`). A phone with
-no app still has a way in: type the address by hand,
-`http://<LAN>:<JARVIS_WIDGET_REMOTE_PORT + 1>/` (8444, by default), and
-follow the two-link welcome page below. That page (`static/movil.html`)
-is untouched and no longer reachable by scanning — it is on its way out
-(owner's decision, 2026-09-06), and the steps below are its ritual, kept
-here only until the app replaces it.
+app pins. Measured against a real iPhone on 2026-09-07 (iOS 26.6.1): the
+scan works, the pin works, and the app authenticates with
+`Authorization: Bearer <token>`.
+
+**The credential travels in that header and nowhere else.** `?t=` in the
+query string was removed the same day: it put the secret into any access
+log that formats the request line, and it existed only because a browser
+cannot set a header on a `WebSocket`. `static/movil.html`, which needed
+it, is deleted. What is left at
+`http://<LAN>:<JARVIS_WIDGET_REMOTE_PORT + 1>/` (8444, by default) is a
+single page offering the CA profile, for a phone that wants the house
+certificate in its system trust store — the app does not need it, since
+it pins the key from the envelope. The Safari steps below are that
+page's ritual, and only that.
 
 > **El QR es ahora una credencial.** Antes era una URL de la red local y
 > daba igual quién lo viera; ahora lleva el token de una persona. Una

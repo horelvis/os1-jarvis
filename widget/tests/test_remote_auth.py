@@ -22,6 +22,7 @@ from jarvis_widget.remote_auth import (
     load_or_create_roster,
     load_or_create_secret,
     save_roster,
+    token_de_cabecera,
 )
 
 
@@ -405,3 +406,29 @@ def test_a_second_origin_widens_nothing_else() -> None:
     assert guard.origin_ok("http://192.168.100.58:8443") is False
     assert guard.origin_ok("https://192.168.100.59:8443") is False
     assert guard.origin_ok("https://192.168.100.58:9999") is False
+
+
+def test_the_bearer_scheme_is_read_case_insensitively() -> None:
+    """RFC 6750 makes the scheme case-insensitive, and a client is free
+    to send `bearer`. Refusing that would be refusing a correct
+    credential for its spelling."""
+    assert token_de_cabecera("Bearer abc123") == "abc123"
+    assert token_de_cabecera("bearer abc123") == "abc123"
+    assert token_de_cabecera("BEARER abc123") == "abc123"
+
+
+def test_anything_that_is_not_a_bearer_token_is_nobody() -> None:
+    """Never a partial parse: what is not exactly one Bearer credential
+    must reach `persona_for` as `None`, not as a string that happens to
+    be left over."""
+    for malo in ("", "   ", "Basic abc123", "Bearer", "Bearer   ", "abc123"):
+        assert token_de_cabecera(malo) is None, malo
+    assert token_de_cabecera(None) is None
+
+
+def test_the_token_is_taken_whole_and_not_trimmed_into_something_else() -> None:
+    """A credential with an internal space is not two tokens: it is a
+    wrong credential, and must stay one string so `compare_digest`
+    refuses it rather than a prefix of it being accepted."""
+    assert token_de_cabecera("Bearer  padded ") == "padded"
+    assert token_de_cabecera("Bearer a b") == "a b"
