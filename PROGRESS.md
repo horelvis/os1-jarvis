@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
 - 2026-09-06 (madrugada) — Un iPhone de verdad encontró cinco cosas ✅
 - 2026-09-06 (noche) — La onda sabe que está trabajando ✅
@@ -65,6 +66,77 @@
 - ~~2026-05 — Phase 1: Tauri skeleton~~ ❌ REJECTED
 - 2026-05 — Phase 2: Mock Python backend ✅
 
+
+---
+
+## 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
+
+Un iPhone real llevaba dos días sin poder emparejarse, diciendo que era
+la wifi. **Lo era todo menos eso**, y hizo falta montarle un socket
+gemelo para verlo.
+
+**Lo que se descartó midiendo, en este orden**, porque cada paso mataba
+un sospechoso entero:
+
+| comprobación | cómo | resultado |
+|---|---|---|
+| ¿llega el teléfono a la caja? | sonda HTTP en claro en `:8888` | sí — `192.168.100.46`, iOS 26.6.1 |
+| ¿llega al puerto de JARVIS? | Safari contra `:8443` | sí — sale el aviso de certificado, que sólo ocurre si el paquete llega |
+| ¿permiso de red local? | el dueño, en el teléfono | concedido |
+| ¿el sobre lleva la dirección? | reconstrucción del PNG en disco | sí — `wss://192.168.100.58:8443/ws` |
+| ¿la huella fija coincide? | SPKI de la cadena servida | sí, byte a byte |
+| ¿valida la cadena? | `openssl` con la CA como única ancla, contra IP y contra nombre | `Verify return code: 0` |
+
+**El PNG se leyó sin decodificador.** `pyzbar` no está y `zbar` tampoco;
+en vez de instalarlos se reconstruyó el QR para cada persona del padrón
+y cada dirección candidata, comparando los bytes del PNG. Coincidencia
+exacta: identifica de quién es el código y qué lleva dentro, con dos
+líneas de Python y ninguna dependencia nueva.
+
+**Entonces se montó el gemelo.** Un socket en `:8890` con el mismo
+certificado, el mismo contrato y cada etapa registrada, y un QR
+apuntándole. La app conectó al primer intento y lo dijo en una línea:
+
+```
+query: {}
+Authorization: Bearer <el token correcto>
+User-Agent: Jarvis/1 CFNetwork/3860.700.1 Darwin/25.6.0
+token reconocido como: None   →   403
+```
+
+**La app manda el token en la cabecera; la caja lo leía del query
+string.** El token era correcto letra por letra. TLS, el pin de la CA,
+el sobre y el upgrade del WebSocket funcionaban todos — por eso nada de
+este lado parecía roto nunca.
+
+**Y la app es la que tenía razón**, que es lo que decidió qué lado se
+mueve: un query string acaba escrito en cualquier log que formatee la
+línea de petición, y este proyecto ya pagó una vez por una credencial
+dentro de una URL (§12, 2026-08-24). `?t=` existía sólo porque un
+navegador **no puede** poner cabeceras en un `WebSocket`; era una
+limitación de `movil.html`, nunca una elección.
+
+**Así que la página se jubila con él**, decisión del dueño: sólo
+cabecera, sin respaldo, y `static/movil.html` borrado con su ruta y con
+el enlace que la bienvenida le apuntaba. La bienvenida conserva el
+perfil del certificado y deja de repartir un secreto en el fragmento —
+lo que además la deja sin acuñar nada, porque `Enrolment.abrir` es el
+único sitio que acuña desde el 2026-09-06, y `build_welcome_app` ya no
+recibe un `Guard`.
+
+**Lo que cuesta, dicho claro:** ahora hay exactamente una puerta y es la
+app nativa. Un navegador ya no puede abrir el socket. Una caja con la
+app rota no tiene camino alternativo a un teléfono.
+
+**Verificado contra la caja en marcha:** con cabecera,
+`{"type": "enrolled", "name": "Orelvis"}` — que es además la primera vez
+que se ve en vivo el nombre capitalizado que el registro del
+enrolamiento anotó el 2026-09-06 como nunca observado, sólo afirmado por
+un test. Con query string, rechazado. Y el iPhone mantuvo después una
+conexión abierta más de un minuto, donde cada intento anterior moría
+dentro del primer segundo.
+
+713 tests, ruff limpio.
 ---
 
 ## 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
