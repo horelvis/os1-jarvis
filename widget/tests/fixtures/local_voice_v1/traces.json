@@ -1,0 +1,1715 @@
+{
+  "protocol": "jarvis.local-voice.v1",
+  "revision": 1,
+  "notes": "Actions/checkpoints are test harness operations, not wire messages. Valid traces model endpoint obligations, not an implemented runtime.",
+  "traces": [
+    {
+      "id": "third_utterance_capacity",
+      "valid": true,
+      "notes": "Old work remains unconfirmed; turn 2 is the sole admitted replacement. A third detection is refused at capacity without allocating turn 3.",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Consulta local"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled",
+            "work_state": "unconfirmed"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 2,
+            "text": "Otra consulta"
+          }
+        },
+        {
+          "direction": "client",
+          "binary_hex": "00000100"
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "busy"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 2,
+            "status": "cancelled",
+            "work_state": "stopped"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "current": 2,
+            "terminals": 2,
+            "playing": null
+          }
+        },
+        {
+          "action": "close",
+          "code": 1013
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "live": 0,
+            "ready": false,
+            "microphone": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "happy_path",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "client",
+          "binary_hex": "00000100"
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "ready": true,
+            "microphone": true,
+            "current": 1,
+            "playing": 1,
+            "terminals": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty_utterance",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": ""
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "current": 1,
+            "playing": null,
+            "terminals": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "filtered_utterance",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "terminals": 1,
+            "playing": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "replacement_and_late_terminal",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 2
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "current": 2,
+            "playing": null
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled",
+            "work_state": "unconfirmed"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 2,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "busy",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 2,
+            "status": "failed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "current": 2,
+            "terminals": 2,
+            "playing": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate_cancel",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled",
+            "work_state": "stopped"
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "terminals": 1,
+            "playing": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "mute_during_capture",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "client",
+          "binary_hex": "00000100"
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": false
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled",
+            "work_state": "stopped"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "microphone": false,
+            "terminals": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 2
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 2,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 2,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "current": 2,
+            "terminals": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "mute_keeps_answer",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": false
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "microphone": false,
+            "playing": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "disconnect",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "action": "disconnect"
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "ready": false,
+            "microphone": false,
+            "playing": null,
+            "live": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "overload",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "overloaded"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled",
+            "work_state": "unconfirmed"
+          }
+        },
+        {
+          "action": "close",
+          "code": 1013
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "live": 0,
+            "ready": false,
+            "playing": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconnect_ignores_old_callback",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "action": "disconnect"
+        },
+        {
+          "action": "connect"
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "action": "late_callback",
+          "generation": 0,
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Old answer"
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "generation": 1,
+            "current": 1,
+            "text": "",
+            "playing": null
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stop_after_completed",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "playing": null,
+            "terminals": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "readiness_timeout",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "readiness_timeout"
+          }
+        },
+        {
+          "action": "close",
+          "code": 1008
+        },
+        {
+          "action": "checkpoint",
+          "expect": {
+            "ready": false,
+            "microphone": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "cloud_rejected",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "local_only_required"
+          }
+        },
+        {
+          "action": "close",
+          "code": 1008
+        }
+      ]
+    },
+    {
+      "id": "long_utterance",
+      "valid": true,
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "error",
+            "code": "utterance_too_long",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "failed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "audio_before_ready",
+      "valid": false,
+      "error": "audio_disabled",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "client",
+          "binary_hex": "00000100"
+        }
+      ]
+    },
+    {
+      "id": "audio_before_enable",
+      "valid": false,
+      "error": "audio_disabled",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "binary_hex": "00000100"
+        }
+      ]
+    },
+    {
+      "id": "future_cancel",
+      "valid": false,
+      "error": "invalid_turn",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "cancel",
+            "turn": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate_terminal",
+      "valid": false,
+      "error": "terminal_turn",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "audio_after_terminal",
+      "valid": false,
+      "error": "terminal_turn",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "completed"
+          }
+        },
+        {
+          "direction": "server",
+          "binary_hex": "0000000100000100"
+        }
+      ]
+    },
+    {
+      "id": "text_before_transcript",
+      "valid": false,
+      "error": "transcript_required",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "text",
+            "turn": 1,
+            "delta": "Hola."
+          }
+        }
+      ]
+    },
+    {
+      "id": "turn_zero",
+      "valid": false,
+      "error": "turn_sequence",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "reused_turn",
+      "valid": false,
+      "error": "turn_sequence",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_done",
+            "turn": 1,
+            "status": "cancelled"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate_transcript",
+      "valid": false,
+      "error": "duplicate_transcript",
+      "steps": [
+        {
+          "direction": "client",
+          "json": {
+            "type": "hello",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "ready",
+            "protocol": "jarvis.local-voice.v1",
+            "processing": "local-only",
+            "input_rate": 16000,
+            "output_rate": 24000,
+            "format": "pcm_s16le",
+            "channels": 1
+          }
+        },
+        {
+          "direction": "client",
+          "json": {
+            "type": "microphone",
+            "enabled": true
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "turn_started",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "speech_stopped",
+            "turn": 1
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        },
+        {
+          "direction": "server",
+          "json": {
+            "type": "transcript",
+            "turn": 1,
+            "text": "Hola"
+          }
+        }
+      ]
+    }
+  ]
+}

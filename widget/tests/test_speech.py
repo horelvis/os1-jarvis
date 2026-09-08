@@ -11,7 +11,11 @@ The filter comes from what the gateway actually sent on 2026-08-23
 ordinary token frames, in English, with emoji.
 """
 
-from jarvis_widget.speech import ClauseChunker, is_system_message
+from jarvis_widget.speech import (
+    ClauseChunker,
+    is_system_message,
+    limit_reply_for_speech,
+)
 
 
 def _feed(text: str) -> list[str]:
@@ -84,6 +88,32 @@ def test_a_whole_message_arrives_as_one_token() -> None:
     out = chunker.push("La lluvia no pide permiso. Llega, lava todo un poco, y se va.")
 
     assert len(out) >= 2
+
+
+def test_a_long_reply_only_speaks_its_first_three_sentences() -> None:
+    text = (
+        "Uno, con detalle. Dos, con más detalle. Tres, todavía útil. Cuatro, ya sobra."
+    )
+
+    assert (
+        limit_reply_for_speech(text)
+        == "Uno, con detalle. Dos, con más detalle. Tres, todavía útil."
+    )
+
+
+def test_a_short_reply_is_not_changed_for_speech() -> None:
+    text = "Una frase. Dos frases. Tres frases."
+
+    assert limit_reply_for_speech(text) == text
+
+
+def test_a_full_stop_inside_a_laughter_tag_does_not_count_as_a_sentence() -> None:
+    text = "<laughter>Una. Dos.</laughter> Tres. Cuatro. Cinco. Seis."
+
+    assert (
+        limit_reply_for_speech(text)
+        == "<laughter>Una. Dos.</laughter> Tres. Cuatro. Cinco."
+    )
 
 
 # ── the system-message filter ─────────────────────────────────────────

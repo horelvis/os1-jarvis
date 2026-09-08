@@ -191,6 +191,84 @@ def test_a_chat_id_on_the_wire_reaches_handle_chat(tmp_path, monkeypatch):
     assert seen[0].source.chat_id == "marta"
 
 
+def test_request_id_reaches_hermes_and_tags_its_reply(tmp_path, monkeypatch):
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+        await self.send(event.source.chat_id, "hola", reply_to=event.message_id)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "chat_id": "marta",
+                                "request_id": "request-1",
+                            }
+                        )
+                    )
+                    return json.loads((await ws.receive(timeout=5)).data)
+        finally:
+            await a.disconnect()
+
+    assert asyncio.run(go()) == {
+        "type": "token",
+        "token": "hola",
+        "chat_id": "marta",
+        "request_id": "request-1",
+    }
+    assert seen[0].message_id == "request-1"
+
+
+def test_cancelled_request_drops_its_late_reply(tmp_path, monkeypatch):
+    async def never_answers(self, event):
+        return None
+
+    monkeypatch.setattr(JarvisAdapter, "handle_message", never_answers, raising=False)
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "primera",
+                                "user_id": "primary",
+                                "chat_id": "marta",
+                                "request_id": "old-request",
+                            }
+                        )
+                    )
+                    await ws.send_str(
+                        json.dumps({"type": "cancel", "request_id": "old-request"})
+                    )
+                    await asyncio.sleep(0.05)
+                    result = await a.send("marta", "tarde", reply_to="old-request")
+                    assert result.success is False
+                    with pytest.raises(asyncio.TimeoutError):
+                        await ws.receive(timeout=0.1)
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
 def test_malformed_message_gets_an_error_in_spanish_not_a_crash(tmp_path):
     async def go():
         a = JarvisAdapter(_cfg(tmp_path))
@@ -632,7 +710,7 @@ def test_disconnect_cancels_a_pending_watchdog(tmp_path, monkeypatch):
             async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
                 await asyncio.sleep(0.05)
                 await a._handle_chat("hola", "primary")
-                turn = a._turns.get("jarvis")
+                turn = a._active_turns.get("jarvis")
                 assert turn is not None
                 await a.disconnect()
                 assert a._turns == {}
@@ -1152,7 +1230,7 @@ def test_a_second_turn_for_the_same_chat_supersedes_the_first():
         primero = a._open_turn("marta")
         segundo = a._open_turn("marta")
         assert primero is not segundo
-        assert a._turns["marta"] is segundo
+        assert a._active_turns["marta"] is segundo
         assert primero.watchdog.cancelled() or primero.watchdog.cancelling()
         a._settle(segundo)
 
@@ -1164,7 +1242,7 @@ def test_a_turn_for_one_chat_never_supersedes_another_chats_turn():
         a = JarvisAdapter(config={})
         marta = a._open_turn("marta")
         lucia = a._open_turn("lucía")
-        assert a._turns["marta"] is marta
+        assert a._active_turns["marta"] is marta
         a._settle(marta)
         a._settle(lucia)
 

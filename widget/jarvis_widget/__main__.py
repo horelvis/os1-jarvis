@@ -17,6 +17,7 @@ import stat
 import sys
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -987,6 +988,7 @@ class JARVISApp(Gtk.Application):
             Speaker,
             TurnChunkers,
             is_system_message,
+            limit_reply_for_speech,
             unwrap_delivery,
         )
         from .stt import Transcriber, build_hint
@@ -1288,52 +1290,23 @@ class JARVISApp(Gtk.Application):
             """
             machine.heard(pcm, endpoint)
 
+        from .replies import ReplyRoutes
+
+        def release_remote(endpoint) -> None:
+            chunkers.drop(endpoint.persona)
+            replies.disconnect(endpoint)
+
         remote_desk = RemoteDesk(
             on_utterance=on_remote_utterance,
-            # Barge-in from a phone (2026-09-07). Straight to
-            # `Speaker.interrupt`, which is already per-destination —
-            # written that way so the ROOM's barge-in could not empty a
-            # phone's reply, and that is exactly the property this
-            # needs in the other direction: one phone cutting him off
-            # must not touch the room's answer or anybody else's.
-            on_interrupt=speaker.interrupt,
-            # Until 2026-09-06 a claim ending — including the one
-            # nobody calls: a claim that simply expires — had to send
-            # the speaker's single shared sink home too, or it went on
-            # pointing at a phone that had dropped and the next reply,
-            # to anybody, was written into a dead socket while the room
-            # heard nothing. There is no shared sink left to send home:
-            # `destino_de` asks THIS desk fresh on every batch of
-            # clauses, so a claim that is gone simply resolves to
-            # `None` (the room) on its own, with nothing to wire up
-            # for THAT any more.
-            #
-            # What IS wired here now is a different backstop, and only
-            # for a PHONE: a person's `TurnChunkers` entry is normally
-            # dropped by `on_done`/`on_error`, but a turn that dies with
-            # neither — the gateway's socket drops mid-answer — would
-            # otherwise leave that buffer sitting there to be reused,
-            # half-built, by their NEXT turn. A phone's claim expires on
-            # its own ceiling even when nothing else does (`RemoteDesk`'s
-            # own docstring), and `on_release` fires on every way a claim
-            # ends — released, stolen, or the socket dropping under it —
-            # so it is the one place guaranteed to run even then, FOR A
-            # PHONE. The desk (`chat_id=None`) holds no claim, so this
-            # covers nothing for it — see `client.on_disconnect` below
-            # for the desk's own version of this same backstop.
-            #
-            # And it is sharper than "the dead phone's own buffer" the
-            # moment two devices hold the SAME persona — see
-            # `destino_de`'s docstring for why that is reachable today,
-            # not merely hypothetical. `chunkers.drop` is keyed on
-            # `endpoint.persona`, not on `endpoint` itself, so ONE
-            # device of that persona disconnecting drops the buffer for
-            # the WHOLE persona — including a reply mid-flight to the
-            # OTHER device still holding that persona's claim. Closing
-            # this needs the same operational fix as `destino_de`'s:
-            # one secret per person (`tools/enrolar.py <persona>`).
-            on_release=lambda endpoint: chunkers.drop(endpoint.persona),
+            on_interrupt=lambda endpoint: (
+                self._spawn(client.cancel(reply.request_id))
+                if (reply := replies.interrupt(endpoint)) is not None
+                else None
+            ),
+            on_release=release_remote,
         )
+        replies = ReplyRoutes(speaker, remote_desk.release)
+        system_replies: set[str | None] = set()
         # Closed until the QR is actually shown (below). The QR itself
         # carries the token now (`enrol.sobre`) rather than pointing at
         # a page that hands one out; the plain-HTTP welcome page still
@@ -1343,6 +1316,17 @@ class JARVISApp(Gtk.Application):
         enrolment = Enrolment()
 
         async def dispatch(pcm: bytes, phone: object | None = None) -> None:
+            reply = None
+            sent = False
+            if phone is not None:
+                # A disconnect may have happened before this scheduled task ran.
+                if remote_desk.endpoint_for(phone.persona) is not phone:
+                    return
+                reply = replies.open(str(uuid.uuid4()), phone.persona, phone)
+                if reply is None:
+                    phone.refuse()
+                    remote_desk.release(phone)
+                    return
             # Wrapped whole: `transcriber.transcribe` can raise (a
             # starved GPU has left him deaf before — CLAUDE.md §12,
             # 2026-08-30) and so can `client.send_chat`, the same reason
@@ -1383,6 +1367,8 @@ class JARVISApp(Gtk.Application):
                     return texto, vector, (time.monotonic() - inicio) * 1000.0
 
                 text, vector, embed_ms = await asyncio.to_thread(_oir_e_identificar)
+                if reply is not None and not reply.accepts_content:
+                    return
                 if necesita_voz:
                     # The number task 9's report is built from: the
                     # milliseconds this adds between the end of the
@@ -1406,7 +1392,6 @@ class JARVISApp(Gtk.Application):
                     # Only if it WAS the phone's turn, though — an empty
                     # desk transcription is the commonest event in the
                     # room, and it used to end a phone's answer halfway.
-                    settle_turn(phone, remote_desk)
                     return
                 print(f"→ {text}", file=sys.stderr, flush=True)
                 text = echo.clean(text, time.monotonic())
@@ -1414,13 +1399,13 @@ class JARVISApp(Gtk.Application):
                     # All of it was him. Not a turn, and not an error.
                     print("(era su propio eco)", file=sys.stderr, flush=True)
                     machine.error("")
-                    settle_turn(phone, remote_desk)
                     return
                 # Unpaired: nothing reaches Hermes, and this branch
                 # never even tries — see `_atendido_por_encuentro`, the
                 # ONE gate this and `on_typed` both call.
-                if _atendido_por_encuentro(text, vector, phone):
-                    settle_turn(phone, remote_desk)
+                if _atendido_por_encuentro(
+                    text, vector, reply.destination if reply is not None else None
+                ):
                     return
                 # A phone's press IS the address, and ONLY a phone's.
                 # This asked `remote_desk.busy` until 2026-09-01, which
@@ -1454,15 +1439,28 @@ class JARVISApp(Gtk.Application):
                     else huellas_actualizadas(registro, huellas_cache)
                 )
                 persona = persona_de(phone, vector, huellas)
+                if reply is None:
+                    reply = replies.open(str(uuid.uuid4()), persona, None)
+                    if reply is None:
+                        machine.error("")
+                        return
                 # Remembered for the enrolment backstop below: a SIGUSR1
                 # arriving is not evidence of who asked for it, and this
                 # is the only first-hand answer in the process.
                 ULTIMO_HABLANTE["persona"] = persona
-                await client.send_chat(spoken, wake=wake.named, chat_id=persona)
+                await client.send_chat(
+                    spoken,
+                    wake=wake.named,
+                    chat_id=persona,
+                    request_id=reply.request_id,
+                )
+                sent = True
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
-                settle_turn(phone, remote_desk)
+            finally:
+                if reply is not None and not sent:
+                    replies.finish(reply)
 
         def on_disconnect() -> None:
             """The gateway connection itself was lost, mid-turn or not.
@@ -1478,6 +1476,8 @@ class JARVISApp(Gtk.Application):
             gateway session and nothing buffered from before it will
             ever be spoken — see CLAUDE.md, task 13.
             """
+            replies.reset()
+            system_replies.clear()
             discarded = chunkers.drop_all()
             if discarded:
                 print(
@@ -1487,147 +1487,73 @@ class JARVISApp(Gtk.Application):
                     flush=True,
                 )
 
-        # ── the gateway's replies ─────────────────────────────────────
-        #
-        # All three accept a trailing `chat_id`, threaded from
-        # gateway.py's `_dispatch`: whose reply this is, or None for the
-        # desk. Resolved through `destino_de` exactly once per callback
-        # — at the moment its clauses are about to be queued — and
-        # passed straight into every `say()` that batch makes. See
-        # `destino_de`'s own docstring for why that timing is the whole
-        # of the fix CLAUDE.md §12 (2026-09-01) records.
-        def on_token(token: str, chat_id: str | None = None) -> None:
-            if is_system_message(token):
-                # Hermes narrating itself, in English, with emoji. Not
-                # hers to say — and its `done` must not end the turn.
-                print(f"(sistema) {token[:60]}", file=sys.stderr, flush=True)
+        # Named replies require an admitted route; only untagged notifications
+        # retain the legacy room default. A missing phone is never that default.
+        def on_token(
+            token: str, chat_id: str | None = None, request_id: str | None = None
+        ) -> None:
+            reply = replies.get(request_id)
+            if request_id and reply is None:
                 return
-            print(f"← {token}", file=sys.stderr, flush=True)
-            # A scheduled delivery arrives wrapped in scaffolding — job
-            # id, dashes, an English footer — and she would read all of
-            # it aloud.
+            if is_system_message(token):
+                system_replies.add(chat_id)
+                return
+            if reply is not None and not reply.accepts_content:
+                return
             token = unwrap_delivery(token)
             if not token:
                 return
             machine.token(token)
-            destino = destino_de(remote_desk, chat_id)
+            destino = reply.destination if reply is not None else None
             if destino is not None:
-                # The phone gets his words as well as his voice, so its
-                # transcript has something to draw (iOS app,
-                # 2026-09-07). Whole and unsplit, and BEFORE the audio:
-                # the clause chunker below is about how he is spoken.
-                # Sent even when his voice is switched off — a muted
-                # answer is still an answer, and a phone that only ever
-                # sees silence cannot tell it from a turn that failed.
                 destino.text(token)
-            for clause in chunkers.for_chat(chat_id).push(token):
-                print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                say(clause, destino)
-
-        def on_done(_ms: int, chat_id: str | None = None) -> None:
-            # He has answered, so the next sentence needs no name for a
-            # while: a conversation is not a sequence of commands.
-            wake.answered(time.monotonic())
-            destino = destino_de(remote_desk, chat_id)
-            # Whether THIS `chat_id` actually said something, as opposed
-            # to one of the gateway's own system messages (turn.py, one
-            # measured turn carried six `done`s of those). Read BEFORE
-            # `for_chat`/`drop` below touch this same `chat_id` — see
-            # `TurnChunkers.has`'s own docstring for why this replaces
-            # `machine.done()`'s return value here (final review,
-            # 2026-09-06, CLAUDE.md): `machine` has ONE `_heard_token`
-            # for the whole house, and a `done` for one `chat_id`
-            # consuming it could make a DIFFERENT `chat_id`'s `done`,
-            # arriving after — or the desk's own `machine.error("")` for
-            # an empty transcription, arriving between the two — find
-            # nothing left and report it did not settle, even though a
-            # real reply of its own had arrived. Reproduced with the
-            # exact interleaving `send()`'s two separate `await
-            # self._push(...)` calls make possible in production:
-            # token(marta), token(lucía), done(marta), done(lucía) left
-            # lucía's claim held for the full 600s ceiling.
-            real_reply = chunkers.has(chat_id)
-            for clause in chunkers.for_chat(chat_id).flush():
-                print(f"  dice: {clause}", file=sys.stderr, flush=True)
-                say(clause, destino)
-            # Behind everything this turn just queued, never before
-            # it: `Speaker.finish` goes through the same FIFO the
-            # clauses do, so the phone is told the turn ended only once
-            # its last byte of audio has been written. Called even when
-            # nothing was said and even when his voice is switched off
-            # — a phone waiting for this frame to rearm its microphone
-            # must not be left waiting by a turn that produced no
-            # sound.
-            speaker.finish(destino)
-            # This conversation's buffer has said everything it had —
-            # see `TurnChunkers.drop` for why it must not linger.
-            chunkers.drop(chat_id)
-            # Still drives the shared wave exactly as before — the wave
-            # is a picture of the room, not a ledger of who owes whom a
-            # settle, so ANY conversation's `done` is entitled to move
-            # it. Its return value is no longer read: see `real_reply`
-            # above for what decides whether a CLAIM is given back.
-            machine.done()
-            if real_reply:
-                # Give the room — and any phone waiting its turn — back.
-                # This is the recovery path for a held turn, not
-                # bookkeeping: without it, a reply that hangs or crashes
-                # locks every phone in the house out until the widget
-                # restarts. Gated on THIS chat's own real settle, not on
-                # every `done`: releasing on one of the gateway's system
-                # -message `done`s would free the desk before the real
-                # tokens ever arrive — a question asked on a phone,
-                # answered out loud in the room.
-                #
-                # And it settles the endpoint this SAME callback already
-                # resolved above, from this turn's own `chat_id` — never
-                # a shared slot. An unprompted turn — a cron reminder, a
-                # camera alert — carries no `chat_id` at all, so
-                # `destino` is already `None` here and gives nothing
-                # back; a desk turn is the same. Two phones overlapping
-                # cannot cross here either, because each `on_done` only
-                # ever asks after ITS OWN `chat_id`, and `real_reply` is
-                # read from that SAME `chat_id`'s own buffer — nothing
-                # shared for a second conversation's `done` to consume.
-                #
-                # `settle_turn`'s own identity guard (`release` ignoring
-                # an endpoint that no longer holds the claim) is vacuous
-                # here: `destino_de` just asked `remote_desk` who holds
-                # this persona's claim RIGHT NOW, so `destino` can only
-                # ever be the current holder or `None` — never stale.
-                # It is the three `settle_turn` calls inside `dispatch`
-                # (above) that pass the ORIGINATING endpoint, which a
-                # re-press CAN steal the claim out from under before the
-                # first press's turn ever gets here; the guard does real
-                # work only there.
-                settle_turn(destino, remote_desk)
-
-        def on_error(message: str, chat_id: str | None = None) -> None:
-            destino = destino_de(remote_desk, chat_id)
-            if message:
-                say(message, destino)
-            _apply_error_to_wake_window(wake, message, time.monotonic())
-            machine.error(message)
-            # This is the OTHER way a turn ends, and its buffer is just
-            # as dead as one `on_done` would have flushed — whatever it
-            # still held was cut short by the error, not a real clause,
-            # so it is dropped rather than spoken. Logged by LENGTH
-            # only, never the text — that buffer is somebody's
-            # half-finished sentence.
-            discarded = chunkers.drop(chat_id)
-            if discarded:
-                quien = chat_id or "la sala"
+            spoken = limit_reply_for_speech(token)
+            if len(spoken) < len(token):
                 print(
-                    f"turno con error: {discarded} caracteres sin decir "
-                    f"descartados ({quien})",
+                    f"voz: respuesta larga reducida de {len(token)} a {len(spoken)} caracteres",
                     file=sys.stderr,
                     flush=True,
                 )
-            # A turn that died is still a turn that ended, and the
-            # phone has no other way to learn it: without this it waits
-            # for a `done` that a failed turn will never queue.
-            speaker.finish(destino)
-            settle_turn(destino, remote_desk)
+            for clause in chunkers.for_chat(chat_id).push(spoken):
+                say(clause, destino)
+
+        def on_done(
+            _ms: int, chat_id: str | None = None, request_id: str | None = None
+        ) -> None:
+            if chat_id in system_replies:
+                system_replies.discard(chat_id)
+                return
+            reply = replies.get(request_id)
+            if request_id and reply is None:
+                return
+            if reply is not None and reply.settled:
+                return
+            wake.answered(time.monotonic())
+            if reply is None or reply.accepts_content:
+                destino = reply.destination if reply is not None else None
+                for clause in chunkers.for_chat(chat_id).flush():
+                    say(clause, destino)
+            chunkers.drop(chat_id)
+            machine.done()
+            if reply is not None:
+                replies.finish(reply)
+
+        def on_error(
+            message: str, chat_id: str | None = None, request_id: str | None = None
+        ) -> None:
+            reply = replies.get(request_id)
+            if request_id and reply is None:
+                return
+            if reply is not None and reply.settled:
+                return
+            system_replies.discard(chat_id)
+            if message and (reply is None or reply.accepts_content):
+                say(message, reply.destination if reply is not None else None)
+            _apply_error_to_wake_window(wake, message, time.monotonic())
+            machine.error(message)
+            chunkers.drop(chat_id)
+            if reply is not None:
+                replies.finish(reply)
 
         def on_photo(path: str, camera: str) -> None:
             # Straight to the GTK thread. Everything else the gateway

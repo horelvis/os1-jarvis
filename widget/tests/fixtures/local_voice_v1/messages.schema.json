@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jarvis local voice v1 application messages",
+  "description": "Use #/$defs/client or #/$defs/server for directional validation. Ordering and byte budgets are specified by the contract.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/client"
+    },
+    {
+      "$ref": "#/$defs/server"
+    }
+  ],
+  "$defs": {
+    "hello": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "hello"
+        },
+        "protocol": {
+          "const": "jarvis.local-voice.v1"
+        },
+        "processing": {
+          "const": "local-only"
+        }
+      },
+      "required": [
+        "type",
+        "protocol",
+        "processing"
+      ],
+      "additionalProperties": false
+    },
+    "microphone": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "microphone"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "cancel": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "cancel"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "type",
+        "turn"
+      ],
+      "additionalProperties": false
+    },
+    "ready": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ready"
+        },
+        "protocol": {
+          "const": "jarvis.local-voice.v1"
+        },
+        "processing": {
+          "const": "local-only"
+        },
+        "input_rate": {
+          "const": 16000
+        },
+        "output_rate": {
+          "const": 24000
+        },
+        "format": {
+          "const": "pcm_s16le"
+        },
+        "channels": {
+          "const": 1
+        }
+      },
+      "required": [
+        "type",
+        "protocol",
+        "processing",
+        "input_rate",
+        "output_rate",
+        "format",
+        "channels"
+      ],
+      "additionalProperties": false
+    },
+    "turn_started": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "turn_started"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "type",
+        "turn"
+      ],
+      "additionalProperties": false
+    },
+    "speech_stopped": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "speech_stopped"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "type",
+        "turn"
+      ],
+      "additionalProperties": false
+    },
+    "transcript": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "transcript"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "type",
+        "turn",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "delta": {
+          "type": "string",
+          "maxLength": 2048,
+          "minLength": 1
+        }
+      },
+      "required": [
+        "type",
+        "turn",
+        "delta"
+      ],
+      "additionalProperties": false
+    },
+    "turn_done": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "turn_done"
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "status": {
+              "enum": [
+                "completed",
+                "failed"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "turn",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "turn_done"
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "status": {
+              "const": "cancelled"
+            },
+            "work_state": {
+              "enum": [
+                "stopped",
+                "unconfirmed"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "turn",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "code": {
+              "enum": [
+                "protocol_mismatch",
+                "invalid_message",
+                "invalid_turn",
+                "audio_disabled",
+                "readiness_timeout",
+                "local_only_required",
+                "profile_unavailable",
+                "policy_changed",
+                "provider_unavailable",
+                "turn_exhausted",
+                "overloaded",
+                "busy"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "code": {
+              "enum": [
+                "utterance_too_long",
+                "turn_timeout",
+                "turn_failed",
+                "busy"
+              ]
+            },
+            "turn": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "turn"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "client": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hello"
+        },
+        {
+          "$ref": "#/$defs/microphone"
+        },
+        {
+          "$ref": "#/$defs/cancel"
+        }
+      ]
+    },
+    "server": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ready"
+        },
+        {
+          "$ref": "#/$defs/turn_started"
+        },
+        {
+          "$ref": "#/$defs/speech_stopped"
+        },
+        {
+          "$ref": "#/$defs/transcript"
+        },
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "$ref": "#/$defs/turn_done"
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ]
+    }
+  }
+}

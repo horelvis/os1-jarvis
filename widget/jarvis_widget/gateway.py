@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import uuid
 from typing import Any, Callable
 
 import websockets
@@ -64,6 +65,7 @@ def encode_chat(
     *,
     wake: bool = False,
     chat_id: str | None = None,
+    request_id: str | None = None,
 ) -> str:
     frame: dict[str, Any] = {"type": "chat", "message": text, "user_id": user_id}
     if wake:
@@ -75,6 +77,8 @@ def encode_chat(
         # session, which is what every build before today sent and what
         # an older gateway understands.
         frame["chat_id"] = chat_id
+    if request_id:
+        frame["request_id"] = request_id
     return json.dumps(frame)
 
 
@@ -140,9 +144,15 @@ class GatewayClient:
         # parameter with a default, which is a strictly more permissive
         # signature and is exactly how a callback that has no use for
         # `chat_id` yet stays that simple.
-        self.on_token: Callable[[str, str | None], None] = lambda _t, _c=None: None
-        self.on_done: Callable[[int, str | None], None] = lambda _ms, _c=None: None
-        self.on_error: Callable[[str, str | None], None] = lambda _m, _c=None: None
+        self.on_token: Callable[[str, str | None, str | None], None] = (
+            lambda _t, _c=None, _r=None: None
+        )
+        self.on_done: Callable[[int, str | None, str | None], None] = (
+            lambda _ms, _c=None, _r=None: None
+        )
+        self.on_error: Callable[[str, str | None, str | None], None] = (
+            lambda _m, _c=None, _r=None: None
+        )
         # A picture for the band above the wave. It is a frame of its
         # own and never a token: an answer travels wherever the turn is
         # routed, and a path in one would be read aloud.
@@ -191,8 +201,13 @@ class GatewayClient:
         await asyncio.wait_for(self._connected.wait(), timeout=timeout)
 
     async def send_chat(
-        self, text: str, *, wake: bool = False, chat_id: str | None = None
-    ) -> None:
+        self,
+        text: str,
+        *,
+        wake: bool = False,
+        chat_id: str | None = None,
+        request_id: str | None = None,
+    ) -> str:
         """Send one turn. Never raises: a lost send is a spoken failure.
 
         The socket can die between the last frame read and this write —
@@ -207,17 +222,39 @@ class GatewayClient:
         the desk. A desk turn passes None and the frame carries no
         chat_id at all, exactly as it always has.
         """
+        request_id = request_id or str(uuid.uuid4())
         ws = self._ws
         if ws is None:
-            self.on_error(_NO_GATEWAY, chat_id)
-            return
+            self._reply_callback(self.on_error, _NO_GATEWAY, chat_id, request_id)
+            return request_id
         try:
-            await ws.send(encode_chat(text, self.user_id, wake=wake, chat_id=chat_id))
+            await ws.send(
+                encode_chat(
+                    text,
+                    self.user_id,
+                    wake=wake,
+                    chat_id=chat_id,
+                    request_id=request_id,
+                )
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning(f"pasarela: la frase no ha salido — {exc}")
-            self.on_error(_NO_GATEWAY, chat_id)
+            self._reply_callback(self.on_error, _NO_GATEWAY, chat_id, request_id)
+        return request_id
+
+    async def cancel(self, request_id: str) -> None:
+        """Ask Hermes to stop one request. A repeated cancel is harmless."""
+        ws = self._ws
+        if ws is None:
+            return
+        try:
+            await ws.send(json.dumps({"type": "cancel", "request_id": request_id}))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"pasarela: la cancelación no ha salido — {exc}")
 
     async def run(self) -> None:
         """Connect, read, and reconnect forever. Cancel to stop.
@@ -300,11 +337,26 @@ class GatewayClient:
             return
         kind = msg["type"]
         if kind == "token":
-            self.on_token(msg.get("token", ""), msg.get("chat_id"))
+            self._reply_callback(
+                self.on_token,
+                msg.get("token", ""),
+                msg.get("chat_id"),
+                msg.get("request_id"),
+            )
         elif kind == "done":
-            self.on_done(int(msg.get("thinking_ms", 0)), msg.get("chat_id"))
+            self._reply_callback(
+                self.on_done,
+                int(msg.get("thinking_ms", 0)),
+                msg.get("chat_id"),
+                msg.get("request_id"),
+            )
         elif kind == "error":
-            self.on_error(msg.get("error", ""), msg.get("chat_id"))
+            self._reply_callback(
+                self.on_error,
+                msg.get("error", ""),
+                msg.get("chat_id"),
+                msg.get("request_id"),
+            )
         elif kind == "console":
             if msg.get("reset"):
                 self.on_console_reset()
@@ -351,3 +403,13 @@ class GatewayClient:
             )
         elif kind == "live_end":
             self.on_live_end(int(msg.get("epoch", 0)), str(msg.get("reason", "")))
+
+    @staticmethod
+    def _reply_callback(
+        callback: Callable, value: Any, chat_id: str | None, request_id: str | None
+    ) -> None:
+        """Call legacy two-argument handlers while clients upgrade to request IDs."""
+        try:
+            callback(value, chat_id, request_id)
+        except TypeError:
+            callback(value, chat_id)

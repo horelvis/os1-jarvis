@@ -453,6 +453,7 @@ class _Claim:
     endpoint: Endpoint
     desde: float
     margen: float
+    answering: bool = False
 
 
 class RemoteDesk:
@@ -561,7 +562,7 @@ class RemoteDesk:
         if now is None:
             now = time.monotonic()
         held = self._claims.get(endpoint.persona)
-        if held is not None and held.endpoint is not endpoint:
+        if held is not None and (held.endpoint is not endpoint or held.answering):
             expired = now - held.desde >= held.margen
             if not expired:
                 endpoint.refuse()
@@ -616,9 +617,11 @@ class RemoteDesk:
         if now is None:
             now = time.monotonic()
         held = self._claims.get(endpoint.persona)
-        if held is not None and held.endpoint is endpoint:
-            held.desde = now
-            held.margen = ANSWERING_SECONDS
+        if held is None or held.endpoint is not endpoint or held.answering:
+            return
+        held.desde = now
+        held.margen = ANSWERING_SECONDS
+        held.answering = True
         self._on_utterance(pcm, endpoint)
 
 

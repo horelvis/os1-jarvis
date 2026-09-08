@@ -13,6 +13,12 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-08 — B1 protege el destino privado hasta el final ✅
+- 2026-09-08 — B2 correlaciona y cancela cada respuesta Hermes ✅
+- 2026-09-08 — P0 de voz local cerrado; iOS comienza F1
+- 2026-09-08 — La voz no arrastra respuestas largas ✅
+- 2026-09-07 — P0 de voz local entregado; revisión de conformidad iOS en curso
+- 2026-09-07 — Plan compartido para voz local iOS; implementación pendiente
 - 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
 - 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
 - 2026-09-06 — El QR deja de ser un enlace y pasa a llevar la casa entera ✅
@@ -68,6 +74,91 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+
+---
+
+## 2026-09-08 — B2 correlaciona y cancela cada respuesta Hermes ✅
+
+Cada turno nuevo del widget lleva un `request_id`; el adaptador JARVIS lo
+convierte en `MessageEvent.message_id` y Hermes lo devuelve como `reply_to` al
+entregar. Los frames `token`, `done` y `error` vuelven con ese mismo id. Un
+`cancel` invalida la petición, cancela el trabajo de sesión de Hermes y hace que
+cualquier callback tardío se descarte, incluso si comparte `chat_id` con el
+siguiente turno. Las tramas legacy sin id conservan su camino compatible.
+
+Verificación focalizada: 113 pruebas de gateway, rutas privadas y adaptador.
+
+---
+
+## 2026-09-08 — B1 protege el destino privado hasta el final ✅
+
+F1 de iOS queda entregada en `0fa10d5` con 145 pruebas; B1 se retoma desde el
+checkpoint aislado de ayer y se integra en este checkout. `ReplyRoutes` captura
+el destino privado al admitir el turno y lo conserva hasta el terminal. Una
+desconexión, interrupción o callback tardío ya no puede terminar enviando una
+respuesta a la sala ni a otro teléfono de la misma persona.
+
+Los avisos legacy sin `chat_id` siguen entrando por la sala. B2 sigue pendiente:
+el gateway aún sólo correlaciona callbacks por `chat_id`, no por request ID. B3,
+B4, `/voice/local` y las pruebas físicas de iOS no se han activado ni probado.
+Verificación: 766 pruebas del widget, Ruff, formato y `git diff --check`.
+
+---
+
+## 2026-09-08 — La voz no arrastra respuestas largas ✅
+
+La investigación sobre RLM expuso el problema: Hermes entregó una respuesta de
+unas 230 palabras como un único `token`; el widget la convirtió en 26 cláusulas
+para CosyVoice y las encoló todas. Mientras el contexto crecía hasta 36,5k
+tokens, JARVIS seguía hablando de una respuesta que la conversación ya había
+dejado atrás. No era una degradación de CosyVoice ni de la caché KV.
+
+`speech.limit_reply_for_speech` deja pasar como máximo tres frases completas a
+la salida hablada, que es el límite ya fijado en `jarvis-soul.md`. El texto
+completo se conserva para el teléfono y el journal; sólo se acota la cola de
+audio. Las etiquetas `<laughter>` siguen siendo atómicas: sus puntos internos
+no cierran una frase. Verificado con 44 pruebas de `test_speech.py` y Ruff.
+
+---
+
+## 2026-09-08 — P0 de voz local cerrado; iOS comienza F1
+
+Leído el acuse de iOS en el plan compartido: acepta el contrato r1 y verifica los
+cuatro hashes del manifiesto. P0 queda cerrado. iOS comunica seis métodos XCTest
+superados y F1 en curso en `codex/local-voice`; quedan pendientes el resultado
+final de simulador/cliente y el commit. Son resultados comunicados por ese agente,
+no ejecutados en esta máquina. Backend B1 aún no ha empezado.
+
+---
+
+## 2026-09-07 — P0 de voz local entregado; revisión de conformidad iOS en curso
+
+Con el diseño y P0 aprobados por el usuario, se publicó el
+[contrato v1](docs/superpowers/specs/2026-09-07-ios-voz-local-contract.md), su esquema
+JSON y los casos compartidos en `widget/tests/fixtures/local_voice_v1/`.
+Incluyen audio binario representado como octetos hexadecimales, secuencias válidas
+e inválidas, reconexión, cancelación y saturación, con manifiesto SHA-256.
+Las comprobaciones de referencia viven en `widget/tests/test_local_voice_contract.py`.
+Verificación: 39 pruebas pasan; esquema validado con 16 casos positivos/negativos
+y 122 mensajes de las secuencias válidas. Ruff y `git diff --check`, correctos.
+
+El agente iOS respondió directamente en el plan compartido desde su repositorio
+`/Users/horelvis/git/ios-jarvis`. Backend respondió allí a sus seis observaciones;
+queda pendiente su conformidad con la revisión concreta del contrato y fixtures.
+La coordinación se mantiene entre agentes en ese archivo, sin usar al usuario
+como intermediario. Esta fase no arranca servicios ni implementa el endpoint.
+
+---
+
+## 2026-09-07 — Plan compartido para voz local iOS; implementación pendiente
+
+Se preparó el [plan coordinado de backend e iOS](docs/superpowers/plans/2026-09-07-ios-voz-local.md)
+a partir de la propuesta de frontend y la validación local de turnos.
+Define contrato y fixtures compartidos, destino privado, correlación y cancelación,
+perfiles y proveedores locales, trabajo paralelo de iOS y pruebas conjuntas.
+Los dos checkouts parten de `403d71f`; la validación anterior sigue en el worktree
+de backend. Falta registrar el repositorio y el acuse del agente iOS y cerrar P0.
+Esta entrega es documental: no se modificaron componentes ni servicios en ejecución.
 
 ---
 

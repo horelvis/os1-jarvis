@@ -44,6 +44,11 @@ def test_a_chat_frame_carries_the_person_when_there_is_one() -> None:
     assert frame["chat_id"] == "marta"
 
 
+def test_a_chat_frame_carries_its_request_id() -> None:
+    frame = json.loads(encode_chat("hola", request_id="request-1"))
+    assert frame["request_id"] == "request-1"
+
+
 def test_token_frame_reads_the_token_field() -> None:
     assert decode_server('{"type":"token","token":"ho"}')["token"] == "ho"
 
@@ -523,6 +528,39 @@ def test_a_tagged_reply_carries_its_chat_id_to_every_callback() -> None:
     assert tokens == [("ho", "marta")]
     assert dones == [(5, "marta")]
     assert errors == [("vaya", "marta")]
+
+
+def test_a_tagged_reply_carries_its_request_id_to_new_handlers() -> None:
+    gw = GatewayClient()
+    seen: list[tuple[str, str | None, str | None]] = []
+    gw.on_token = lambda text, chat_id=None, request_id=None: seen.append(
+        (text, chat_id, request_id)
+    )
+
+    gw._dispatch(
+        json.dumps(
+            {
+                "type": "token",
+                "token": "hola",
+                "chat_id": "marta",
+                "request_id": "request-1",
+            }
+        )
+    )
+
+    assert seen == [("hola", "marta", "request-1")]
+
+
+async def test_cancel_writes_the_request_id_to_the_socket() -> None:
+    sent: list[str] = []
+    gw = GatewayClient()
+    gw._ws = _FakeWs(sent)
+
+    await gw.cancel("request-1")
+
+    assert [json.loads(raw) for raw in sent] == [
+        {"type": "cancel", "request_id": "request-1"}
+    ]
 
 
 def test_an_untagged_reply_still_reaches_the_desk() -> None:

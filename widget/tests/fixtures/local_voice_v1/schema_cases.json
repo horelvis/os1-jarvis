@@ -1,0 +1,170 @@
+{
+  "cases": [
+    {
+      "id": "hello",
+      "direction": "client",
+      "valid": true,
+      "message": {
+        "type": "hello",
+        "protocol": "jarvis.local-voice.v1",
+        "processing": "local-only"
+      }
+    },
+    {
+      "id": "ready",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "ready",
+        "protocol": "jarvis.local-voice.v1",
+        "processing": "local-only",
+        "input_rate": 16000,
+        "output_rate": 24000,
+        "format": "pcm_s16le",
+        "channels": 1
+      }
+    },
+    {
+      "id": "cancel_boolean_turn",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "cancel",
+        "turn": true
+      }
+    },
+    {
+      "id": "cancel_string_turn",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "cancel",
+        "turn": "1"
+      }
+    },
+    {
+      "id": "cancel_zero",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "cancel",
+        "turn": 0
+      }
+    },
+    {
+      "id": "cancel_overflow",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "cancel",
+        "turn": 4294967296
+      }
+    },
+    {
+      "id": "extra_identity",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "hello",
+        "protocol": "jarvis.local-voice.v1",
+        "processing": "local-only",
+        "persona": "someone"
+      }
+    },
+    {
+      "id": "legacy_start",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "start"
+      }
+    },
+    {
+      "id": "wrong_direction",
+      "direction": "client",
+      "valid": false,
+      "message": {
+        "type": "ready",
+        "protocol": "jarvis.local-voice.v1",
+        "processing": "local-only",
+        "input_rate": 16000,
+        "output_rate": 24000,
+        "format": "pcm_s16le",
+        "channels": 1
+      }
+    },
+    {
+      "id": "wrong_format",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "ready",
+        "protocol": "jarvis.local-voice.v1",
+        "processing": "local-only",
+        "input_rate": 48000,
+        "output_rate": 24000,
+        "format": "pcm_s16le",
+        "channels": 1
+      }
+    },
+    {
+      "id": "empty_delta",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "text",
+        "turn": 1,
+        "delta": ""
+      }
+    },
+    {
+      "id": "cancelled_without_work_state",
+      "direction": "server",
+      "valid": true,
+      "message": {
+        "type": "turn_done",
+        "turn": 1,
+        "status": "cancelled"
+      }
+    },
+    {
+      "id": "completed_work_state",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "turn_done",
+        "turn": 1,
+        "status": "completed",
+        "work_state": "stopped"
+      }
+    },
+    {
+      "id": "unknown_error",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "error",
+        "code": "internal_exception"
+      }
+    },
+    {
+      "id": "turn_error_missing_turn",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "error",
+        "code": "turn_failed"
+      }
+    },
+    {
+      "id": "session_error_with_turn",
+      "direction": "server",
+      "valid": false,
+      "message": {
+        "type": "error",
+        "code": "overloaded",
+        "turn": 1
+      }
+    }
+  ]
+}

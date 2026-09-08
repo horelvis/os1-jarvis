@@ -20,7 +20,7 @@ import json
 import re
 from typing import Any, Dict
 
-_CLIENT_TYPES = {"chat", "listen"}
+_CLIENT_TYPES = {"chat", "cancel", "listen"}
 
 # The same grammar as `personas._ID` in the widget and as Hermes' own
 # `_PROFILE_ID_RE` (`.hermes/src/hermes_cli/profiles.py`) — anchored,
@@ -122,10 +122,26 @@ def decode_client(raw: str) -> Dict[str, Any]:
         if wake is not None and not isinstance(wake, bool):
             raise ProtocolError("wake must be a boolean when present")
 
+        request_id = msg.get("request_id")
+        if request_id is not None:
+            if not isinstance(request_id, str) or not request_id:
+                raise ProtocolError(
+                    "request_id must be a non-blank string when present"
+                )
+            if len(request_id) > 64:
+                raise ProtocolError("request_id is over 64 chars")
+
+    if kind == "cancel":
+        request_id = msg.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise ProtocolError("cancel needs a non-blank request_id")
+        if len(request_id) > 64:
+            raise ProtocolError("request_id is over 64 chars")
+
     return msg
 
 
-def token(text: str, chat_id: str | None = None) -> str:
+def token(text: str, chat_id: str | None = None, request_id: str | None = None) -> str:
     frame: Dict[str, Any] = {"type": "token", "token": text}
     if chat_id:
         # Whose reply this is. Omitted for the house's single session,
@@ -133,13 +149,19 @@ def token(text: str, chat_id: str | None = None) -> str:
         # did — see `test_a_reply_frame_without_a_person_is_byte_for_
         # byte_what_it_was`.
         frame["chat_id"] = chat_id
+    if request_id:
+        frame["request_id"] = request_id
     return json.dumps(frame)
 
 
-def done(thinking_ms: int, chat_id: str | None = None) -> str:
+def done(
+    thinking_ms: int, chat_id: str | None = None, request_id: str | None = None
+) -> str:
     frame: Dict[str, Any] = {"type": "done", "thinking_ms": thinking_ms}
     if chat_id:
         frame["chat_id"] = chat_id
+    if request_id:
+        frame["request_id"] = request_id
     return json.dumps(frame)
 
 
@@ -271,11 +293,15 @@ def working(on: object) -> str:
     return json.dumps({"type": "working", "on": bool(on)})
 
 
-def error(message: str, chat_id: str | None = None) -> str:
+def error(
+    message: str, chat_id: str | None = None, request_id: str | None = None
+) -> str:
     """`message` is shown to the user, so it is Spanish and in her voice."""
     frame: Dict[str, Any] = {"type": "error", "error": message}
     if chat_id:
         frame["chat_id"] = chat_id
+    if request_id:
+        frame["request_id"] = request_id
     return json.dumps(frame)
 
 

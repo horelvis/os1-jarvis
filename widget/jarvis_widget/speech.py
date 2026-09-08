@@ -32,6 +32,10 @@ _SOFT_STOPS = ",;:"
 _MIN_CLAUSE_CHARS = 12
 # A comma only earns a cut when there is a real phrase behind it.
 _MIN_SOFT_CLAUSE_CHARS = 25
+# The soul permits one or two spoken sentences, three only when needed.
+# This is enforced at the audio boundary: a long tool result may be useful
+# as text, but it must not leave the room listening to a stale monologue.
+_MAX_SPOKEN_SENTENCES = 3
 
 # Hermes narrates itself through ordinary `token` frames — in English,
 # with emoji, to a person who has no keyboard. Measured verbatim:
@@ -101,6 +105,23 @@ def unwrap_delivery(text: str) -> str:
     body = _CRON_HEADER.sub("", text)
     body = _CRON_FOOTER.sub("", body)
     return body.strip()
+
+
+def limit_reply_for_speech(text: str) -> str:
+    """Keep at most three complete sentences for the spoken reply.
+
+    Hermes delivers one completed reply in a token frame. The phone still
+    receives that full text, but synthesising all of a long research answer
+    serially makes the voice lag behind the conversation for minutes.
+    """
+    sentences = 0
+    for index, char in enumerate(text):
+        if char not in _HARD_STOPS or has_unclosed_tag(text[: index + 1]):
+            continue
+        sentences += 1
+        if sentences == _MAX_SPOKEN_SENTENCES:
+            return text[: index + 1].strip()
+    return text.strip()
 
 
 class ClauseChunker:
@@ -385,6 +406,8 @@ class Speaker:
             destino, generation, clause = await self._queue.get()
             if generation != self._generation_for(destino):
                 continue  # queued before an interruption of THIS destino
+            if getattr(destino, "closed", False):
+                continue  # an admitted private turn already sent its terminal
             if clause is self._FIN_DE_TURNO:
                 self._decir_fin(destino)
                 continue
@@ -478,7 +501,9 @@ class Speaker:
 
         sink = self._player if destino is None else destino
         async for chunk, _backend in tts.stream(clause, client=self._client):
-            if generation != self._generation_for(destino):
+            if generation != self._generation_for(destino) or getattr(
+                sink, "closed", False
+            ):
                 return  # this destination was interrupted mid-synthesis
             sink.write(chunk)
             await asyncio.sleep(0)  # let the loop breathe between chunks

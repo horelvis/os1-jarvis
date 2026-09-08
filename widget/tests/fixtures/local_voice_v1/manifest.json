@@ -1,0 +1,10 @@
+{
+  "protocol": "jarvis.local-voice.v1",
+  "revision": 1,
+  "sha256": {
+    "messages.schema.json": "88a26ba52a91cb7a1e8d858b536a6db7abb202e7d37dad95efda533f29f47c08",
+    "traces.json": "6b71a331f58222a64451e0ab5789ed802f6703ab6050f1f9b414cdbd8bf7018f",
+    "binary.json": "19d34c78758d800ce61b5345b6046b588cfb9da1750c4bdec8a1872f064415bc",
+    "schema_cases.json": "2d69c24b466945746d2f6c7e5731ccf221554deca478f654909351e16de7748d"
+  }
+}

@@ -90,6 +90,7 @@ try:
         MessageEvent,
         MessageType,
         SendResult,
+        build_session_key,
     )
 except ImportError:  # pragma: no cover - only without Hermes installed
     from enum import Enum
@@ -165,6 +166,9 @@ except ImportError:  # pragma: no cover - only without Hermes installed
             self._fatal_error_message = message
             self._fatal_error_retryable = retryable
 
+        async def cancel_session_processing(self, _session_key: str) -> None:
+            """The real base cancels Hermes' background agent task."""
+
     class MessageType(Enum):  # type: ignore[no-redef]
         """Stand-in mirroring gateway.platforms.base.MessageType."""
 
@@ -186,6 +190,9 @@ except ImportError:  # pragma: no cover - only without Hermes installed
             )
             self.source = source
             self.message_id = message_id
+
+    def build_session_key(source: Any, **_kwargs: Any) -> str:  # type: ignore[no-redef]
+        return str(source.chat_id)
 
 
 # Spanish, in his voice — these reach the screen. See Hermes/jarvis-soul.md:
@@ -279,10 +286,12 @@ class _Turn:
     """
 
     chat: str
-    turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    session_key: str | None = None
     watchdog: Optional[asyncio.Task] = field(default=None, repr=False)
     settled: bool = False
     timed_out: bool = False
+    cancelled: bool = False
 
 
 class JarvisAdapter(BasePlatformAdapter):
@@ -337,7 +346,8 @@ class JarvisAdapter(BasePlatformAdapter):
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._ws: Optional[web.WebSocketResponse] = None
-        # At most one open turn PER CHAT. It was one for the whole
+        # Every request owns its reply slot. A second index holds the one open
+        # request per chat only for legacy busy/session helpers.
         # platform until 2026-09-05, which is what made the house a
         # single conversation. The rule that a second `chat` frame
         # supersedes rather than queues keeps its meaning — it now
@@ -355,6 +365,7 @@ class JarvisAdapter(BasePlatformAdapter):
         # moment its turn settles" either, and a reader should not trust
         # that this comment once said so.
         self._turns: Dict[str, _Turn] = {}
+        self._active_turns: Dict[str, _Turn] = {}
 
         # While the code assistant waits for an answer, jarvis_code
         # sets this; the next unnamed input is the answer and goes to
@@ -478,13 +489,42 @@ class JarvisAdapter(BasePlatformAdapter):
         makes the retry path dead code. It also pushes Hermes' own English
         error text onto the OS1 screen as a second token/done pair.
         """
-        del reply_to, metadata
+        del metadata
         # `chat_id` here is Hermes' own — the RESOLVED chat this reply
         # belongs to (`event.source.chat_id`, which `_handle_chat` set to
         # `chat_id or CHAT_ID_DEFAULT`). It is exactly what `_open_turn`
         # keyed `self._turns` by, so no chat that was never opened here
         # can ever collide with one that was.
-        turn = self._turns.get(chat_id)
+        turn = (
+            self._turns.get(reply_to) if reply_to else self._active_turns.get(chat_id)
+        )
+        if turn is None and not reply_to:
+            turn = next(
+                (
+                    candidate
+                    for candidate in self._turns.values()
+                    if candidate.chat == chat_id and candidate.timed_out
+                ),
+                None,
+            )
+
+        if reply_to and turn is None:
+            logger.warning("jarvis: dropping reply for an unknown request")
+            return SendResult(
+                success=False,
+                error="the request was cancelled or replaced before delivery",
+                retryable=False,
+            )
+
+        if turn is not None and turn.cancelled:
+            logger.info(
+                "jarvis: dropping reply for cancelled request %s", turn.request_id
+            )
+            return SendResult(
+                success=False,
+                error="the request was cancelled before delivery",
+                retryable=False,
+            )
 
         if turn is not None and turn.timed_out:
             # The watchdog already told the user this turn was lost. Pushing
@@ -494,8 +534,8 @@ class JarvisAdapter(BasePlatformAdapter):
             # and its `done` would resolve the wrong promise. Report the
             # failure instead; non-retryable, because retrying delivers the
             # same stale reply.
-            if self._turns.get(turn.chat) is turn:
-                del self._turns[turn.chat]
+            if self._turns.get(turn.request_id) is turn:
+                del self._turns[turn.request_id]
             logger.warning(
                 f"jarvis: dropping a reply that arrived after the "
                 f"{self.turn_timeout:.0f}s watchdog already closed the turn"
@@ -525,9 +565,10 @@ class JarvisAdapter(BasePlatformAdapter):
         # correctly even when `turn` is None (see `_wire_chat`'s
         # docstring for the bug this closes).
         tag = self._wire_chat(chat_id)
-        delivered = await self._push(token(content, chat_id=tag)) and await self._push(
-            done(0, chat_id=tag)
-        )
+        request_id = turn.request_id if turn is not None else None
+        delivered = await self._push(
+            token(content, chat_id=tag, request_id=request_id)
+        ) and await self._push(done(0, chat_id=tag, request_id=request_id))
         if not delivered:
             # Nobody is listening — a browser mid-refresh, or a socket that
             # died between the frontend's frame and this reply. `retryable`
@@ -543,7 +584,7 @@ class JarvisAdapter(BasePlatformAdapter):
 
         if turn is not None and not turn.settled:
             self._settle(turn)
-        return SendResult(success=True, message_id=turn.turn_id if turn else None)
+        return SendResult(success=True, message_id=request_id)
 
     async def _push(self, payload: str) -> bool:
         """Write one frame to the strip. False means it did not get there."""
@@ -701,7 +742,7 @@ class JarvisAdapter(BasePlatformAdapter):
         (`alta.hacer_alta`) treats it as a refusal, which is the only
         safe reading when what is being decided is a credential.
         """
-        abiertos = list(self._turns)
+        abiertos = list(self._active_turns)
         return abiertos[0] if len(abiertos) == 1 else None
 
     async def push_working(self, on: bool) -> bool:
@@ -804,24 +845,33 @@ class JarvisAdapter(BasePlatformAdapter):
             return None
         return chat
 
-    def _open_turn(self, chat: str) -> _Turn:
+    def _open_turn(
+        self, chat: str, request_id: str | None = None, session_key: str | None = None
+    ) -> _Turn:
         # A new turn supersedes whatever was still open FOR THIS CHAT —
         # one strip, but now one slot per person: two people speaking at
         # once must not collide, and the frontend only sends again for a
         # given chat once that chat's previous turn settled or the user
         # reloaded.
-        previous = self._turns.get(chat)
+        previous = self._active_turns.get(chat)
         if previous is not None and not previous.settled:
             self._abandon_turn(previous)
-        turn = _Turn(chat=chat)
-        self._turns[chat] = turn
+        turn = _Turn(
+            chat=chat,
+            request_id=request_id or str(uuid.uuid4()),
+            session_key=session_key,
+        )
+        self._turns[request_id] = turn
+        self._active_turns[chat] = turn
         turn.watchdog = asyncio.create_task(self._watch_turn(turn))
         return turn
 
     def _abandon_turn(self, turn: _Turn) -> None:
         """Drop an open turn without answering it (supersede / shutdown)."""
-        if self._turns.get(turn.chat) is turn:
-            del self._turns[turn.chat]
+        if self._turns.get(turn.request_id) is turn:
+            del self._turns[turn.request_id]
+        if self._active_turns.get(turn.chat) is turn:
+            del self._active_turns[turn.chat]
         if turn.watchdog is not None:
             turn.watchdog.cancel()
 
@@ -847,8 +897,10 @@ class JarvisAdapter(BasePlatformAdapter):
         if turn.settled:
             return
         turn.settled = True
-        if not keep_slot and self._turns.get(turn.chat) is turn:
-            del self._turns[turn.chat]
+        if not keep_slot and self._turns.get(turn.request_id) is turn:
+            del self._turns[turn.request_id]
+        if self._active_turns.get(turn.chat) is turn:
+            del self._active_turns[turn.chat]
         watchdog = turn.watchdog
         # Guard against a watchdog cancelling itself: `_watch_turn` calls
         # `_settle(turn, keep_slot=True)` from inside its own task, right
@@ -864,17 +916,23 @@ class JarvisAdapter(BasePlatformAdapter):
             await asyncio.sleep(self.turn_timeout)
         except asyncio.CancelledError:
             return
-        if turn.settled or self._turns.get(turn.chat) is not turn:
+        if turn.settled or self._turns.get(turn.request_id) is not turn:
             return
         turn.timed_out = True
         self._settle(turn, keep_slot=True)
         logger.warning(
             f"jarvis: no reply within {self.turn_timeout:.0f}s for turn "
-            f"{turn.turn_id} (chat {turn.chat!r}) — telling the user instead "
+            f"{turn.request_id} (chat {turn.chat!r}) — telling the user instead "
             f"of leaving the screen stuck (check the gateway log for "
             f"authorization, session-key or dispatch warnings)"
         )
-        await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn.chat)))
+        await self._push(
+            error(
+                _TURN_LOST,
+                chat_id=self._wire_chat(turn.chat),
+                request_id=turn.request_id,
+            )
+        )
 
     # ── transport ─────────────────────────────────────────────────────────
 
@@ -960,8 +1018,13 @@ class JarvisAdapter(BasePlatformAdapter):
                         await self._push(silence())
                         continue
                     await self._handle_chat(
-                        decoded["message"], decoded["user_id"], decoded.get("chat_id")
+                        decoded["message"],
+                        decoded["user_id"],
+                        decoded.get("chat_id"),
+                        decoded.get("request_id"),
                     )
+                elif decoded["type"] == "cancel":
+                    await self._cancel_request(decoded["request_id"])
         finally:
             # In a finally because an exception in the loop body would
             # otherwise leave self._ws pointing at a socket whose handler has
@@ -995,7 +1058,11 @@ class JarvisAdapter(BasePlatformAdapter):
             return False
 
     async def _handle_chat(
-        self, message: str, user_id: str, chat_id: Optional[str] = None
+        self,
+        message: str,
+        user_id: str,
+        chat_id: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> None:
         # Whose conversation this is. None is a desk turn or an older
         # strip build, and both mean the house's one session — the
@@ -1016,9 +1083,20 @@ class JarvisAdapter(BasePlatformAdapter):
             text=message,
             message_type=MessageType.TEXT,
             source=source,
-            message_id=str(uuid.uuid4()),
+            message_id=request_id or str(uuid.uuid4()),
         )
-        turn = self._open_turn(chat)
+        extra = getattr(self.config, "extra", {}) or {}
+        session_key = build_session_key(
+            source,
+            group_sessions_per_user=extra.get("group_sessions_per_user", True),
+            thread_sessions_per_user=extra.get("thread_sessions_per_user", False),
+            profile=(
+                self._session_key_profile(source)
+                if hasattr(self, "_session_key_profile")
+                else None
+            ),
+        )
+        turn = self._open_turn(chat, event.message_id, session_key)
         try:
             # Returns as soon as the gateway has spawned its background task;
             # the reply comes back later through send(). The watchdog armed
@@ -1028,4 +1106,22 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.error(f"jarvis: dispatch failed — {exc}")
             if not turn.settled:
                 self._settle(turn)
-                await self._push(error(_TURN_LOST, chat_id=self._wire_chat(turn.chat)))
+                await self._push(
+                    error(
+                        _TURN_LOST,
+                        chat_id=self._wire_chat(turn.chat),
+                        request_id=turn.request_id,
+                    )
+                )
+
+    async def _cancel_request(self, request_id: str) -> None:
+        """Cancel one correlated Hermes run and permanently reject its output."""
+        turn = self._turns.get(request_id)
+        if turn is None or turn.cancelled:
+            return
+        turn.cancelled = True
+        self._settle(turn)
+        # The base owns the actual background task and agent interruption.
+        # A missing session key only occurs in the no-Hermes test shim.
+        if turn.session_key is not None:
+            await self.cancel_session_processing(turn.session_key)

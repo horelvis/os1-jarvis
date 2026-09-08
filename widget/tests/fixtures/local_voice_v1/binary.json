@@ -1,0 +1,110 @@
+{
+  "protocol": "jarvis.local-voice.v1",
+  "storage": "hex octets; decode to raw WebSocket binary bytes",
+  "vectors": [
+    {
+      "id": "input_edges",
+      "direction": "client",
+      "hex": "0000ff7f0080ffff",
+      "valid": true,
+      "samples": [
+        0,
+        32767,
+        -32768,
+        -1
+      ]
+    },
+    {
+      "id": "output_edges",
+      "direction": "server",
+      "hex": "000000010000ff7f0080ffff",
+      "valid": true,
+      "turn": 1,
+      "samples": [
+        0,
+        32767,
+        -32768,
+        -1
+      ]
+    },
+    {
+      "id": "output_big_endian",
+      "direction": "server",
+      "hex": "01020304d2042efb",
+      "valid": true,
+      "turn": 16909060,
+      "samples": [
+        1234,
+        -1234
+      ]
+    },
+    {
+      "id": "output_max_turn",
+      "direction": "server",
+      "hex": "ffffffff0000",
+      "valid": true,
+      "turn": 4294967295,
+      "samples": [
+        0
+      ]
+    },
+    {
+      "id": "empty_input",
+      "direction": "client",
+      "hex": "",
+      "valid": false
+    },
+    {
+      "id": "odd_input",
+      "direction": "client",
+      "hex": "00",
+      "valid": false
+    },
+    {
+      "id": "header_only",
+      "direction": "server",
+      "hex": "00000001",
+      "valid": false
+    },
+    {
+      "id": "odd_output",
+      "direction": "server",
+      "hex": "0000000100",
+      "valid": false
+    },
+    {
+      "id": "turn_zero",
+      "direction": "server",
+      "hex": "000000000000",
+      "valid": false
+    },
+    {
+      "id": "missing_header",
+      "direction": "server",
+      "hex": "0000",
+      "valid": false
+    }
+  ],
+  "boundaries": [
+    {
+      "direction": "client",
+      "bytes": 3200,
+      "valid": true
+    },
+    {
+      "direction": "client",
+      "bytes": 3202,
+      "valid": false
+    },
+    {
+      "direction": "server",
+      "bytes": 48004,
+      "valid": true
+    },
+    {
+      "direction": "server",
+      "bytes": 48006,
+      "valid": false
+    }
+  ]
+}
