@@ -350,9 +350,12 @@ providers:
     default_model: gemma-4-26b-a4b-it
     extra_body:
       chat_template_kwargs:
-        # Voice turns need direct answers rather than an internal thought
-        # channel, which the strip never speaks.
-        enable_thinking: false
+        # Thinking must stay on: without it, Gemma 4 26B does not select
+        # tools at all and answers every turn conversationally (measured
+        # 2026-09-14 — teacher `clases` and everything else went unused,
+        # tool_turns=0). The strip never SPEAKS the thought channel; the
+        # model just needs it to decide what to call.
+        enable_thinking: true
 
 # Note on the two fields above: provider and model are SEPARATE. Putting
 # `custom:local` into model.default sends the literal string

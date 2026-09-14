@@ -87,7 +87,6 @@ ExecStart=%h/git/llama.cpp/build/bin/llama-server \
     --cache-type-v q4_0 \
     --ctx-size ${JARVIS_LLAMA_CTX} \
     --jinja \
-    --reasoning off \
     --flash-attn on \
 # NOT --split-mode row: it splits tensors across several GPUs and this
 # box has one. It used to be a harmless no-op; on b10603 it is fatal —
