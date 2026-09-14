@@ -55,7 +55,7 @@ Type=simple
 # Gemma 4 26B-A4B, an MoE with 3.8B active parameters per token.
 # Measured here at 64K: 14,392 MiB, 120-127 tok/s, Spanish and function calls
 # verified. Qwen GSQ-RCO and Heretic remain on disk as rollbacks.
-Environment=JARVIS_LLAMA_MODEL=%h/.jarvis/models/Gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
+Environment=JARVIS_LLAMA_MODEL=%h/.jarvis/models/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.

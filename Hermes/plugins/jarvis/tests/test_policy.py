@@ -14,7 +14,7 @@ def _policy():
     return {
         "local_provider": {
             "provider": "custom:local",
-            "model": "gemma-4-26b-a4b-it",
+            "model": "qwen3.8-27b",
             "base_url": "http://127.0.0.1:8000/v1",
         }
     }

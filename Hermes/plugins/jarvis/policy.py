@@ -110,7 +110,7 @@ class PolicyResolver:
             return False
         if provider.get("provider") != "custom:local":
             return False
-        if provider.get("model") != "gemma-4-26b-a4b-it":
+        if provider.get("model") != "qwen3.8-27b":
             return False
         base_url = provider.get("base_url")
         if not isinstance(base_url, str):
