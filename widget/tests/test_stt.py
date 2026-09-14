@@ -29,6 +29,28 @@ def test_a_real_sentence_containing_gracias_survives() -> None:
     assert clean("Gracias, pero prefiero quedarme en casa") != ""
 
 
+def test_a_repetition_loop_is_dropped() -> None:
+    """Whisper's other silence failure: latching onto one token and
+    printing it until the clip ends, instead of the polite filler above."""
+    for phrase in (
+        "asterisk asterisk asterisk",
+        "eikeko eikeko eikeko eikeko",
+        "e, e, e, e",
+        "sí sí sí sí",
+    ):
+        assert clean(phrase) == "", phrase
+
+
+def test_two_repeated_words_are_not_yet_a_loop() -> None:
+    """A genuine "no, no" must survive; a loop takes three of the same."""
+    assert clean("no, no") != ""
+    assert clean("vale, vale") != ""
+
+
+def test_a_mixed_sentence_that_happens_to_repeat_a_word_survives() -> None:
+    assert clean("ya, ya lo sé, pero prefiero quedarme") != ""
+
+
 def test_an_empty_transcription_stays_empty() -> None:
     assert clean("") == ""
     assert clean("   ") == ""

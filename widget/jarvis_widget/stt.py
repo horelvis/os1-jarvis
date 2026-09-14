@@ -84,12 +84,63 @@ _HALLUCINATIONS = re.compile(
 )
 
 
+_WORD = re.compile(r"[a-záéíóúñü][a-záéíóúñü0-9]*")
+
+
+def _is_repetition_loop(text: str) -> bool:
+    """True when the transcript is one token repeated — Whisper's other
+    silence failure.
+
+    The `_HALLUCINATIONS` regex catches the politeness Whisper fills
+    silence WITH. This catches what it does when the audio is low-SNR but
+    not silent — the echo of his own voice, a television across the room:
+    it latches onto a syllable and prints it until the clip ends, measured
+    live as "asterisk asterisk", "eikeko eikeko eikeko eikeko" and
+    "e, e, e, e". A real sentence mixes words; a loop has all of one.
+    """
+    words = _WORD.findall(text.lower())
+    return len(words) >= 3 and len(set(words)) == 1
+
+
 def clean(text: str) -> str:
     """Trim, and drop the phrases Whisper invents out of silence."""
     stripped = text.strip()
     if not stripped:
         return ""
-    return "" if _HALLUCINATIONS.match(stripped) else stripped
+    if _HALLUCINATIONS.match(stripped) or _is_repetition_loop(stripped):
+        return ""
+    return stripped
+
+
+class TranscriptionContext:
+    """Small, ephemeral context keyed by the authenticated phone persona.
+
+    Owned by the gateway loop. Capture a string snapshot before handing work
+    to the STT thread; never let a mutable global hint mix two phone turns.
+    Unknown room speech has no persona yet and must not borrow phone context.
+    """
+
+    def __init__(self, max_chars: int = 640, max_personas: int = 16) -> None:
+        self._max_chars = max(0, max_chars)
+        self._max_personas = max(1, max_personas)
+        self._by_persona: dict[str, str] = {}
+
+    def remember(self, persona: str, text: str) -> None:
+        if not persona or not text.strip() or self._max_chars == 0:
+            return
+        # Expression markers guide speech synthesis, not speech recognition.
+        for marker in ("<laughter>", "</laughter>", "[laughter]", "[breath]", "[sigh]"):
+            text = text.replace(marker, "")
+        previous = self._by_persona.pop(persona, "")
+        self._by_persona[persona] = (previous + " " + text).strip()[-self._max_chars :]
+        while len(self._by_persona) > self._max_personas:
+            del self._by_persona[next(iter(self._by_persona))]
+
+    def snapshot(self, persona: str | None) -> str:
+        return self._by_persona.get(persona, "") if persona else ""
+
+    def clear(self) -> None:
+        self._by_persona.clear()
 
 
 class Transcriber:
@@ -118,7 +169,7 @@ class Transcriber:
             self.model_name, device="cuda", compute_type=COMPUTE_TYPE
         )
 
-    def transcribe(self, pcm: bytes) -> str:
+    def transcribe(self, pcm: bytes, *, context: str = "") -> str:
         """16 kHz mono int16 PCM in, Spanish text out. "" if not ready."""
         if self._model is None:
             return ""
@@ -130,9 +181,16 @@ class Transcriber:
             language="es",  # never auto-detect: she lives in Spanish
             beam_size=1,  # latency over correctness (CLAUDE.md §1.4)
             vad_filter=False,  # Silero already cut this to one utterance
+            # Conditioning on the previous timestamp's text is what lets a
+            # low-SNR clip degenerate into an endless loop of one syllable
+            # (see `_is_repetition_loop`). The house's words still get in
+            # through `initial_prompt`; this only stops the model echoing
+            # ITSELF.
+            condition_on_previous_text=False,
             # Biases the decoder towards the words this house uses. Kept
             # to one short sentence: a long prompt is context the model
             # spends attention on, and it can start echoing it.
-            initial_prompt=self.hint or None,
+            initial_prompt=" ".join(part for part in (self.hint, context) if part)
+            or None,
         )
         return clean(" ".join(segment.text for segment in segments))

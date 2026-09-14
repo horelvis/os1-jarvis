@@ -67,6 +67,11 @@ def is_system_message(text: str) -> bool:
     if not stripped:
         return True
 
+    # '<' is a Unicode math symbol, but this is a supported voice marker.
+    # Treating it as Hermes narration also swallowed the phone's terminal.
+    if stripped.startswith("<laughter>"):
+        return False
+
     first = stripped[0]
     if first in _SPEAKABLE_LEADING_PUNCTUATION:
         return False

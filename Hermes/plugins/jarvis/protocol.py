@@ -20,7 +20,9 @@ import json
 import re
 from typing import Any, Dict
 
-_CLIENT_TYPES = {"chat", "cancel", "listen"}
+_CLIENT_TYPES = {"chat", "cancel", "listen", "turn.submit", "turn.cancel"}
+PCM_MAGIC = b"JPCM"
+MAX_PCM_FRAME_BYTES = 48000
 
 # The same grammar as `personas._ID` in the widget and as Hermes' own
 # `_PROFILE_ID_RE` (`.hermes/src/hermes_cli/profiles.py`) — anchored,
@@ -97,7 +99,7 @@ def decode_client(raw: str) -> Dict[str, Any]:
             # obviously hostile.
             raise ProtocolError(f"chat_id is not a usable id: {chat!r}")
 
-    if kind == "chat":
+    if kind in {"chat", "turn.submit"}:
         message = msg.get("message")
         if not isinstance(message, str) or not message.strip():
             # An empty turn would reach the model as an empty prompt.
@@ -122,21 +124,29 @@ def decode_client(raw: str) -> Dict[str, Any]:
         if wake is not None and not isinstance(wake, bool):
             raise ProtocolError("wake must be a boolean when present")
 
-        request_id = msg.get("request_id")
+        request_key = "request_id" if kind == "chat" else "client_request_id"
+        request_id = msg.get(request_key)
+        if kind == "turn.submit" and request_id is None:
+            raise ProtocolError("turn.submit needs a non-blank client_request_id")
         if request_id is not None:
             if not isinstance(request_id, str) or not request_id:
                 raise ProtocolError(
-                    "request_id must be a non-blank string when present"
+                    f"{request_key} must be a non-blank string when present"
                 )
             if len(request_id) > 64:
-                raise ProtocolError("request_id is over 64 chars")
+                raise ProtocolError(f"{request_key} is over 64 chars")
 
-    if kind == "cancel":
-        request_id = msg.get("request_id")
+        audio = msg.get("audio")
+        if audio is not None and audio != "pcm_s16le/24000":
+            raise ProtocolError("audio must be pcm_s16le/24000 when present")
+
+    if kind in {"cancel", "turn.cancel"}:
+        request_key = "request_id" if kind == "cancel" else "turn_id"
+        request_id = msg.get(request_key)
         if not isinstance(request_id, str) or not request_id:
-            raise ProtocolError("cancel needs a non-blank request_id")
+            raise ProtocolError(f"{kind} needs a non-blank {request_key}")
         if len(request_id) > 64:
-            raise ProtocolError("request_id is over 64 chars")
+            raise ProtocolError(f"{request_key} is over 64 chars")
 
     return msg
 
@@ -165,6 +175,34 @@ def done(
     return json.dumps(frame)
 
 
+def turn_accepted(client_request_id: str, turn_id: str) -> str:
+    """Hermes' admission receipt for a `turn.submit` client request."""
+    return json.dumps(
+        {
+            "type": "turn.accepted",
+            "client_request_id": client_request_id,
+            "turn_id": turn_id,
+        }
+    )
+
+
+def pcm_start(turn_id: str) -> str:
+    """Tell an upgraded desktop that the correlated reply carries PCM."""
+    return json.dumps(
+        {"type": "pcm.start", "turn_id": turn_id, "format": "pcm_s16le", "rate": 24000}
+    )
+
+
+def pcm_frame(turn_id: str, pcm: bytes) -> bytes:
+    """One addressed, headerless 24 kHz mono int16 PCM frame."""
+    encoded_turn = turn_id.encode("ascii")
+    if not encoded_turn or len(encoded_turn) > 64:
+        raise ProtocolError("invalid PCM turn id")
+    if not 2 <= len(pcm) <= MAX_PCM_FRAME_BYTES or len(pcm) % 2:
+        raise ProtocolError("invalid PCM frame")
+    return PCM_MAGIC + len(encoded_turn).to_bytes(1, "big") + encoded_turn + pcm
+
+
 def photo(path: str, camera: str) -> str:
     """A picture for the strip, and only for the strip.
 
@@ -191,6 +229,8 @@ def ficha(
     fuente: str = "",
     correcta: str = "",
     elegida: str = "",
+    chat_id: str | None = None,
+    request_id: str | None = None,
 ) -> str:
     """A card for the strip, and only for the strip.
 
@@ -204,16 +244,19 @@ def ficha(
     """
     if tipo not in TIPOS_FICHA:
         raise ProtocolError(f"unknown ficha tipo: {tipo!r}")
-    return json.dumps(
-        {
-            "type": "ficha",
-            "tipo": tipo,
-            "md": md,
-            "fuente": fuente,
-            "correcta": correcta or None,
-            "elegida": elegida or None,
-        }
-    )
+    frame: Dict[str, Any] = {
+        "type": "ficha",
+        "tipo": tipo,
+        "md": md,
+        "fuente": fuente,
+        "correcta": correcta or None,
+        "elegida": elegida or None,
+    }
+    if chat_id:
+        frame["chat_id"] = chat_id
+    if request_id:
+        frame["request_id"] = request_id
+    return json.dumps(frame)
 
 
 def console(text: str, *, done: bool = False, reset: bool = False) -> str:

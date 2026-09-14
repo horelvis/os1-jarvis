@@ -24,9 +24,13 @@ from Hermes.plugins.jarvis import register
 class _StubCtx:
     """Just enough of the plugin registration context to call register()."""
 
-    def __init__(self):
+    def __init__(self, settings=None):
         self.hooks = {}
         self.tools = {}
+        self.settings = settings or {}
+
+    def get_config(self, key, default=None):
+        return self.settings.get(key, default)
 
     def register_hook(self, name, fn):
         self.hooks[name] = fn
@@ -125,7 +129,19 @@ def test_register_wires_both_tool_hooks():
 
     register(ctx)
 
-    assert set(ctx.hooks) == {"pre_tool_call", "post_tool_call"}
+    assert set(ctx.hooks) == {"pre_tool_call", "post_tool_call", "pre_llm_call"}
+
+
+def test_sensitive_tools_require_a_human_approval():
+    ctx = _StubCtx()
+    register(ctx)
+
+    approval = ctx.hooks["pre_tool_call"](tool_name="emparejar")
+
+    assert approval["action"] == "approve"
+    assert approval["rule_key"] == "jarvis-sensitive:emparejar"
+    assert "confirmo la acción" in approval["message"]
+    assert ctx.hooks["pre_tool_call"](tool_name="cron_create") is None
 
 
 def test_two_tools_at_once_announce_once_and_clear_once(monkeypatch):

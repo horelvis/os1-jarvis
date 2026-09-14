@@ -14,10 +14,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import ssl
 import sys
 import time
+from base64 import b64encode
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Protocol
 
@@ -422,9 +425,24 @@ class Endpoint(Protocol):
 
     def write(self, pcm: bytes) -> None: ...
 
+    def transcript(self, text: str) -> None:
+        """The question as transcribed locally, before dispatch to Hermes."""
+        ...
+
     def text(self, texto: str) -> None:
         """What he just said, as text. The room implements it as
         nothing — somebody sitting here can hear him."""
+        ...
+
+    def ficha(
+        self,
+        md: str,
+        tipo: str,
+        fuente: str,
+        correcta: str | None,
+        elegida: str | None,
+    ) -> None:
+        """A teacher card, rendered natively by the phone client."""
         ...
 
     def done(self) -> None:
@@ -625,6 +643,69 @@ class RemoteDesk:
         self._on_utterance(pcm, endpoint)
 
 
+_IMAGEN = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+
+# Bigger than this and it is not a lesson illustration — the same ceiling
+# the plugin's `imagen.MAX_BYTES` applies when it downloads the picture.
+MAX_IMAGEN = 4 * 1024 * 1024
+
+# Pillow's own format name -> the MIME a phone can draw. Only raster
+# formats: the plugin's `_es_imagen` admits nothing else into the spool
+# (SVG is text and fails Pillow's `verify`, so it never reaches here).
+_MIME_POR_FORMATO = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "GIF": "image/gif",
+    "WEBP": "image/webp",
+}
+
+
+def _mime(datos: bytes) -> str | None:
+    """The MIME Pillow reads out of a picture's bytes, or None."""
+    try:
+        from PIL import Image
+
+        formato = Image.open(BytesIO(datos)).format or ""
+    except Exception:  # a picture that will not decode costs the picture
+        return None
+    return _MIME_POR_FORMATO.get(formato)
+
+
+def inline_imagenes(md: str) -> str:
+    """Rewrite each local image reference as a `data:` URI, for the phone.
+
+    The strip inlines its own HTML (`ficha_html.py`); a phone renders
+    CommonMark on the device and cannot read a path on this box. The card
+    is rewritten here, at the phone boundary and nowhere else, so every
+    `![](…)` that names a spool file becomes a `data:` URI instead. A
+    reference that cannot be read, is too large, or does not decode as a
+    picture is dropped from the document — the picture is a luxury, the
+    question is not (Ruling 7). References already `data:`, and anything
+    that is not a local path, are left alone.
+    """
+    salida = md or ""
+    for match in _IMAGEN.finditer(salida):
+        completo = match.group(0)
+        referencia = match.group(1)
+        if referencia.startswith("data:") or not referencia.startswith("/"):
+            continue
+        try:
+            datos = Path(referencia).read_bytes()
+        except OSError:
+            salida = salida.replace(completo, "")
+            continue
+        if not datos or len(datos) > MAX_IMAGEN:
+            salida = salida.replace(completo, "")
+            continue
+        mime = _mime(datos)
+        if mime is None:
+            salida = salida.replace(completo, "")
+            continue
+        incrustada = f"data:{mime};base64,{b64encode(datos).decode('ascii')}"
+        salida = salida.replace(f"]({referencia})", f"]({incrustada})")
+    return salida
+
+
 class WebEndpoint:
     """One connected phone."""
 
@@ -672,6 +753,12 @@ class WebEndpoint:
         # from the audio thread too.
         self._loop.call_soon_threadsafe(self._send, self._ws.send_bytes(pcm))
 
+    def transcript(self, text: str) -> None:
+        """Return local Whisper's exact Hermes input over the paired socket."""
+        self._loop.call_soon_threadsafe(
+            self._send, self._ws.send_json({"type": "transcript", "text": text})
+        )
+
     def text(self, texto: str) -> None:
         """His side of the conversation, in words, for the phone to draw.
 
@@ -688,6 +775,29 @@ class WebEndpoint:
         """
         self._loop.call_soon_threadsafe(
             self._send, self._ws.send_json({"type": "text", "text": texto})
+        )
+
+    def ficha(
+        self,
+        md: str,
+        tipo: str,
+        fuente: str,
+        correcta: str | None,
+        elegida: str | None,
+    ) -> None:
+        """Send the structured card the native client renders as a scrollable view."""
+        self._loop.call_soon_threadsafe(
+            self._send,
+            self._ws.send_json(
+                {
+                    "type": "ficha",
+                    "md": inline_imagenes(md),
+                    "tipo": tipo,
+                    "fuente": fuente,
+                    "correcta": correcta,
+                    "elegida": elegida,
+                }
+            ),
         )
 
     def done(self) -> None:

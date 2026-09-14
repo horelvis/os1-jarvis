@@ -22,6 +22,7 @@ from jarvis_widget.remote import (
     RemoteDesk,
     _handler,
     build_welcome_app,
+    inline_imagenes,
 )
 from jarvis_widget.personas import CASA
 from jarvis_widget.remote_audio import MAX_UTTERANCE_BYTES, MAX_UTTERANCE_SECONDS
@@ -1039,6 +1040,31 @@ async def test_what_he_says_reaches_the_phone_as_text_too() -> None:
     assert ws.enviados == [{"type": "text", "text": "Aquí sigo, señor."}]
 
 
+async def test_a_teacher_card_reaches_the_phone_as_structured_data() -> None:
+    class FakeWS:
+        def __init__(self) -> None:
+            self.enviados: list[dict] = []
+
+        async def send_json(self, payload: dict) -> None:
+            self.enviados.append(payload)
+
+    ws = FakeWS()
+    endpoint = WebEndpoint(ws, "phone", "marta", asyncio.get_running_loop())
+    endpoint.ficha("## Pregunta\n\n- a", "pregunta", "Cambridge", None, None)
+    await asyncio.sleep(0.05)
+
+    assert ws.enviados == [
+        {
+            "type": "ficha",
+            "md": "## Pregunta\n\n- a",
+            "tipo": "pregunta",
+            "fuente": "Cambridge",
+            "correcta": None,
+            "elegida": None,
+        }
+    ]
+
+
 async def test_the_departure_says_how_the_socket_ended(captured_logs) -> None:
     """ "It left" and "we killed it" are the same line otherwise, and
     today that distinction is the open question: three of five sockets
@@ -1061,3 +1087,49 @@ async def test_the_departure_says_how_the_socket_ended(captured_logs) -> None:
         await client.close()
 
     assert "cierre" in captured_logs.getvalue()
+
+
+def _png_un_pixel() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    bosquejo = BytesIO()
+    Image.new("RGB", (2, 2), (220, 30, 30)).save(bosquejo, format="PNG")
+    return bosquejo.getvalue()
+
+
+def test_inline_imagenes_rewrites_a_local_image_to_a_data_uri(tmp_path) -> None:
+    png = _png_un_pixel()
+    ruta = tmp_path / "diagrama.img"
+    ruta.write_bytes(png)
+
+    salida = inline_imagenes(f"## Mira\n\n![]({ruta})\n\n- a\n- b\n")
+
+    import base64
+
+    esperado = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
+    assert f"![]({esperado})" in salida
+    assert str(ruta) not in salida
+
+
+def test_inline_imagenes_drops_what_cannot_or_should_not_inline(tmp_path) -> None:
+    ruta_grande = tmp_path / "grande.img"
+    ruta_grande.write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    ruta_no_imagen = tmp_path / "texto.img"
+    ruta_no_imagen.write_bytes(b"esto no es una imagen")
+
+    md = (
+        f"![]({ruta_grande})\n"
+        f"![]({ruta_no_imagen})\n"
+        f"![]({tmp_path / 'no_existe.img'})\n"
+        "![](data:image/png;base64,yaDentro)\n"
+        "![](https://example.net/fuera.jpg)\n"
+    )
+    salida = inline_imagenes(md)
+
+    assert str(ruta_grande) not in salida
+    assert str(ruta_no_imagen) not in salida
+    assert "no_existe.img" not in salida
+    assert "![](data:image/png;base64,yaDentro)" in salida
+    assert "![](https://example.net/fuera.jpg)" in salida

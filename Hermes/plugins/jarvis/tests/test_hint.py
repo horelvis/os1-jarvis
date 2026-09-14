@@ -26,18 +26,20 @@ def test_the_hint_says_a_camera_photo_can_be_shown():
     assert "tira" in lowered
 
 
-def test_the_hint_does_not_promise_a_general_display():
-    # Narrow on purpose. A still from a camera, and nothing else — the
-    # band draws a texture and has no way to render text or a file.
+def test_the_hint_describes_the_native_chat_and_its_transcription():
+    # The native app can display a complete summary. The retired voice-only
+    # restriction made the model offer another delivery instead of the content.
     hint = _platform_hint()
-    assert "texto" in hint and "ficheros" in hint
-    assert "markdown" in hint  # the no-screen-to-read rule survives
+    assert "transcripción" in hint
+    assert "resúmenes" in hint and "enlaces verificados" in hint
+    assert "No hay teclado ni pantalla que leer" not in hint
+    assert "Es lo único que puedes mostrar — ni texto" not in hint
 
 
 def test_the_hint_still_says_he_cannot_see_the_photo_himself():
     # He knows what the detector told him. He is not looking at the
     # picture, and a turn that pretends otherwise invents detail.
-    assert "no la ves" in _platform_hint()
+    assert "no ves la imagen de la cámara" in _platform_hint().lower()
 
 
 def test_the_hint_carries_the_persona():

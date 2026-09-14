@@ -991,7 +991,7 @@ class JARVISApp(Gtk.Application):
             limit_reply_for_speech,
             unwrap_delivery,
         )
-        from .stt import Transcriber, build_hint
+        from .stt import Transcriber, TranscriptionContext, build_hint
         from .turn import TurnMachine
         from .vad import SileroDetector, UtteranceDetector
 
@@ -1012,6 +1012,7 @@ class JARVISApp(Gtk.Application):
         # says, so Whisper stops inventing spellings of both — see
         # `stt.build_hint`.
         transcriber = Transcriber(hint=build_hint(_WAKE_WORD))
+        transcription_context = TranscriptionContext()
         client = GatewayClient()
 
         # The first encounter: while `registro.amo` is `None`, every
@@ -1307,6 +1308,9 @@ class JARVISApp(Gtk.Application):
         )
         replies = ReplyRoutes(speaker, remote_desk.release)
         system_replies: set[str | None] = set()
+        # Hermes sends this before a correlated desktop token. It is the
+        # capability boundary: only a legacy gateway reply is synthesised here.
+        pcm_turns: set[str] = set()
         # Closed until the QR is actually shown (below). The QR itself
         # carries the token now (`enrol.sobre`) rather than pointing at
         # a page that hands one out; the plain-HTTP welcome page still
@@ -1359,9 +1363,12 @@ class JARVISApp(Gtk.Application):
                 # and voice adds nothing there (`persona_de`'s own
                 # docstring).
                 necesita_voz = phone is None
+                context = transcription_context.snapshot(
+                    phone.persona if phone is not None else None
+                )
 
                 def _oir_e_identificar() -> tuple[str, "np.ndarray | None", float]:
-                    texto = transcriber.transcribe(pcm)
+                    texto = transcriber.transcribe(pcm, context=context)
                     inicio = time.monotonic()
                     vector = locutor.vector(pcm) if necesita_voz else None
                     return texto, vector, (time.monotonic() - inicio) * 1000.0
@@ -1448,6 +1455,10 @@ class JARVISApp(Gtk.Application):
                 # arriving is not evidence of who asked for it, and this
                 # is the only first-hand answer in the process.
                 ULTIMO_HABLANTE["persona"] = persona
+                # One transcription: the native phone renders precisely what
+                # local Whisper handed Hermes, without Apple/cloud STT.
+                if reply.destination is not None:
+                    reply.destination.transcript(spoken)
                 await client.send_chat(
                     spoken,
                     wake=wake.named,
@@ -1477,7 +1488,9 @@ class JARVISApp(Gtk.Application):
             ever be spoken — see CLAUDE.md, task 13.
             """
             replies.reset()
+            transcription_context.clear()
             system_replies.clear()
+            pcm_turns.clear()
             discarded = chunkers.drop_all()
             if discarded:
                 print(
@@ -1486,6 +1499,22 @@ class JARVISApp(Gtk.Application):
                     file=sys.stderr,
                     flush=True,
                 )
+
+        def on_turn_accepted(client_request_id: str, turn_id: str) -> None:
+            replies.accept(client_request_id, turn_id)
+
+        def on_pcm_start(turn_id: str) -> None:
+            pcm_turns.add(turn_id)
+
+        def on_pcm(turn_id: str, pcm: bytes) -> None:
+            if turn_id not in pcm_turns:
+                return
+            # The Hermes socket carries both desktop and relayed phone turns.
+            # PCM must use the same frozen destination as on_token, not the
+            # room player just because synthesis moved into Hermes.
+            replies.write_pcm(
+                turn_id, pcm, player.write if wave.switches.voice_on else None
+            )
 
         # Named replies require an admitted route; only untagged notifications
         # retain the legacy room default. A missing phone is never that default.
@@ -1506,34 +1535,50 @@ class JARVISApp(Gtk.Application):
             machine.token(token)
             destino = reply.destination if reply is not None else None
             if destino is not None:
+                transcription_context.remember(reply.chat_id, token)
                 destino.text(token)
-            spoken = limit_reply_for_speech(token)
-            if len(spoken) < len(token):
-                print(
-                    f"voz: respuesta larga reducida de {len(token)} a {len(spoken)} caracteres",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            for clause in chunkers.for_chat(chat_id).push(spoken):
-                say(clause, destino)
+            if request_id in pcm_turns:
+                # Hermes synthesises the WHOLE token — a streamed clause, or
+                # the full reply on the whole-reply PCM path — and its PCM is
+                # what reaches the speaker, so the echo filter must remember
+                # exactly that text. `limit_reply_for_speech` is a
+                # LOCAL-synthesis rule; feeding its cut here left the tail of
+                # every long reply unrecognised as his own voice, the AEC's
+                # residue survived `clean`, and he interrupted himself
+                # mid-sentence (measured 2026-09-13).
+                echo.spoke(token, time.monotonic())
+            else:
+                spoken = limit_reply_for_speech(token)
+                if len(spoken) < len(token):
+                    print(
+                        f"voz: respuesta larga reducida de {len(token)} a {len(spoken)} caracteres",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                for clause in chunkers.for_chat(chat_id).push(spoken):
+                    say(clause, destino)
 
         def on_done(
             _ms: int, chat_id: str | None = None, request_id: str | None = None
         ) -> None:
+            reply = replies.get(request_id)
             if chat_id in system_replies:
                 system_replies.discard(chat_id)
-                return
-            reply = replies.get(request_id)
+                # Filtering content is not cancelling an admitted request.
+                # Even a wholly filtered reply must release the phone once.
+                if reply is None:
+                    return
             if request_id and reply is None:
                 return
             if reply is not None and reply.settled:
                 return
             wake.answered(time.monotonic())
-            if reply is None or reply.accepts_content:
+            if (reply is None or reply.accepts_content) and request_id not in pcm_turns:
                 destino = reply.destination if reply is not None else None
                 for clause in chunkers.for_chat(chat_id).flush():
                     say(clause, destino)
             chunkers.drop(chat_id)
+            pcm_turns.discard(request_id or "")
             machine.done()
             if reply is not None:
                 replies.finish(reply)
@@ -1547,11 +1592,16 @@ class JARVISApp(Gtk.Application):
             if reply is not None and reply.settled:
                 return
             system_replies.discard(chat_id)
-            if message and (reply is None or reply.accepts_content):
+            if (
+                message
+                and request_id not in pcm_turns
+                and (reply is None or reply.accepts_content)
+            ):
                 say(message, reply.destination if reply is not None else None)
             _apply_error_to_wake_window(wake, message, time.monotonic())
             machine.error(message)
             chunkers.drop(chat_id)
+            pcm_turns.discard(request_id or "")
             if reply is not None:
                 replies.finish(reply)
 
@@ -1564,10 +1614,22 @@ class JARVISApp(Gtk.Application):
             GLib.idle_add(band.show_photo, path, camera)
 
         def on_ficha(
-            md: str, tipo: str, fuente: str, correcta: str | None, elegida: str | None
+            md: str,
+            tipo: str,
+            fuente: str,
+            correcta: str | None,
+            elegida: str | None,
+            _chat_id: str | None = None,
+            request_id: str | None = None,
         ) -> None:
-            # Like `on_photo`: this does not go through the turn machine.
-            # A card is not something he said.
+            reply = replies.get(request_id)
+            if request_id and reply is None:
+                return
+            if reply is not None and reply.destination is not None:
+                reply.destination.ficha(md, tipo, fuente, correcta, elegida)
+                return
+
+            # Like `on_photo`: a desk card does not go through the turn machine.
             def dibujar() -> bool:
                 _apply_ficha_frame(
                     ficha_model,
@@ -1720,6 +1782,9 @@ class JARVISApp(Gtk.Application):
 
         client.on_disconnect = on_disconnect
         client.on_token = on_token
+        client.on_turn_accepted = on_turn_accepted
+        client.on_pcm_start = on_pcm_start
+        client.on_pcm = on_pcm
         client.on_done = on_done
         client.on_error = on_error
 

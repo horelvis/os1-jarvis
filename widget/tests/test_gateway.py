@@ -17,9 +17,11 @@ from jarvis_widget.gateway import (
     _NO_GATEWAY,
     GatewayClient,
     ProtocolError,
+    decode_pcm_frame,
     decode_live_frame,
     decode_server,
     encode_chat,
+    encode_turn_submit,
 )
 
 
@@ -47,6 +49,22 @@ def test_a_chat_frame_carries_the_person_when_there_is_one() -> None:
 def test_a_chat_frame_carries_its_request_id() -> None:
     frame = json.loads(encode_chat("hola", request_id="request-1"))
     assert frame["request_id"] == "request-1"
+
+
+def test_turn_submit_carries_a_client_nonce_not_a_turn_id() -> None:
+    assert json.loads(encode_turn_submit("hola", client_request_id="client-1")) == {
+        "type": "turn.submit",
+        "message": "hola",
+        "user_id": "primary",
+        "client_request_id": "client-1",
+        "audio": "pcm_s16le/24000",
+    }
+
+
+def test_turn_submit_opted_into_hermes_pcm() -> None:
+    assert json.loads(encode_turn_submit("hola", client_request_id="client-1"))[
+        "audio"
+    ] == ("pcm_s16le/24000")
 
 
 def test_token_frame_reads_the_token_field() -> None:
@@ -340,6 +358,26 @@ def test_a_ficha_frame_reaches_its_callback() -> None:
     assert recogido == [("- a\n- b\n", "pregunta", "Cambridge", None, None)]
 
 
+def test_a_private_ficha_reaches_the_phone_route_identifiers() -> None:
+    cliente = GatewayClient("ws://x")
+    recogido: list = []
+    cliente.on_ficha = lambda *args: recogido.append(args)
+
+    cliente._dispatch(
+        json.dumps(
+            {
+                "type": "ficha",
+                "tipo": "pregunta",
+                "md": "- a\n- b\n",
+                "chat_id": "marta",
+                "request_id": "r1",
+            }
+        )
+    )
+
+    assert recogido == [("- a\n- b\n", "pregunta", "", None, None, "marta", "r1")]
+
+
 def test_a_ficha_with_an_unknown_tipo_is_dropped_not_fatal() -> None:
     """The gateway and the widget are versioned separately and always
     will be: an unknown kind must cost the card, not the turn."""
@@ -380,6 +418,36 @@ def test_a_binary_frame_is_not_parsed_as_json():
     gw._dispatch((7).to_bytes(4, "big") + b"\x00\x00\x01\x65abc")
 
     assert seen == [(7, b"\x00\x00\x01\x65abc")]
+
+
+def test_an_addressed_pcm_frame_reaches_only_the_pcm_handler():
+    gw = GatewayClient()
+    seen = []
+    gw.on_pcm = lambda turn, pcm: seen.append((turn, pcm))
+
+    gw._dispatch(b"JPCM\x06turn-1\x01\x00")
+
+    assert seen == [("turn-1", b"\x01\x00")]
+    assert decode_pcm_frame(b"JPCM\x06turn-1\x01\x00") == ("turn-1", b"\x01\x00")
+
+
+def test_pcm_start_reaches_its_handler():
+    gw = GatewayClient()
+    seen = []
+    gw.on_pcm_start = seen.append
+
+    gw._dispatch(
+        json.dumps(
+            {
+                "type": "pcm.start",
+                "turn_id": "turn-1",
+                "format": "pcm_s16le",
+                "rate": 24000,
+            }
+        )
+    )
+
+    assert seen == ["turn-1"]
 
 
 def test_a_truncated_binary_frame_is_dropped_not_raised():
@@ -559,7 +627,7 @@ async def test_cancel_writes_the_request_id_to_the_socket() -> None:
     await gw.cancel("request-1")
 
     assert [json.loads(raw) for raw in sent] == [
-        {"type": "cancel", "request_id": "request-1"}
+        {"type": "turn.cancel", "turn_id": "request-1"}
     ]
 
 

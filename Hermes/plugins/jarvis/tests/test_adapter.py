@@ -6,7 +6,7 @@ import pytest
 
 aiohttp = pytest.importorskip("aiohttp")
 
-from Hermes.plugins.jarvis.adapter import JarvisAdapter  # noqa: E402
+from Hermes.plugins.jarvis.adapter import JarvisAdapter, _voice_approval_command  # noqa: E402
 
 
 def _cfg(tmp_path: Path) -> dict:
@@ -15,6 +15,16 @@ def _cfg(tmp_path: Path) -> dict:
     # test needs a scratch directory again.
     del tmp_path
     return {"port": 0}
+
+
+def test_spoken_approval_requires_the_exact_phrase():
+    assert _voice_approval_command("Confirmo la acción") == "approve"
+    assert _voice_approval_command("  cancelo LA ACCION ") == "deny"
+    assert _voice_approval_command("confirmo") == "confirmo"
+    assert (
+        _voice_approval_command("confirmo la accion por favor")
+        == "confirmo la accion por favor"
+    )
 
 
 def test_websocket_round_trip(tmp_path, monkeypatch):
@@ -48,8 +58,250 @@ def test_websocket_round_trip(tmp_path, monkeypatch):
     asyncio.run(go())
 
 
+def test_turn_submit_receives_hermes_id_before_its_correlated_reply(
+    tmp_path, monkeypatch
+):
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, "aquí", reply_to=event.message_id)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "turn.submit",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "client_request_id": "client-1",
+                            }
+                        )
+                    )
+                    accepted = json.loads((await ws.receive(timeout=5)).data)
+                    reply = json.loads((await ws.receive(timeout=5)).data)
+                    assert accepted["type"] == "turn.accepted"
+                    assert accepted["client_request_id"] == "client-1"
+                    assert accepted["turn_id"] != "client-1"
+                    assert reply["request_id"] == accepted["turn_id"]
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
+def test_pcm_opt_in_orders_marker_text_pcm_and_terminal(tmp_path, monkeypatch):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def fake_stream(_text, *, client):
+        assert isinstance(client, FakeClient)
+        yield b"\x01\x00\x02\x00", "cosyvoice"
+
+    import Hermes.plugins.jarvis_voice.tts as tts
+
+    monkeypatch.setattr(tts, "is_available", lambda: True)
+    monkeypatch.setattr(tts, "new_client", FakeClient)
+    monkeypatch.setattr(tts, "stream", fake_stream)
+
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, "aquí", reply_to=event.message_id)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_json(
+                        {
+                            "type": "turn.submit",
+                            "message": "hola",
+                            "user_id": "primary",
+                            "client_request_id": "client-1",
+                            "audio": "pcm_s16le/24000",
+                        }
+                    )
+                    accepted = json.loads((await ws.receive(timeout=5)).data)
+                    marker = json.loads((await ws.receive(timeout=5)).data)
+                    text = json.loads((await ws.receive(timeout=5)).data)
+                    audio = await ws.receive(timeout=5)
+                    terminal = json.loads((await ws.receive(timeout=5)).data)
+                    return accepted, marker, text, audio.data, terminal
+        finally:
+            await a.disconnect()
+
+    accepted, marker, text, audio, terminal = asyncio.run(go())
+    assert marker == {
+        "type": "pcm.start",
+        "turn_id": accepted["turn_id"],
+        "format": "pcm_s16le",
+        "rate": 24000,
+    }
+    assert text["request_id"] == accepted["turn_id"]
+    assert audio == b"JPCM\x24" + accepted["turn_id"].encode() + b"\x01\x00\x02\x00"
+    assert terminal == {
+        "type": "done",
+        "thinking_ms": 0,
+        "chat_id": "casa",
+        "request_id": accepted["turn_id"],
+    }
+
+
+def test_streaming_pcm_starts_before_the_final_reply_and_is_not_replayed(
+    tmp_path, monkeypatch
+):
+    async def fake_handle_message(self, _event):
+        return None
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(
+            {**_cfg(tmp_path), "policy": {"desktop_principal": "orelvis"}}
+        )
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_json(
+                        {
+                            "type": "turn.submit",
+                            "message": "hola",
+                            "user_id": "primary",
+                            "client_request_id": "client-1",
+                            "audio": "pcm_s16le/24000",
+                        }
+                    )
+                    accepted = json.loads((await ws.receive(timeout=5)).data)
+                    from Hermes.plugins.jarvis.adapter import AudioFormat
+
+                    format = AudioFormat()
+                    assert a.supports_streaming_tts("orelvis", format)
+                    handle = await a.begin_streaming_tts("orelvis", format)
+                    assert handle is not None
+                    await a.write_streaming_tts_text(handle, "Aquí estoy.")
+                    await a.write_streaming_tts(handle, b"\x01\x00\x02\x00")
+                    await a.finish_streaming_tts(handle)
+                    result = await a.send(
+                        "orelvis", "Aquí estoy.", reply_to=accepted["turn_id"]
+                    )
+                    frames = [await ws.receive(timeout=5) for _ in range(4)]
+                    return accepted, result, frames
+        finally:
+            await a.disconnect()
+
+    accepted, result, frames = asyncio.run(go())
+    marker, text, audio, terminal = frames
+    assert result.success
+    assert json.loads(marker.data)["type"] == "pcm.start"
+    assert (
+        audio.data == b"JPCM\x24" + accepted["turn_id"].encode() + b"\x01\x00\x02\x00"
+    )
+    assert json.loads(text.data)["token"] == "Aquí estoy."
+    assert json.loads(terminal.data)["type"] == "done"
+
+
+def test_pcm_opt_in_fails_in_spanish_without_a_cloud_fallback(tmp_path, monkeypatch):
+    import Hermes.plugins.jarvis_voice.tts as tts
+
+    monkeypatch.setattr(tts, "is_available", lambda: False)
+
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, "aquí", reply_to=event.message_id)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_json(
+                        {
+                            "type": "turn.submit",
+                            "message": "hola",
+                            "user_id": "primary",
+                            "client_request_id": "client-1",
+                            "audio": "pcm_s16le/24000",
+                        }
+                    )
+                    await ws.receive(timeout=5)  # admission receipt
+                    return json.loads((await ws.receive(timeout=5)).data)
+        finally:
+            await a.disconnect()
+
+    frame = asyncio.run(go())
+    assert frame["type"] == "error"
+    assert "voz" in frame["error"]
+
+
+def test_a_reconnected_desktop_cannot_receive_an_old_turn(tmp_path, monkeypatch):
+    """A replacement socket is not a delivery target for its predecessor."""
+
+    accepted = asyncio.Event()
+
+    async def fake_handle_message(self, event):
+        accepted.set()
+        return None
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as old_ws:
+                    await old_ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "request_id": "old-turn",
+                            }
+                        )
+                    )
+                    await asyncio.wait_for(accepted.wait(), timeout=1)
+                    async with s.ws_connect(
+                        f"http://127.0.0.1:{a.port}/ws"
+                    ) as replacement_ws:
+                        result = await a.send(
+                            "jarvis", "respuesta tardía", reply_to="old-turn"
+                        )
+                        assert result.success is False
+                        with pytest.raises(asyncio.TimeoutError):
+                            await replacement_ws.receive(timeout=0.1)
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+
+
 def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
-    # The adapter must hand Hermes a TEXT MessageEvent, not answer itself.
+    # The adapter must hand Hermes a MessageEvent, not answer itself.
     import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
@@ -73,19 +325,37 @@ def test_chat_becomes_a_message_event(tmp_path, monkeypatch):
     assert len(seen) == 1
     assert seen[0].text == "hola"
     assert seen[0].message_type.value == "text"
-    # The session key vision and code target is built from these two
-    # fields, not from get_chat_info() — a regression here would silence
-    # both plugins without failing anywhere else (Finding 3, 2026-08-28).
-    assert seen[0].source.chat_id == "jarvis"
-    assert seen[0].source.chat_name == "JARVIS"
+    # Legacy desktop has no authenticated per-person identity. Its source is
+    # the fail-closed casa policy, not its wire user_id/chat_id.
+    assert seen[0].source.chat_id == "casa"
+    assert seen[0].source.chat_name == "Casa"
 
 
-def test_a_named_chat_id_becomes_its_own_session_and_display_name(
-    tmp_path, monkeypatch
-):
-    # This is the whole point of the task: a phone turn carries a
-    # person, and that person gets a session — and a memory — of their
-    # own rather than sharing the house's.
+def test_pcm_turn_becomes_a_voice_message_event(tmp_path, monkeypatch):
+    seen = []
+
+    async def fake_handle_message(self, event):
+        seen.append(event)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            await a._handle_chat("hola", "primary", desktop_pcm=True)
+        finally:
+            await a.disconnect()
+
+    asyncio.run(go())
+    assert seen[0].message_type.value == "voice"
+
+
+def test_a_desktop_named_chat_id_cannot_become_its_own_session(tmp_path, monkeypatch):
+    # A legacy desktop frame is not a phone credential. Its chat_id cannot
+    # choose a different durable session or policy.
     import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
@@ -107,10 +377,8 @@ def test_a_named_chat_id_becomes_its_own_session_and_display_name(
 
     asyncio.run(go())
     assert len(seen) == 1
-    assert seen[0].source.chat_id == "marta"
-    # The id is ASCII-only and ships with no accent; the display name is
-    # not the identity, only what is shown for it.
-    assert seen[0].source.chat_name == "Marta"
+    assert seen[0].source.chat_id == "casa"
+    assert seen[0].source.chat_name == "Casa"
 
 
 def test_a_chat_frame_with_no_chat_id_still_reaches_the_house_session(
@@ -148,10 +416,10 @@ def test_a_chat_frame_with_no_chat_id_still_reaches_the_house_session(
 
     asyncio.run(go())
     assert len(seen) == 1
-    assert seen[0].source.chat_id == "jarvis"
+    assert seen[0].source.chat_id == "casa"
 
 
-def test_a_chat_id_on_the_wire_reaches_handle_chat(tmp_path, monkeypatch):
+def test_a_desktop_chat_id_on_the_wire_cannot_select_a_principal(tmp_path, monkeypatch):
     import Hermes.plugins.jarvis.adapter as mod
 
     seen = []
@@ -188,7 +456,7 @@ def test_a_chat_id_on_the_wire_reaches_handle_chat(tmp_path, monkeypatch):
 
     asyncio.run(go())
     assert len(seen) == 1
-    assert seen[0].source.chat_id == "marta"
+    assert seen[0].source.chat_id == "casa"
 
 
 def test_request_id_reaches_hermes_and_tags_its_reply(tmp_path, monkeypatch):
@@ -214,7 +482,7 @@ def test_request_id_reaches_hermes_and_tags_its_reply(tmp_path, monkeypatch):
                                 "type": "chat",
                                 "message": "hola",
                                 "user_id": "primary",
-                                "chat_id": "marta",
+                                "chat_id": "casa",
                                 "request_id": "request-1",
                             }
                         )
@@ -226,10 +494,71 @@ def test_request_id_reaches_hermes_and_tags_its_reply(tmp_path, monkeypatch):
     assert asyncio.run(go()) == {
         "type": "token",
         "token": "hola",
-        "chat_id": "marta",
+        "chat_id": "casa",
         "request_id": "request-1",
     }
     assert seen[0].message_id == "request-1"
+
+
+def test_legacy_chat_without_request_id_accepts_its_correlated_reply(
+    tmp_path, monkeypatch
+):
+    async def fake_handle_message(self, event):
+        await self.send(event.source.chat_id, "hola", reply_to=event.message_id)
+
+    monkeypatch.setattr(
+        JarvisAdapter, "handle_message", fake_handle_message, raising=False
+    )
+
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    await ws.send_str(
+                        json.dumps(
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                            }
+                        )
+                    )
+                    return json.loads((await ws.receive(timeout=5)).data)
+        finally:
+            await a.disconnect()
+
+    frame = asyncio.run(go())
+    assert frame["type"] == "token"
+    assert frame["token"] == "hola"
+    assert frame["request_id"]
+
+
+def test_unanchored_notification_cannot_settle_an_active_request(tmp_path):
+    async def go():
+        a = JarvisAdapter(_cfg(tmp_path))
+        await a.connect()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
+                    turn = a._open_turn("jarvis", "request-1")
+                    await a.send("jarvis", "aviso")
+                    await a.send("jarvis", "respuesta", reply_to="request-1")
+                    return turn, [
+                        json.loads((await ws.receive(timeout=5)).data) for _ in range(4)
+                    ]
+        finally:
+            await a.disconnect()
+
+    turn, frames = asyncio.run(go())
+    assert frames == [
+        {"type": "token", "token": "aviso"},
+        {"type": "done", "thinking_ms": 0},
+        {"type": "token", "token": "respuesta", "request_id": "request-1"},
+        {"type": "done", "thinking_ms": 0, "request_id": "request-1"},
+    ]
+    assert turn.settled is True
 
 
 def test_cancelled_request_drops_its_late_reply(tmp_path, monkeypatch):
@@ -589,7 +918,7 @@ def test_a_reply_that_arrives_in_time_gets_no_watchdog_error(tmp_path, monkeypat
     # The watchdog must not double-send. A turn answered normally sees
     # exactly token+done and nothing after it.
     async def answers(self, event):
-        await self.send(event.source.chat_id, "aquí estoy")
+        await self.send(event.source.chat_id, "aquí estoy", reply_to=event.message_id)
 
     monkeypatch.setattr(JarvisAdapter, "handle_message", answers, raising=False)
 
@@ -601,7 +930,12 @@ def test_a_reply_that_arrives_in_time_gets_no_watchdog_error(tmp_path, monkeypat
                 async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
                     await ws.send_str(
                         json.dumps(
-                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "request_id": "request-1",
+                            }
                         )
                     )
                     assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
@@ -640,7 +974,12 @@ def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
                 async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws") as ws:
                     await ws.send_str(
                         json.dumps(
-                            {"type": "chat", "message": "hola", "user_id": "primary"}
+                            {
+                                "type": "chat",
+                                "message": "hola",
+                                "user_id": "primary",
+                                "request_id": "request-1",
+                            }
                         )
                     )
                     assert json.loads((await ws.receive(timeout=5)).data)["type"] == (
@@ -652,7 +991,7 @@ def test_a_late_reply_is_dropped_rather_than_landing_on_the_next_turn(
                     # which turn a reply lands on, this must match the
                     # turn that timed out — a mismatched key would find
                     # no turn at all and let a fresh frame through.
-                    result = await a.send("jarvis", "llego tarde")
+                    result = await a.send("jarvis", "llego tarde", reply_to="request-1")
                     assert result.success is False
                     assert result.retryable is False
                     # The error text must read as a timeout to Hermes'
@@ -674,7 +1013,7 @@ def test_the_watchdog_leaves_no_task_behind(tmp_path, monkeypatch):
     # One task per turn, cancelled when the turn settles. Over weeks of
     # uptime nothing here may accumulate.
     async def answers(self, event):
-        await self.send(event.source.chat_id, "vale")
+        await self.send(event.source.chat_id, "vale", reply_to=event.message_id)
 
     monkeypatch.setattr(JarvisAdapter, "handle_message", answers, raising=False)
 
@@ -710,7 +1049,7 @@ def test_disconnect_cancels_a_pending_watchdog(tmp_path, monkeypatch):
             async with s.ws_connect(f"http://127.0.0.1:{a.port}/ws"):
                 await asyncio.sleep(0.05)
                 await a._handle_chat("hola", "primary")
-                turn = a._active_turns.get("jarvis")
+                turn = a._active_turns.get("casa")
                 assert turn is not None
                 await a.disconnect()
                 assert a._turns == {}
@@ -1315,6 +1654,20 @@ async def test_push_ficha_without_an_image_is_sent(connected_adapter):
     ok = await connected_adapter.push_ficha("## Hola\n\n- a\n- b\n", "pregunta")
     assert ok is True
     assert connected_adapter._ws.sent
+
+
+@pytest.mark.asyncio
+async def test_push_ficha_is_tagged_with_the_current_hermes_request(connected_adapter):
+    current = asyncio.current_task()
+    assert current is not None
+    turn = connected_adapter._open_turn("marta", "request-1", "session-1")
+    connected_adapter._session_tasks = {"session-1": current}
+
+    ok = await connected_adapter.push_ficha("## Hola", "pregunta")
+
+    assert ok is True
+    assert json.loads(connected_adapter._ws.sent[0])["request_id"] == "request-1"
+    connected_adapter._settle(turn)
 
 
 @pytest.mark.asyncio

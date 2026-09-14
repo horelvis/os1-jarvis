@@ -5,8 +5,8 @@ label: JARVIS
 kind: platform
 version: 1.0.0
 description: >
-  Holds the single WebSocket the strip talks over. Text only in this
-  version; audio arrives in plan 3b.
+  Holds the desktop WebSocket plus opt-in TLS mobile text and local-voice
+  surfaces. Local voice fails closed until Hermes has an explicit local STT worker.
 author: Horelvis Castillo
 
 # ─────────────────────────────────────────────────────────────────────────

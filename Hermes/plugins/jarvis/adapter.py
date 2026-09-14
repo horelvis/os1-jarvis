@@ -27,9 +27,12 @@ Two things a reader should know before changing anything here:
 from __future__ import annotations
 
 import asyncio
-import threading
 import errno
+import json
 import os
+import ssl
+import threading
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +42,9 @@ from urllib.parse import urlsplit
 from aiohttp import WSMsgType, web
 from loguru import logger
 
+from .delivery import enforce_delivery
+from .mobile_auth import MobileGuard, bearer_token, load_roster
+from .policy import PolicyError, PolicyResolver, PolicySnapshot
 from .protocol import (
     ProtocolError,
     asking,
@@ -50,11 +56,15 @@ from .protocol import (
     live,
     live_end,
     live_frame,
+    pcm_frame,
+    pcm_start,
     photo,
     silence,
     token,
+    turn_accepted,
     working,
 )
+from .voice_local import VoiceLocalSession
 
 # Every adapter with a live socket, so the synchronous `pre_tool_call`
 # hooks in `__init__.py` can reach one. A module-level registry is how
@@ -64,6 +74,24 @@ from .protocol import (
 # promises there is only ever one.
 _VIVOS: "set[JarvisAdapter]" = set()
 _VIVOS_LOCK = threading.Lock()
+
+_VOICE_APPROVALS = {
+    "confirmo la accion": "approve",
+    "cancelo la accion": "deny",
+}
+
+
+def _voice_approval_command(message: str) -> str:
+    """Translate the owner's exact spoken approval into Hermes control text.
+
+    The gateway only accepts the resulting word while an approval is pending,
+    so an ordinary conversation cannot approve an action by accident.
+    """
+    normalized = (
+        unicodedata.normalize("NFKD", message).encode("ascii", "ignore").decode()
+    )
+    normalized = " ".join(normalized.casefold().split())
+    return _VOICE_APPROVALS.get(normalized, message)
 
 
 def quien_pregunta() -> "str | None":
@@ -86,10 +114,12 @@ def adaptadores_vivos() -> "list[JarvisAdapter]":
 try:
     from gateway.config import Platform
     from gateway.platforms.base import (
+        AudioFormat,
         BasePlatformAdapter,
         MessageEvent,
         MessageType,
         SendResult,
+        StreamingTTSHandle,
         build_session_key,
     )
 except ImportError:  # pragma: no cover - only without Hermes installed
@@ -126,6 +156,19 @@ except ImportError:  # pragma: no cover - only without Hermes installed
         message_id: Optional[str] = None
         error: Optional[str] = None
         retryable: bool = False
+
+    @dataclass
+    class AudioFormat:  # type: ignore[no-redef]
+        sample_rate: int = 24000
+        channels: int = 1
+        sample_width: int = 2
+
+    @dataclass
+    class StreamingTTSHandle:  # type: ignore[no-redef]
+        chat_id: str = ""
+        audio_format: AudioFormat = field(default_factory=AudioFormat)
+        audible: bool = False
+        aborted: bool = False
 
     class BasePlatformAdapter:  # type: ignore[no-redef]
         """Stand-in so these tests run on a machine with no Hermes."""
@@ -173,6 +216,7 @@ except ImportError:  # pragma: no cover - only without Hermes installed
         """Stand-in mirroring gateway.platforms.base.MessageType."""
 
         TEXT = "text"
+        VOICE = "voice"
 
     class MessageEvent:  # type: ignore[no-redef]
         """Stand-in mirroring gateway.platforms.base.MessageEvent."""
@@ -288,16 +332,48 @@ class _Turn:
     chat: str
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_key: str | None = None
+    policy: PolicySnapshot | None = None
+    delivery_target: "_DeliveryTarget | None" = None
     watchdog: Optional[asyncio.Task] = field(default=None, repr=False)
     settled: bool = False
     timed_out: bool = False
     cancelled: bool = False
+    desktop_pcm: bool = False
+    streaming_pcm: bool = False
+
+
+@dataclass
+class _StreamingPCMHandle(StreamingTTSHandle):
+    """A live PCM stream anchored to the desktop turn that owns it."""
+
+    turn: "_Turn | None" = None
+    bytes_sent: int = 0
+
+
+@dataclass(frozen=True)
+class _DeliveryTarget:
+    """The one connection allowed to receive a turn's output.
+
+    A client reconnecting is a new destination, even when it represents the
+    same physical strip. This prevents a late agent callback from becoming an
+    answer to a later turn on the replacement socket.
+    """
+
+    client_id: str
+    connection_generation: int
+    kind: str = "desktop"
 
 
 class JarvisAdapter(BasePlatformAdapter):
     name = "jarvis"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        *,
+        plugin_settings: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         del kwargs
         # The house pattern (plugins/platforms/irc/adapter.py:127-128): a
         # subclass builds its OWN Platform and passes it up, rather than
@@ -318,6 +394,14 @@ class JarvisAdapter(BasePlatformAdapter):
             cfg: Dict[str, Any] = config
         else:
             cfg = getattr(config, "extra", None) or {}
+
+        # PlatformConfig.extra does not contain plugins.entries.jarvis.settings.
+        # The registration context must pass those explicitly. Ignoring them
+        # silently selected the tool-free casa policy despite an owner policy
+        # being configured. Explicit platform sections override plugin sections
+        # atomically; never splice half of one authorization policy into another.
+        if plugin_settings:
+            cfg = {**plugin_settings, **cfg}
 
         # Environment first, then the config dict, then a default — the
         # house pattern (see plugins/platforms/irc/adapter.py's
@@ -346,6 +430,23 @@ class JarvisAdapter(BasePlatformAdapter):
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._ws: Optional[web.WebSocketResponse] = None
+        self._connection_generation = 0
+        self._delivery_target: _DeliveryTarget | None = None
+        self._mobile_runner: Optional[web.AppRunner] = None
+        self._mobile_site: Optional[web.TCPSite] = None
+        self._mobile_peers: dict[_DeliveryTarget, web.WebSocketResponse] = {}
+        self._mobile_generations: dict[str, int] = {}
+        mobile = (
+            cfg.get("mobile", {}) if isinstance(cfg.get("mobile", {}), dict) else {}
+        )
+        self._mobile_config = mobile
+        policy = cfg.get("policy", {})
+        self._policy = PolicyResolver(policy if isinstance(policy, dict) else {})
+        self.mobile_port: int | None = None
+        # All output for the desktop passes through one ordered writer. The
+        # connection check belongs inside it, so a reconnect cannot race a
+        # frame selected for the old socket.
+        self._writer_lock = asyncio.Lock()
         # Every request owns its reply slot. A second index holds the one open
         # request per chat only for legacy busy/session helpers.
         # platform until 2026-09-05, which is what made the house a
@@ -432,6 +533,12 @@ class JarvisAdapter(BasePlatformAdapter):
             )
             return False
         self.port = self._actual_port()
+        await self._connect_mobile()
+        policy = self._policy.admit_desktop()
+        logger.info(
+            f"jarvis: configured seat principal={policy.principal} "
+            f"profile={policy.profile} toolsets={len(policy.toolsets)}"
+        )
         logger.info(f"jarvis: serving /ws on :{self.port}")
         return True
 
@@ -447,12 +554,181 @@ class JarvisAdapter(BasePlatformAdapter):
             return int(addresses[0][1])
         return self._configured_port
 
+    async def _connect_mobile(self) -> None:
+        """Start the separately configured TLS-only mobile listener.
+
+        Certificate issuance stays with the legacy widget during M2. An
+        injected SSLContext keeps this surface testable and prevents an
+        accidental plaintext LAN listener while that ownership is unresolved.
+        """
+        mobile = self._mobile_config
+        enabled = bool(mobile.get("enabled")) or mobile.get("port") is not None
+        if not enabled:
+            return
+        host = mobile.get("host")
+        port = mobile.get("port")
+        context = mobile.get("ssl_context")
+        if context is None:
+            cert, key = mobile.get("tls_cert"), mobile.get("tls_key")
+            if isinstance(cert, str) and isinstance(key, str):
+                try:
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(cert, key)
+                except (OSError, ssl.SSLError) as exc:
+                    logger.warning(
+                        f"jarvis: mobile listener disabled; TLS setup failed — {exc}"
+                    )
+                    return
+        if (
+            not isinstance(host, str)
+            or not host
+            or not isinstance(port, int)
+            or context is None
+        ):
+            logger.warning(
+                "jarvis: mobile listener disabled; configure mobile.host, mobile.port, "
+                "and mobile.tls_cert/mobile.tls_key (or an injected SSLContext); "
+                "M2 never serves plaintext LAN WebSockets"
+            )
+            return
+        roster = load_roster(mobile.get("roster_path"), mobile.get("token_path"))
+        origin_hosts = mobile.get("origins") or (f"https://{host}:{port}",)
+        if not isinstance(origin_hosts, (list, tuple)) or not all(
+            isinstance(origin, str) for origin in origin_hosts
+        ):
+            logger.warning(
+                "jarvis: mobile listener disabled; mobile.origins is invalid"
+            )
+            return
+        guard = MobileGuard(roster, tuple(origin_hosts))
+        app = web.Application()
+        app.router.add_get("/ws", self._mobile_ws_handler(guard))
+        # Kept beside the M2 text route, but never shares its frame format or
+        # delivery state. Authentication still happens before either upgrade.
+        app.router.add_get("/voice/local", self._voice_local_handler(guard))
+        self._mobile_runner = web.AppRunner(app, access_log=None)
+        await self._mobile_runner.setup()
+        self._mobile_site = web.TCPSite(
+            self._mobile_runner, host, port, ssl_context=context
+        )
+        try:
+            await self._mobile_site.start()
+        except OSError as exc:
+            await self._mobile_runner.cleanup()
+            self._mobile_runner = None
+            self._mobile_site = None
+            logger.error(f"jarvis: could not bind mobile listener {host}:{port}: {exc}")
+            return
+        addresses = self._mobile_runner.addresses
+        self.mobile_port = int(addresses[0][1]) if addresses else port
+        logger.info(f"jarvis: serving mobile /ws on TLS port {self.mobile_port}")
+
+    def _mobile_ws_handler(self, guard: MobileGuard):
+        async def handle(request: web.Request) -> web.WebSocketResponse:
+            # Both checks happen before prepare(), so a denied peer never gets
+            # a WebSocket upgrade or a connection-registry entry.
+            if not guard.origin_ok(request.headers.get("Origin", "")):
+                raise web.HTTPForbidden()
+            persona = guard.persona_for(
+                bearer_token(request.headers.get("Authorization"))
+            )
+            if persona is None:
+                raise web.HTTPForbidden()
+            try:
+                self._policy.admit_mobile(persona)
+            except PolicyError as exc:
+                logger.warning(f"jarvis: refusing mobile principal {persona!r} — {exc}")
+                raise web.HTTPForbidden() from exc
+            ws = web.WebSocketResponse(heartbeat=20, compress=False)
+            await ws.prepare(request)
+            generation = self._mobile_generations.get(persona, 0) + 1
+            self._mobile_generations[persona] = generation
+            target = _DeliveryTarget(persona, generation, "mobile")
+            self._mobile_peers[target] = ws
+            try:
+                async for message in ws:
+                    if message.type is not WSMsgType.TEXT:
+                        continue
+                    try:
+                        frame = json.loads(message.data)
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        not isinstance(frame, dict)
+                        or frame.get("type") != "turn.submit"
+                    ):
+                        continue
+                    text = frame.get("text")
+                    client_request_id = frame.get("client_request_id")
+                    if (
+                        not isinstance(text, str)
+                        or not text
+                        or not isinstance(client_request_id, str)
+                    ):
+                        continue
+                    # Persona and chat come solely from the authenticated roster.
+                    await self._handle_chat(
+                        text,
+                        persona,
+                        persona,
+                        None,
+                        target,
+                        client_request_id,
+                        mobile=True,
+                    )
+            finally:
+                self._mobile_peers.pop(target, None)
+            return ws
+
+        return handle
+
+    def _voice_local_handler(self, guard: MobileGuard):
+        async def handle(request: web.Request) -> web.WebSocketResponse:
+            if not guard.origin_ok(request.headers.get("Origin", "")):
+                raise web.HTTPForbidden()
+            persona = guard.persona_for(
+                bearer_token(request.headers.get("Authorization"))
+            )
+            if persona is None:
+                raise web.HTTPForbidden()
+            try:
+                self._policy.admit_mobile(persona)
+            except PolicyError as exc:
+                logger.warning(
+                    f"jarvis: refusing local voice principal {persona!r} — {exc}"
+                )
+                raise web.HTTPForbidden() from exc
+
+            ws = web.WebSocketResponse(heartbeat=20, compress=False, max_msg_size=16384)
+            await ws.prepare(request)
+            # No in-Hermes STT worker exists in this repository. The callable
+            # is deliberately not borrowed from widget/stt.py: doing so would
+            # move microphone audio through an undocumented cross-process path.
+            local = self._mobile_config.get("voice_local", {})
+            stt = local.get("stt") if isinstance(local, dict) else None
+            provider_ready = lambda: (
+                callable(stt) and self._policy.local_provider_ready()
+            )
+            session = VoiceLocalSession(ws, provider_ready=provider_ready, on_pcm=stt)
+            await session.run()
+            return ws
+
+        return handle
+
     async def disconnect(self) -> None:
         for turn in list(self._turns.values()):
             self._abandon_turn(turn)
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
         self._ws = None
+        for ws in list(self._mobile_peers.values()):
+            if not ws.closed:
+                await ws.close()
+        self._mobile_peers.clear()
+        if self._mobile_runner is not None:
+            await self._mobile_runner.cleanup()
+        self._mobile_runner = None
+        self._mobile_site = None
         # Set when a strip connects; see the websocket handler below.
         self.loop: asyncio.AbstractEventLoop | None = None
         if self._runner is not None:
@@ -490,26 +766,17 @@ class JarvisAdapter(BasePlatformAdapter):
         error text onto the OS1 screen as a second token/done pair.
         """
         del metadata
-        # `chat_id` here is Hermes' own — the RESOLVED chat this reply
-        # belongs to (`event.source.chat_id`, which `_handle_chat` set to
-        # `chat_id or CHAT_ID_DEFAULT`). It is exactly what `_open_turn`
-        # keyed `self._turns` by, so no chat that was never opened here
-        # can ever collide with one that was.
-        turn = (
-            self._turns.get(reply_to) if reply_to else self._active_turns.get(chat_id)
-        )
-        if turn is None and not reply_to:
-            turn = next(
-                (
-                    candidate
-                    for candidate in self._turns.values()
-                    if candidate.chat == chat_id and candidate.timed_out
-                ),
-                None,
-            )
+        # A reply without an anchor is a gateway notification, not a turn
+        # terminal. Some gateway paths send one while the model is starting;
+        # binding it to the active chat would settle the real request before
+        # its correlated final reply arrives.
+        turn = self._turns.get(reply_to) if reply_to else None
 
         if reply_to and turn is None:
-            logger.warning("jarvis: dropping reply for an unknown request")
+            logger.warning(
+                f"jarvis: dropping reply for an unknown request "
+                f"(reply_to={reply_to!r}, turns={sorted(self._turns)!r})"
+            )
             return SendResult(
                 success=False,
                 error="the request was cancelled or replaced before delivery",
@@ -561,14 +828,64 @@ class JarvisAdapter(BasePlatformAdapter):
                 retryable=False,
             )
 
+        # Validate the policy-impossible claims before text or TTS leaves us.
+        checked = enforce_delivery(
+            content, toolsets=turn.policy.toolsets if turn and turn.policy else None
+        )
+        if checked != content:
+            logger.warning(
+                "jarvis: withheld unsupported action claim from tool-free turn"
+            )
+            content = checked
+
         # The chat_id `send()` was GIVEN, not the turn's — this must tag
         # correctly even when `turn` is None (see `_wire_chat`'s
         # docstring for the bug this closes).
-        tag = self._wire_chat(chat_id)
         request_id = turn.request_id if turn is not None else None
-        delivered = await self._push(
-            token(content, chat_id=tag, request_id=request_id)
-        ) and await self._push(done(0, chat_id=tag, request_id=request_id))
+        target = turn.delivery_target if turn is not None else None
+        if target is not None and target.kind == "mobile":
+            delivered = await self._push_mobile(
+                {"type": "text", "turn_id": request_id, "text": content}, target
+            ) and await self._push_mobile(
+                {"type": "done", "turn_id": request_id}, target
+            )
+        elif turn is not None and turn.streaming_pcm:
+            # The streaming-TTS consumer has already delivered this reply as
+            # the model generated it. The final send owns only transcript and
+            # terminal framing; synthesising `content` again would replay it.
+            delivered = (
+                True
+                if turn.streaming_text
+                else await self._push(
+                    token(
+                        content,
+                        chat_id=self._wire_chat(turn.chat),
+                        request_id=turn.request_id,
+                    ),
+                    target=turn.delivery_target,
+                )
+            ) and await self._push(
+                done(0, chat_id=self._wire_chat(turn.chat), request_id=turn.request_id),
+                target=turn.delivery_target,
+            )
+        elif turn is not None and turn.desktop_pcm:
+            delivered = await self._send_desktop_pcm(turn, content)
+        else:
+            tag = self._wire_chat(chat_id)
+            delivered = await self._push(
+                token(content, chat_id=tag, request_id=request_id), target=target
+            ) and await self._push(
+                done(0, chat_id=tag, request_id=request_id), target=target
+            )
+        if turn is not None and turn.cancelled:
+            # Barge-in can land while CosyVoice is yielding. It has already
+            # cancelled Hermes' task and silenced the player; retrying here
+            # would resurrect precisely the turn the user stopped.
+            return SendResult(
+                success=False,
+                error="the request was cancelled during local voice delivery",
+                retryable=False,
+            )
         if not delivered:
             # Nobody is listening — a browser mid-refresh, or a socket that
             # died between the frontend's frame and this reply. `retryable`
@@ -579,30 +896,215 @@ class JarvisAdapter(BasePlatformAdapter):
             return SendResult(
                 success=False,
                 error="jarvis: no strip connected",
-                retryable=True,
+                retryable=target is None or target.kind == "desktop",
             )
 
         if turn is not None and not turn.settled:
             self._settle(turn)
         return SendResult(success=True, message_id=request_id)
 
-    async def _push(self, payload: str) -> bool:
-        """Write one frame to the strip. False means it did not get there."""
-        ws = self._ws
-        if ws is None or ws.closed:
-            logger.warning("jarvis: nothing connected, dropping a frame")
-            return False
+    def supports_streaming_tts(self, chat_id: str, audio_format: AudioFormat) -> bool:
+        """Accept local 24 kHz PCM for the one live desktop voice turn."""
+        return (
+            audio_format.sample_rate == 24000
+            and audio_format.channels == 1
+            and audio_format.sample_width == 2
+            and self._streaming_turn(chat_id) is not None
+        )
+
+    def _streaming_turn(self, chat_id: str) -> _Turn | None:
+        candidates = [
+            turn
+            for turn in self._turns.values()
+            if turn.chat == chat_id
+            and turn.desktop_pcm
+            # A tool-free profile must pass its complete reply through the
+            # delivery guard before it can be spoken. Otherwise streamed PCM
+            # could voice an unsupported promise before send() can reject it.
+            and (turn.policy is None or bool(turn.policy.toolsets))
+            and not turn.cancelled
+            and not turn.settled
+            and turn.delivery_target == self._delivery_target
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+
+    async def begin_streaming_tts(
+        self,
+        chat_id: str,
+        audio_format: AudioFormat,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> StreamingTTSHandle | None:
+        del metadata
+        turn = self._streaming_turn(chat_id)
+        if turn is None or not await self._push(
+            pcm_start(turn.request_id), target=turn.delivery_target
+        ):
+            return None
+        logger.info(f"jarvis: PCM stream opened for {turn.request_id}")
+        return _StreamingPCMHandle(
+            chat_id=chat_id, audio_format=audio_format, turn=turn
+        )
+
+    async def write_streaming_tts(
+        self, handle: StreamingTTSHandle, chunk: bytes
+    ) -> None:
+        if not isinstance(handle, _StreamingPCMHandle) or handle.aborted or not chunk:
+            return
+        turn = handle.turn
+        if (
+            turn is None
+            or turn.cancelled
+            or self._turns.get(turn.request_id) is not turn
+            or not await self._push_pcm(
+                pcm_frame(turn.request_id, chunk), target=turn.delivery_target
+            )
+        ):
+            handle.aborted = True
+            return
+        handle.bytes_sent += len(chunk)
+        if not turn.streaming_pcm:
+            logger.info(f"jarvis: first PCM block for {turn.request_id}")
+        turn.streaming_pcm = True
+
+    async def write_streaming_tts_text(
+        self, handle: StreamingTTSHandle, text: str
+    ) -> None:
+        """Publish a PCM clause before its audio reaches the room.
+
+        The strip records this text in its echo filter. The terminal send
+        then carries only `done`, so the transcript is not repeated.
+        """
+        if not isinstance(handle, _StreamingPCMHandle) or handle.aborted:
+            return
+        turn = handle.turn
+        if (
+            turn is None
+            or turn.cancelled
+            or self._turns.get(turn.request_id) is not turn
+            or not await self._push(
+                token(
+                    text, chat_id=self._wire_chat(turn.chat), request_id=turn.request_id
+                ),
+                target=turn.delivery_target,
+            )
+        ):
+            handle.aborted = True
+            raise ConnectionError(
+                "the desktop disconnected during streamed text delivery"
+            )
+        turn.streaming_text = True
+
+    async def finish_streaming_tts(
+        self, handle: StreamingTTSHandle, *, interrupted: bool = False
+    ) -> None:
+        if isinstance(handle, _StreamingPCMHandle) and handle.turn is not None:
+            logger.info(
+                f"jarvis: PCM stream closed for {handle.turn.request_id} after "
+                f"{handle.bytes_sent} bytes{' (interrupted)' if interrupted else ''}"
+            )
+        if interrupted:
+            handle.aborted = True
+
+    async def abort_streaming_tts(
+        self, handle: StreamingTTSHandle, error: Optional[str] = None
+    ) -> None:
+        del error
+        handle.aborted = True
+
+    async def _send_desktop_pcm(self, turn: _Turn, content: str) -> bool:
+        """Deliver a reply through local CosyVoice as correlated PCM only."""
         try:
-            await ws.send_str(payload)
-        except (ConnectionResetError, RuntimeError) as exc:
-            # aiohttp raises ConnectionResetError on a socket that died
-            # underneath us and RuntimeError when the transport is already
-            # closing. Neither may propagate: _push is called from send()
-            # (whose caller is Hermes) and from the watchdog (whose caller is
-            # nobody), and an exception in either place is a silent turn.
-            logger.warning(f"jarvis: frame not delivered — {exc}")
-            return False
-        return True
+            from Hermes.plugins.jarvis_voice import tts
+
+            if not tts.is_available():
+                raise RuntimeError("CosyVoice local reference is unavailable")
+            if not await self._push(
+                pcm_start(turn.request_id), target=turn.delivery_target
+            ):
+                return False
+            if not await self._push(
+                token(
+                    content,
+                    chat_id=self._wire_chat(turn.chat),
+                    request_id=turn.request_id,
+                ),
+                target=turn.delivery_target,
+            ):
+                return False
+            remainder = b""
+            async with tts.new_client() as client:
+                async for chunk, _backend in tts.stream(content, client=client):
+                    if turn.cancelled or self._turns.get(turn.request_id) is not turn:
+                        return False
+                    pcm = remainder + chunk
+                    remainder = pcm[-1:] if len(pcm) % 2 else b""
+                    if remainder:
+                        pcm = pcm[:-1]
+                    for start in range(0, len(pcm), 48000):
+                        if not await self._push_pcm(
+                            pcm_frame(turn.request_id, pcm[start : start + 48000]),
+                            target=turn.delivery_target,
+                        ):
+                            return False
+            if remainder:
+                raise RuntimeError("CosyVoice returned an incomplete PCM sample")
+            return await self._push(
+                done(0, chat_id=self._wire_chat(turn.chat), request_id=turn.request_id),
+                target=turn.delivery_target,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"jarvis: local CosyVoice failed for {turn.request_id} — {exc}"
+            )
+            if not turn.cancelled:
+                await self._push(
+                    error(
+                        "Ahora mismo no consigo poner mi voz. Sigo aquí contigo.",
+                        chat_id=self._wire_chat(turn.chat),
+                        request_id=turn.request_id,
+                    ),
+                    target=turn.delivery_target,
+                )
+            return True
+
+    async def _push(
+        self, payload: str, *, target: _DeliveryTarget | None = None
+    ) -> bool:
+        """Write one frame to the strip. False means it did not get there."""
+        async with self._writer_lock:
+            if target is not None and self._delivery_target != target:
+                logger.info("jarvis: dropping a frame for a replaced connection")
+                return False
+            ws = self._ws
+            if ws is None or ws.closed:
+                logger.warning("jarvis: nothing connected, dropping a frame")
+                return False
+            try:
+                await ws.send_str(payload)
+            except (ConnectionResetError, RuntimeError) as exc:
+                # aiohttp raises ConnectionResetError on a socket that died
+                # underneath us and RuntimeError when the transport is already
+                # closing. Neither may propagate: _push is called from send()
+                # (whose caller is Hermes) and from the watchdog (whose caller is
+                # nobody), and an exception in either place is a silent turn.
+                logger.warning(f"jarvis: frame not delivered — {exc}")
+                return False
+            return True
+
+    async def _push_mobile(
+        self, frame: dict[str, Any], target: _DeliveryTarget
+    ) -> bool:
+        async with self._writer_lock:
+            ws = self._mobile_peers.get(target)
+            if ws is None or ws.closed:
+                logger.info("jarvis: dropping frame for disconnected mobile peer")
+                return False
+            try:
+                await ws.send_json(frame)
+            except (ConnectionResetError, RuntimeError) as exc:
+                logger.warning(f"jarvis: mobile frame not delivered — {exc}")
+                return False
+            return True
 
     async def push_photo(self, path: str, camera: str) -> bool:
         """Show a photo on the strip. False when it could not be shown.
@@ -696,8 +1198,15 @@ class JarvisAdapter(BasePlatformAdapter):
                 # one visible outcome of this check looked like a bug.
                 limpio = quitar_imagen(limpio, referencia)
         try:
+            turn = self._turn_for_current_task()
             frame = ficha(
-                limpio, tipo, fuente=fuente, correcta=correcta, elegida=elegida
+                limpio,
+                tipo,
+                fuente=fuente,
+                correcta=correcta,
+                elegida=elegida,
+                chat_id=self._wire_chat(turn.chat) if turn is not None else None,
+                request_id=turn.request_id if turn is not None else None,
             )
         except ProtocolError as exc:
             # An unknown tipo is a bug in the caller, not in what the
@@ -705,7 +1214,23 @@ class JarvisAdapter(BasePlatformAdapter):
             # method: this method must never raise into a turn.
             logger.warning(f"jarvis: refusing to draw a ficha — {exc}")
             return False
-        return await self._push(frame)
+        return await self._push(frame, target=turn.delivery_target if turn else None)
+
+    def _turn_for_current_task(self) -> _Turn | None:
+        """The request whose Hermes task is currently drawing a card.
+
+        Teacher tools run inside the same background task the base adapter owns
+        for a session. Matching task identity, rather than a mutable "current
+        chat" field, keeps two simultaneous phone lessons from swapping cards.
+        """
+        current = asyncio.current_task()
+        if current is None:
+            return None
+        session_tasks = getattr(self, "_session_tasks", {})
+        for turn in self._turns.values():
+            if turn.session_key and session_tasks.get(turn.session_key) is current:
+                return turn
+        return None
 
     async def _push_bytes(self, payload: bytes) -> bool:
         """Write one binary frame to the strip. False means it did not land.
@@ -725,6 +1250,23 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.debug(f"jarvis: live frame not delivered — {exc}")
             return False
         return True
+
+    async def _push_pcm(
+        self, payload: bytes, *, target: _DeliveryTarget | None
+    ) -> bool:
+        """Write a correlated PCM frame without letting a reconnect retarget it."""
+        async with self._writer_lock:
+            if target is not None and self._delivery_target != target:
+                return False
+            ws = self._ws
+            if ws is None or ws.closed:
+                return False
+            try:
+                await ws.send_bytes(payload)
+            except (ConnectionResetError, RuntimeError) as exc:
+                logger.warning(f"jarvis: PCM frame not delivered — {exc}")
+                return False
+            return True
 
     async def push_console(
         self, text: str, *, done: bool = False, reset: bool = False
@@ -846,7 +1388,13 @@ class JarvisAdapter(BasePlatformAdapter):
         return chat
 
     def _open_turn(
-        self, chat: str, request_id: str | None = None, session_key: str | None = None
+        self,
+        chat: str,
+        request_id: str | None = None,
+        session_key: str | None = None,
+        delivery_target: _DeliveryTarget | None = None,
+        policy: PolicySnapshot | None = None,
+        desktop_pcm: bool = False,
     ) -> _Turn:
         # A new turn supersedes whatever was still open FOR THIS CHAT —
         # one strip, but now one slot per person: two people speaking at
@@ -860,8 +1408,11 @@ class JarvisAdapter(BasePlatformAdapter):
             chat=chat,
             request_id=request_id or str(uuid.uuid4()),
             session_key=session_key,
+            delivery_target=delivery_target,
+            policy=policy,
+            desktop_pcm=desktop_pcm,
         )
-        self._turns[request_id] = turn
+        self._turns[turn.request_id] = turn
         self._active_turns[chat] = turn
         turn.watchdog = asyncio.create_task(self._watch_turn(turn))
         return turn
@@ -931,7 +1482,8 @@ class JarvisAdapter(BasePlatformAdapter):
                 _TURN_LOST,
                 chat_id=self._wire_chat(turn.chat),
                 request_id=turn.request_id,
-            )
+            ),
+            target=turn.delivery_target,
         )
 
     # ── transport ─────────────────────────────────────────────────────────
@@ -995,6 +1547,8 @@ class JarvisAdapter(BasePlatformAdapter):
         with _VIVOS_LOCK:
             _VIVOS.add(self)
         previous, self._ws = self._ws, ws
+        self._connection_generation += 1
+        self._delivery_target = _DeliveryTarget("desktop", self._connection_generation)
         if previous is not None and not previous.closed:
             await previous.close()
 
@@ -1008,7 +1562,7 @@ class JarvisAdapter(BasePlatformAdapter):
                     logger.warning(f"jarvis: bad frame — {exc}")
                     await self._push(error(_BAD_FRAME))
                     continue
-                if decoded["type"] == "chat":
+                if decoded["type"] in {"chat", "turn.submit"}:
                     if self._should_divert(decoded):
                         # The words went to the code assistant, so no
                         # turn was opened and nothing will answer them.
@@ -1022,9 +1576,15 @@ class JarvisAdapter(BasePlatformAdapter):
                         decoded["user_id"],
                         decoded.get("chat_id"),
                         decoded.get("request_id"),
+                        self._delivery_target,
+                        decoded.get("client_request_id"),
+                        mobile=False,
+                        desktop_pcm=decoded.get("audio") == "pcm_s16le/24000",
                     )
-                elif decoded["type"] == "cancel":
-                    await self._cancel_request(decoded["request_id"])
+                elif decoded["type"] in {"cancel", "turn.cancel"}:
+                    await self._cancel_request(
+                        decoded.get("turn_id") or decoded["request_id"]
+                    )
         finally:
             # In a finally because an exception in the loop body would
             # otherwise leave self._ws pointing at a socket whose handler has
@@ -1032,6 +1592,7 @@ class JarvisAdapter(BasePlatformAdapter):
             # log line at all.
             if self._ws is ws:
                 self._ws = None
+                self._delivery_target = None
                 # Leaves the registry with the socket. An adapter kept
                 # in it after its strip is gone would have every hook
                 # schedule a frame into a closed connection, once per
@@ -1057,17 +1618,37 @@ class JarvisAdapter(BasePlatformAdapter):
             logger.warning(f"jarvis: divert failed — {exc}")
             return False
 
+    def toolsets_for_source(self, source: Any) -> list[str] | None:
+        """Return a fresh policy override; an empty list explicitly denies tools."""
+        policy = getattr(source, "jarvis_policy", None)
+        return list(policy.toolsets) if isinstance(policy, PolicySnapshot) else None
+
     async def _handle_chat(
         self,
         message: str,
         user_id: str,
         chat_id: Optional[str] = None,
         request_id: Optional[str] = None,
+        delivery_target: _DeliveryTarget | None = None,
+        client_request_id: str | None = None,
+        mobile: bool = False,
+        desktop_pcm: bool = False,
     ) -> None:
-        # Whose conversation this is. None is a desk turn or an older
-        # strip build, and both mean the house's one session — the
-        # single literal this whole feature was waiting behind.
-        chat = chat_id or CHAT_ID_DEFAULT
+        message = _voice_approval_command(message)
+        try:
+            policy = (
+                self._policy.admit_mobile(user_id)
+                if mobile
+                else self._policy.admit_desktop()
+            )
+        except PolicyError as exc:
+            logger.warning(f"jarvis: refusing turn admission — {exc}")
+            return
+        # Client chat_id is routing decoration, never a principal selector.
+        # Keeping this tied to the policy principal also prevents a legacy
+        # desktop frame from opening a privileged person's durable session.
+        del chat_id
+        chat = policy.principal
         source = self.build_source(
             chat_id=chat,
             # A display name only, never the identity: `chat` is
@@ -1076,14 +1657,27 @@ class JarvisAdapter(BasePlatformAdapter):
             # the id and is not attempted here — `.title()` is cosmetic.
             chat_name=chat.upper() if chat == CHAT_ID_DEFAULT else chat.title(),
             chat_type="dm",
-            user_id=user_id,
-            user_name=user_id,
+            # Hermes' platform gate authorizes the adapter-controlled seat,
+            # not the persona selected by a client frame. Mobile identity is
+            # already authenticated by the roster and frozen in `policy`.
+            user_id=DEFAULT_USER_ID,
+            user_name=policy.principal,
+        )
+        # This is metadata only. Do not stamp `source.profile`: doing so would
+        # activate a profile merely because code changed, before an operator
+        # has created and enabled its Hermes home and route.
+        source.jarvis_policy = policy
+        turn_id = (
+            str(uuid.uuid4()) if client_request_id else request_id or str(uuid.uuid4())
         )
         event = MessageEvent(
             text=message,
-            message_type=MessageType.TEXT,
+            # The strip has already transcribed the microphone locally.  The
+            # PCM reply capability marks this as a voice turn for Hermes so
+            # its delta-to-TTS consumer starts speaking at the first clause.
+            message_type=MessageType.VOICE if desktop_pcm else MessageType.TEXT,
             source=source,
-            message_id=request_id or str(uuid.uuid4()),
+            message_id=turn_id,
         )
         extra = getattr(self.config, "extra", {}) or {}
         session_key = build_session_key(
@@ -1096,7 +1690,27 @@ class JarvisAdapter(BasePlatformAdapter):
                 else None
             ),
         )
-        turn = self._open_turn(chat, event.message_id, session_key)
+        turn = self._open_turn(
+            chat, event.message_id, session_key, delivery_target, policy, desktop_pcm
+        )
+        if client_request_id is not None:
+            if delivery_target is not None and delivery_target.kind == "mobile":
+                accepted = await self._push_mobile(
+                    {
+                        "type": "turn.accepted",
+                        "client_request_id": client_request_id,
+                        "turn_id": turn.request_id,
+                    },
+                    delivery_target,
+                )
+            else:
+                accepted = await self._push(
+                    turn_accepted(client_request_id, turn.request_id),
+                    target=delivery_target,
+                )
+            if not accepted:
+                self._abandon_turn(turn)
+                return
         try:
             # Returns as soon as the gateway has spawned its background task;
             # the reply comes back later through send(). The watchdog armed
@@ -1111,7 +1725,8 @@ class JarvisAdapter(BasePlatformAdapter):
                         _TURN_LOST,
                         chat_id=self._wire_chat(turn.chat),
                         request_id=turn.request_id,
-                    )
+                    ),
+                    target=turn.delivery_target,
                 )
 
     async def _cancel_request(self, request_id: str) -> None:

@@ -13,10 +13,33 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-14 — La ficha del profesor inlinea sus imágenes para el móvil ✅
+- 2026-09-13 — La voz volvía entre cortada: el widget llevaba semanas sin cancelación de eco ✅
+- 2026-09-09 — La política llega al resolver real; entrega móvil aún pendiente
+- 2026-09-09 — El resumen prometido no tenía trabajo detrás ⏸
+- 2026-09-09 — La transcripción recibe contexto privado, no una corrección global ⏸
+- 2026-09-09 — Whisper recibe Alfresco como vocabulario, sin corregir palabras a ciegas ⏸
+- 2026-09-09 — Una sola transcripción, en la caja, sin Apple ✅⏸
+- 2026-09-09 — Una risa no puede tragarse el fin del turno ✅⏸
+- 2026-09-09 — El PCM de Hermes vuelve al teléfono que preguntó ✅⏸
 - 2026-09-08 — B1 protege el destino privado hasta el final ✅
 - 2026-09-08 — B2 correlaciona y cancela cada respuesta Hermes ✅
+- 2026-09-08 — Las fichas del profesor llegan al móvil correcto ✅
+- 2026-09-08 — La conversación se compacta antes de hacerse audible ✅
+- 2026-09-08 — Hermes será la autoridad de los turnos ✅
+- 2026-09-08 — M0: la entrega legacy vuelve a tener una base comprobada ✅
+- 2026-09-08 — M2: admisión móvil TLS opt-in en Hermes ✅
+- 2026-09-08 — M3: política de perfiles y capacidades en la admisión ✅
+- 2026-09-08 — M4: frontera TLS de voz local y escritor acotado ⏸
+- 2026-09-08 — M4: PCM de escritorio dirigido por Hermes ⏸
 - 2026-09-08 — P0 de voz local cerrado; iOS comienza F1
 - 2026-09-08 — La voz no arrastra respuestas largas ✅
+- 2026-09-08 — Acciones sensibles requieren confirmación de voz ✅
+- 2026-09-08 — Mistral Small 3.1 probado y descartado como principal
+- 2026-09-08 — Gemma 4 26B-A4B supera la prueba local ✅
+- 2026-09-08 — JARVIS empieza a hablar mientras Gemma genera ✅
+- 2026-09-08 — Qwen GSQ-RCO reduce VRAM sin perder herramientas ✅
+- 2026-09-08 — Grok 4.6 probado y descartado para voz
 - 2026-09-07 — P0 de voz local entregado; revisión de conformidad iOS en curso
 - 2026-09-07 — Plan compartido para voz local iOS; implementación pendiente
 - 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
@@ -74,6 +97,500 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+
+---
+
+## 2026-09-14 — La ficha del profesor inlinea sus imágenes para el móvil ✅
+
+La coordinación con `mac` (repo ios-jarvis) por el buzón A2A de AgentDialog
+cerró el hueco que faltaba para que el móvil pinte las fichas del profesor:
+hasta ahora el frame `ficha` mandaba el Markdown con las imágenes como rutas
+locales absolutas al spool del profesor (`~/.jarvis/teacher/img/<hash>.img`),
+que el iPhone no puede leer. `mac` asumió todo el lado iOS (decoder + render
+nativo en scroll) y quedó a mi cargo inlinear las imágenes del lado backend.
+
+Cambio en `widget/jarvis_widget/remote.py`: una función pura
+`inline_imagenes()` reescribe cada referencia `![](ruta_local)` como
+`data:<mime>;base64,…` en el momento exacto en que `WebEndpoint.ficha()`
+construye el frame hacia el teléfono — sólo en esa frontera; el strip sigue
+inlinando su propio HTML en `ficha_html.py` y no se toca. El MIME se saca del
+contenido con Pillow (los archivos del spool llevan extensión `.img`, sin
+tipo), con el mismo tope de 4 MiB por imagen del plugin. Una referencia que no
+se puede leer, es demasiado grande o no decodifica como imagen se quita del
+documento, no de la tarjeta (Ruling 7); lo que ya sea `data:` o no sea una ruta
+local se deja como está.
+
+Verificación: 3 pruebas nuevas en `widget/tests/test_remote.py`; la suite de
+`widget/` queda en verde (799). Confirmado a `mac` para la prueba end-to-end
+con una ficha real.
+
+---
+
+## 2026-09-13 — La voz volvía entre cortada: el widget llevaba semanas sin cancelación de eco
+
+**Síntoma del amo (20:00, noche):** "la voz responde entre cortada y en un
+idioma ilegible, no funciona bien la cancelación del eco". El journal
+confirmaba lo de siempre — turnos de 26 s transcritos como galimatías
+("plataformas de Kenanás, Eikema, Eikeko…"), la respuesta de 648 caracteres
+recortada a 99 — pero esta vez la causa no era el modelo.
+
+**Causa raíz, encontrada con `pw-link`:** el widget (PID 5487) capturaba del
+micrófono USB **crudo** (`UACDemoV1.0:capture_MONO`) y sonaba por los altavoces
+**crudos** (`ALC897 Analog:playback_FL/FR`), **saltándose por completo el par
+de cancelación de eco** (`echo-cancel-source` / `echo-cancel-sink`, nodos 36/37
+de `wpctl status`) — que existe, está cableado y no hace nada porque nadie lo
+consume. El estado persistente de WirePlumber
+(`~/.local/state/wireplumber/default-nodes`, guardado el 26-08-18:02) tenía los
+dispositivos crudos como predeterminado:
+`default.configured.audio.sink=alsa_output.pci-0000_00_1f.3.analog-stereo`,
+`source=alsa_input.usb-…UACDemoV1.0-00.mono-fallback`. El módulo
+`auto-echo-cancel` de `40-device-defaults.lua` no lo corrigió porque el
+almacenamiento persistente manda sobre él.
+
+Consecuencias encadenadas: su propia voz volvía al micrófono sin cancelar →
+`build_is_a_person` la juzgaba "persona" (el filtro de eco solo conocía los 99
+caracteres recortados de una respuesta de 648, así que la cola de la frase no
+coincidía) → `speaker.interrupt()` a mitad de frase (**entre cortada**), y el
+residuo mezclado con la tele entraba como turno (**idioma ilegible**).
+
+**Arreglos:**
+
+1. **`widget/jarvis_widget/__main__.py` — `on_token`:** en la rama PCM,
+   `echo.spoke()` recibía `limit_reply_for_speech(token)` (recortado a 3
+   frases), pero Hermes sintetiza y suena el **token entero** (el camino
+   whole-reply de `adapter._send_desktop_pcm`, o la cláusula completa del
+   streaming). El filtro de eco recordaba ~15% de lo que realmente se oía. Ahora
+   recibe el token completo; el recorte queda solo para la síntesis local, que
+   es donde existe.
+2. **PipeWire:** `wpctl set-default` sobre `echo-cancel-sink` (37) y
+   `echo-cancel-source` (36). El estado persistente queda:
+   `default.configured.audio.sink=echo-cancel-sink`,
+   `source=echo-cancel-source`, y el widget reiniciado se enruta por el par
+   cancelador — verificado en `pw-link`: `output_FL > Altavoces (con cancelación
+   de eco)`, `input_FL < Micrófono sin eco`.
+
+**Pendiente de verificación física:** una persona interrumpiendo de verdad
+mientras habla (la prueba de `pw-link` del 25-08 fue exactamente esta). El
+canceller no limpia del todo (medido), por eso el filtro por palabras sigue
+siendo la segunda línea; ahora sabe lo que se va a oír.
+
+**Nota operativa:** si el estado de WirePlumber se vuelve a escribir con los
+dispositivos crudos (un `wpctl set-default`, los ajustes de sonido de GNOME, la
+pérdida de `~/.local/state/wireplumber/default-nodes`), el widget vuelve a
+saltarse el AEC en silencio — el síntoma es solo "la voz entre cortada". El
+chequeo es `pw-link | rg python` (ver §2.8 de CLAUDE.md).
+
+## 2026-09-09 — La política llega al resolver real; entrega móvil aún pendiente
+
+**Actualización de pruebas físicas, 18:44 UTC:** arreglo desplegado a las
+18:21 UTC. En la repetición de 18:39:39, entrada autenticada del móvil y perfil
+efectivo `orelvis` correlacionados: usuario 857, llamada `session_search` 858,
+resultado 859 (`success=true`, una sesión, 10261 caracteres), respuesta 860
+(`stop`, 642 caracteres). Dos llamadas modelo, 26,3 s; ejecución nueva acreditada
+por ID `7KDKu48wVlZcFUFsIr84VYTUC5upTfvN` y log, no por historial reimportado.
+El usuario reporta botón de audio deshabilitado. Journal: CosyVoice cerró el
+stream con `incomplete chunked read` en turno
+`3f3e2ff0-9ccc-41df-9dda-da6f8c5c4f6b`. Audio/terminal aún sin verificar.
+Mac pausa pruebas físicas para simulador. Restaurada la restricción temporal:
+perfil vuelve a `disabled_toolsets: [tts]`; gateway reiniciado 18:44:04 UTC y
+widget reconectado 18:44:06 UTC. La tarea Collab sigue abierta por fallo TTS y
+pruebas pendientes. Detalles en el handoff.
+
+Collab `T_6fa63a9a9bd0`, instancia backend. Revalidada la sonda del handoff en
+SQLite de solo lectura: usuario 285, asistente 286, `finish_reason=stop`, cero
+llamadas/resultados posteriores. Las llamadas históricas reimportadas se
+contrastaron por ID con el DB raíz. El log registra una llamada principal y
+tres compresiones auxiliares; no demuestra recepción en iOS ni enlaza por sí
+solo el UUID de la sonda.
+
+Corregido un fallo concreto, sin atribuirle aún la respuesta falsa: el adaptador
+devolvía una tupla donde Hermes exige lista. Ahora devuelve una copia; el resolver
+genérico distingue `[]` (ninguna herramienta) de `None` (configuración habitual)
+y no incorpora plugins/MCP ajenos al override. Se conserva la validación de
+nombres, restricciones de plataforma y herramientas deshabilitadas. El parche
+del core está versionable en `Hermes/source-toolsets.patch`; `setup-runtime.sh`
+lo aplica idempotentemente y falla ante conflictos sin descartar cambios locales.
+
+**974 tests conjuntos del plugin/widget correctos; 18 del resolver Hermes**,
+también sobre el pin limpio con el parche aplicado. Prueba real de importación
+adaptador/core incluida, sin depender solo del shim. Comprobadas aplicación,
+reaplicación y negativa ante conflicto del parche; `bash -n` correcto.
+
+Cuatro sondas de componente con solo `session_search` en la petición HTTP a
+Gemma devolvieron llamadas de herramienta, tanto con etiqueta Qwen como Gemma,
+con petición nueva e histórica. No reproducen exactamente el contexto comprimido
+del incidente. Otra prueba ejecutó la herramienta original con `SessionDB`
+de solo lectura: una sesión, 3434 caracteres, cero cambios SQL; el mismo hash
+del resultado llegó a Gemma y produjo un resumen de 339 caracteres (`stop`).
+Esta última llamada fue iniciada por el helper, no autónomamente por el modelo.
+Dos intentos previos del helper devolvieron error de DB y no cuentan como éxito.
+
+**No desplegado ni cerrado:** no se reiniciaron servicios, no se cambió el
+modelo/configuración del perfil y no se probó entrega móvil. A las 16:44 UTC
+Collab figuraba `reconnecting`; el hub del Mac rechazó la conexión al solicitar
+ventana conjunta. No se creó otra sala. Evidencia y siguiente paso en el handoff;
+la tarea sigue abierta hasta verificar petición, ejecución, resultado y terminal
+en el recorrido real.
+
+## 2026-09-09 — El resumen prometido no tenía trabajo detrás ⏸
+
+La sesión de Alfresco afirmaba haber buscado y estar preparando un envío, pero
+sus turnos terminaron con texto y cero llamadas a herramientas. No existía un
+resumen pendiente. El móvil legacy pasa por el asiento `casa`, sin herramientas,
+mientras el hint seguía anunciando acciones y negando que hubiese texto/enlaces
+visibles. No se relajó esa frontera para solucionar la promesa.
+
+Se actualizan las capacidades descritas y se añade contexto efímero por
+`pre_llm_call`, efectivo también con sesiones antiguas sin borrar su historial.
+La sonda A/B contra Gemma local y el historial real mostró que el prompt no
+basta: admitía no haber buscado pero volvía a ofrecer hacerlo después.
+`delivery.enforce_delivery` frena las afirmaciones observadas imposibles para
+un turno con cero herramientas, antes de entregar texto o sintetizar audio.
+En ese perfil se espera al texto final para validar; el streaming anticipado
+no puede sacar una promesa antes del control. Los perfiles con herramientas
+conservan el camino de streaming. Hay coste de latencia en el perfil sin ellas.
+
+**964 tests conjuntos del plugin y widget correctos**, incluida la frontera
+antes de TTS. Ruff de los nuevos archivos correcto; persiste deuda previa del
+adaptador en el chequeo amplio. Gateway reiniciado a las 13:26:08 CEST y activo.
+No se cambia el cliente iOS, no se añaden herramientas ni permisos de búsqueda.
+
+**Pendiente:** la búsqueda real de ofertas no está habilitada en este recorrido.
+Hace falta completar la identidad móvil autenticada y aclarar el alcance de
+«no salir al exterior» antes de realizar consultas web. No hay un resumen de
+vacantes verificado ni se da esta parte por entregada.
+
+---
+
+## 2026-09-09 — La transcripción recibe contexto privado, no una corrección global ⏸
+
+Verificado el proceso real del iPhone: ejecuta la versión sin Apple. Comparados
+journal del widget y entrada de Hermes: ambos llevan la misma frase incorrecta.
+Hermes puede resolver la intención usando su conversación, pero la decodificación
+acústica solo recibía un vocabulario fijo.
+
+Se retira el añadido global de Alfresco. `TranscriptionContext` conserva en RAM
+hasta 640 caracteres de respuestas recientes por persona autenticada (16 personas
+máximo), sin compartirlos con otras ni con audio de sala aún no identificado.
+`dispatch` toma una copia antes de ir al hilo de STT; ese contexto se entrega
+al prompt de Whisper local. No hay sustitución ciega posterior ni servicio nuevo.
+Se limpia al desconectarse de Hermes y se aprende desde las nuevas respuestas,
+no desde el historial duradero ni desde una identidad elegida por el teléfono.
+
+**794 tests correctos**, incluidos límites, aislamiento y camino real de los
+callbacks hasta el decodificador y ambos destinos de texto. Ruff correcto.
+Widget reiniciado a las 11:26:45 CEST. **La mejora acústica sigue pendiente**:
+no hay grabación anterior para A/B y no se presenta un test de cableado como
+prueba de que esta voz ya se transcriba correctamente.
+
+---
+
+## 2026-09-09 — Whisper recibe Alfresco como vocabulario, sin corregir palabras a ciegas ⏸
+
+La inconsistencia persistente ya estaba en los logs del STT local: a las 11:03
+«del fresco» y a las 11:07 «Alfred», para Alfresco. La app copiaba la fuente;
+unificarla no garantiza precisión acústica ni que el modelo interprete esas
+palabras literalmente en su respuesta.
+
+El proceso no tenía override STT. `build_hint` añade ahora Alfresco, consultoría
+y gestión documental ECM al prompt del decodificador. No se reemplazan palabras
+reconocidas a posteriori. Actualizada la prueba de vocabulario: 12 tests de STT
+y entrega de transcripción correctos, Ruff/formato correctos, widget reiniciado
+y activo. Sin cambios de app, proveedor ni salida de datos.
+
+Pendiente de nueva muestra física con la misma pregunta; no hay audio anterior
+guardado ni evidencia A/B de mejora todavía.
+
+---
+
+## 2026-09-09 — Una sola transcripción, en la caja, sin Apple ✅⏸
+
+El usuario aclaró que no había pedido mantener Apple: el requisito es que
+audio/transcripción no salgan al exterior. La versión iOS previa permitía el
+fallback remoto de Apple y se retiró ese camino por completo, incluido su
+permiso. El móvil envía PCM solo a la caja y ahora recibe la misma transcripción
+local de Whisper que se entrega a Hermes.
+
+El endpoint legacy `/ws` añade `transcript(text)` antes del dispatch, usando
+el destino privado de `ReplyRoutes`. Una salida cerrada no recibe texto tardío.
+`text` sigue siendo la respuesta del asistente; no se cambia a `/voice/local`.
+Contrato: `docs/superpowers/specs/2026-09-09-legacy-transcript-contract.md`.
+
+Tres regresiones nuevas cubren orden del frame, privacidad del destino y el
+dispatch real entregando la misma frase a teléfono/Hermes. **790 tests del
+widget y 157 del simulador iOS correctos**. Widget reiniciado a las 11:02:52 CEST;
+app firmada instalada y abierta a las 11:02:58. Pendiente de confirmar en el
+teléfono la pregunta de Alfresco. La atribución anterior de «mantener Apple por
+decisión del usuario» fue una interpretación del agente, rectificada aquí.
+
+---
+
+## 2026-09-09 — Una risa no puede tragarse el fin del turno ✅⏸
+
+La segunda pregunta desde el iPhone se quedaba esperando. Los logs cerraron
+dos sospechosos: Hermes produjo texto en 0,7 s y CosyVoice generó 8,84 s de
+audio. La respuesta comenzaba con `<laughter>`; `is_system_message` veía el
+primer `<` como símbolo matemático Unicode y la marcaba como aviso de sistema.
+`on_done` descartaba entonces su terminal, sin cerrar `ReplyRoutes` ni avisar
+al teléfono. No era lentitud del modelo.
+
+El filtro reconoce ahora ese marcador de voz explícitamente, sin aceptar
+etiquetas arbitrarias. Además, un texto filtrado nunca impide cerrar una
+respuesta admitida: filtrar contenido no equivale a cancelar su turno.
+
+Tres regresiones ejecutan los callbacks reales sin GTK ni GPU, con destinos
+sintéticos: tres turnos consecutivos incluyendo una risa, un aviso genuino que
+debe cerrar una vez, y clasificación de marcadores. La secuencia fallaba en
+el segundo turno antes del arreglo. Después: **787 tests del widget correctos**,
+Ruff correcto y servicio reiniciado/activo. Pendiente de repetición auditiva
+en el teléfono. La transcripción de las preguntas seguirá siendo de Apple,
+por decisión explícita del usuario; no se añade un evento al protocolo.
+
+---
+
+## 2026-09-09 — El PCM de Hermes vuelve al teléfono que preguntó ✅⏸
+
+La aceptación de la app iOS encontró una regresión del camino de transición:
+el texto llegaba rápido al teléfono, pero la voz salía por la caja. El widget
+anuncia PCM en `turn.submit` también al retransmitir un turno móvil. Hermes
+devuelve PCM dirigido al socket del widget, y `on_pcm` lo escribía directamente
+en `player.write`, sin consultar el destino privado que `on_token` sí respetaba.
+Además, `pcm.start` evitaba la síntesis local, así que no quedaba otro camino
+que enviase los bytes al teléfono.
+
+`ReplyRoutes.write_pcm` resuelve ahora el turno canónico de Hermes y entrega
+los bytes al mismo destino inmutable que el texto. Un turno desconocido,
+terminado, cancelado o con el teléfono desconectado no cae a la sala ni a una
+conexión nueva de la misma persona. El interruptor de voz de la sala solo
+silencia la sala, no el teléfono privado.
+
+Seis casos nuevos comprueban el destino de los bytes: dos teléfonos y sala,
+interrupción, desconexión/reconexión, turnos ausentes/terminados y mute de sala.
+Primero fallaron; tras la corrección, 118 tests dirigidos y luego **784 tests
+del widget** pasaron. Ruff y `git diff --check` correctos. No se cambió el
+contrato iOS `/ws`, no se activó `/voice/local` ni se modificó Hermes.
+
+Widget reiniciado el 2026-09-09 a las 09:43:11 CEST: activo y escuchando en
+`192.168.100.58:8443`. **Confirmación auditiva recibida después del despliegue**:
+el usuario dijo «se escucha perfecto». También percibe menor latencia desde el
+iPhone que hablando a la caja; todavía no hay medición comparativa.
+
+---
+
+## 2026-09-08 — JARVIS empieza a hablar mientras Gemma genera ✅
+
+El cuello ya no era CosyVoice: Hermes trae `StreamingTTSConsumer`, que corta
+los deltas del modelo por frase y los manda a PCM antes de acabar la respuesta,
+pero JARVIS no implementaba ese contrato y clasificaba sus transcripciones
+locales como texto. El adaptador ahora acepta PCM 24 kHz para el turno activo,
+marca esas transcripciones como voz y entrega cada cláusula a la tira según
+sale de Gemma. Una vez que la primera muestra ha llegado, la entrega final sólo
+envía texto y cierre: nunca vuelve a sintetizar ni repetir la respuesta.
+
+`voice.auto_tts` queda activado sólo como puerta del consumidor streaming; la
+voz sigue siendo local, CosyVoice sigue en `:8093`, y un fallo antes de audio
+conserva la síntesis completa existente como recuperación.
+
+---
+
+## 2026-09-08 — Gemma 4 26B-A4B supera la prueba local ⏸
+
+`Gemma 4 26B-A4B IQ4_XS` cargó entero en la RTX 4090 a 64K. Midió 14.39 GiB
+en llama-server, español breve natural a 120-127 tok/s y una llamada
+estructurada correcta a `crear_recordatorio`. Qwen GSQ-RCO usa 0.95 GiB menos,
+pero sólo llega a 53-55 tok/s. Por decisión del propietario, Gemma queda como
+modelo activo; Qwen GSQ-RCO y Heretic permanecen como rollbacks.
+
+---
+
+## 2026-09-08 — Qwen GSQ-RCO reduce VRAM sin perder herramientas ✅
+
+El Qwen3.8 oficial vuelve a llevar arnés por decisión del propietario, pero la
+cuantización `GSQ-RCO IQ3_S` de ISTA-DASLab conserva las pruebas del modelo
+base a 11.8 GB. Medido a 64K en la 4090: llama-server ocupa 13.44 GiB frente
+a los 16.33 GiB de Heretic, responde español breve a 53-55 tok/s y emite la
+llamada estructurada de `crear_recordatorio` correctamente. Queda como modelo
+activo; Heretic permanece en disco como rollback sin arnés.
+
+---
+
+## 2026-09-08 — Grok 4.6 probado y descartado para voz
+
+Por petición del propietario, `grok-4.6` de xAI se activó como modelo por
+defecto de Hermes. La admisión móvil conservó la comprobación de Qwen local;
+no convirtió una conexión móvil no autenticada en una ruta cloud.
+
+La primera respuesta no streaming a una pregunta breve tardó 9.07 s, de los
+que 473 tokens fueron razonamiento interno; una llamada de herramienta válida
+tardó 5.63 s. `reasoning_effort: none` no es válido para este modelo (HTTP
+400). Es correcto funcionalmente, pero no cumple la latencia de voz. El
+propietario lo descartó y Heretic volvió a ser el modelo activo.
+
+---
+
+## 2026-09-08 — Mistral Small 3.1 probado y descartado como principal
+
+`Mistral Small 3.1 24B Instruct Q4_K_M` cargó entero en la RTX 4090 con 64K
+de contexto: 16.98 GiB frente a los 16.33 GiB de Heretic. Contestó español
+breve y natural a 55.5 tok/s, pero el GGUF no emitió una llamada de herramienta
+ante una petición explícita; respondió con texto hasta agotar el límite. La
+plantilla explícita `mistral-v7` de llama.cpp tampoco es integrable: declara
+que no admite tools ni system messages y redujo la petición a cinco tokens.
+Se restauró Heretic inmediatamente. El archivo descargado queda sólo para
+probar una versión de llama.cpp/GGUF que preserve function calling.
+
+---
+
+## 2026-09-08 — Acciones sensibles requieren confirmación de voz ✅
+
+Las herramientas que pueden cambiar la casa, leer o escribir datos privados,
+abrir cámaras, emparejar un teléfono o delegar trabajo quedan delante del gate
+nativo de aprobación de Hermes. La solicitud caduca denegada a los sesenta
+segundos y los trabajos cron y no interactivos también fallan cerrados.
+
+JARVIS traduce exclusivamente `confirmo la acción` y `cancelo la acción` a la
+respuesta de aprobación o denegación. La pasarela sólo les da efecto mientras
+una acción espera: en una conversación normal siguen siendo palabras normales.
+No hay autorización persistente por voz.
+
+Verificación: 940 tests de `Hermes/plugins/jarvis/tests` y `widget/tests`.
+
+---
+
+## 2026-09-08 — M4: PCM de escritorio dirigido por Hermes ⏸
+
+El escritorio actualizado anuncia `pcm_s16le/24000` al abrir un turno. Hermes
+congela su destino, envía el texto y, en el mismo orden, PCM int16 a 24 kHz
+marcado con el `turn_id` de Hermes. La síntesis ya se hace dentro del adaptador
+con la implementación local de CosyVoice de `jarvis_voice`; no hay Edge ni otra
+salida cloud. Si CosyVoice no está disponible o falla, el turno termina con un
+error en español en vez de quedar colgado.
+
+El widget actual recibe esos frames y sólo los reproduce. Conserva su ruta de
+síntesis exclusivamente para una pasarela antigua que no envíe `pcm.start`, y
+para los recorridos móviles/onboarding aún legacy; así la actualización de un
+solo extremo no deja mudo el escritorio. Barge-in sigue vaciando el `Player` y
+cancela el turno Hermes correlacionado.
+
+M4 sigue parcial: `/voice/local` carece de STT/VAD local y el móvil aún no usa
+esta entrega PCM compartida. M5 sigue bloqueada por retirar el relay móvil,
+`ReplyRoutes`, TLS/alta del widget y la ruta `/ws` legacy tras una aceptación
+física conjunta.
+
+---
+
+## 2026-09-08 — M4: frontera TLS de voz local y escritor acotado ⏸
+
+Hermes sirve ahora `/voice/local` dentro del listener móvil TLS opt-in, con la
+misma comprobación de Origin, bearer y roster antes del upgrade que M2. El
+protocolo `jarvis.local-voice.v1` vive en un módulo propio: rechaza JSON con
+claves duplicadas o números no finitos, valida PCM y su prefijo UInt32 big-endian,
+y serializa JSON y binario por un escritor único con los límites y reserva de
+terminal del contrato. Los tests usan certificado y roster temporales y comprueban
+que un Hermes sin STT local responde `provider_unavailable` y cierra, sin aceptar
+audio ni recurrir al widget, Edge ni otro proveedor remoto.
+
+Esto es **parcial**, no M4 completa: Hermes aún no tiene un worker STT local ni
+endpointing/VAD, por lo que no anuncia `ready`, no admite PCM y no puede despachar
+una transcripción al agente. Por la misma razón no se ha activado CosyVoice directo
+ni se ha medido GPU, audio físico o iOS. El relay móvil legacy y `/ws` permanecen
+intactos hasta M5.
+
+Verificación: 156 tests del plugin `jarvis` y 148 tests de contrato/rutas móviles
+del widget. La suite completa del widget no llegó a colección en este entorno por
+falta de `sounddevice`.
+
+---
+
+## 2026-09-08 — M3: perfiles de personas, no de lugares ⏸
+
+El adaptador congela principal, perfil, capacidades, política local y huella de
+configuración al admitir un turno móvil. La primera vinculación ya tiene una
+autoridad canónica en `~/.jarvis/casa.json`: su campo `amo` identifica al dueño;
+`casa` significa un turno no atribuible, nunca una persona ni un perfil.
+
+La ruta artificial `casa` y su home se retiraron tras detectar que contradecían
+ese modelo. El escritorio físico se enruta al dueño emparejado, actualmente
+`orelvis`, que conserva sus capacidades completas. El gateway sigue siendo el
+único dueño de `127.0.0.1:7777`.
+
+Falta enlazar el alta existente de un teléfono con la creación de un perfil Hermes
+para cada familiar. Hasta entonces el listener móvil Hermes permanece opt-in y
+cualquier identidad que no sea el dueño falla cerrada.
+
+El relay móvil del widget legacy no puede atribuir de forma individual cada
+teléfono y sigue fuera de esta garantía hasta M4/M5.
+
+---
+
+## 2026-09-08 — M0: la entrega legacy vuelve a tener una base comprobada ✅
+
+La entrega experimental se corrigió sin ampliar el contrato legacy: un aviso de
+Hermes sin `reply_to` ya no liquida un turno activo; sólo la respuesta anclada
+al `request_id` puede emitir su terminal. La regresión del adaptador cubre el
+aviso no anclado, los callbacks tardíos y la cancelación.
+
+La comprobación física posterior al reinicio confirmó el recorrido completo:
+voz terminada a las 14:00:06, Qwen terminó 205 tokens en 3.01 s a 41.5 tok/s y
+CosyVoice recibió la respuesta inmediatamente después. El siguiente audio se
+clasificó correctamente como eco propio. La base para M1 está verde (`65`
+pruebas del adaptador en ese corte) y no se migra más autoridad hasta tener
+tests deterministas para cada nueva frontera.
+
+---
+
+## 2026-09-08 — Hermes será la autoridad de los turnos ✅
+
+La investigación de entrega reveló el límite del diseño actual: widget y Hermes
+mantienen cada uno estado de turno, identidad y destino, mientras el móvil sólo
+puede recibir lo que el widget le reenvía. La correlación añadida al protocolo no
+elimina esa doble autoridad ni convierte `chat_id` en una frontera de permisos.
+
+El usuario aprobó que Hermes sea el centro de mando. El diseño de migración en
+[`docs/superpowers/plans/2026-09-08-hermes-authority-migration.md`](docs/superpowers/plans/2026-09-08-hermes-authority-migration.md)
+fija turnos inmutables de Hermes, clientes periféricos, destinos privados sin
+fallback, perfiles/capacidades resueltos en Hermes y entrega multimedia ordenada.
+Primero se restaura una base legacy verde; después se migra de forma incremental,
+sin cortar escritorio ni iOS.
+
+---
+
+## 2026-09-08 — La conversación se compacta antes de hacerse audible ✅
+
+La lentitud no estaba en Whisper, CosyVoice ni en la GPU. Hermes reenviaba el
+historial íntegro en cada turno y, aunque el modelo tiene una ventana de 64K,
+el salvavidas para contextos pequeños retrasaba la compresión hasta unos 55.7K
+tokens. Se midieron prefills de 41.7K tokens de 16.2 s sin competencia y 29.2
+s con otra solicitud; el segundo caso además bajó otra generación a 8.4 tok/s.
+
+`compression.threshold_tokens: 16000` conserva la ventana requerida de 64K
+para giros con herramientas, pero resume el historial durable antes de que sus
+prefills dominen una conversación hablada. La primera compresión había fallado
+porque su cliente auxiliar no hereda `providers.local.extra_body`: Qwen dejaba
+la salida sólo en `reasoning_content`, que Hermes rechaza correctamente para no
+guardar cadena de pensamiento. `auxiliary.compression.extra_body` replica
+`enable_thinking: false` para esa única llamada.
+
+Verificación: YAML válido, merge aplicado a `.hermes/home/config.yaml`, Hermes
+reiniciado y escuchando en `:7777`, y una petición local con el mismo cuerpo
+de compresión devolvió `content: "listo"`. Falta observar la primera
+compactación natural de una sesión existente; no se forzó un turno sobre la
+conversación de nadie sólo para medirla.
+
+---
+
+## 2026-09-08 — Las fichas del profesor llegan al móvil correcto ✅
+
+`jarvis_teacher` dibujaba toda ficha en el strip, aunque la clase hubiera
+empezado en un teléfono. Ahora el adaptador recupera el turno Hermes de la
+tarea actual, marca el frame con su `chat_id` y `request_id`, y el widget lo
+entrega exclusivamente al `WebEndpoint` que abrió ese turno. El móvil recibe
+el formato estructurado `ficha` previsto para su vista nativa, sin WebKit ni
+Markdown paginado del escritorio; un turno de escritorio sigue dibujando su
+ficha en el strip.
+
+Verificación focalizada: 237 pruebas de protocolo, adaptador, gateway, remoto
+y rutas privadas.
 
 ---
 

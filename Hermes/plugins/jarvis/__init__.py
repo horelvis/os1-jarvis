@@ -17,6 +17,7 @@ from .adapter import (
     quien_pregunta,
 )
 from .alta import hacer_alta
+from .delivery import DELIVERY_CONTEXT, delivery_context
 
 __all__ = ["JarvisAdapter", "register"]
 
@@ -93,9 +94,9 @@ _SCREEN = (
     "falta que anuncies que vas a enseñarla ni que expliques cómo: "
     "habla de lo que hay como si los dos lo estuvierais mirando, pero "
     "ponla de verdad — decir que está puesta sin haberla puesto es "
-    "mentirle a la persona. Es lo único que puedes mostrar — ni texto, "
-    "ni ficheros, ni enlaces, ni imágenes de otro sitio — y tú no la "
-    "ves: solo sabes lo que la cámara te ha contado."
+    "mentirle a la persona. La app también muestra tus respuestas de texto "
+    "como transcripción y puede incluir resúmenes y enlaces verificados. "
+    "No ves la imagen de la cámara: solo sabes lo que te ha contado."
 )
 
 # The rule that turns "he has tools" into "he uses them". Measured
@@ -137,14 +138,36 @@ _TEACHING = (
     "sobre algo, dilo en vez de rellenarlo."
 )
 
+# These actions can change the house, expose private data, grant a new phone
+# access, or hand work to another agent. Conversation, reminders and memory do
+# not wait. The approval gate itself is Hermes' fail-closed native mechanism.
+_SENSITIVE_ACTIONS = frozenset(
+    {
+        "terminal",
+        "read_file",
+        "write_file",
+        "patch",
+        "search_files",
+        "mirar",
+        "ver_en_vivo",
+        "a2a_call",
+        "emparejar",
+    }
+)
+
+_SENSITIVE_ACTION_MESSAGE = (
+    "Acción sensible solicitada. Para ejecutarla, di exactamente: "
+    "confirmo la acción. Para cancelarla, di: cancelo la acción."
+)
+
 
 def _platform_hint() -> str:
     """The persona, plus the constraints of talking through a strip."""
     surface = (
         "Hablas en voz alta, por un altavoz, a la persona que vive aquí. "
-        "No hay teclado ni pantalla que leer: nada de listas, markdown, "
-        "URLs ni nombres de fichero. Frases que se puedan escuchar. "
-        f"{_SCREEN} {_HONESTY} {_TEACHING} "
+        "La app conserva también el texto de la respuesta. Usa frases que "
+        "se puedan escuchar y entrega el contenido que te hayan pedido. "
+        f"{_SCREEN} {_HONESTY} {_TEACHING} {DELIVERY_CONTEXT} "
         "Para encargos de programación usa a2a_call con el agente 'codigo': "
         "lanza el encargo y responde solo que estás en ello. Los avisos del "
         "asistente de código te llegarán como mensajes; trasládalos en una "
@@ -250,12 +273,19 @@ def register(ctx):
         except Exception:  # noqa: BLE001 — a hook may not take a turn down
             logger.debug("jarvis: no he podido anunciar el trabajo", exc_info=True)
 
-    def _on_pre_tool_call(**_kwargs: Any) -> None:
+    def _on_pre_tool_call(tool_name: str = "", **_kwargs: Any) -> dict[str, str] | None:
         with candado:
             estado["abiertas"] += 1
             primera = estado["abiertas"] == 1
         if primera:
             _anunciar(True)
+        if tool_name in _SENSITIVE_ACTIONS:
+            return {
+                "action": "approve",
+                "message": _SENSITIVE_ACTION_MESSAGE,
+                "rule_key": f"jarvis-sensitive:{tool_name}",
+            }
+        return None
 
     def _on_post_tool_call(**_kwargs: Any) -> None:
         with candado:
@@ -315,11 +345,25 @@ def register(ctx):
 
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("pre_llm_call", delivery_context)
+
+    def _make_adapter(config):
+        # Hermes passes platform configuration to the factory, not this
+        # plugin's settings. Read them through the supported context API,
+        # rather than changing the policy default or trusting client chat_id.
+        settings = {}
+        get_config = getattr(ctx, "get_config", None)
+        if callable(get_config):
+            for key in ("policy", "mobile", "port", "turn_timeout"):
+                value = get_config(key, None)
+                if value is not None:
+                    settings[key] = value
+        return JarvisAdapter(config, plugin_settings=settings)
 
     ctx.register_platform(
         name="jarvis",
         label="JARVIS",
-        adapter_factory=lambda cfg: JarvisAdapter(cfg),
+        adapter_factory=_make_adapter,
         check_fn=check_requirements,
         required_env=[],
         install_hint="uv pip install --python ~/hermes-src/.venv/bin/python aiohttp",

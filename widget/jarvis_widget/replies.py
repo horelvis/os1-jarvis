@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+_UNSET = object()
+
 
 class PhoneOutput:
     """One turn's private sink, including an idempotent terminal notification."""
@@ -29,6 +31,22 @@ class PhoneOutput:
     def text(self, text: str) -> None:
         if not self.closed:
             self.phone.text(text)
+
+    def transcript(self, text: str) -> None:
+        """The local transcription belongs only to the original phone."""
+        if not self.closed:
+            self.phone.transcript(text)
+
+    def ficha(
+        self,
+        md: str,
+        tipo: str,
+        fuente: str,
+        correcta: str | None,
+        elegida: str | None,
+    ) -> None:
+        if not self.closed:
+            self.phone.ficha(md, tipo, fuente, correcta, elegida)
 
     def done(self) -> None:
         if self.closed:
@@ -66,11 +84,11 @@ class ReplyRoutes:
         self._replies: dict[str, Reply] = {}
 
     def open(
-        self, request_id: str, chat_id: str | object, phone: object | None = None
+        self, request_id: str, chat_id: str | object, phone: object | None = _UNSET
     ) -> Reply | None:
         # The two-argument form was B1's public seam. Keeping it while the
         # widget and gateway upgrade together costs no alternate wire behavior.
-        if phone is None:
+        if phone is _UNSET:
             phone = chat_id
             chat_id = request_id
         assert isinstance(chat_id, str)
@@ -84,6 +102,41 @@ class ReplyRoutes:
 
     def get(self, request_id: str | None) -> Reply | None:
         return self._replies.get(request_id)
+
+    def write_pcm(
+        self,
+        request_id: str,
+        pcm: bytes,
+        room_write: Callable[[bytes], None] | None,
+    ) -> bool:
+        """Deliver Hermes PCM to the same admission-time sink as its text.
+
+        The widget connection relays phone turns too. A PCM capability on
+        that connection does not make every reply a room reply. Unknown or
+        closed private routes must never fall back to the room.
+        """
+        reply = self.get(request_id)
+        if reply is None or not reply.accepts_content:
+            logger.debug("Addressed PCM discarded: no active reply destination")
+            return False
+        if reply.destination is not None:
+            reply.destination.write(pcm)
+        elif room_write is not None:
+            room_write(pcm)
+        else:
+            logger.debug("Room PCM discarded: room voice is muted")
+            return False
+        return True
+
+    def accept(self, client_request_id: str, turn_id: str) -> Reply | None:
+        """Replace the local nonce with Hermes' canonical turn id once."""
+        reply = self._replies.get(client_request_id)
+        if reply is None or turn_id in self._replies:
+            return None
+        del self._replies[client_request_id]
+        reply.request_id = turn_id
+        self._replies[turn_id] = reply
+        return reply
 
     def finish(self, reply: Reply) -> None:
         if reply.settled:

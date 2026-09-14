@@ -18,6 +18,8 @@ from Hermes.plugins.jarvis.protocol import (
     live_end,
     live_frame,
     photo,
+    pcm_frame,
+    pcm_start,
     silence,
     token,
 )
@@ -30,6 +32,38 @@ def test_decodes_a_chat_message():
         "message": "hola",
         "user_id": "primary",
     }
+
+
+def test_decodes_turn_submit_with_a_client_nonce():
+    assert decode_client(
+        '{"type":"turn.submit","message":"hola","user_id":"primary",'
+        '"client_request_id":"client-1"}'
+    ) == {
+        "type": "turn.submit",
+        "message": "hola",
+        "user_id": "primary",
+        "client_request_id": "client-1",
+    }
+
+
+def test_turn_submit_requires_its_client_nonce():
+    with pytest.raises(ProtocolError):
+        decode_client('{"type":"turn.submit","message":"hola","user_id":"primary"}')
+
+
+def test_turn_submit_may_opt_into_addressed_pcm():
+    assert (
+        decode_client(
+            '{"type":"turn.submit","message":"hola","user_id":"primary",'
+            '"client_request_id":"client-1","audio":"pcm_s16le/24000"}'
+        )["audio"]
+        == "pcm_s16le/24000"
+    )
+
+
+def test_pcm_frames_carry_the_turn_and_int16_pcm():
+    assert json.loads(pcm_start("turn-1"))["turn_id"] == "turn-1"
+    assert pcm_frame("turn-1", b"\x01\x00") == b"JPCM\x06turn-1\x01\x00"
 
 
 def test_rejects_unknown_type():
@@ -369,6 +403,13 @@ def test_ficha_carries_its_kind_and_its_markdown() -> None:
 def test_a_corrected_ficha_carries_both_answers() -> None:
     frame = json.loads(ficha("- a\n- b\n", "pregunta", correcta="b", elegida="a"))
     assert (frame["correcta"], frame["elegida"]) == ("b", "a")
+
+
+def test_a_private_ficha_carries_the_request_that_opened_it() -> None:
+    frame = json.loads(
+        ficha("- a\n- b\n", "pregunta", chat_id="marta", request_id="r1")
+    )
+    assert (frame["chat_id"], frame["request_id"]) == ("marta", "r1")
 
 
 def test_an_unknown_kind_is_refused_here_rather_than_on_the_strip() -> None:

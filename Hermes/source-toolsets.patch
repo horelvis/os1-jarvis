@@ -1,0 +1,112 @@
+diff --git a/gateway/run.py b/gateway/run.py
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -22407,7 +22407,9 @@
+         validated through the SAME ``_get_platform_tools`` path as normal
+         platform config — by substituting it as the platform's toolset list —
+         so unknown names and platform-restricted toolsets are dropped rather
+-        than trusted. When absent, falls back to standard
++        than trusted. Only explicitly supplied names survive validation;
++        automatic plugin/MCP additions are excluded. An empty list disables
++        all toolsets. When absent, falls back to standard
+         ``platform_toolsets.<platform>`` resolution.
+         """
+         from hermes_cli.tools_config import _get_platform_tools
+@@ -22420,12 +22422,24 @@
+         except Exception:
+             override = None
+
+-        if override and isinstance(override, list):
++        if isinstance(override, list):
++            if not override:
++                return []
++            from hermes_cli.tools_config import enabled_mcp_server_names
++            from toolsets import validate_toolset
++
+             cfg = dict(user_config)
+             pts = dict(cfg.get("platform_toolsets") or {})
+             pts[platform_key] = [str(t) for t in override]
+             cfg["platform_toolsets"] = pts
+-            return sorted(_get_platform_tools(cfg, platform_key))
++            allowed = set(pts[platform_key])
++            # Platform config preserves passthrough names, including unknowns.
++            known_mcp = enabled_mcp_server_names(cfg)
++            return sorted(
++                name
++                for name in _get_platform_tools(cfg, platform_key) & allowed
++                if validate_toolset(name) or name in known_mcp
++            )
+
+         return sorted(_get_platform_tools(user_config, platform_key))
+
+diff --git a/tests/gateway/test_webhook_route_toolsets.py b/tests/gateway/test_webhook_route_toolsets.py
+--- a/tests/gateway/test_webhook_route_toolsets.py
++++ b/tests/gateway/test_webhook_route_toolsets.py
+@@ -7,6 +7,10 @@
+ behave identically to a manually configured platform toolset list.
+ """
+
++from types import SimpleNamespace
++
++import pytest
++
+ from gateway.platforms.base import BasePlatformAdapter
+ from gateway.platforms.webhook import WebhookAdapter
+ from gateway.run import GatewayRunner
+@@ -83,8 +87,7 @@
+         assert "vision" not in res  # platform list fully replaced, not merged
+
+     def test_override_validated_like_platform_config(self):
+-        # Contract: resolving with an override is byte-identical to resolving
+-        # the same list configured as platform_toolsets.webhook.
++        # Overrides retain platform validation, without automatic additions.
+         override = ["terminal", "file", "web", "discord_admin"]
+         wa = _make_adapter({"mon": {"secret": "x", "toolsets": override}})
+         gr = _make_runner(wa)
+@@ -95,6 +98,7 @@
+             _get_platform_tools(
+                 {"platform_toolsets": {"webhook": list(override)}}, "webhook"
+             )
++            & set(override)
+         )
+         assert res == expected
+         # discord_admin is platform-restricted to discord — must be dropped.
+@@ -135,3 +139,38 @@
+             gr, cfg, _Src("webhook:mon:d"), "webhook"
+         )
+         assert cfg["platform_toolsets"]["webhook"] == ["web"]
++
++    @pytest.mark.parametrize("override", [[], ["web"], None])
++    def test_override_bounds_automatic_capabilities(self, monkeypatch, override):
++        from hermes_cli import tools_config
++
++        monkeypatch.setattr(
++            tools_config, "_get_plugin_toolset_keys", lambda: {"unrelated_plugin"}
++        )
++        cfg = {
++            "platform_toolsets": {"webhook": ["terminal", "file"]},
++            "mcp_servers": {"unrelated_mcp": {"command": "never-executed"}},
++        }
++        defaults = _get_platform_tools(cfg, "webhook")
++        assert {"terminal", "file", "unrelated_plugin", "unrelated_mcp"} <= defaults
++        gr = _make_runner(SimpleNamespace(toolsets_for_source=lambda source: override))
++        result = gr._resolve_enabled_toolsets_for_source(cfg, _Src("test"), "webhook")
++        assert result == (sorted(defaults) if override is None else override)
++
++    @pytest.mark.parametrize("retained", [[], ["web"]])
++    def test_unknown_disabled_and_restricted_overrides_are_dropped(self, retained):
++        override = retained + ["terminal", "discord_admin", "unknown_toolset"]
++        wa = _make_adapter({"mon": {"toolsets": override}})
++        cfg = {"agent": {"disabled_toolsets": ["terminal"]}}
++        result = _make_runner(wa)._resolve_enabled_toolsets_for_source(
++            cfg, _Src("webhook:mon:d"), "webhook"
++        )
++        assert result == retained
++
++    def test_explicit_mcp_survives_without_registry_discovery(self):
++        cfg = {"mcp_servers": {"selected_mcp": {"command": "never-executed"}}}
++        wa = _make_adapter({"mon": {"toolsets": ["web", "selected_mcp"]}})
++        result = _make_runner(wa)._resolve_enabled_toolsets_for_source(
++            cfg, _Src("webhook:mon:d"), "webhook"
++        )
++        assert result == ["selected_mcp", "web"]

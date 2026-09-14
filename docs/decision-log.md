@@ -11,6 +11,47 @@
 
 ---
 
+## 2026-09-08 — Gemma hace el turno lo bastante rápido para desaparecer
+
+**Decisión del propietario:** Gemma 4 26B-A4B IQ4_XS sustituye a Qwen
+GSQ-RCO como modelo local activo. La prueba midió 120-127 tok/s, una respuesta
+natural en español y una llamada de herramienta estructurada correcta, con
+14.39 GiB de VRAM. Los 0.95 GiB adicionales frente a Qwen son un coste menor
+que se compensa ampliamente por más del doble de velocidad. Hermes identifica
+la ruta local como Gemma para usar sus reglas de prompt y herramientas.
+
+---
+
+## 2026-09-08 — La precisión se pone donde importa, y JARVIS recupera VRAM
+
+**Decisión del propietario:** volver a un modelo con arnés es aceptable si se
+gana calidad y margen operativo. Se probó `Qwen3.8-27B-GSQ-RCO-IQ3_S`, una
+cuantización estándar GGUF por tensor de ISTA-DASLab.
+
+Frente a Heretic IQ4_XS, llama-server bajó de 16.33 a 13.44 GiB a 64K. Midió
+53-55 tok/s, dio una respuesta breve natural en español y emitió una llamada
+estructurada correcta a `crear_recordatorio`. El modelo pasa a ser el activo.
+Heretic no se elimina: conserva el rollback si el arnés resulta inaceptable
+en el uso real.
+
+---
+
+## 2026-09-08 — Grok 4.6 sale a prueba, y el razonamiento cuesta una conversación
+
+**Decisión del propietario:** `grok-4.6` de xAI quedó temporalmente como
+modelo por defecto de Hermes para medir el modelo cloud real, con Heretic
+local intacto y el control de admisión móvil todavía anclado al proveedor local.
+
+La ruta OpenAI-compatible respondió bien en español y emitió una llamada de
+herramienta estructurada correcta. Pero una respuesta breve no streaming tardó
+9.07 s, incluyendo 473 tokens de razonamiento interno; una llamada de
+herramienta tardó 5.63 s. El intento de pedir `reasoning_effort: none` recibió
+HTTP 400: Grok 4.6 no admite ese valor. La calidad no compensa esa espera para
+una presencia de voz. El propietario lo descartó inmediatamente y Heretic
+volvió a ser el modelo activo.
+
+---
+
 ## 2026-09-07 — The credential moves to a header, and the web page goes
 
 **The measurement, and it took an instrumented twin socket to get it.**

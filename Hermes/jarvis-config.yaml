@@ -30,6 +30,22 @@ plugins:
       allow_tool_override: false
     jarvis:
       allow_tool_override: false
+      # M2 mobile admission remains disabled until its explicit TLS listener is
+      # configured. This policy merely defines the locally hosted model that a
+      # future authenticated mobile connection must use.
+      settings:
+        policy:
+          local_provider:
+            provider: custom:local
+            model: gemma-4-26b-a4b-it
+            base_url: http://127.0.0.1:8000/v1
+          # The physical desktop belongs to the paired owner. Family members
+          # receive their own authenticated profiles when they are enrolled.
+          desktop_principal: orelvis
+
+# M3 routes the unauthenticated physical desktop only to its paired owner.
+# Family routes are added together with each person's authenticated profile,
+# never through the synthetic `casa` identity.
     jarvis-vision:
       allow_tool_override: false
       # Starting a turn nobody asked for is a per-plugin permission, and
@@ -94,12 +110,14 @@ tts:
   provider: cosyvoice
   streaming:
     provider: cosyvoice
+    # CosyVoice zero-shot needs ~9 s before its first PCM block on this host;
+    # leave time for the remaining streamed audio after the LLM has finished.
+    finish_timeout_seconds: 30
 
 voice:
-  # The gateway speaking on its own. The widget does the speaking, from
-  # CosyVoice, so this must stay off — and it does NOT stay off by
-  # itself: it was found set to true on 2026-08-23 without anyone
-  # setting it deliberately.
+  # CosyVoice zero-shot can pause after its first PCM block. Keep Hermes'
+  # delta-to-PCM path disabled until the backend sustains a full utterance;
+  # the adapter then synthesises the complete local reply without cutting it.
   auto_tts: false
 
 # No wake word by design (widget decision 4, 2026-08-23): the strip
@@ -132,6 +150,14 @@ agent:
   # machine. This is the backstop; `--n-predict 2048` on llama-server
   # caps ONE generation, not a loop of them.
   max_turns: 25
+
+# Sensitive JARVIS actions are elevated by the platform plugin to Hermes'
+# native approval gate. A missing reply expires as a denial.
+approvals:
+  mode: manual
+  timeout: 60
+  cron_mode: deny
+  single_query_mode: deny
 
 # ── Which tools the strip may use ─────────────────────────────────────
 # Per PLATFORM, resolved by gateway/run.py::
@@ -195,6 +221,13 @@ agent:
 gateway:
   message_timestamps:
     enabled: true
+  multiplex_profiles: true
+  multiplex_profile_allowlist: [orelvis]
+  profile_routes:
+    - name: orelvis
+      platform: jarvis
+      chat_id: orelvis
+      profile: orelvis
 
 # ── The tools are offered directly, not through a search bridge ───────
 #
@@ -284,23 +317,41 @@ platform_toolsets:
 # why. Pin cron jobs themselves too (`--provider`/`--model`), or a later
 # change to this value makes Hermes skip them to avoid unintended spend.
 model:
-  default: qwen3.8-27b
+  default: gemma-4-26b-a4b-it
   provider: custom:local
   # Hermes refuses any model whose window is under 64,000 and kills the
   # turn outright, so llama-server must be started with --ctx-size 65536
   # to match.
   context_length: 65536
 
+# A 64K window is required by Hermes, but it is not a useful target for a
+# spoken conversation: replaying 20K-42K tokens adds 8-16 seconds before the
+# model can answer, and concurrent requests make it worse. The core's
+# small-context safeguard otherwise delays compaction until roughly 85% of the
+# window. Keep the window for tool-heavy turns while compacting the durable
+# session transcript before it becomes audible latency.
+compression:
+  threshold_tokens: 16000
+
+# Compression uses Hermes' auxiliary client rather than the main agent
+# request path, so it does not inherit providers.local.extra_body. Without
+# this duplicate configuration must keep Gemma's thinking channel disabled,
+# or the compressor can receive an empty visible response.
+auxiliary:
+  compression:
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
 providers:
   local:
     base_url: http://127.0.0.1:8000/v1
     api_key: no-key-required
-    default_model: qwen3.8-27b
+    default_model: gemma-4-26b-a4b-it
     extra_body:
       chat_template_kwargs:
-        # Qwen3.8 reasons by default and puts EVERYTHING into
-        # reasoning_content: `content` comes back EMPTY and the strip
-        # sits in "thinking" without ever speaking.
+        # Voice turns need direct answers rather than an internal thought
+        # channel, which the strip never speaks.
         enable_thinking: false
 
 # Note on the two fields above: provider and model are SEPARATE. Putting

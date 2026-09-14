@@ -41,7 +41,10 @@ _SERVER_TYPES = {
     "console",
     "asking",
     "working",
+    "turn.accepted",
+    "pcm.start",
 }
+_PCM_MAGIC = b"JPCM"
 
 # Said out loud when the gateway is unreachable. Silence would leave the
 # user talking to a wall — one of the few Spanish strings in this package.
@@ -57,6 +60,23 @@ def decode_live_frame(raw: bytes) -> tuple[int, bytes]:
     if len(raw) < 4:
         raise ProtocolError(f"live frame is {len(raw)} bytes, needs at least 4")
     return int.from_bytes(raw[:4], "big"), bytes(raw[4:])
+
+
+def decode_pcm_frame(raw: bytes) -> tuple[str, bytes]:
+    """Split an addressed PCM frame. Raises ProtocolError on another binary kind."""
+    if len(raw) < 6 or not raw.startswith(_PCM_MAGIC):
+        raise ProtocolError("not a PCM frame")
+    turn_length = raw[4]
+    if not 1 <= turn_length <= 64 or len(raw) <= 5 + turn_length:
+        raise ProtocolError("invalid PCM frame")
+    try:
+        turn_id = raw[5 : 5 + turn_length].decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ProtocolError("invalid PCM turn id") from exc
+    pcm = bytes(raw[5 + turn_length :])
+    if len(pcm) % 2:
+        raise ProtocolError("PCM is not int16 aligned")
+    return turn_id, pcm
 
 
 def encode_chat(
@@ -79,6 +99,29 @@ def encode_chat(
         frame["chat_id"] = chat_id
     if request_id:
         frame["request_id"] = request_id
+    return json.dumps(frame)
+
+
+def encode_turn_submit(
+    text: str,
+    user_id: str = DEFAULT_USER_ID,
+    *,
+    wake: bool = False,
+    chat_id: str | None = None,
+    client_request_id: str,
+) -> str:
+    frame: dict[str, Any] = {
+        "type": "turn.submit",
+        "message": text,
+        "user_id": user_id,
+        "client_request_id": client_request_id,
+        # Old gateways ignore this optional capability and keep sending tokens.
+        "audio": "pcm_s16le/24000",
+    }
+    if wake:
+        frame["wake"] = True
+    if chat_id:
+        frame["chat_id"] = chat_id
     return json.dumps(frame)
 
 
@@ -153,6 +196,9 @@ class GatewayClient:
         self.on_error: Callable[[str, str | None, str | None], None] = (
             lambda _m, _c=None, _r=None: None
         )
+        self.on_turn_accepted: Callable[[str, str], None] = lambda _client, _turn: None
+        self.on_pcm_start: Callable[[str], None] = lambda _turn: None
+        self.on_pcm: Callable[[str, bytes], None] = lambda _turn, _pcm: None
         # A picture for the band above the wave. It is a frame of its
         # own and never a token: an answer travels wherever the turn is
         # routed, and a path in one would be read aloud.
@@ -160,9 +206,9 @@ class GatewayClient:
         # A card for the strip: a question, a syllabus or something being
         # explained. Server to client only, like `on_photo`, and for the
         # same reason — what is drawn is not what he says.
-        self.on_ficha: Callable[[str, str, str, str | None, str | None], None] = (
-            lambda _md, _t, _f, _c, _e: None
-        )
+        self.on_ficha: Callable[
+            [str, str, str, str | None, str | None, str | None, str | None], None
+        ] = lambda _md, _t, _f, _c, _e, _chat_id=None, _request_id=None: None
         # A live view: opened, fed packets, and closed. The picture never
         # travels as a token either — see on_photo above for why.
         self.on_live_open: Callable[[str, int, bytes, int, int], None] = (
@@ -229,12 +275,12 @@ class GatewayClient:
             return request_id
         try:
             await ws.send(
-                encode_chat(
+                encode_turn_submit(
                     text,
                     self.user_id,
                     wake=wake,
                     chat_id=chat_id,
-                    request_id=request_id,
+                    client_request_id=request_id,
                 )
             )
         except asyncio.CancelledError:
@@ -250,7 +296,7 @@ class GatewayClient:
         if ws is None:
             return
         try:
-            await ws.send(json.dumps({"type": "cancel", "request_id": request_id}))
+            await ws.send(json.dumps({"type": "turn.cancel", "turn_id": request_id}))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -326,17 +372,35 @@ class GatewayClient:
         # down the path that deliberately ignores unknown types.
         if isinstance(raw, (bytes, bytearray)):
             try:
-                epoch, packet = decode_live_frame(bytes(raw))
+                pcm_turn, pcm = decode_pcm_frame(bytes(raw))
             except ProtocolError:
+                try:
+                    epoch, packet = decode_live_frame(bytes(raw))
+                except ProtocolError:
+                    return
+                self.on_live_frame(epoch, packet)
                 return
-            self.on_live_frame(epoch, packet)
+            self.on_pcm(pcm_turn, pcm)
             return
         try:
             msg = decode_server(raw)
         except ProtocolError:
             return
         kind = msg["type"]
-        if kind == "token":
+        if kind == "turn.accepted":
+            client_request_id = msg.get("client_request_id")
+            turn_id = msg.get("turn_id")
+            if isinstance(client_request_id, str) and isinstance(turn_id, str):
+                self.on_turn_accepted(client_request_id, turn_id)
+        elif kind == "pcm.start":
+            turn_id = msg.get("turn_id")
+            if (
+                isinstance(turn_id, str)
+                and msg.get("format") == "pcm_s16le"
+                and msg.get("rate") == 24000
+            ):
+                self.on_pcm_start(turn_id)
+        elif kind == "token":
             self._reply_callback(
                 self.on_token,
                 msg.get("token", ""),
@@ -382,12 +446,14 @@ class GatewayClient:
             # 2026-08-25), and this is the branch that keeps a newer
             # gateway from killing an older strip's turn.
             if tipo in {"pregunta", "plan", "explicacion"}:
-                self.on_ficha(
+                self._ficha_callback(
                     str(msg.get("md", "")),
                     tipo,
                     str(msg.get("fuente", "")),
                     msg.get("correcta"),
                     msg.get("elegida"),
+                    msg.get("chat_id"),
+                    msg.get("request_id"),
                 )
         elif kind == "live":
             try:
@@ -413,3 +479,18 @@ class GatewayClient:
             callback(value, chat_id, request_id)
         except TypeError:
             callback(value, chat_id)
+
+    def _ficha_callback(
+        self,
+        md: str,
+        tipo: str,
+        fuente: str,
+        correcta: str | None,
+        elegida: str | None,
+        chat_id: str | None,
+        request_id: str | None,
+    ) -> None:
+        try:
+            self.on_ficha(md, tipo, fuente, correcta, elegida, chat_id, request_id)
+        except TypeError:
+            self.on_ficha(md, tipo, fuente, correcta, elegida)

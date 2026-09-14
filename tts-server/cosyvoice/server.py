@@ -149,7 +149,12 @@ async def inference_zero_shot(
     # streaming happens later).
     background_tasks.add_task(_safe_unlink, path)
     prompt_text = _ensure_eop_prefix(prompt_text)
-    model_output = cosyvoice.inference_zero_shot(tts_text, prompt_text, path)
+    # JARVIS speaks Spanish; the EN/ZH frontend can fail on Spanish with
+    # digits (WeText's tagger returns empty), or expand numbers in English.
+    # The supported bypass preserves both texts and the required EOP marker.
+    model_output = cosyvoice.inference_zero_shot(
+        tts_text, prompt_text, path, text_frontend=False,
+    )
     return StreamingResponse(generate_data(model_output), background=background_tasks)
 
 

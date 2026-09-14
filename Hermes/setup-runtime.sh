@@ -74,6 +74,18 @@ actual="$(git -C "$HERMES_SRC" rev-parse HEAD)"
 }
 echo "    $HERMES_TAG @ ${HERMES_COMMIT:0:12}"
 
+# Never reset local work or partially apply a conflicting runtime fix.
+SOURCE_TOOLSETS_PATCH="$REPO_ROOT/Hermes/source-toolsets.patch"
+if git -C "$HERMES_SRC" apply --check "$SOURCE_TOOLSETS_PATCH"; then
+  git -C "$HERMES_SRC" apply "$SOURCE_TOOLSETS_PATCH"
+  echo "    source-toolsets.patch applied"
+elif git -C "$HERMES_SRC" apply --reverse --check "$SOURCE_TOOLSETS_PATCH"; then
+  echo "    source-toolsets.patch already applied"
+else
+  echo "source-toolsets.patch conflicts with runtime sources; local changes preserved. Resolve manually before retrying." >&2
+  exit 1
+fi
+
 say "2/6  Runtime venv (Python 3.11)"
 # --python 3.11: Hermes' own developer path. uv downloads the interpreter if
 # the system has none, which is the case on a box that ships only 3.12.

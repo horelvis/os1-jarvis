@@ -135,6 +135,7 @@ def register(ctx) -> None:
             handler=_handler(_aula, nombre),
             is_async=True,
         )
+    logger.info(f"jarvis-teacher: registered {len(_ESQUEMAS)} tools (toolset {TOOLSET})")
 
 
 def _handler(fabrica, nombre: str):

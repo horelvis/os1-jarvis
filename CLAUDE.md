@@ -44,9 +44,9 @@ can act on it. Not a window you open. Something that is there.
   Transparent, borderless, always above, drawn with GSK.
 - **Brain:** Hermes Agent gateway on `:7777` (plugin `jarvis`), which
   gives JARVIS tools: memory, reminders, session recall.
-- **LLM:** local `llama-server` with Qwen3.8-27B **Heretic** (GGUF) — the
-  decensored build, since 2026-09-01 — or X.AI's Grok API, a config
-  switch. §2.5 and §12 carry the trade.
+- **LLM:** local `llama-server` with **Gemma 4 26B-A4B IQ4_XS** (GGUF),
+  since 2026-09-08; Qwen GSQ-RCO and Heretic remain rollbacks. §2.5 and
+  §12 carry the trade.
 - **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process, **int8
   since 2026-09-01** — same model, 992 MiB cheaper, measured identical.
 - **Endpointing:** a second engine, Vosk `small-es` on the CPU, decides
@@ -407,12 +407,11 @@ widget imported `backend/samantha/tts.py`. It imported
 
 ### 2.5 LLM Runtime + Model
 
-**Decision (revised 2026-09-01 — the harness comes off):**
+**Decision (revised 2026-09-08 — speed without leaving the house):**
 - **Default runtime:** llama.cpp `llama-server` on this box, `:8000`.
-- **Default model:** **Qwen3.8-27B Heretic, RVN-IQ4_XS** GGUF — the
-  decensored build. 16,330 MiB with the KV cache at q4_0, **47 tok/s**.
-  §12 (2026-09-01) has what it buys, measured over nine requests, and
-  what it costs.
+- **Default model:** **Gemma 4 26B-A4B IQ4_XS** GGUF. 14,392 MiB with the
+  KV cache at q4_0, **120-127 tok/s**; Spanish and function calls measured
+  correctly. Qwen GSQ-RCO and Heretic remain on disk as rollbacks.
 - **Previous default:** Qwen3.8-27B UD-Q3_K_XL, 15,296 MiB, 52.5 tok/s.
   Still on disk, and the fallback if the Heretic ever has to go.
 - **Remote fallback:** X.AI Grok API (`https://api.x.ai`,
@@ -572,7 +571,26 @@ there is no Web Speech API.
   louder than the person. `JARVIS_WIDGET_MIC_GATE=1` remains, off by
   default, as the fallback for a box where deciding it on words is not
   enough — it deafens the microphone for as long as he speaks, which
-  works everywhere and costs being able to interrupt him at all.
+   works everywhere and costs being able to interrupt him at all.
+- **The AEC pair must stay the default, and nothing checks that it is**
+   (2026-09-13). The widget opens PortAudio's `default`, so it captures
+   from `echo-cancel-source` and plays into `echo-cancel-sink` ONLY while
+   WirePlumber's persistent default says so
+   (`~/.local/state/wireplumber/default-nodes`). Something rewrote that
+   state to the raw devices on 2026-08-26 and the widget silently
+   bypassed the AEC for weeks: his own voice came back at RMS 0.178, the
+   barge-in gate judged it "a person" and he interrupted himself
+   mid-sentence — "la voz entre cortada", with the tail of his reply
+   feeding back as a garbled turn. The AEC config
+   (`~/.config/pipewire/pipewire.conf.d/99-echo-cancel.conf`) is not
+   enough: `auto-echo-cancel` in WirePlumber loses to the persisted
+   state. Check `pw-link | rg python` — the widget must show
+   `Altavoces (con cancelación de eco)` on output and
+   `Micrófono sin eco` on input. There is a second, independent half:
+   the echo filter must be fed the FULL spoken text in the PCM path —
+   `on_token` truncated it with `limit_reply_for_speech` while Hermes
+   synthesised the whole reply, so the filter knew ~15% of what the room
+   heard. Fixed in `__main__.py`, 2026-09-13.
 - **The speech engine failing costs speed, never hearing** (2026-09-01).
   Vosk missing, or raising later, leaves the 1.2 s floor closing turns
   and every sound treated as a person: `VoskSwitch` turns the feature
@@ -1163,6 +1181,9 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-08** — Gemma makes the turn fast enough to disappear
+- **2026-09-08** — Precision moves where it matters, and JARVIS gets VRAM back
+- **2026-09-08** — Grok 4.6 is tried, and reasoning costs a conversation
 - **2026-09-07** — The credential moves to a header, and the web page goes
 - **2026-09-06** — He gains a vault, and it is not his memory
 - **2026-09-06** — One scan carries the house, not a link to it
