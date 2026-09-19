@@ -149,7 +149,26 @@ agent:
   # loop at seconds instead of at whenever a human walks past the
   # machine. This is the backstop; `--n-predict 2048` on llama-server
   # caps ONE generation, not a loop of them.
-  max_turns: 25
+  #
+  # **25 was too high, measured 2026-09-19.** The "bounds a loop at
+  # seconds" above assumed cheap iterations. A long test reached turn 9
+  # ("háblame de los pulpos") and there the model re-issued the SAME
+  # `web_search` query over and over — `octopus sleep dreaming skin 2025
+  # iScience Ribeiro Medeiros` — 15+ times. Each iteration is a search
+  # plus a model call (~5 s), so at iteration 17 the turn crossed the
+  # adapter's 90 s watchdog and died with "Algo se ha quedado a medias";
+  # the still-running agent then swallowed the next messages as
+  # "↪ Redirected current run". That is the collapse the owner reported.
+  # The tool guardrails do not catch it: they warn only (hard stops are
+  # opt-in) and the repeated result was not byte-identical, so nothing
+  # fired.
+  #
+  # 10 keeps the "several tools" case whole (the doc's own 5-9) and ends
+  # a loop in ~50 s, inside the watchdog, so the turn closes with a final
+  # answer instead of a timeout. The loop itself is still the model's
+  # (Bonsai repeats tool calls at ~77% agentic retention); this bounds
+  # the damage, it does not cure the repetition.
+  max_turns: 10
 
 # Sensitive JARVIS actions are elevated by the platform plugin to Hermes'
 # native approval gate. A missing reply expires as a denial.

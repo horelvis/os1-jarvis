@@ -13,7 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
-- 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación deja de bloquearse ✅
+- 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación y el loop de tools se acotan ✅
 - 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
 - 2026-09-19 — La voz pasa a fp16: ~15% menos latencia, sin coste de VRAM ✅
 - 2026-09-14 — La ficha del profesor inlinea sus imágenes para el móvil ✅
@@ -205,6 +205,19 @@ breaker se enclava: la sesión crece y el modelo se degrada en bucle. Los
 logs muestran lo mismo el 08, 09 y 13 de septiembre, con los modelos
 anteriores. Arreglo: `threshold_tokens: 24000` (~13.200 comprimibles →
 ~7.400, un 43% real). Es el valor más bajo que funciona.
+
+**El test largo encontró una tercera cosa: el modelo se va de herramientas.**
+12 turnos en español, ocho bien; al noveno («háblame de los pulpos») el
+modelo reemitió la misma `web_search` más de quince veces y, a ~5 s por
+iteración, cruzó el watchdog de 90 s del adaptador. El run siguió vivo y
+se tragó los mensajes siguientes como «↪ Redirected current run». Se
+reprodujo con «cuéntame la historia de España» (varias búsquedas sobre la
+Guerra Civil). Los guardarraíles de tools no lo cazan: solo avisan y el
+resultado repetido no era idéntico. `max_turns: 25` era el único backstop
+y su comentario asumía iteraciones baratas. Bajado a **10**, que respeta
+el caso «varios herramientas» (5-9) y acota un loop a ~50 s. Queda dicho
+que acota el daño, no cura la repetición, y que en un segundo pase una
+investigación larga aún rozó el watchdog arrastrando dos turnos.
 
 Cambios: `widget/jarvis_widget/speech.py`, `widget/tests/test_speech.py`,
 `Hermes/jarvis-config.yaml` (aplicado con `apply-config.sh` a la config y

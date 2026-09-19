@@ -64,6 +64,40 @@ que funciona, a propósito, para no pagar la latencia de replay que ese
 mismo comentario advierte; si algún día vuelve a enclavarse, se sube, y
 no se baja hacia el coste fijo.
 
+**3. El modelo se va de herramientas, y `max_turns: 25` ya no lo acotaba.**
+Un test largo de 12 turnos (2026-09-19) lo dejó a la vista: los ocho
+primeros turnos, bien; al noveno («háblame de los pulpos») el modelo
+reemitió la MISMA `web_search` —`octopus sleep dreaming skin 2025
+iScience Ribeiro Medeiros`— más de quince veces. Cada iteración es una
+búsqueda más una llamada al modelo (~5 s), así que en la iteración 17 el
+turno cruzó el watchdog de 90 s del adaptador y murió con «Algo se ha
+quedado a medias»; el run seguía vivo y se tragó los mensajes
+siguientes como «↪ Redirected current run». Eso es el «se colapsa» que
+reportó el propietario. Se reprodujo en un segundo pase con «cuéntame la
+historia de España»: varias `web_search` sobre la Guerra Civil, más de
+90 s, y los dos turnos siguientes arrastrados por el redirect.
+
+Los guardarraíles de herramientas no lo cazan: por defecto solo **avisan**
+(`hard_stop_enabled: False`) y el resultado repetido no era byte-idéntico,
+así que no dispararon nada. `max_turns` era el único backstop, y su
+comentario asumía iteraciones baratas («bounds a loop at seconds») que no
+lo son cuando cada una lleva una búsqueda.
+
+**El arreglo:** `agent.max_turns: 10`. Respeta el caso «varios
+herramientas» del propio comentario (5-9), y acota un loop a ~50 s,
+dentro del watchdog, de modo que el turno cierra con una respuesta final
+en vez de morir por timeout.
+
+**Lo que queda, dicho claro:** el arreglo acota el daño, no cura la
+repetición — es del modelo (Bonsai retiene ~77% de comportamiento
+agéntico). Y 10 iteraciones lentas aún pueden rozar los 90 s: en el
+segundo pase, «cuéntame la historia de España» encadenó varias búsquedas
+y volvió a cruzar el watchdog, arrastrando los dos turnos siguientes. Las
+palancas que quedan, para decidir con el propietario: bajar más
+`max_turns`, subir `turn_timeout` (más espera), o quitarle a la voz la
+costumbre de investigar lo que ya sabe (regla en la persona, que exige
+`/new` + `/approve`).
+
 ---
 
 ## 2026-09-19 — Bonsai 2 27B: un 27B ternario que devuelve 4 GB de VRAM
