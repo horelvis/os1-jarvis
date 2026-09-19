@@ -27,8 +27,12 @@ docs/superpowers/specs/2026-09-19-mascota.md).
 
 from __future__ import annotations
 
+import json
 import os
+import socket
 import sys
+import threading
+import time
 from pathlib import Path
 
 import gi
@@ -77,13 +81,49 @@ class MascotArea(Gtk.Widget):
         self._state = os.environ.get("MASCOTA_STATE", "")
         self._fixed = bool(self._state)
         self._textures: dict[str, object] = {}
+        self._lock = threading.Lock()
+        self._remote: str | None = None
+        if not os.environ.get("MASCOTA_LOCAL"):
+            threading.Thread(target=self._follow_remote, daemon=True).start()
         self.add_tick_callback(self._tick)
 
     @property
     def state(self) -> str:
+        # El plugin manda; el ciclo es solo el modo sin gateway.
+        with self._lock:
+            if self._remote:
+                return self._remote
         if self._fixed:
             return self._state
         return STATES[int(self._t / CYCLE_SECONDS) % len(STATES)]
+
+    def _follow_remote(self) -> None:
+        """Lee el estado del plugin (:8094) y reconecta sin descanso."""
+        host, _, port = os.environ.get("MASCOTA_REMOTE", "127.0.0.1:8094").partition(":")
+        address = (host or "127.0.0.1", int(port or "8094"))
+        while True:
+            try:
+                with socket.create_connection(address, timeout=5) as sock:
+                    # Bloqueante a partir de aquí: el servidor manda un
+                    # latido cada 15 s y cierra al morir, así que no hace
+                    # falta un timeout de lectura (y con él, el latido
+                    # parecía una caída).
+                    sock.settimeout(None)
+                    stream = sock.makefile("r", encoding="utf-8")
+                    print(f"mascota: conectada a {address[0]}:{address[1]}", flush=True)
+                    for line in stream:
+                        try:
+                            snapshot = json.loads(line)
+                        except ValueError:
+                            continue
+                        state = snapshot.get("state")
+                        if state in STATES:
+                            with self._lock:
+                                self._remote = state
+            except OSError:
+                with self._lock:
+                    self._remote = None
+            time.sleep(3)
 
     def _texture(self, state: str):
         if state not in self._textures:

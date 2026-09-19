@@ -725,9 +725,14 @@ os1-jarvis/
 │       ├── jarvis_voice/  ← CosyVoice, from inside the gateway
 │       ├── jarvis_vision/ ← the cameras: YOLO, the quiet rules, the
 │       │                      alert, and `mirar`. Its own README.
-│       └── jarvis_teacher/  ← he teaches a subject: the course's state,
-│                              the sources and the domain gate, the card
-│                              on the strip. Its own README.
+│       ├── jarvis_teacher/  ← he teaches a subject: the course's state,
+│       │                      the sources and the domain gate, the card
+│       │                      on the strip. Its own README.
+│       └── jarvis_mascota/  ← the boxer's state, published on
+│                              loopback :8094 for the desktop overlay.
+│                              The adapter publishes; the plugin is the
+│                              bus. Spec:
+│                              docs/superpowers/specs/2026-09-19-mascota.md
 │
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from

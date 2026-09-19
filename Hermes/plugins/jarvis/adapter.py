@@ -30,6 +30,7 @@ import asyncio
 import errno
 import json
 import os
+import socket
 import ssl
 import threading
 import unicodedata
@@ -41,6 +42,29 @@ from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 from loguru import logger
+
+# La mascota es opcional, y se le habla por loopback, no por import: los
+# dos plugins cargan como nombres de módulo distintos (`hermes_plugins.*`
+# frente a `Hermes.plugins.*`), así que un bus importado no se
+# compartiría. Un puerto sí. Fire-and-forget: publicar un estado nunca
+# debe frenar un turno.
+_MASCOTA_PORT = int(os.environ.get("JARVIS_MASCOTA_PORT", "8094"))
+
+
+def _mascota(state: str, detail: str = "") -> None:
+    """Publica un estado al plugin de la mascota, sin bloquear."""
+
+    def _send() -> None:
+        try:
+            with socket.create_connection(("127.0.0.1", _MASCOTA_PORT), timeout=0.5) as conn:
+                conn.sendall(
+                    (json.dumps({"state": state, "detail": detail}) + "\n").encode("utf-8")
+                )
+        except OSError:
+            pass  # sin mascota no pasa nada; es un adorno
+
+    threading.Thread(target=_send, name="mascota-publish", daemon=True).start()
+
 
 from .delivery import enforce_delivery
 from .mobile_auth import MobileGuard, bearer_token, load_roster
@@ -871,6 +895,7 @@ class JarvisAdapter(BasePlatformAdapter):
         elif turn is not None and turn.desktop_pcm:
             delivered = await self._send_desktop_pcm(turn, content)
         else:
+            _mascota("speaking")
             tag = self._wire_chat(chat_id)
             delivered = await self._push(
                 token(content, chat_id=tag, request_id=request_id), target=target
@@ -964,6 +989,7 @@ class JarvisAdapter(BasePlatformAdapter):
         handle.bytes_sent += len(chunk)
         if not turn.streaming_pcm:
             logger.info(f"jarvis: first PCM block for {turn.request_id}")
+            _mascota("speaking")
         turn.streaming_pcm = True
 
     async def write_streaming_tts_text(
@@ -1002,6 +1028,7 @@ class JarvisAdapter(BasePlatformAdapter):
                 f"jarvis: PCM stream closed for {handle.turn.request_id} after "
                 f"{handle.bytes_sent} bytes{' (interrupted)' if interrupted else ''}"
             )
+        _mascota("idle")
         if interrupted:
             handle.aborted = True
 
@@ -1329,6 +1356,7 @@ class JarvisAdapter(BasePlatformAdapter):
         on: a strip that is not connected cannot be holding a window
         open either.
         """
+        _mascota("asking" if open_ else "thinking")
         return await self._push(asking(open_))
 
     async def push_live_open(
@@ -1415,6 +1443,7 @@ class JarvisAdapter(BasePlatformAdapter):
         self._turns[turn.request_id] = turn
         self._active_turns[chat] = turn
         turn.watchdog = asyncio.create_task(self._watch_turn(turn))
+        _mascota("thinking")
         return turn
 
     def _abandon_turn(self, turn: _Turn) -> None:

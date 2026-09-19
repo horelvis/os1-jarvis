@@ -13,6 +13,7 @@ from .adapter import (
     ENV_ALLOWED_USERS,
     JarvisAdapter,
     _env,
+    _mascota,
     adaptadores_vivos,
     quien_pregunta,
 )
@@ -272,6 +273,9 @@ def register(ctx):
                 adaptador.push_working_threadsafe(on)
         except Exception:  # noqa: BLE001 — a hook may not take a turn down
             logger.debug("jarvis: no he podido anunciar el trabajo", exc_info=True)
+        # La mascota usa el mismo momento: `working` mientras hay una
+        # herramienta abierta, `thinking` cuando el modelo vuelve a hablar.
+        _mascota("working" if on else "thinking")
 
     def _on_pre_tool_call(tool_name: str = "", **_kwargs: Any) -> dict[str, str] | None:
         with candado:
@@ -346,6 +350,9 @@ def register(ctx):
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_llm_call", delivery_context)
+    # Segundo observador del mismo hook: antes de cada llamada al modelo,
+    # la mascota piensa. No sustituye a `delivery_context`, se suma.
+    ctx.register_hook("pre_llm_call", lambda **_kw: _mascota("thinking"))
 
     def _make_adapter(config):
         # Hermes passes platform configuration to the factory, not this

@@ -16,9 +16,14 @@ DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD \
   ./.venv/bin/python ../docs/superpowers/spikes/2026-09-19-mascota/overlay.py
 ```
 
-- `MASCOTA_STATE=thinking` fija una postura. Sin ella, cicla cada 2,5 s.
+- Por defecto **se conecta al plugin** en `127.0.0.1:8094` y sigue el
+  estado real. `MASCOTA_LOCAL=1` desconecta y cicla; `MASCOTA_STATE=thinking`
+  fija una postura; `MASCOTA_REMOTE=host:puerto` cambia el destino.
 - `MASCOTA_SIZE=180` cambia el tamaño (por defecto 170 px).
 - `MASCOTA_DIR=<ruta>` apunta a otra carpeta de PNGs.
+- El plugin se llama `jarvis-mascota` y el adaptador de la tira publica
+  en él (`thinking`/`working`/`speaking`/`asking`). Para probar sin
+  gateway: `MASCOTA_LOCAL=1`.
 - Reutiliza `theme` (el CSS que mata la sombra) y `ewmh` (above +
   skip-taskbar) de la tira, así que se coloca encima y abajo a la
   derecha, justo sobre la tira.

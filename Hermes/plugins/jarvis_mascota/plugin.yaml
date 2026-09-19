@@ -1,0 +1,38 @@
+manifest_version: 2
+api_version: 1
+name: jarvis-mascota
+label: JARVIS (mascota)
+kind: standalone
+version: 1.0.0
+description: >
+  El estado del bóxer de JARVIS. Observa la vida del gateway (turno,
+  herramienta, respuesta) y publica un estado por loopback en :8094,
+  para que el overlay de la mascota cambie de cara. NO habla, no
+  razona y no guarda conversación: solo mira y publica.
+author: Horelvis Castillo
+
+# ─────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# 1. THE PORT IS TAKEN. If something already listens on 127.0.0.1:8094
+#    the server does not start; one WARNING is logged and the gateway
+#    carries on perfectly. The mascota then never changes: it stays in
+#    `idle` (or cycles, in the spike). Named here because "the dog is
+#    frozen" has no other symptom.
+#
+# 2. THE HOOKS ARE APPROXIMATE, ON PURPOSE. `thinking` / `working` /
+#    `speaking` are inferred from lifecycle hooks, not from the strip's
+#    own turn machine. `asking` (approval pending) and `alert` (camera
+#    or reminder) are NOT wired yet — they need the platform adapter or
+#    the other plugins to publish. A frozen `idle` is not necessarily a
+#    bug; a state that never changes during a long tool turn is.
+#
+# 3. LOOPBACK ONLY, ALWAYS. 127.0.0.1, never 0.0.0.0. The mascota is a
+#    desktop ornament; it has no business on the house network.
+python_dependencies:
+  - "loguru>=0.7,<1"
+optional_env:
+  - name: JARVIS_MASCOTA_PORT
+    description: "Puerto loopback del estado de la mascota (por defecto 8094)"
+    prompt: "Puerto mascota"
+    password: false

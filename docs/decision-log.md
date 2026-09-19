@@ -11,6 +11,51 @@
 
 ---
 
+## 2026-09-19 — La mascota: un bóxer fuera de la tira, y el plugin que es bus y no fuente
+
+**Decisión del propietario:** JARVIS tiene mascota. Es un **bóxer, de
+frente**, y vive **fuera de la tira**, en un **overlay GTK4 flotante**
+alimentado por un **plugin de Hermes**. La moda de los «pets» de Codex
+(2026-05) es una capa de estado con cuerpo: no hace trabajo, dice de un
+vistazo qué está pasando. Encaja con un agente que trabaja minutos en
+segundo plano, que es exactamente lo que hace JARVIS.
+
+**No es el guijarro, y no está en la tira.** El guijarro se aprobó solo
+para el móvil (avatar, 2026-09); el «no face» de 2026-09-01 sigue en pie
+para la tira. La mascota es otra cosa: una tercera superficie, pequeña,
+opcional, que no compite con la onda. El arte lo aporta el amo: ocho PNG
+de 512×512, uno por estado.
+
+**El arte manda.** El spike intentó dibujar el personaje con curvas GSK
+—guijarro, luego doxer, luego bóxer— y salió tosco. Con las ocho imágenes
+del propietario se ve bien de un golpe. La lección es del proyecto
+entero: el código pinta, el arte decide.
+
+**El plugin es el bus; la fuente es el adaptador.** `jarvis_mascota`
+sirve el estado en `127.0.0.1:8094` (NDJSON, escuchar o publicar). Se
+llegó aquí por una medición: los **hooks de ciclo de vida de un plugin
+standalone no se disparan** en el camino de turno del gateway —probado
+con un fichero sonda que nunca apareció—, mientras que los del plugin
+`jarvis` (`kind: platform`) sí. Por eso publica el adaptador, que ya
+conoce el turno. Y por loopback y no por import: los plugins cargan como
+`hermes_plugins.*` y el adaptador importa `Hermes.plugins.*`; son módulos
+distintos y un bus importado no se compartiría. Un puerto sí, y el
+acoplamiento queda a la vista en vez de escondido tras un import que a
+veces acierta.
+
+**Cableado y pendiente:** `thinking` (empieza el turno),
+`working`/`asking` (herramienta y aprobación) y `speaking` (respuesta,
+que se revierte solo a `idle`). `error` queda a medias y `alert` (cámara,
+recordatorio, ficha) **no está**: necesita que los otros plugins
+publiquen.
+
+**Coste estético, dicho claro:** el bóxer ilustrado es a color y con
+volumen, así que rompe §1.3 (un solo color, sin sombras) **por decisión
+del propietario**, no por descuido. Es la primera cosa del proyecto que
+se salta la paleta a propósito.
+
+---
+
 ## 2026-09-19 — La tira deja de leer el protocolo en voz alta, y la compactación deja de bloquearse
 
 **El síntoma del propietario:** «JARVIS habla mal en conversaciones con

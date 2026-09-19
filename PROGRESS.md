@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-19 — La mascota: el bóxer en un overlay, con el estado que publica el adaptador ✅⏸
 - 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación y el loop de tools se acotan ✅
 - 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
 - 2026-09-19 — La voz pasa a fp16: ~15% menos latencia, sin coste de VRAM ✅
@@ -174,6 +175,41 @@ el verbo «coger» como en Madrid: «Cogeré el bus a las ocho, señor», y
 avisó de que fuera de España suena raro; el sofrito con aceite de
 oliva, cebolla, pimiento y tomate al final; registro natural y cálido,
 sin `<think>` filtrado, y llamada de herramienta en español correcta.
+
+---
+
+## 2026-09-19 — La mascota: el bóxer en un overlay, con el estado que publica el adaptador ✅⏸
+
+El propietario trajo la moda (los «pets» de Codex) y pidió una mascota
+para JARVIS. Se decidió **fuera de la tira**, en un **overlay GTK4
+flotante** alimentado por un **plugin de Hermes**, y de **frente** —un
+asistente que te mira es un compañero; de perfil es un icono—. El arte lo
+puso el amo: **ocho PNG de 512×512** de un bóxer, uno por estado.
+
+**El spike destapó que dibujar a mano no vale.** Se intentó primero el
+personaje con curvas GSK (guijarro, doxer, bóxer): salió toscos. Con el
+arte del propietario se ve bien de un golpe. **El arte manda; el código
+solo lo pinta.**
+
+**El plugin es el bus, no la fuente.** `jarvis_mascota` sirve el estado
+en `127.0.0.1:8094` (NDJSON en las dos direcciones: escuchar o publicar).
+Quien publica es el **adaptador de la plataforma `jarvis`**, que ya sabe
+el turno. Se llegó ahí por una medición incómoda: los **hooks de ciclo de
+vida de un plugin standalone no se disparan** en el camino de turno del
+gateway (probado con un fichero sonda), mientras que los del plugin
+`jarvis`, que es `kind: platform`, sí. Y se habla por TCP, no por import:
+los plugins cargan como `hermes_plugins.*` y el adaptador importa
+`Hermes.plugins.*`, módulos distintos; un bus importado no se compartiría.
+
+Cableado hoy: `thinking` (empieza el turno), `working`/`asking` (herramienta
+y aprobación), `speaking` (respuesta, se revierte solo a `idle`).
+Pendiente: `error` a medias y `alert` (cámara, recordatorio, ficha) sin
+cablear. Coste estético registrado: el bóxer ilustrado rompe §1.3 (un
+color, sin sombras) **por decisión del propietario**.
+
+Cambios: `Hermes/plugins/jarvis_mascota/` (nuevo), `Hermes/plugins/jarvis/
+{__init__,adapter}.py`, `Hermes/jarvis-config.yaml`,
+`docs/superpowers/{specs,spikes/2026-09-19-mascota}/`.
 
 ---
 

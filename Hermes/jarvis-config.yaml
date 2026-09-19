@@ -25,6 +25,9 @@ plugins:
     - jarvis-vision
     - jarvis-code
     - jarvis-teacher
+    # La mascota: solo publica estado por loopback (:8094). Si no está,
+    # no pasa nada salvo que el perro no reacciona.
+    - jarvis-mascota
   entries:
     jarvis-voice:
       allow_tool_override: false
