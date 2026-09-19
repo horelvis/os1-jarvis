@@ -1,0 +1,25 @@
+[Unit]
+Description=JARVIS (mascota, el bóxer en el escritorio)
+# Igual que la tira: mobiliario de una sesión gráfica, no un servicio de
+# arranque. Sin servidor de pantalla sale al instante y systemd lo
+# reiniciaría para siempre. PartOf lo ata a la vida de la sesión.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# DISPLAY y XAUTHORITY NO se ponen aquí: GNOME los importa al gestor de
+# systemd del usuario cuando arranca la sesión, y `After=`/`PartOf=`
+# garantizan que este servicio arranca después. Es la única versión que
+# sobrevive a que el número de sesión cambie (§2.2).
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONNOUSERSITE=1
+# `jarvis_widget` (theme y ewmh) vive en widget/; el overlay reutiliza su
+# color y su colocación. El arte está en mascota/assets/boxer/.
+Environment=PYTHONPATH=%h/git/os1-jarvis/widget
+ExecStart=%h/git/os1-jarvis/widget/.venv/bin/python %h/git/os1-jarvis/mascota/overlay.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

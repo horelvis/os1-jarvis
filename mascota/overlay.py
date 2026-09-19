@@ -1,33 +1,29 @@
-"""La mascota de JARVIS — SPIKE visual (2026-09-19).
+"""La mascota de JARVIS — el bóxer en el escritorio.
 
-Un overlay GTK4 flotante que dibuja al BÓXER de JARVIS y cambia de imagen
-según el estado. El arte son ocho PNG (fondo transparente, 512x512),
-uno por estado, en `assets/boxer/<estado>.png`.
+Un overlay GTK4 flotante, transparente y siempre encima que dibuja al
+bóxer y **lo anima**. Dos fuentes de movimiento, y conviven:
 
-NO hay plugin todavía: el estado se elige por entorno o se cicla, para
-poder juzgarlo en pantalla antes de decidir. La textura se cambia por
-estado, que es exactamente lo que hará el plugin al mandar `{"state":…}`.
+1. **Frames** (arte): si existe `assets/boxer/<estado>/` con PNGs
+   numerados, se reproducen como una animación a `MASCOTA_FPS` (por
+   defecto 8). Es el camino «spritesheet» de los pets de Codex.
+2. **Procedural**: con un solo PNG por estado, se mueve igual — respira,
+   se balancea, rebota, se inclina — con transformaciones GSK. Cada
+   estado tiene su carácter: `working` bombea, `speaking` pulsa como si
+   hablara, `alert` da un brinco, `error` se deja caer.
 
-Reutiliza `theme` (el CSS que mata la sombra) y `ewmh` (above +
-skip-taskbar) de la tira, para que se coloque igual que ella.
+El estado lo publica el plugin `jarvis-mascota` en `127.0.0.1:8094`; si
+no hay gateway, `MASCOTA_LOCAL=1` lo hace ciclar solo.
 
 Uso:
     cd widget
     DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD \
-      ./.venv/bin/python ../docs/superpowers/spikes/2026-09-19-mascota/overlay.py
-
-    MASCOTA_STATE=thinking    # fija una postura; sin ella, cicla cada 2,5 s
-    MASCOTA_SIZE=180          # tamaño en píxeles (por defecto 170)
-    MASCOTA_DIR=<ruta>        # carpeta de PNGs (por defecto ./assets/boxer)
-
-Es un esbozo desechable. Si convence, sube a `mascota/` con su propio
-paquete y su plugin de Hermes (ver
-docs/superpowers/specs/2026-09-19-mascota.md).
+      ./.venv/bin/python ../mascota/overlay.py
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import sys
@@ -42,7 +38,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 
-from gi.repository import Gdk, GLib, Graphene, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
 
 try:
     gi.require_version("GdkX11", "4.0")
@@ -57,6 +53,7 @@ TITLE = "MASCOTA"
 CYCLE_SECONDS = 2.5
 MARGIN_X = 26
 MARGIN_Y = 16
+MASCOTA_FPS = float(os.environ.get("MASCOTA_FPS", "8"))
 
 STATES = (
     "idle",
@@ -74,13 +71,43 @@ _ASSETS = Path(os.environ.get("MASCOTA_DIR", _HERE / "assets" / "boxer"))
 SIZE = int(os.environ.get("MASCOTA_SIZE", "170"))
 
 
+def motion(state: str, t: float) -> tuple[float, float, float, float, float]:
+    """Movimiento procedural de un estado: (dx, dy, scale_x, scale_y, grados).
+
+    Es lo que da vida a un PNG quieto. Los números son pequeños a
+    propósito: la mascota acompaña, no baila. El pivote está en los pies
+    (lo pone quien dibuja), así que inclinarse lee como estar de pie.
+    """
+    tau = math.tau
+    breathe = math.sin(tau * 0.25 * t)
+    sway = math.sin(tau * 0.15 * t)
+    if state == "idle":
+        return (0.6 * sway, 0.8 * breathe, 1 + 0.008 * breathe, 1 - 0.012 * breathe, 0.4 * sway)
+    if state == "listening":
+        return (0.0, -2.0, 1.0, 1.0, 1.6 * math.sin(tau * 0.35 * t))
+    if state == "thinking":
+        return (0.0, 0.5 * breathe, 1.0, 1.0, 2.6 * math.sin(tau * 0.22 * t))
+    if state == "speaking":
+        pulse = math.sin(tau * 6.0 * t)
+        return (0.0, -0.6, 1 + 0.018 * pulse, 1 + 0.010 * pulse, 0.0)
+    if state == "working":
+        return (0.0, -1.8 * abs(math.sin(tau * 1.4 * t)), 1.0, 1.0, 0.0)
+    if state == "asking":
+        return (0.0, -2.2 * abs(math.sin(tau * 1.8 * t)), 1.0, 1.0, 1.2 * math.sin(tau * 0.9 * t))
+    if state == "error":
+        return (0.0, 1.6, 1.0, 0.99, -1.0)
+    if state == "alert":
+        return (0.0, -3.2 * abs(math.sin(tau * 2.5 * t)), 1.0, 1.0, 0.0)
+    return (0.0, 0.0, 1.0, 1.0, 0.0)
+
+
 class MascotArea(Gtk.Widget):
     def __init__(self) -> None:
         super().__init__()
         self._t = 0.0
         self._state = os.environ.get("MASCOTA_STATE", "")
         self._fixed = bool(self._state)
-        self._textures: dict[str, object] = {}
+        self._frames: dict[str, list] = {}
         self._lock = threading.Lock()
         self._remote: str | None = None
         if not os.environ.get("MASCOTA_LOCAL"):
@@ -89,7 +116,6 @@ class MascotArea(Gtk.Widget):
 
     @property
     def state(self) -> str:
-        # El plugin manda; el ciclo es solo el modo sin gateway.
         with self._lock:
             if self._remote:
                 return self._remote
@@ -104,11 +130,7 @@ class MascotArea(Gtk.Widget):
         while True:
             try:
                 with socket.create_connection(address, timeout=5) as sock:
-                    # Bloqueante a partir de aquí: el servidor manda un
-                    # latido cada 15 s y cierra al morir, así que no hace
-                    # falta un timeout de lectura (y con él, el latido
-                    # parecía una caída).
-                    sock.settimeout(None)
+                    sock.settimeout(None)  # el latido de 15 s cubre la liveness
                     stream = sock.makefile("r", encoding="utf-8")
                     print(f"mascota: conectada a {address[0]}:{address[1]}", flush=True)
                     for line in stream:
@@ -125,40 +147,70 @@ class MascotArea(Gtk.Widget):
                     self._remote = None
             time.sleep(3)
 
-    def _texture(self, state: str):
-        if state not in self._textures:
-            path = _ASSETS / f"{state}.png"
+    def _load_frames(self, state: str) -> list:
+        """Los PNGs de un estado: una carpeta secuencia, o un solo fichero."""
+        if state in self._frames:
+            return self._frames[state]
+        frames: list = []
+        folder = _ASSETS / state
+        candidates: list[Path] = []
+        if folder.is_dir():
+            candidates = sorted(folder.glob("*.png"))
+        else:
+            single = _ASSETS / f"{state}.png"
+            if single.is_file():
+                candidates = [single]
+        for path in candidates:
             try:
-                self._textures[state] = Gdk.Texture.new_from_filename(str(path))
+                frames.append(Gdk.Texture.new_from_filename(str(path)))
             except Exception as exc:  # noqa: BLE001
-                print(f"mascota: falta {path}: {exc}", file=sys.stderr, flush=True)
-                self._textures[state] = None
-        return self._textures[state]
+                print(f"mascota: no pude cargar {path}: {exc}", file=sys.stderr, flush=True)
+        if not frames:
+            print(f"mascota: sin arte para «{state}» en {_ASSETS}", file=sys.stderr, flush=True)
+        self._frames[state] = frames
+        return frames
 
     def _tick(self, _widget: Gtk.Widget, clock: Gdk.FrameClock) -> bool:
         t = clock.get_frame_time() / 1_000_000
         if getattr(self, "_last", None) is None:
             self._last = t
-        dt = min(t - self._last, 0.05)
+        dt = min(t - self._last, 0.05)  # un portátil suspendido no teletransporta
         self._last = t
         self._t += dt
         self.queue_draw()
         return True
 
     def do_snapshot(self, snapshot: Gtk.Snapshot) -> None:
-        texture = self._texture(self.state)
-        if texture is None:
+        state = self.state
+        frames = self._load_frames(state)
+        if not frames:
             return
         w = float(self.get_width())
         h = float(self.get_height())
         if w <= 0 or h <= 0:
             return
-        # Cuadrada y del mismo encuadre en todas, así no salta al cambiar
-        # de estado. La textura ya trae el canal alfa.
+        texture = frames[int(self._t * MASCOTA_FPS) % len(frames)]
+
         side = min(w, h)
+        x = (w - side) / 2
+        y = (h - side) / 2
+        dx, dy, sx, sy, degrees = motion(state, self._t)
+
+        # Pivote en los pies, no en el centro: un perro sentado se inclina
+        # sobre el suelo, no sobre su ombligo.
+        px, py = w / 2, y + side * 0.92
+        transform = Gsk.Transform.new()
+        transform = transform.translate(Graphene.Point().init(px + dx, py + dy))
+        transform = transform.rotate(degrees)
+        transform = transform.scale(sx, sy)
+        transform = transform.translate(Graphene.Point().init(-px, -py))
+
         rect = Graphene.Rect()
-        rect.init((w - side) / 2, (h - side) / 2, side, side)
+        rect.init(x, y, side, side)
+        snapshot.save()
+        snapshot.transform(transform)
         snapshot.append_texture(texture, rect)
+        snapshot.restore()
 
 
 class MascotWindow(Gtk.ApplicationWindow):
@@ -200,7 +252,7 @@ class MascotWindow(Gtk.ApplicationWindow):
 
 class MascotApp(Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id="com.os1jarvis.Mascota.Spike")
+        super().__init__(application_id="com.os1jarvis.Mascota")
 
     def do_activate(self) -> None:
         # La referencia es obligatoria: sin ella la ventana se recolecta y
@@ -208,7 +260,7 @@ class MascotApp(Gtk.Application):
         self._win = MascotWindow(self)
         self._win.present()
         area = self._win.get_child()
-        print(f"mascota: arte en {_ASSETS} ({SIZE}px)", flush=True)
+        print(f"mascota: arte en {_ASSETS} ({SIZE}px, {MASCOTA_FPS:g} fps)", flush=True)
 
         def _report() -> bool:
             print(f"mascota: {area.state}", flush=True)

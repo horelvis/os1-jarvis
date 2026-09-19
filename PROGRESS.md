@@ -208,8 +208,12 @@ cablear. Coste estético registrado: el bóxer ilustrado rompe §1.3 (un
 color, sin sombras) **por decisión del propietario**.
 
 Cambios: `Hermes/plugins/jarvis_mascota/` (nuevo), `Hermes/plugins/jarvis/
-{__init__,adapter}.py`, `Hermes/jarvis-config.yaml`,
-`docs/superpowers/{specs,spikes/2026-09-19-mascota}/`.
+{__init__,adapter}.py`, `Hermes/jarvis-config.yaml`, y la superficie nueva
+`mascota/` (promovida desde el spike) con
+`systemd/jarvis-mascota.service`. El overlay, además, **se anima**: frames
+si hay una secuencia en `assets/boxer/<estado>/`, y si no movimiento
+procedural por estado (respira, se balancea, rebota, se inclina) con
+transformaciones GSK.
 
 ---
 

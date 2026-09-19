@@ -734,10 +734,13 @@ os1-jarvis/
 │                              bus. Spec:
 │                              docs/superpowers/specs/2026-09-19-mascota.md
 │
+├── mascota/                ← el bóxer en el escritorio: overlay GTK4
+│                             aparte, alimentado por el plugin
+│                             jarvis_mascota. Su propio README.
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from
 ├── systemd/                ← user units: widget, hermes, hermes-serve,
-│                             llamacpp
+│                             llamacpp, mascota
 ├── docs/
 │   ├── decision-log.md     ← §12: why things are the way they are
 │   ├── progress-2026-08.md ← the log, August: the widget era
