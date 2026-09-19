@@ -29,7 +29,9 @@ DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD \
 
 1. **Frames (arte).** Si existe `assets/boxer/<estado>/` con PNGs
    numerados, se reproducen como animación a `MASCOTA_FPS` (por defecto
-   8). Es el camino «spritesheet» de los pets de Codex.
+   12). **Los ocho están**: 36 frames de 256×256 por estado, extraídos de
+   los vídeos del propietario sobre chroma verde (key + despill). 36
+   frames a 12 fps son los 3 s originales.
 2. **Procedural.** Con un solo PNG por estado (lo que hay hoy), se mueve
    igual: respira, se balancea, rebota o se inclina con
    transformaciones GSK. Cada estado tiene su carácter —`working`

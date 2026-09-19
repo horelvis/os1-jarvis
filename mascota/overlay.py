@@ -53,7 +53,9 @@ TITLE = "MASCOTA"
 CYCLE_SECONDS = 2.5
 MARGIN_X = 26
 MARGIN_Y = 16
-MASCOTA_FPS = float(os.environ.get("MASCOTA_FPS", "8"))
+# 12 fps y 36 frames por estado = los 3 s originales. Coincide con la
+# extracción (`fps=12`) para que la animación dure lo que duraba.
+MASCOTA_FPS = float(os.environ.get("MASCOTA_FPS", "12"))
 
 STATES = (
     "idle",
