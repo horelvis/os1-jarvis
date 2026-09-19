@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación deja de bloquearse ✅
 - 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
 - 2026-09-19 — La voz pasa a fp16: ~15% menos latencia, sin coste de VRAM ✅
 - 2026-09-14 — La ficha del profesor inlinea sus imágenes para el móvil ✅
@@ -173,6 +174,41 @@ el verbo «coger» como en Madrid: «Cogeré el bus a las ocho, señor», y
 avisó de que fuera de España suena raro; el sofrito con aceite de
 oliva, cebolla, pimiento y tomate al final; registro natural y cálido,
 sin `<think>` filtrado, y llamada de herramienta en español correcta.
+
+---
+
+## 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación deja de bloquearse ✅
+
+El propietario reportó que JARVIS «habla mal en conversaciones con más de
+2 preguntas, se colapsa». No era el modelo nuevo: se reprodujo en la
+sesión viva y eran dos fallos independientes, ambos anteriores a Bonsai.
+
+**La tira hablaba los marcadores de protocolo de Hermes.** `is_system_message`
+descarta por forma (primer carácter símbolo/pictograma), pero los handoffs
+de compactación y los avisos de interrupción llegan envueltos en `[ ]`, que
+es puntuación, y pasaban. En el transcript aparecen como mensajes de rol
+`assistant`, es decir, la respuesta que se manda a la tira y se lee:
+`[PRIOR CONTEXT …]`, `[CONTEXT COMPACTION — REFERENCE ONLY] …` (4.668
+caracteres) y `Operation interrupted: waiting for model response…`. De ahí
+el inglés. Se añadió `_META_FRAME_RE` en `speech.py`: protocolo cerrado en
+mayúsculas, mientras que sus marcas (`[breath]`, `[laughter]`, `[sigh]`)
+son minúsculas y no se tocan. 3 pruebas nuevas; 800 en verde.
+
+**La compactación no podía ganar, por aritmética.** El umbral se compara
+con la petición entera, no con la transcripción: prompt de sistema 4.528
+tokens + esquemas/memoria ~6.000 = **~10.800 fijos**. Con umbral 16.000
+quedaban ~5.200 comprimibles, y el compresor retiene cola de
+`16000 × 0,20 = 3.200` más un resumen con suelo de 2.000: el resultado
+igualaba o superaba lo reemplazado. Telemetría: `failure_class:
+no_progress` (43 ms, sin llamar al LLM) y `would_grow`. Dos strikes y el
+breaker se enclava: la sesión crece y el modelo se degrada en bucle. Los
+logs muestran lo mismo el 08, 09 y 13 de septiembre, con los modelos
+anteriores. Arreglo: `threshold_tokens: 24000` (~13.200 comprimibles →
+~7.400, un 43% real). Es el valor más bajo que funciona.
+
+Cambios: `widget/jarvis_widget/speech.py`, `widget/tests/test_speech.py`,
+`Hermes/jarvis-config.yaml` (aplicado con `apply-config.sh` a la config y
+al perfil `orelvis`), y reinicio del gateway y de la tira.
 
 ---
 

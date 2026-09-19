@@ -332,8 +332,28 @@ model:
 # small-context safeguard otherwise delays compaction until roughly 85% of the
 # window. Keep the window for tool-heavy turns while compacting the durable
 # session transcript before it becomes audible latency.
+#
+# **16000 was wrong, measured 2026-09-19.** The threshold is compared against
+# the WHOLE request, but the transcript is only part of it: the system prompt
+# is 18,114 chars (~4,528 tokens) and the tool schemas, memory and timestamp
+# prefix add roughly 6,000 more, so ~10,800 tokens are FIXED before a single
+# turn. At a 16,000 threshold the compressible transcript is ~5,200 tokens;
+# the compressor keeps a verbatim tail of threshold × target_ratio (16,000 ×
+# 0.20 = 3,200) and its summary has a 2,000-token floor, so the compacted
+# result (~5,200) is the same size as what it replaced or larger. Compression
+# was therefore refused every time ("compressed transcript would be larger
+# than the original"), which counts as an ineffective strike; after two the
+# breaker latches and the session keeps growing with the model degraded and
+# looping. On the previous models too — the log shows it on 2026-09-08, 09-09
+# and 09-13 — so it is not Bonsai's fault.
+#
+# 24,000 leaves ~13,200 compressible tokens, which the compressor reduces to
+# ~7,400 (summary ~2,600 + tail 4,800): a real 43% cut, so it stops latching
+# and the loop goes away. It is deliberately the lowest value that works, to
+# keep the replay latency the paragraph above worries about. Raise it if
+# compaction ever latches again; do NOT drop it back toward the fixed cost.
 compression:
-  threshold_tokens: 16000
+  threshold_tokens: 24000
 
 # Compression uses Hermes' auxiliary client rather than the main agent
 # request path, so it does not inherit providers.local.extra_body. Without

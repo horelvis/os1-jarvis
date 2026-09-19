@@ -11,6 +11,61 @@
 
 ---
 
+## 2026-09-19 — La tira deja de leer el protocolo en voz alta, y la compactación deja de bloquearse
+
+**El síntoma del propietario:** «JARVIS habla mal en conversaciones con
+más de 2 preguntas, se colapsa». Reproducido en la sesión viva
+`20260913_214011_fb57c3e9`, no supuesto.
+
+**Dos causas, independientes, y ninguna es Bonsai.**
+
+**1. La tira hablaba los marcadores de protocolo de Hermes.** El filtro
+`is_system_message` de `widget/jarvis_widget/speech.py` descarta por
+forma: un frame que empieza por símbolo/pictograma es Hermes hablando de
+sí mismo. Pero los handoffs y las interrupciones llegan envueltos en
+`[ ]`, que es puntuación, así que pasaban y se leían en voz alta. En el
+transcript, como mensajes de rol `assistant` (o sea, la respuesta que se
+manda a la tira):
+
+- `[PRIOR CONTEXT — for reference only; not a new message] …`
+- `[CONTEXT COMPACTION — REFERENCE ONLY] …` (4.668 caracteres)
+- `Operation interrupted: waiting for model response (0.6s elapsed).`
+
+De ahí el inglés que el propietario le escuchó. Se añadió
+`_META_FRAME_RE`: el protocolo es un conjunto cerrado y en mayúsculas
+(`PRIOR CONTEXT`, `CONTEXT COMPACTION`, `END OF PRIOR CONTEXT`,
+`Operation interrupted`, `You've reached the maximum number of
+tool-calling iterations`), y sus propias marcas son minúsculas
+(`[breath]`, `[laughter]`, `[sigh]`), así que no se comen nada suyo.
+Enumerar la narración libre sería una batalla perdida; enumerar el cable
+no lo es.
+
+**2. La compactación no podía ganar, por aritmética.** El umbral se
+compara con la petición ENTERA, pero la transcripción es solo una parte:
+el prompt de sistema son 18.114 chars (~4.528 tokens) y los esquemas de
+herramientas, memoria y marca de tiempo suman ~6.000 más. Son
+**~10.800 tokens fijos** antes de un solo turno. Con
+`threshold_tokens: 16000` quedaban ~5.200 tokens comprimibles; el
+compresor retiene una cola literal de `threshold × target_ratio` =
+16.000 × 0,20 = 3.200 y su resumen tiene un suelo de 2.000, así que el
+resultado (~5.200) es del tamaño de lo que reemplaza o mayor. La
+telemetría lo confirma sin ambigüedad: `failure_class: no_progress`
+(abortado en 43 ms **sin llamar al LLM**) y `would_grow`. Cada intento
+rechazado cuenta como strike de inefectividad; a los dos, el breaker se
+enclava y la sesión crece sin límite con el modelo degradado y en bucle.
+
+**No es nuevo:** `errors.log` muestra el mismo «insufficient progress» el
+2026-09-08, 09-09 y 09-13, con los modelos anteriores.
+
+**El arreglo:** `threshold_tokens: 24000`. Deja ~13.200 tokens
+comprimibles que el compresor reduce a ~7.400 (resumen ~2.600 + cola
+4.800), un 43% real, así que deja de enclavarse. Es el valor más bajo
+que funciona, a propósito, para no pagar la latencia de replay que ese
+mismo comentario advierte; si algún día vuelve a enclavarse, se sube, y
+no se baja hacia el coste fijo.
+
+---
+
 ## 2026-09-19 — Bonsai 2 27B: un 27B ternario que devuelve 4 GB de VRAM
 
 **Decisión del propietario:** adoptar `Ternary-Bonsai-2-27B` (PrismML)

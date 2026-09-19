@@ -138,6 +138,26 @@ def test_hermes_narrating_itself_is_not_said_out_loud() -> None:
         assert is_system_message(text) is True, text
 
 
+def test_compaction_and_interrupt_protocol_is_not_said_out_loud() -> None:
+    """Verbatim from a live session on 2026-09-19, spoken as her reply.
+
+    These arrive as `assistant` messages that begin with `[` or a plain
+    letter, so the pictograph rule let every one of them through.
+    """
+    for text in (
+        "[PRIOR CONTEXT — for reference only; not a new message] "
+        "Operation interrupted: waiting for model response (0.6s elapsed).",
+        "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted "
+        "into the summary below.",
+        "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]",
+        "Operation interrupted: waiting for model response (0.6s elapsed).",
+        "Operation interrupted during retry (…)",
+        "You've reached the maximum number of tool-calling iterations "
+        "allowed. Please provide a final response.",
+    ):
+        assert is_system_message(text) is True, text
+
+
 def test_her_own_words_are_not_filtered() -> None:
     for text in (
         "La lluvia no pide permiso. Llega, lava todo un poco, y se va.",

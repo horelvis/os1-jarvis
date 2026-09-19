@@ -60,11 +60,37 @@ _MAX_SPOKEN_SENTENCES = 3
 # quiet about something that was not hers to say.
 _SPEAKABLE_LEADING_PUNCTUATION = "¿¡\"'«—-…("
 
+# The shape rule above (first character is a pictograph) misses the
+# markers Hermes wraps in `[ ]` — a bracket is punctuation, so they were
+# spoken. Measured 2026-09-19 in a live session, as `assistant` messages,
+# read out loud in English mid-conversation:
+#
+#   [PRIOR CONTEXT — for reference only; not a new message] …
+#   [CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted…
+#   [END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]
+#   Operation interrupted: waiting for model response (0.6s elapsed).
+#   You've reached the maximum number of tool-calling iterations allowed.
+#
+# These are protocol, not speech, and they are a small closed set of
+# uppercase bracket tags plus two fixed sentences. Enumerating free-form
+# narration is a losing game; enumerating the wire protocol is not. Her
+# own markers are lowercase single words (`[breath]`, `[laughter]`,
+# `[sigh]`) and never match.
+_META_FRAME_RE = re.compile(
+    r"\[\s*(?:PRIOR CONTEXT|END OF PRIOR CONTEXT|CONTEXT COMPACTION)\b"
+    r"|^\s*Operation interrupted\b"
+    r"|^\s*You've reached the maximum number of tool-calling iterations\b",
+    re.IGNORECASE,
+)
+
 
 def is_system_message(text: str) -> bool:
     """True for a frame the gateway wrote about itself. Never spoken."""
     stripped = text.strip()
     if not stripped:
+        return True
+
+    if _META_FRAME_RE.search(stripped):
         return True
 
     # '<' is a Unicode math symbol, but this is a supported voice marker.
