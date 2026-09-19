@@ -206,6 +206,16 @@ if __name__ == '__main__':
         default='iic/CosyVoice2-0.5B',
         help='local path or modelscope repo id',
     )
+    # AutoModel defaults to fp16=False, so the model ran in fp32 until
+    # 2026-09-19: ~5 GB resident and no tensor cores. fp16 only enables
+    # `torch.cuda.amp.autocast` around inference (CosyVoice3Model sets
+    # `with torch.cuda.amp.autocast(self.fp16)`); the weights stay fp32
+    # on the GPU. Default 1 because the only reason to want fp32 here is
+    # numeric debugging, not speed. Set COSYVOICE_FP16=0 to revert.
+    parser.add_argument(
+        '--fp16', type=int, default=int(os.environ.get('COSYVOICE_FP16', '1')),
+        help='autocast fp16 for the LLM and flow decoder (default 1).',
+    )
     args = parser.parse_args()
-    cosyvoice = AutoModel(model_dir=args.model_dir)
+    cosyvoice = AutoModel(model_dir=args.model_dir, fp16=bool(args.fp16))
     uvicorn.run(app, host="0.0.0.0", port=args.port)

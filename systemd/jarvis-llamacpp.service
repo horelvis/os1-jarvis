@@ -52,10 +52,34 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 
-# Gemma 4 26B-A4B, an MoE with 3.8B active parameters per token.
-# Measured here at 64K: 14,392 MiB, 120-127 tok/s, Spanish and function calls
-# verified. Qwen GSQ-RCO and Heretic remain on disk as rollbacks.
-Environment=JARVIS_LLAMA_MODEL=%h/.jarvis/models/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf
+# Ternary Bonsai 2 27B (PTQ1_0), PrismML's ternary build of Qwen3.8 27B.
+# Measured here at 64K: ~8.2 GB, 88.6 tok/s generation, Spanish and
+# function calls verified (2026-09-19). Retains 98.2% of the Qwen3.8-27B
+# FP16 benchmark score in 5.93 GB. It is based on the SAME base model the
+# project defaulted to before Gemma, so it also carries Qwen3.8's Spanish.
+#
+# **PTQ1_0, not PQ2_0, and it is a trade.** Both were benched on this
+# box the same day with llama-bench (4K ctx): PTQ1_0 91.5 tg128 / 1,569
+# pp512 against PQ2_0's 85.5 / 3,117. PTQ1_0 is 7% faster at decoding
+# and ~1 GiB smaller, and half as fast at prefill — the two packings
+# trade footprint and unpack cost, and the docs say neither is uniformly
+# faster. The owner chose the decode side on 2026-09-19: for voice, the
+# reply is what is audible and the prompt is cached between turns, so
+# the prefill cost is paid mostly on a new session or after compaction.
+# PQ2_0 is still on disk as the rollback if the prompt latency ever
+# bites.
+#
+# **It runs on the PrismML fork of llama.cpp, not upstream.** The ternary
+# weight basis needs a runtime Walsh-Hadamard transform that is not merged
+# yet; a stock build refuses these files, and a plain Q2_0 file loads
+# silently and outputs gibberish. The binary below is the prebuilt
+# prism-b10709 Linux CUDA 12.4 release, unpacked under ~/.jarvis/bin/.
+# Rollbacks, all still on disk:
+#   - Bonsai 2 27B PQ2_0: 7.25 GB, 82.8 tok/s server, 2x the prefill
+#   - Gemma 4 26B-A4B IQ4_XS: 14,392 MiB, 120-127 tok/s (the default
+#     between 2026-09-08 and 2026-09-19)
+#   - Qwen3.8-27B-GSQ-RCO-IQ3_S: 11 GB tree, the previous default
+Environment=JARVIS_LLAMA_MODEL=%h/.jarvis/models/Ternary-Bonsai-2-27B-gguf/Ternary-Bonsai-2-27B-PTQ1_0.gguf
 
 # Server bind. Default localhost; override to 0.0.0.0 if the backend
 # runs on a different host on the LAN.
@@ -73,12 +97,12 @@ Environment=JARVIS_LLAMA_NGL=99
 # "below the minimum 64,000 required by Hermes Agent".
 Environment=JARVIS_LLAMA_CTX=65536
 
-# The build in ~/git/llama.cpp, not whatever llama-server is on PATH.
-# Qwen3.8's hybrid Gated DeltaNet needs a recent build: b9115 failed to
-# load the Q3_K_XL outright ("missing tensor blk.64.ssm_conv1d.weight")
-# where b10603 loads it and runs it FOUR TIMES faster — 57 tok/s against
-# 13.7 for the Q4_K_M on the old build.
-ExecStart=%h/git/llama.cpp/build/bin/llama-server \
+# The PrismML fork, prebuilt release prism-b10709 (CUDA 12.4), not
+# whatever llama-server is on PATH and NOT ~/git/llama.cpp: Bonsai 2's
+# ternary packings are refused by upstream. See the model comment above.
+# `--alias` is the name Hermes sends (jarvis-config.yaml, model.default).
+ExecStart=%h/.jarvis/bin/llama-prism/llama-server \
+    --alias bonsai-2-27b \
     -m ${JARVIS_LLAMA_MODEL} \
     --host ${JARVIS_LLAMA_HOST} \
     --port ${JARVIS_LLAMA_PORT} \
@@ -88,15 +112,36 @@ ExecStart=%h/git/llama.cpp/build/bin/llama-server \
     --ctx-size ${JARVIS_LLAMA_CTX} \
     --jinja \
     --flash-attn on \
+# Bonsai 2 reasons by default and, like Qwen3.8 before it, puts the whole
+# thought into `reasoning_content` — `content` comes back empty and the
+# strip sits in "thinking" without ever speaking.
+#
+# **`--reasoning-budget 0` does NOT turn it off on this fork.** Measured
+# 2026-09-19 against the managed server: a request with no thinking field
+# came back `content: ""`, 250 chars of `reasoning_content`, and
+# `finish_reason: length`; sending `thinking_budget_tokens: 0` in the
+# body did not change it either. What works is the template kwarg, the
+# same one the demo's 8B scripts pass: `enable_thinking: false`. With it
+# and no `--reasoning-format none` (that option leaks a literal
+# `<think></think>` into `content`), the reply is clean.
+# The Hermes side already sends `enable_thinking: false` in
+# `providers.local.extra_body` — which is why the gateway worked while a
+# bare `curl` did not — but the server must not depend on every client
+# remembering to.
+    --reasoning-budget 0 \
+    --chat-template-kwargs '{"enable_thinking": false}' \
+# Sampling is Bonsai's own recommendation (docs.prismml.com/run/llamacpp),
+# not Qwen3's: temp 0.5, top-p 0.85, top-k 20, min-p 0. There is no
+# presence penalty in it. `--flash-attn on` and the q4_0 KV cache above
+# are unchanged from the Qwen3.8 run.
 # NOT --split-mode row: it splits tensors across several GPUs and this
 # box has one. It used to be a harmless no-op; on b10603 it is fatal —
 # "device CUDA0 does not support split buffers" — and the model never
 # loads, so the gateway answers nothing (measured 2026-08-25).
-    --temp 0.6 \
+    --temp 0.5 \
     --top-k 20 \
-    --top-p 0.95 \
+    --top-p 0.85 \
     --min-p 0 \
-    --presence-penalty 1.5 \
     --no-context-shift \
 # A ceiling on ONE generation, and the reason it exists is thermal.
 # Measured 2026-08-26: a single request reached 15,099 tokens and was

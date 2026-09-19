@@ -48,6 +48,11 @@ services:
       # and CosyVoice 3's frontend then double-loads + crashes. Our
       # overlay saves to a tempfile and passes the path instead.
       - ./server.py:/opt/CosyVoice/runtime/python/fastapi/server.py:ro
+    environment:
+      # Autocast fp16 for the LLM and flow decoder. AutoModel's own
+      # default is False, so this was off until 2026-09-19 and the model
+      # ran fp32: ~5 GB resident, no tensor cores. Set 0 to revert.
+      - COSYVOICE_FP16=${COSYVOICE_FP16:-1}
     deploy:
       resources:
         reservations:
@@ -55,9 +60,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    # CosyVoice 3 0.5B at fp16 fits comfortably in ~2 GB VRAM. With
-    # llama-server (~10 GB) + XTTS (~3 GB) on the 4090 there's still
-    # ~9 GB free, so no memory contention.
+    # CosyVoice 3 0.5B on the 4090, with llama-server (Bonsai 2 27B,
+    # ~8 GB) + widget/Whisper (~1.5 GB) resident, leaves ~9 GB free
+    # (measured 2026-09-19). No memory contention.
     restart: unless-stopped
     healthcheck:
       # The /inference_sft endpoint exists for any model that has

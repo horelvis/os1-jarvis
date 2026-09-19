@@ -13,6 +13,8 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
+- 2026-09-19 — La voz pasa a fp16: ~15% menos latencia, sin coste de VRAM ✅
 - 2026-09-14 — La ficha del profesor inlinea sus imágenes para el móvil ✅
 - 2026-09-13 — La voz volvía entre cortada: el widget llevaba semanas sin cancelación de eco ✅
 - 2026-09-09 — La política llega al resolver real; entrega móvil aún pendiente
@@ -97,6 +99,110 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+
+---
+
+## 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
+
+El propietario trajo `Bonsai 2 27B` de PrismML (publicado dos días antes)
+y pidió cambiarlo y probarlo. Es un 27B ternario (1.76 bpw, 7.25 GB en
+PQ2_0) construido sobre **Qwen3.8 27B** — la base que el proyecto ya usó
+antes de Gemma — con 262K de contexto y retención del 98.2% del FP16.
+La relevancia para JARVIS no es la calidad, que es parecida a la del
+modelo al que sucede: es el precio en VRAM.
+
+Medido en la 4090 a 64K, KV q4_0, `--flash-attn on`:
+
+| modelo | VRAM | generación |
+|---|---|---|
+| Bonsai 2 27B PQ2_0 | 9,188 MiB | 82.8 tok/s |
+| Gemma 4 26B-A4B IQ4_XS | 14,392 MiB | 120-127 tok/s |
+| Qwen3.8-27B GSQ-RCO | 13,444 MiB | 53-55 tok/s |
+
+Pierde frente a Gemma en velocidad, pero gana 4.3 GB y pasa el suelo de
+30 tok/s de §1.4 con margen. Con el widget (1.5 GB) residente quedan
+13.2 GB libres, y aun cargando CosyVoice (~5 GB) el margen deja de ser
+el ~1.1 GB que §0 llama la restricción real.
+
+**Un fork, y hay que decirlo.** Las cuantizaciones ternarias necesitan
+una transformada de Walsh–Hadamard en tiempo de ejecución que no está en
+upstream todavía: llama.cpp stock rechaza los archivos, y un `Q2_0` sin
+marcar carga en silencio y escribe basura. Se usó el prebuilt
+`prism-b10709` (Linux CUDA 12.4) en `~/.jarvis/bin/llama-prism/`; la
+unidad `jarvis-llamacpp.service` deja de apuntar a `~/git/llama.cpp`.
+Gemma y Qwen GSQ-RCO siguen en disco como rollback.
+
+**Validación:** español natural; `tool_calls` correctas a nivel de API;
+turno completo por Hermes (`thinking_ms: 0`); y una búsqueda web real
+que devolvió el 17-sep-2026. Bonsai razona por defecto, así que se
+apagó con `--reasoning-budget 0` (mismo patrón que Qwen3.8: sin eso,
+`content` llega vacío). El sampling pasó al recomendado por Bonsai
+(temp 0.5 / top-p 0.85 / top-k 20 / min-p 0), sin presencia.
+
+Cambios: `systemd/jarvis-llamacpp.service`, `Hermes/jarvis-config.yaml`
+(modelo `bonsai-2-27b` y `thinking_budget_tokens: 0`), aplicado con
+`apply-config.sh` a la config y al perfil `orelvis`.
+
+**El propietario preguntó por los 143 tok/s de la nota de prensa y la
+respuesta no es la config, es la tarjeta.** `llama-bench` del propio
+fork a 4K da tg128 **85.5** (PQ2_0) y **91.5** (PTQ1_0); por el
+servidor, **82.8** y **88.6**. El whitepaper de PrismML da, para el
+ternario en **RTX 4090, tg128 90.9**; los 143 son de una **5090**
+(1.78× el ancho de banda). Es memory-bound y cuadra: 143 × 1008/1792 ≈
+80. `--parallel 1`, KV f16 en vez de q4_0 (±2%) y `-b`/`-ub` no mueven
+nada. **Bonsai 2 no tiene drafter DSpark** —lo confirma
+`download_models.sh`—, así que la decodificación especulativa no existe
+para este modelo.
+
+**El propietario eligió PTQ1_0** (91.5 tg128, 88.6 por el servidor, ~1
+GiB menos) a cambio de la mitad de prefill, y el defecto se cambió.
+El precio se vio en el camino real: un turno en frío sobre una sesión
+larga tardó 10-17 s de prefill; con el prefijo cacheado, 2.5 s. PQ2_0
+queda como rollback.
+
+**Un susto con el thinking.** Un `curl` directo devolvía `content` vacío
+y todo en `reasoning_content`: `--reasoning-budget 0` no apaga el
+thinking en este fork, y `thinking_budget_tokens: 0` en el body tampoco.
+Lo que funciona es `enable_thinking: false` como kwarg de plantilla, sin
+`--reasoning-format none` (que deja un `<think></think>` literal en el
+texto). El gateway nunca se rompió porque Hermes ya lo mandaba; ahora lo
+manda también el servidor, y así un cliente directo no recibe silencio.
+
+**Validación del español (por el gateway):** correcto y de España. Con
+el verbo «coger» como en Madrid: «Cogeré el bus a las ocho, señor», y
+avisó de que fuera de España suena raro; el sofrito con aceite de
+oliva, cebolla, pimiento y tomate al final; registro natural y cálido,
+sin `<think>` filtrado, y llamada de herramienta en español correcta.
+
+---
+
+## 2026-09-19 — La voz pasa a fp16: ~15% menos latencia, sin coste de VRAM ✅
+
+El propietario pidió subir a VRAM todo lo que diera más velocidad de
+respuesta, ahora que Bonsai deja 9 GB libres. La auditoría del contenedor
+dice que el grueso **ya estaba** en GPU: LLM, flow, hift y el
+`speech_tokenizer_v3.onnx` corren en CUDA. Lo que faltaba era un flag:
+`AutoModel` trae `fp16=False` por defecto, así que el modelo iba en fp32
+sin tensor cores. El overlay de `server.py` pasa ahora
+`fp16=<COSYVOICE_FP16>` (por defecto `1`), que activa
+`torch.cuda.amp.autocast`; los pesos siguen fp32, de modo que la VRAM no
+cambia (~5.1 GB).
+
+Medido en la 4090, misma referencia y voz:
+
+| texto | fp32 | fp16 |
+|---|---|---|
+| «Sí.» | 0.42 s | 0.42 s |
+| una frase | 0.55 s | 0.51 s |
+| tres frases | 1.80 s | 1.52 s |
+
+Gana en cuanto pasa de una cláusula; en las muy cortas, nada. El coste
+fijo por petición es ~0.3 s. Lo único que queda en CPU es cosmético y a
+propósito: `campplus.onnx` (27 MB, embedding de hablante, que upstream
+fija a CPU) y el extractor de mel. Se documentó también que la
+arquitectura no cambia: el modelo vive en Docker en `:8093`, la
+integración con Hermes es el plugin `jarvis_voice`, y la tira habla
+directa al modelo.
 
 ---
 

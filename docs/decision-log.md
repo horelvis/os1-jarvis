@@ -11,6 +11,96 @@
 
 ---
 
+## 2026-09-19 — Bonsai 2 27B: un 27B ternario que devuelve 4 GB de VRAM
+
+**Decisión del propietario:** adoptar `Ternary-Bonsai-2-27B` (PrismML)
+como modelo local activo, primero en **PQ2_0** y el mismo día en
+**PTQ1_0** tras medir el trueque. Está construido sobre Qwen3.8
+27B — la misma base que el proyecto usó antes de Gemma — cuantizado
+end-to-end a ternario (1.76 bpw). Retiene el 98.2% del score agregado
+del FP16 en 20 benchmarks, con agéntico/tool-calling en 77.57 frente a
+79.74 del FP16, y contexto de 262K. Licencia Apache 2.0.
+
+Medido aquí, a 64K con KV q4_0 y `--flash-attn on`:
+
+| | VRAM | generación |
+|---|---|---|
+| Bonsai 2 27B PQ2_0 | **9,188 MiB** | **82.8 tok/s** |
+| Gemma 4 26B-A4B (previo) | 14,392 MiB | 120-127 tok/s |
+| Qwen3.8 GSQ-RCO (previo) | 13,444 MiB | 53-55 tok/s |
+
+Es más lento que Gemma, pero supera el suelo de 30 tok/s de §1.4 con
+holgura y deja **4.3 GB de VRAM** respecto a Gemma. Con `widget` (1.5
+GB) y el peor caso de CosyVoice (~5 GB) residentes, el margen libre pasa
+de ~1.1 GB a varios GB, que es exactamente la restricción que §0 llama
+la real.
+
+**Validación:** respuesta natural en español; llamada estructurada
+correcta a nivel API; turno completo por el gateway (`thinking_ms: 0`);
+una búsqueda web real vía Hermes que devolvió la fecha correcta
+(17-sep-2026). El contexto de 64K exigido por Hermes se mantiene y
+`--reasoning-budget 0` apaga el razonamiento — Bonsai 2 razona por
+defecto y, como Qwen3.8, dejaba `content` vacío.
+
+**Coste, y es real:** el fork de llama.cpp de PrismML. Las
+cuantizaciones ternarias necesitan una transformada de Walsh–Hadamard en
+tiempo de ejecución que aún no está en upstream; un build stock rechaza
+estos archivos y un `Q2_0` sin marcar carga en silencio y da basura. Se
+usa el binario prebuilt `prism-b10709` (Linux CUDA 12.4), en
+`~/.jarvis/bin/llama-prism/`, no `~/git/llama.cpp`. Si el fork deja de
+mantenerse, el rollback es Gemma (aún en disco).
+
+**Sampling:** el recomendado por Bonsai (temp 0.5, top-p 0.85, top-k 20,
+min-p 0), no el de Qwen3; se retiró `--presence-penalty 1.5`.
+
+**Revisión de rendimiento, mismo día.** El propietario preguntó por qué
+no se ven los 143 tok/s de la documentación. La respuesta es el
+hardware, no la configuración. `llama-bench` con el propio binario del
+fork, a 4K de contexto, da **tg128 85.5 tok/s** con PQ2_0 y **91.5** con
+PTQ1_0; por el servidor real, **82.8** y **88.6**. El whitepaper de
+PrismML mide, para el ternario de 27B en una **RTX 4090, tg128 90.9**
+(pp512 301.8); los 143 son de una **RTX 5090**, que tiene 1.78× el ancho
+de banda de memoria. El modelo es memory-bound: 143 × (1008/1792) ≈ 80,
+que es exactamente lo medido. No hay error de configuración —
+`-ngl 99`, `--flash-attn on`, `--parallel 1` y `-ctk/-ctv q4_0` frente a
+f16 (±2%) no mueven nada. **No hay drafter DSpark para Bonsai 2** (el
+script `download_models.sh` del demo lo dice: a diferencia del Ternary
+Bonsai viejo, Bonsai 2 no trae drafter), así que la decodificación
+especulativa, el único multiplicador real de la documentación
+(1.8–2.4×), no está disponible aquí.
+
+**PTQ1_0 frente a PQ2_0, medido:** PTQ1_0 es 5.53 GiB y va **7% más
+rápido en decode** (91.5 vs 85.5 tg128, 88.6 vs 82.8 por el servidor) y
+usa ~1 GiB menos, pero **procesa el prompt a la mitad** (pp512 1569 vs
+3117). **El propietario eligió PTQ1_0** por el decode, y se cambió el
+defecto. El precio se vio en el camino real: un turno en frío sobre una
+sesión ya larga tardó 10-17 s de prefill; con el prefijo cacheado, 2.5 s.
+PQ2_0 queda en disco como rollback si el arranque en frío molesta.
+
+**El thinking no se apagaba con el flag que parecía.** Medido el mismo
+día sobre el servidor gestionado: un `curl` sin campo de thinking
+devolvió `content: ""`, 250 caracteres de `reasoning_content` y
+`finish_reason: length`; mandar `thinking_budget_tokens: 0` en el body
+tampoco lo apagó. `--reasoning-budget 0` está en la unidad pero **no
+hace nada en este fork**. Lo que sí funciona es el kwarg de plantilla
+`enable_thinking: false` (el que usan los scripts del demo), y sin
+`--reasoning-format none`, que filtra un `<think></think>` literal al
+`content`. Que el gateway nunca fallara se debía a que Hermes ya manda
+ese kwarg en `providers.local.extra_body` — un cliente que no lo mande
+recibe silencio. El servidor pasa ahora el kwarg él mismo, así que no
+depende de que cada cliente se acuerde.
+
+**Validación del español (PTQ1_0, por el gateway):** correcto y de
+España. Se le pidió el verbo «coger» como en Madrid y contestó «Cogeré
+el bus a las ocho, señor» y avisó de que fuera de España suena raro; el
+sofrito lo describió con aceite de oliva, cebolla, pimiento y tomate al
+final; el registro es natural y cálido («señor», «la casa es mi casa»),
+sin bloques `<think>` ni razonamiento filtrado, y una llamada de
+herramienta en español siguió funcionando. No se aprecia regresión
+frente a Qwen3.8, que es su misma base.
+
+---
+
 ## 2026-09-08 — Gemma hace el turno lo bastante rápido para desaparecer
 
 **Decisión del propietario:** Gemma 4 26B-A4B IQ4_XS sustituye a Qwen

@@ -44,8 +44,10 @@ can act on it. Not a window you open. Something that is there.
   Transparent, borderless, always above, drawn with GSK.
 - **Brain:** Hermes Agent gateway on `:7777` (plugin `jarvis`), which
   gives JARVIS tools: memory, reminders, session recall.
-- **LLM:** local `llama-server` with **Gemma 4 26B-A4B IQ4_XS** (GGUF),
-  since 2026-09-08; Qwen GSQ-RCO and Heretic remain rollbacks. §2.5 and
+- **LLM:** local `llama-server` with **Ternary Bonsai 2 27B PTQ1_0**
+  (ternary GGUF, 1.76 bpw), since 2026-09-19. It runs on the **PrismML
+  fork** of llama.cpp — upstream refuses its ternary packings. PQ2_0,
+  Gemma 4 26B-A4B, Qwen GSQ-RCO and Heretic remain rollbacks. §2.5 and
   §12 carry the trade.
 - **STT:** faster-whisper `large-v3-turbo`, on the GPU, in-process, **int8
   since 2026-09-01** — same model, 992 MiB cheaper, measured identical.
@@ -90,21 +92,26 @@ can act on it. Not a window you open. Something that is there.
 │   + jarvis_voice (TTS)     │
 │   + jarvis_vision (cameras)│
 │   memory · cron · sessions   │       llama-server :8000
-└───────────────┬──────────────┘       (Qwen3.8-27B, local)
+└───────────────┬──────────────┘   (Bonsai 2 27B, PrismML fork)
                 └──────────────────────────────┘
 ```
 
 **The VRAM budget is the real constraint**, and it has FOUR claimants,
 not three — the fourth is the one every arithmetic here has forgotten at
-least once. Measured 2026-09-01 with everything resident:
+least once. Measured 2026-09-19 with everything resident, CosyVoice
+mid-synthesis (`Bonsai 2 27B PTQ1_0`, since):
 
 | | MiB |
 |---|---|
-| llama-server (Heretic, KV q4) | 16,330 |
-| CosyVoice | 5,080 |
-| widget (Whisper int8) | 1,534 |
+| llama-server (Bonsai 2 27B PTQ1_0, KV q4) | 8,044 |
+| CosyVoice | 5,086 |
+| widget (Whisper int8) | 1,457 |
 | **the desktop** — Xorg 99, gnome-shell 28, a browser tab 35 | ~240 |
-| **free** | **1,380 of 24,564** |
+| **free** | **~9,300 of 24,564** |
+
+The same table on 2026-09-01, with Heretic at 16,330, left **1,380 MiB**
+free. Bonsai is what moved the margin from "nothing fits" to room for the
+voice model and then some. The old numbers are in git history.
 
 A 27B at Q4_K_M does not fit alongside them at all and spills onto the
 CPU: 13.7 tok/s that way against 57 when it fits (§12, 2026-08-23).
@@ -138,7 +145,7 @@ as the primary interaction mode.
 ### Product principles (in priority order)
 
 1. **Privacy with eyes open, not absolute.** Every piece of inference
-   runs on this box: the LLM (Qwen3.8-27B on llama-server), the voice
+   runs on this box: the LLM (Bonsai 2 27B on llama-server), the voice
    (CosyVoice), the ears (Silero + Whisper) and the eyes (YOLO). Since
    2026-08-23 **nothing said in the room leaves it by default.**
 
@@ -223,7 +230,7 @@ as the primary interaction mode.
 
 ### What he is NOT
 
-- ❌ A cloud-LLM wrapper (conversational inference stays local — Qwen via llama-server)
+- ❌ A cloud-LLM wrapper (conversational inference stays local — Bonsai 2 27B via llama-server)
 - ❌ A coding assistant
 - ❌ **A visible agent.** She uses tools; she never performs using them.
   No "ejecutando 3 de 5", no tool names out loud, no step-by-step
@@ -407,16 +414,39 @@ widget imported `backend/samantha/tts.py`. It imported
 
 ### 2.5 LLM Runtime + Model
 
-**Decision (revised 2026-09-08 — speed without leaving the house):**
-- **Default runtime:** llama.cpp `llama-server` on this box, `:8000`.
-- **Default model:** **Gemma 4 26B-A4B IQ4_XS** GGUF. 14,392 MiB with the
-  KV cache at q4_0, **120-127 tok/s**; Spanish and function calls measured
-  correctly. Qwen GSQ-RCO and Heretic remain on disk as rollbacks.
-- **Previous default:** Qwen3.8-27B UD-Q3_K_XL, 15,296 MiB, 52.5 tok/s.
-  Still on disk, and the fallback if the Heretic ever has to go.
+**Decision (revised 2026-09-19 — the 27B that costs 9 GB):**
+- **Default runtime:** llama.cpp `llama-server` on this box, `:8000` —
+  but the **PrismML fork**, prebuilt `prism-b10709` (Linux CUDA 12.4) at
+  `~/.jarvis/bin/llama-prism/`. Not `~/git/llama.cpp`, and not whatever
+  is on PATH: Bonsai 2's ternary packings need a runtime Walsh–Hadamard
+  transform that is not upstream, and a stock build refuses them (a bare
+  `Q2_0` file loads silently and outputs gibberish).
+- **Default model:** **Ternary Bonsai 2 27B PTQ1_0** GGUF — Qwen3.8 27B
+  compressed end-to-end to ternary (1.76 bpw), 5.93 GB on disk. Measured
+  here at 64K with q4_0 KV: **~8.2 GB, 88.6 tok/s** server (91.5 tg128
+  in `llama-bench`), Spanish and function calls verified, 262K native
+  context. Retains 98.2% of the Qwen3.8-27B FP16 benchmark score. It
+  reasons by default, and on this fork `--reasoning-budget 0` does **not**
+  turn that off — the unit passes `--chat-template-kwargs
+  '{"enable_thinking": false}'`, which does, and without
+  `--reasoning-format none` (that leaks a literal `<think>` into
+  `content`). Sampling is Bonsai's own (temp 0.5, top-p 0.85, top-k 20,
+  min-p 0).
+  **The cost is prefill:** PTQ1_0 halves prompt processing against PQ2_0
+  (1,569 vs 3,117 pp512), so a cold, long session pays it once. The owner
+  chose the decode side on 2026-09-19.
+- **Previous default (same day):** Bonsai 2 27B PQ2_0, 7.25 GB, 82.8
+  tok/s server, twice the prefill. Still on disk. Behind both, Gemma 4
+  26B-A4B IQ4_XS (14,392 MiB, 120-127 tok/s), Qwen3.8-27B GSQ-RCO
+  (13,444 MiB, 53-55 tok/s) and Heretic.
 - **Remote fallback:** X.AI Grok API (`https://api.x.ai`,
   OpenAI-compatible), `grok-4-1-fast-non-reasoning`. One config switch;
   §1.1 for what it costs.
+
+**The trade, stated plainly:** Bonsai gives up Gemma's generation speed
+for ~6 GB of VRAM and a point where it no longer depends on a fork
+upstream may not merge. §1.4 asks for 30 tok/s; 88.6 clears it, and the
+VRAM margin is the constraint §0 calls the real one.
 
 **Why Q3 and not the usual Q4_K_M** — the only number that mattered:
 
@@ -478,7 +508,15 @@ config, not code.
 - **TTS:** **CosyVoice 3** zero-shot, in Docker on `:8093`, cloning his
   voice from one reference clip plus its transcript in `voices/`.
   24 kHz int16, synthesised clause by clause so he starts speaking
-  before the sentence is finished. ~5.5 GB of VRAM.
+  before the sentence is finished. ~5.1 GB of VRAM. **In fp16 autocast
+  since 2026-09-19** (`COSYVOICE_FP16`, default 1): `AutoModel`'s own
+  default is `fp16=False` and the model was running fp32, costing ~15%
+  on anything longer than a clause. The weights stay fp32, so VRAM is
+  unchanged; only `campplus.onnx` (27 MB) and the mel extractor remain
+  on CPU, deliberately. The Docker service is the model; the Hermes
+  integration is `Hermes/plugins/jarvis_voice/`, which registers
+  `cosyvoice` in both TTS registries, and the widget talks to the model
+  directly (the `tts` toolset is disabled for that reason).
 
 **Piper was the v3 choice** (`es_ES-davefx-medium`, CPU, ~200 ms) and
 lost on identity, not on latency: a preset voice is somebody else's.
@@ -1181,6 +1219,7 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-19** — Bonsai 2 27B: a ternary 27B that gives back 4 GB of VRAM
 - **2026-09-08** — Gemma makes the turn fast enough to disappear
 - **2026-09-08** — Precision moves where it matters, and JARVIS gets VRAM back
 - **2026-09-08** — Grok 4.6 is tried, and reasoning costs a conversation

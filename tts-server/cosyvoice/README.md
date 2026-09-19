@@ -4,6 +4,28 @@
 upstream FastAPI server. The Dockerfile pins CosyVoice to
 `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc`.
 
+## fp16 autocast (2026-09-19)
+
+`AutoModel`'s default is `fp16=False`, so the server ran the LLM and flow
+decoder in fp32 with no tensor cores. The overlay now passes
+`fp16=<COSYVOICE_FP16>` (default `1`). This only sets
+`torch.cuda.amp.autocast(True)` around inference — the weights stay fp32
+on the GPU, so **VRAM does not change** (~5.1 GB either way). Measured on
+this 4090, same references and voices:
+
+| texto | fp32 | fp16 |
+|---|---|---|
+| «Sí.» | 0.42 s | 0.42 s |
+| una frase | 0.55 s | 0.51 s |
+| tres frases | 1.80 s | 1.52 s |
+
+~15% on anything longer than a clause, nothing on the very short ones.
+The fixed cost is ~0.3 s per request. What is still on CPU is small and
+deliberate: `campplus.onnx` (27 MB, speaker embedding, hardcoded to
+`CPUExecutionProvider` by upstream) and the mel-spectrogram feature
+extractor. `speech_tokenizer_v3.onnx` and all of the LLM/flow/hift are
+on CUDA. Set `COSYVOICE_FP16=0` to revert.
+
 ## Spanish Zero-Shot Fix (2026-09-09)
 
 Reported incident: the September 9 18:40:05 UTC request completed
