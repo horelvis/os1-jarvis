@@ -169,6 +169,8 @@ class MascotArea(Gtk.Widget):
                 print(f"mascota: no pude cargar {path}: {exc}", file=sys.stderr, flush=True)
         if not frames:
             print(f"mascota: sin arte para «{state}» en {_ASSETS}", file=sys.stderr, flush=True)
+        else:
+            print(f"mascota: {state}: {len(frames)} frames", flush=True)
         self._frames[state] = frames
         return frames
 
@@ -196,7 +198,12 @@ class MascotArea(Gtk.Widget):
         side = min(w, h)
         x = (w - side) / 2
         y = (h - side) / 2
-        dx, dy, sx, sy, degrees = motion(state, self._t)
+        if len(frames) > 1:
+            # El vídeo ya trae el movimiento. Sumarle el procedural encima
+            # lo deforma y lo hace parecer mal reproducido.
+            dx, dy, sx, sy, degrees = 0.0, 0.0, 1.0, 1.0, 0.0
+        else:
+            dx, dy, sx, sy, degrees = motion(state, self._t)
 
         # Pivote en los pies, no en el centro: un perro sentado se inclina
         # sobre el suelo, no sobre su ombligo.
