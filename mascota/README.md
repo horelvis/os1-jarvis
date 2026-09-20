@@ -25,6 +25,17 @@ DISPLAY=:0 PYTHONNOUSERSITE=1 PYTHONPATH=$PWD \
 - Reutiliza `theme` (el CSS que mata la sombra) y `ewmh` (above +
   skip-taskbar) de la tira: por eso la unidad pone `PYTHONPATH=widget/`.
 
+## Quitarlo y recuperarlo
+
+**Doble click sobre el bóxer lo quita.** Un click suelto no hace nada,
+para no despedirlo sin querer. Sale con código 0 y la unidad es
+`Restart=on-failure`, así que **no vuelve solo**; se recupera cuando
+quieras:
+
+```bash
+systemctl --user start jarvis-mascota.service
+```
+
 ## Animación — dos caminos, y conviven
 
 1. **Frames (arte).** Si existe `assets/boxer/<estado>/` con PNGs

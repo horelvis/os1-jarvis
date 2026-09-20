@@ -234,6 +234,20 @@ class MascotWindow(Gtk.ApplicationWindow):
         self._ewmh: Ewmh | None = None
         self.connect("map", self._on_map)
 
+        # Doble click: se quita. Un click suelto no hace nada (para no
+        # despedirlo sin querer). Como el servicio es Restart=on-failure,
+        # salir con código 0 NO lo resucita: para recuperarlo,
+        # `systemctl --user start jarvis-mascota`.
+        gesture = Gtk.GestureClick()
+        gesture.set_button(1)
+        gesture.connect("pressed", self._on_pressed)
+        self.add_controller(gesture)
+
+    def _on_pressed(self, _gesture: Gtk.GestureClick, n_press: int, _x: float, _y: float) -> None:
+        if n_press >= 2:
+            print("mascota: doble click — me quito hasta que me vuelvan a arrancar", flush=True)
+            self.get_application().quit()
+
     def _on_map(self, _widget: Gtk.Widget) -> None:
         provider = Gtk.CssProvider()
         provider.load_from_data(theme.CSS.encode("utf-8"), -1)
