@@ -72,16 +72,16 @@ export function nearestEntities(bot, radar = RADAR, maxEntities = MAX_ENTITIES) 
 }
 
 function blockUnderfoot(bot) {
-  // Best-effort and deliberately shallow: mineflayer's block lookup can
-  // throw on an unloaded chunk, and a missing label is fine while the
-  // alternative is losing the whole snapshot to it.
+  // Best-effort and deliberately shallow: a missing label is fine while
+  // the alternative is losing the whole snapshot to it.
+  //
+  // `bot.blockAt` wants a real Vec3, not a `{x, y, z}` literal — a plain
+  // object returns null, which reads exactly like an unloaded chunk. It
+  // is what made a working world look empty while diagnosing this on
+  // 2026-09-22.
   try {
-    const position = bot.entity.position;
-    const block = bot.blockAt({
-      x: Math.floor(position.x),
-      y: Math.floor(position.y) - 1,
-      z: Math.floor(position.z),
-    });
+    const below = bot.entity.position.offset(0, -1, 0);
+    const block = bot.blockAt(below);
     return block?.name || null;
   } catch {
     return null;
