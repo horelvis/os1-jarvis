@@ -95,11 +95,23 @@ say "3/6  Plugin dependencies Hermes will not install"
 uv pip install --quiet --python "$HERMES_SRC/.venv/bin/python" "${PLUGIN_DEPS[@]}"
 echo "    ${PLUGIN_DEPS[*]}"
 
+# The Minecraft bridge is a Node program living inside a plugin
+# directory, and Hermes has no notion of it at all — not even the
+# `python_dependencies` warning the manifests get. Without this `npm ci`
+# the plugin loads, registers two tools, and both stay dark forever
+# because the bridge on :8095 was never installed.
+if command -v npm >/dev/null; then
+  npm ci --prefix "$REPO_ROOT/Hermes/plugins/jarvis_minecraft/bridge" --silent
+  echo "    npm ci  Hermes/plugins/jarvis_minecraft/bridge"
+else
+  echo "    npm not found — the Minecraft bridge will not start" >&2
+fi
+
 say "4/6  HERMES_HOME at $HERMES_HOME"
 mkdir -p "$HERMES_HOME/plugins"
 # Symlinks, not copies: the plugins are versioned source in this repo and
 # must stay editable in place. Same pattern the plan documents use.
-for plugin in jarvis_voice jarvis jarvis_vision jarvis_code jarvis_teacher; do
+for plugin in jarvis_voice jarvis jarvis_vision jarvis_code jarvis_teacher jarvis_minecraft; do
   ln -sfn "$REPO_ROOT/Hermes/plugins/$plugin" "$HERMES_HOME/plugins/$plugin"
   echo "    plugins/$plugin -> Hermes/plugins/$plugin"
 done
@@ -114,7 +126,7 @@ say "5/6  Enable them"
 # --no-allow-tool-override answers the capability prompt with "no", which is
 # what all four want (jarvis_voice declares allow_tool_override: false)
 # and what makes this scriptable. None of them replaces a built-in tool.
-for plugin in jarvis-voice jarvis jarvis-vision jarvis-code jarvis-teacher; do
+for plugin in jarvis-voice jarvis jarvis-vision jarvis-code jarvis-teacher jarvis-minecraft; do
   HERMES_HOME="$HERMES_HOME" "$HERMES_SRC/.venv/bin/hermes" plugins enable \
     "$plugin" --no-allow-tool-override >/dev/null 2>&1 || true
   echo "    $plugin"

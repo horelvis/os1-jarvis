@@ -25,9 +25,7 @@ plugins:
     - jarvis-vision
     - jarvis-code
     - jarvis-teacher
-    # La mascota: solo publica estado por loopback (:8094). Si no está,
-    # no pasa nada salvo que el perro no reacciona.
-    - jarvis-mascota
+    - jarvis-minecraft
   entries:
     jarvis-voice:
       allow_tool_override: false
@@ -102,6 +100,20 @@ plugins:
       allow_gateway_injection: true
     jarvis-teacher:
       enabled: true
+    jarvis-minecraft:
+      allow_tool_override: false
+      # Same permission as vision and code, and the same silent failure
+      # when it is missing. The body reports critical events (health low,
+      # attack, death) and this is the switch that lets them into the
+      # conversation. Without it `ctx.inject_message()` returns False and
+      # the body suffers at DEBUG level, alone. Phase 1 emits no events
+      # yet — phase 3 does — but the seam is wired and tested.
+      allow_gateway_injection: true
+      # The bridge's URL is read with
+      # `ctx.get_config("bridge", …)` → settings.bridge. The default
+      # (http://127.0.0.1:8095) is right on this box, so it is not set.
+      # settings:
+      #   bridge: http://127.0.0.1:8095
 
 # ── TTS ───────────────────────────────────────────────────────────────
 # Hermes' default provider is `edge` — Microsoft's cloud. Measured
@@ -127,6 +139,18 @@ voice:
 # listens always and a local VAD decides when someone is talking.
 wake_word:
   enabled: false
+
+# ── Mascota (petdex) ──────────────────────────────────────────────────
+# Desde 2026-09-22 la mascota es la de Hermes, no un overlay propio. Se
+# instala con `hermes pets install <slug>` (galería petdex) y se pinta en
+# la app Hermes Desktop —la que apunta a :9119— y en CLI/TUI. Puramente
+# cosmética: no toca el prompt, los tokens ni el comportamiento del
+# agente. El slug debe estar instalado en `$HERMES_HOME/pets/`, o no se
+# dibuja nada.
+display:
+  pet:
+    enabled: true
+    slug: lulu-capybara-2
 
 agent:
   # The widget speaks. With the tts toolset available the agent answers
@@ -319,6 +343,10 @@ platform_toolsets:
     - codigo
     - terminal
     - clases
+    # `mundo` carries estado_del_mundo and ir_a — the Minecraft body's
+    # tools. Same reasoning as `camaras`: a toolset of our own keeps
+    # Hermes' own game-adjacent names from being offered by accident.
+    - mundo
     # `file` — read_file / write_file / patch / search_files, which is
     # what Hermes' own `note-taking/obsidian` skill uses to reach the
     # vault at OBSIDIAN_VAULT_PATH (.env, git-ignored). Added 2026-09-06.

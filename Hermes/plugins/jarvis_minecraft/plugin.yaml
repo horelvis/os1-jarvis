@@ -1,0 +1,46 @@
+manifest_version: 2
+api_version: 1
+name: jarvis-minecraft
+label: JARVIS (mundo)
+kind: standalone
+version: 1.0.0
+description: >
+  Le da un cuerpo en Minecraft: un bot que ve el mundo y se mueve por él,
+  gobernado por las tools del toolset `mundo`. El cuerpo (Mineflayer) vive
+  en un bridge Node aparte, en loopback.
+author: Horelvis Castillo
+
+# ─────────────────────────────────────────────────────────────────────
+# How this plugin fails, and how it fails SILENTLY.
+#
+# 1. THE BRIDGE IS NOT RUNNING. The health loop cannot reach
+#    http://127.0.0.1:8095, `client.up` stays False, and the tools are
+#    simply not offered (`check_fn`) — the model never sees a tool that
+#    cannot work. One WARNING then DEBUG, on a backoff. Check
+#    `systemctl --user status jarvis-minecraft-bridge`.
+#
+# 2. THE MINECRAFT SERVER IS DOWN. The bridge is up but has no bot: it
+#    answers /state with `{"bot": null}` and /do with
+#    `{"ok": false, "error": "sin_cuerpo"}`. The tools stay offered, and
+#    a call returns a sentence. Recovery is automatic — the bridge
+#    reconnects on its own (measured 2026-09-22).
+#
+# 3. THE BRIDGE ANSWERS WITH THE WRONG VERSION OF MINECRAFT. Mineflayer
+#    refuses the handshake with "please specify the correct version", or
+#    worse, connects and decodes packets wrong. The pair is pinned in
+#    `bridge/config.js` and `server/docker-compose.yml`, and the whole
+#    story is in docs/superpowers/specs/2026-09-22-minecraft-probe.md.
+#    Do not bump either alone.
+#
+# 4. THE EVENT INJECTION IS DENIED. Starting a turn nobody asked for is
+#    default-off. Without `allow_gateway_injection: true` on this
+#    plugin's config entry, `ctx.inject_message()` returns False and what
+#    happens to the body reaches nobody — silently, at DEBUG level. This
+#    is the failure jarvis-vision and jarvis-code each hit once.
+#
+# 5. `python_dependencies` ARE DECLARED, NOT INSTALLED. Hermes warns at
+#    load naming the missing ones but never installs them; the plugin
+#    then fails to import and shows as "enabled" anyway. Only `loguru`
+#    is needed, and it is already in the gateway's runtime.
+python_dependencies:
+  - "loguru>=0.7,<1"
