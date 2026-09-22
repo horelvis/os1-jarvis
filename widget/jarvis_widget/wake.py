@@ -19,10 +19,20 @@ positive costs one unwanted answer, which he can be told to forget; a
 false negative costs trust in the whole surface. So the comparison is a
 similarity ratio, and the threshold is set where those four spellings
 pass.
+
+**And the name counts at the start of a sentence, not just of the
+transcription.** Measured 2026-09-22: the VAD glued a previous sentence
+onto his name — "…la diferencia entre…  Jarvis, ¿me escuchas?" — and a
+scan that looked only at the first two words of the whole text dropped a
+sentence that was plainly addressed to him. Whisper writes the pause, so
+the transcription is split on it and the name is looked for sentence by
+sentence. What is unchanged is the rule underneath: a name buried
+mid-sentence is somebody talking *about* him.
 """
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from difflib import SequenceMatcher
 
@@ -56,15 +66,46 @@ MAX_HOLD_SECONDS = 900.0
 # him, not to him.
 MAX_LEAD_WORDS = 2
 
-# Word characters, for splitting. Kept here rather than a regex import
-# for the same reason the rest of this module has no dependencies.
+# Word characters, for splitting and for stripping punctuation off a
+# word before it is compared to his name.
 _PUNCTUATION = ",.;:¿?¡!…\"'“”()-—"
 
 # What separates his name from the sentence after it — a comma, a pause.
 # NOT the full set above: stripping that would eat the "¿" that opens a
-# Spanish question, and "¿qué hora es?" would reach him as "qué hora
-# es?", which CosyVoice reads with the wrong intonation.
+# Spanish question, and "¿qué hora es?" would reach him as "qué hora es?",
+# which CosyVoice reads with the wrong intonation.
 _SEPARATORS = ",.;: -—"
+
+# Splitting the transcription into sentences. Whisper writes the pause
+# between two sentences as "." / "?" / "!" / "…" (or a newline), so the
+# token that follows one of those is where a fresh sentence starts — and
+# therefore where his name counts.
+_WORD = re.compile(r"\S+")
+_SENTENCE_STOPS = ".!?…"
+
+
+def _sentence_starts(tokens: list[tuple[str, int, int]], text: str) -> list[int]:
+    """Indices of the tokens that begin a sentence.
+
+    The first token always does. Every later one does when the previous
+    token ends in a sentence stop, or when one sits in the gap between
+    them — "entre..." leaves the stop inside the token, "entre. " leaves
+    it in the gap, and both are the same pause to a person.
+    """
+    starts: list[int] = []
+    previous_end = 0
+    previous_word = ""
+    for index, (word, start, end) in enumerate(tokens):
+        if index == 0:
+            starts.append(index)
+        else:
+            gap = text[previous_end:start]
+            if (previous_word and previous_word[-1] in _SENTENCE_STOPS) or any(
+                char in _SENTENCE_STOPS or char == "\n" for char in gap
+            ):
+                starts.append(index)
+        previous_word, previous_end = word, end
+    return starts
 
 
 def _fold(word: str) -> str:
@@ -131,15 +172,27 @@ class WakeWord:
         if not self.word:
             return text
 
-        words = text.split()
-        for lead in range(min(MAX_LEAD_WORDS, len(words))):
-            if _is_the_name(words[lead], self.word):
-                rest = " ".join(words[lead + 1 :]).lstrip(_SEPARATORS).strip()
-                self.named = True
-                # His name and nothing else is somebody getting his
-                # attention, and he should answer that rather than
-                # receive an empty turn.
-                return rest or text
+        # His name counts at the START OF A SENTENCE, not only at the
+        # start of the transcription. A run-on VAD segment glues a
+        # previous sentence onto the name — measured 2026-09-22, the
+        # transcription was "…cuál es la diferencia entre…  Jarvis, ¿me
+        # escuchas?" and the old scan, which looked only at the first two
+        # words of the WHOLE text, dropped it. Whisper writes the pause as
+        # "…" or ".", so the sentence after it is where the name is looked
+        # for. The rule that survives is the one that mattered: a name
+        # buried mid-sentence ("le dije a Jarvis que…") is somebody talking
+        # ABOUT him, and still does not open a turn.
+        tokens = [(m.group(), m.start(), m.end()) for m in _WORD.finditer(text)]
+        for start in _sentence_starts(tokens, text):
+            for lead in range(min(MAX_LEAD_WORDS, len(tokens) - start)):
+                word, _word_start, word_end = tokens[start + lead]
+                if _is_the_name(word, self.word):
+                    rest = text[word_end:].lstrip(_SEPARATORS + " ").strip()
+                    self.named = True
+                    # His name and nothing else is somebody getting his
+                    # attention, and he should answer that rather than
+                    # receive an empty turn.
+                    return rest or text.strip()
 
         # Inside the window a sentence needs no name — but it does not
         # extend the window on its own. Only an answer does, so a room

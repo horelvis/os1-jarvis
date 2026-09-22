@@ -93,6 +93,40 @@ def test_the_name_can_come_after_a_filler():
     assert w.heard("Oye, Jarvis, apaga la luz", now=0.0) == "apaga la luz"
 
 
+def test_a_run_on_segment_still_finds_his_name_at_a_sentence_start():
+    # Measured 2026-09-22: the VAD glued a previous sentence onto the name
+    # and the old scan, which only looked at the first two words of the
+    # WHOLE text, dropped it. Whisper wrote the pause as "…".
+    w = WakeWord()
+    texto = (
+        "Así que la misión es ver ahora cuál es la diferencia entre...  "
+        "Jarvis, ¿me escuchas?"
+    )
+    assert w.heard(texto, now=0.0) == "¿me escuchas?"
+    assert w.named is True
+
+
+def test_the_name_after_a_full_stop_still_opens_a_turn():
+    w = WakeWord()
+    assert w.heard("Hace frío hoy. Jarvis, sube la calefacción.", now=0.0) == (
+        "sube la calefacción."
+    )
+
+
+def test_the_name_after_a_question_mark_still_opens_a_turn():
+    w = WakeWord()
+    assert w.heard("¿Lo has oído? Jarvis, contéstame.", now=0.0) == "contéstame."
+
+
+def test_a_name_buried_mid_sentence_is_still_not_for_him():
+    # The rule the sentence-splitting must NOT break: a name in the middle
+    # of a sentence, with no pause before it, is somebody talking ABOUT
+    # him, not to him.
+    w = WakeWord()
+    assert w.heard("le dije a Jarvis que viniera", now=0.0) is None
+    assert w.named is False
+
+
 def test_nothing_heard_is_never_a_turn():
     w = WakeWord()
     assert w.heard("", now=0.0) is None
