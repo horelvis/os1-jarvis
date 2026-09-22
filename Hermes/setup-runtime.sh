@@ -3,10 +3,12 @@
 # Install the Hermes runtime this project pins, inside this project.
 #
 # Why in-repo: the plugins under Hermes/plugins/ are written against the
-# contracts captured in docs/superpowers/specs/hermes-contracts-v0.20.5.md.
-# A Hermes of any other version silently fails to match them — the shims the
-# tests run against cannot tell you so. Pinning the runtime next to the
-# plugins is what makes "clone and start" reproducible.
+# contracts captured in docs/superpowers/specs/hermes-contracts-v0.20.5.md
+# (captured at 0.20.5; the runtime now pins 0.21.4, re-verified 2026-09-22 —
+# see the addendum at the top of that document for what moved). A Hermes of
+# any other version silently fails to match them — the shims the tests run
+# against cannot tell you so. Pinning the runtime next to the plugins is what
+# makes "clone and start" reproducible.
 #
 # What this does NOT touch: ~/.hermes, ~/.local/bin/hermes, or any gateway
 # already running. Those belong to the machine's owner, not to JARVIS.
@@ -25,13 +27,13 @@ HERMES_HOME="$REPO_ROOT/.hermes/home"
 # The pin. The tag is for humans; the commit is what is verified, because a
 # tag can be moved and a commit cannot.
 HERMES_REPO="https://github.com/NousResearch/hermes-agent.git"
-HERMES_TAG="v2026.8.19"          # pyproject version 0.20.5
+HERMES_TAG="v2026.9.21"          # pyproject version 0.21.4
 # The COMMIT the tag points at, not the tag object's own hash. `git ls-remote
-# --tags` prints the latter for an annotated tag (v2026.8.19 -> b05e680e…);
+# --tags` prints the latter for an annotated tag (v2026.9.21 -> dd2c35f4…);
 # checking that out lands on the commit below and the verification here fails,
 # which is how this line got corrected in the first place. Read it with
-# `git ls-remote --tags <repo> "v2026.8.19^{}"`.
-HERMES_COMMIT="fcbd1076a93841fa88855acce810e342a5b78101"
+# `git ls-remote --tags <repo> "v2026.9.21^{}"`.
+HERMES_COMMIT="d337b736aa1e8ebecfab043842d13e4a2d2f48a3"
 
 # Declared in the plugin.yaml manifests — all three of them, including
 # jarvis_vision's, which until 2026-08-24 declared nothing at all and now
@@ -75,16 +77,25 @@ actual="$(git -C "$HERMES_SRC" rev-parse HEAD)"
 echo "    $HERMES_TAG @ ${HERMES_COMMIT:0:12}"
 
 # Never reset local work or partially apply a conflicting runtime fix.
-SOURCE_TOOLSETS_PATCH="$REPO_ROOT/Hermes/source-toolsets.patch"
-if git -C "$HERMES_SRC" apply --check "$SOURCE_TOOLSETS_PATCH"; then
-  git -C "$HERMES_SRC" apply "$SOURCE_TOOLSETS_PATCH"
-  echo "    source-toolsets.patch applied"
-elif git -C "$HERMES_SRC" apply --reverse --check "$SOURCE_TOOLSETS_PATCH"; then
-  echo "    source-toolsets.patch already applied"
-else
-  echo "source-toolsets.patch conflicts with runtime sources; local changes preserved. Resolve manually before retrying." >&2
-  exit 1
-fi
+# These carry the behaviour the plugins need but upstream does not provide:
+# the toolset-override semantics for the phone surface, and the streaming-TTS
+# echo/finish-timeout fixes. Each is applied idempotently.
+PATCHES=(
+  "$REPO_ROOT/Hermes/source-toolsets.patch"
+  "$REPO_ROOT/Hermes/streaming-tts.patch"
+)
+for patch in "${PATCHES[@]}"; do
+  name="$(basename "$patch")"
+  if git -C "$HERMES_SRC" apply --check "$patch"; then
+    git -C "$HERMES_SRC" apply "$patch"
+    echo "    $name applied"
+  elif git -C "$HERMES_SRC" apply --reverse --check "$patch"; then
+    echo "    $name already applied"
+  else
+    echo "$name conflicts with runtime sources; local changes preserved. Resolve manually before retrying." >&2
+    exit 1
+  fi
+done
 
 say "2/6  Runtime venv (Python 3.11)"
 # --python 3.11: Hermes' own developer path. uv downloads the interpreter if

@@ -25,8 +25,10 @@ PCM_MAGIC = b"JPCM"
 MAX_PCM_FRAME_BYTES = 48000
 
 # The same grammar as `personas._ID` in the widget and as Hermes' own
-# `_PROFILE_ID_RE` (`.hermes/src/hermes_cli/profiles.py`) — anchored,
-# lowercase, ASCII. It is duplicated rather than imported because this
+# `PROFILE_ID_RE` (`.hermes/src/hermes_constants.py`) — anchored,
+# lowercase, ASCII. `hermes_cli/profiles.py::_PROFILE_ID_RE` is only a
+# legacy alias since 0.21.4, which is why the parity test reads the
+# canonical name. It is duplicated rather than imported because this
 # plugin runs inside the gateway and must not depend on the widget;
 # `test_protocol.py`'s grammar-parity test is what keeps the copies
 # honest.

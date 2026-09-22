@@ -1,5 +1,30 @@
 # Hermes contracts, captured from source — v0.20.5
 
+> **Addendum — runtime moved to 0.21.4 (2026-09-22).** The pin is now
+> `v2026.9.21` (commit `d337b736aa1e8ebecfab043842d13e4a2d2f48a3`,
+> `pyproject.toml` version `0.21.4`). Everything below is still the record
+> of the 0.20.5 capture; re-verify a specific signature here against the new
+> commit before trusting it. What moved, and what was re-checked:
+>
+> - **The gateway was split.** `gateway/run.py` is now a facade (~6k lines)
+>   over `gateway/run_*.py`. The toolset override resolver
+>   `_resolve_enabled_toolsets_for_source` moved to `gateway/run_turn.py`
+>   (`GatewayTurnMixin`); `_adapter_for_source` was renamed
+>   `_delivery_adapter_for` (`gateway/authz_mixin.py`).
+> - **`hermes_cli/profiles.py::_PROFILE_ID_RE` is a legacy alias** for
+>   `hermes_constants.PROFILE_ID_RE`, which is now the canonical pattern.
+> - **Still intact** (proven by `hermes plugins doctor` on every plugin and
+>   by the real-resolver test): `gateway.platforms.base`
+>   (`AudioFormat`, `BasePlatformAdapter`, `MessageEvent`, `MessageType`,
+>   `SendResult`, `StreamingTTSHandle`, `build_session_key`,
+>   `toolsets_for_source`), `gateway.config.Platform`, `gateway.run.
+>   _gateway_runner_ref`, `tools.tts_streaming.{StreamingTTSProvider,
+>   register}`, `agent.tts_provider.TTSProvider`, `tools.web_tools.
+>   web_search_tool`, `hermes_cli.tools_config._get_platform_tools`.
+> - **JARVIS runtime patches** live in `Hermes/source-toolsets.patch` and
+>   `Hermes/streaming-tts.patch`, both applied idempotently by
+>   `Hermes/setup-runtime.sh`. Upstream does not provide either behaviour.
+
 **Date:** 2026-08-22
 **Method:** `git clone https://github.com/NousResearch/hermes-agent.git`,
 checked out at commit `fcbd1076a93841fa88855acce810e342a5b78101` (tag

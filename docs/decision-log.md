@@ -11,6 +11,42 @@
 
 ---
 
+## 2026-09-22 — Hermes sube a 0.21.4, y el parche del core se muda con el refactor
+
+**Decisión:** mover el pin del runtime de `v2026.8.19` (0.20.5) a
+`v2026.9.21` (0.21.4, commit `d337b736`), portando lo que el repo aplica
+sobre el core y versionando lo que hasta hoy vivía sin versionar.
+
+**No es un número.** Entre ambos releases el gateway se partió:
+`gateway/run.py` pasó de ~29k a ~6k líneas, con las fases en
+`gateway/run_*.py`. La función que parchea
+`Hermes/source-toolsets.patch` —`_resolve_enabled_toolsets_for_source`—
+ya no está en `run.py` sino en `gateway/run_turn.py`
+(`GatewayTurnMixin`), así que el parche no aplicaba y el resolver habría
+vuelto a la semántica de upstream: la lista vacía del asiento `casa`
+dejaría de apagar las tools y los plugins/MCP automáticos se colarían en
+cada override. Portado con la misma semántica y con sus tests
+(`tests/gateway/test_webhook_route_toolsets.py`, 20 en verde).
+
+**Lo que estaba sin versionar, y por qué se versiona ahora.** El cambio
+de `gateway/streaming_tts_consumer.py` (publicar cada cláusula al filtro
+de eco con `write_streaming_tts_text`) y el `finish_timeout_seconds`
+configurable en el drenaje del TTS vivían **solo** como cambios locales
+en `.hermes/src`. `setup-runtime.sh` no los conocía: al mover el pin los
+habría descartado sin ruido. Ahora son `Hermes/streaming-tts.patch`, que
+el script aplica junto al otro, idempotente y con fallo ante conflicto.
+
+**Contratos:** `hermes_cli/profiles.py::_PROFILE_ID_RE` es desde 0.21.4
+un alias legacy; el canónico es `hermes_constants.PROFILE_ID_RE`.
+`_adapter_for_source` pasó a `_delivery_adapter_for`
+(`gateway/authz_mixin.py`). Dos tests que leen fuente de Hermes
+apuntaban a los nombres viejos y se corrigieron (plugin y widget).
+
+**Evidencia:** `hermes --version` → `v0.21.4 (2026.9.21)`; `plugins
+doctor` importa y registra los seis plugins; 607 tests de plugins + 800
+del widget en verde, más los tests del core tocados. Los servicios vivos
+no se reiniciaron: el cambio queda en el repo hasta que se despliegue.
+
 ## 2026-09-22 — El cuerpo entra en Minecraft, y un perfil enrutado apagaba todos los plugins
 
 **Decisión del propietario:** JARVIS tiene un cuerpo en Minecraft. El

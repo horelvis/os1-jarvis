@@ -121,7 +121,7 @@ from Hermes.plugins.jarvis.policy import PolicyResolver
 assert issubclass(JarvisAdapter, BasePlatformAdapter)
 adapter = object.__new__(JarvisAdapter)
 runner = object.__new__(GatewayRunner)
-runner._adapter_for_source = lambda source: adapter
+runner._delivery_adapter_for = lambda source: adapter
 resolver = PolicyResolver({})
 cfg = {
     "platform_toolsets": {"jarvis": ["terminal", "file"]},

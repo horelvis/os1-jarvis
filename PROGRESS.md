@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-22 — Hermes sube a 0.21.4: el refactor del gateway, y los parches que no trae upstream ✅
 - 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
 - 2026-09-22 — La mascota se va con Hermes: fuera el bóxer, fuera el bus; un pet de petdex en el desktop ✅
 - 2026-09-19 — La mascota: el bóxer en un overlay, con el estado que publica el adaptador ✅⏸
@@ -105,6 +106,43 @@
 
 ---
 
+
+## 2026-09-22 — Hermes sube a 0.21.4: el refactor del gateway, y los parches que no trae upstream ✅
+
+El pin del runtime llevaba desde agosto en `v2026.8.19` (0.20.5). Se mueve
+a `v2026.9.21` (0.21.4, commit `d337b736`). No fue un cambio de número:
+entre ambos releases el gateway se partió —`gateway/run.py` pasó de ~29k a
+~6k líneas, con las fases en `gateway/run_*.py`—, así que los parches que
+el repo aplica sobre el core dejaron de encajar.
+
+Lo que se portó:
+
+- `Hermes/source-toolsets.patch`: el resolver
+  `_resolve_enabled_toolsets_for_source` vive ahora en
+  `gateway/run_turn.py` (`GatewayTurnMixin`), no en `run.py`. La semántica
+  no cambia: sólo sobreviven los nombres explícitos del override, la lista
+  vacía apaga todas las tools, y se siguen cayendo las desconocidas, las
+  restringidas por plataforma y las deshabilitadas.
+- `Hermes/streaming-tts.patch` (nuevo, antes vivía sin versionar en
+  `.hermes/src`): publica cada cláusula al filtro de eco del adaptador
+  (`write_streaming_tts_text`) antes de que su PCM suene, y deja que el
+  proveedor de streaming declare la ventana de drenaje
+  (`finish_timeout_seconds`, 30 en `jarvis-config.yaml`) en vez del 10 s
+  fijo. Sin versionarlo, `setup-runtime.sh` lo habría borrado al mover el
+  pin.
+- `setup-runtime.sh` aplica ahora una lista de parches, idempotente y con
+  fallo ante conflicto.
+
+Dos tests leían fuente de Hermes y apuntaban a símbolos que se movieron:
+`_PROFILE_ID_RE` (hoy alias legacy; el canónico es
+`hermes_constants.PROFILE_ID_RE`) y `_adapter_for_source` (renombrado
+`_delivery_adapter_for`). Corregidos en el plugin y en el widget.
+
+Verificación: runtime `v0.21.4`; `plugins doctor` importa y registra los
+seis plugins; **607 tests de plugins + 800 del widget** en verde; los tests
+del core tocados (`test_webhook_route_toolsets.py`,
+`test_streaming_tts_consumer.py`) también. Servicios no reiniciados: el
+cambio queda en el repo.
 
 ## 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
 
