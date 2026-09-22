@@ -76,6 +76,14 @@ test("la vida fraccionaria se redondea (un zombi pega y deja 10.833…)", () => 
   assert.equal(snapshot(bot).bot.vida, 11);
 });
 
+test("dice si está dentro del agua, no solo cerca", () => {
+  const bot = fakeBot();
+  bot.entity.isInWater = true;
+  assert.equal(snapshot(bot).bot.en_agua, true);
+  bot.entity.isInWater = false;
+  assert.equal(snapshot(bot).bot.en_agua, false);
+});
+
 test("es_de_dia distingue el mediodía de la medianoche", () => {
   const bot = fakeBot();
   bot.time.timeOfDay = 6000;

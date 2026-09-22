@@ -115,6 +115,14 @@ export function snapshot(bot, { radar = RADAR, maxEntities = MAX_ENTITIES } = {}
       hora: Number.isFinite(timeOfDay) ? timeOfDay : null,
       es_de_dia: isDay(timeOfDay),
       dimension: bot.game?.dimension ?? null,
+      // Whether the bot is IN water or lava, not just standing near it.
+      // Without this the model cannot verify a request like "entra al
+      // agua": `ir_a` only says it arrived at coordinates, and a model
+      // that cannot check the result invents one — measured 2026-09-22,
+      // when it claimed to be waist-deep while the snapshot said
+      // `grass_block`.
+      en_agua: bot.entity?.isInWater ?? false,
+      en_lava: bot.entity?.isInLava ?? false,
     },
     inventario: inventory(bot),
     entorno: {
