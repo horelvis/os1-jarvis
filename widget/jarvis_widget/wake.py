@@ -193,7 +193,7 @@ class WakeWord:
         # ABOUT him, and still does not open a turn.
         tokens = [(m.group(), m.start(), m.end()) for m in _WORD.finditer(text)]
         starts = _sentence_starts(tokens, text)
-        bounds = list(zip(starts, starts[1:] + [len(tokens)]))
+        bounds = list(zip(starts, [*starts[1:], len(tokens)]))
         for start, end in bounds:
             # His name at the start of the sentence: the command follows it.
             for lead in range(min(MAX_LEAD_WORDS, end - start)):
