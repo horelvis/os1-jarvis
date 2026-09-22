@@ -16,6 +16,12 @@ import { createServer as createHttpServer } from "node:http";
 
 const MAX_BODY = 64 * 1024; // an action is coordinates, not a file
 
+// How often an idle /events stream says something. Without it the
+// plugin's urllib read times out after 60 s and the follower reports
+// "se ha cortado el puente" every minute on an idle world — measured
+// 2026-09-22. A comment line is valid SSE and ignored by any reader.
+const KEEPALIVE_MS = 15_000;
+
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -48,8 +54,10 @@ export function createBridgeServer({
   doAction,
   subscribe = () => () => {},
   events = null,
+  keepAliveMs = KEEPALIVE_MS,
 } = {}) {
   const clients = new Set();
+  const pings = new Map();
 
   // One fan-out point. `events` is an optional emitter-like ({ on }) the
   // bot side owns; subscribe() is the seam tests use instead.
@@ -63,8 +71,17 @@ export function createBridgeServer({
       try {
         res.write(line);
       } catch {
-        clients.delete(res);
+        drop(res);
       }
+    }
+  }
+
+  function drop(res) {
+    clients.delete(res);
+    const ping = pings.get(res);
+    if (ping) {
+      clearInterval(ping);
+      pings.delete(res);
     }
   }
 
@@ -104,9 +121,20 @@ export function createBridgeServer({
         // stream is live before the first real event.
         res.write(": ok\n\n");
         clients.add(res);
+        if (keepAliveMs > 0) {
+          const ping = setInterval(() => {
+            try {
+              res.write(": ping\n\n");
+            } catch {
+              drop(res);
+            }
+          }, keepAliveMs);
+          if (typeof ping.unref === "function") ping.unref();
+          pings.set(res, ping);
+        }
         const unsubscribe = subscribe((payload) => broadcast(payload));
         req.on("close", () => {
-          clients.delete(res);
+          drop(res);
           try {
             unsubscribe();
           } catch {

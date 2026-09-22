@@ -19,6 +19,12 @@ ORELVIS = "orelvis"
 
 # The existing JARVIS platform toolsets. Keep this list here rather than
 # inheriting a process-wide default, which could silently widen mobile access.
+#
+# This tuple, NOT `platform_toolsets.jarvis` in the config, is what fixes
+# the desktop seat's toolsets: `admit_desktop()` returns it and the
+# adapter logs `toolsets=len(...)`. Adding a toolset to the yaml alone
+# changes nothing here — measured 2026-09-22, when `mundo` sat in the
+# config and the gateway still reported 12. Both places must agree.
 FULL_TOOLSETS = (
     "memory",
     "session_search",
@@ -31,6 +37,7 @@ FULL_TOOLSETS = (
     "codigo",
     "terminal",
     "clases",
+    "mundo",
     "file",
 )
 

@@ -120,3 +120,33 @@ test("una petición a una ruta que no existe es 404", async () => {
     server.close();
   }
 });
+
+test("GET /events manda keepalives en un stream inactivo", async () => {
+  // Without this the plugin's blocking read times out after 60 s and the
+  // follower reports a cut every minute on a world where nothing happens.
+  const server = createBridgeServer({
+    getState: () => ({}),
+    doAction: async () => ({}),
+    keepAliveMs: 20,
+  });
+  const port = await listen(server);
+  const controller = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    const deadline = Date.now() + 2000;
+    while (!seen.includes(": ping") && Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value);
+    }
+    assert.match(seen, /: ping/);
+  } finally {
+    controller.abort();
+    server.close();
+  }
+});
