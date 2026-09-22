@@ -22,6 +22,7 @@ import { ACTION_TIMEOUT_MS } from "./config.js";
 // without importing the plugin.
 export const SAID = {
   llegado: "He llegado.",
+  dicho: "Lo he dicho.",
   sin_camino: "No encuentro por dónde ir.",
   tardanza: "Me he quedado a medias.",
   fallo: "No he podido hacerlo.",
@@ -64,6 +65,14 @@ export function makeHandlers(bot, goals) {
     decir: (args) => decir(bot, args),
   };
 }
+
+// The sentence a successful action ends with. `decir` is not an arrival,
+// and saying "he llegado" after writing in chat would make the plugin
+// answer the wrong thing — 2026-09-22.
+const SAID_OK = {
+  ir_a: SAID.llegado,
+  decir: SAID.dicho,
+};
 
 // Which failure becomes which sentence. A path the pathfinder cannot
 // find is not an error, it is a fact about the world, and it gets its own
@@ -120,7 +129,7 @@ export class ActionQueue {
       return { ok: false, ...saidFor(error) };
     }
 
-    const answer = { ok: true, said: SAID.llegado };
+    const answer = { ok: true, said: SAID_OK[name] ?? SAID.llegado };
     if (this.snapshot) {
       try {
         answer.state = this.snapshot();

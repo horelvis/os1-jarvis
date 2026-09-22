@@ -78,6 +78,15 @@ test("una acción desconocida es un fallo, no un lanzamiento", async () => {
   assert.equal(answer.error, "desconocida");
 });
 
+test("cada acción tiene su propia frase de éxito", async () => {
+  const queue = new ActionQueue({
+    handlers: { ir_a: async () => {}, decir: async () => {} },
+    timeoutMs: 100,
+  });
+  assert.equal((await queue.run("ir_a")).said, SAID.llegado);
+  assert.equal((await queue.run("decir")).said, SAID.dicho);
+});
+
 test("el snapshot se adjunta al éxito y nunca lo estropea", async () => {
   const good = new ActionQueue({
     handlers: { noop: async () => {} },
