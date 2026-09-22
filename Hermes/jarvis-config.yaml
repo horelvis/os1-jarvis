@@ -381,14 +381,32 @@ platform_toolsets:
 # why. Pin cron jobs themselves too (`--provider`/`--model`), or a later
 # change to this value makes Hermes skip them to avoid unintended spend.
 model:
-  # Matches `--alias bonsai-2-27b` on jarvis-llamacpp.service. The name is
-  # a label llama-server echoes; it is not a real HF repo.
-  default: bonsai-2-27b
-  provider: custom:local
-  # Hermes refuses any model whose window is under 64,000 and kills the
-  # turn outright, so llama-server must be started with --ctx-size 65536
-  # to match.
+  # ── Cloud first since 2026-09-22, on the owner's instruction ──────────
+  #
+  # JARVIS runs on OpenCode Go (subscription; `OPENCODE_GO_API_KEY` in the
+  # repo `.env`, git-ignored). The reason is tool-calling: Bonsai 2 27B
+  # repeated tool calls until the turn budget ran out (~10 iterations), so
+  # anything multi-step — walking into water, building — was cut off.
+  # GLM-5.3 is picked for function calling and Spanish.
+  #
+  # **This is the project's biggest privacy change since it went local.**
+  # §1.1: every turn — the conversation, and whatever a camera puts in the
+  # prompt — now leaves the house for OpenCode. Going back is two lines:
+  # `default: bonsai-2-27b`, `provider: custom:local`, and drop
+  # `fallback_model`.
+  default: glm-5.3
+  provider: opencode-go
+  # Hermes refuses any model whose window is under 64,000. GLM-5.3 lists
+  # 1.31M, but a spoken turn does not need it: this bounds cost and replay
+  # latency, and matches the compaction floor below.
   context_length: 65536
+
+# The local body answers if the cloud does not. Same Bonsai the box ran
+# before, so a dead network or a bad key degrades to a slower, local
+# JARVIS instead of a silent one.
+fallback_model:
+  provider: custom:local
+  model: bonsai-2-27b
 
 # A 64K window is required by Hermes, but it is not a useful target for a
 # spoken conversation: replaying 20K-42K tokens adds 8-16 seconds before the
@@ -419,15 +437,14 @@ model:
 compression:
   threshold_tokens: 24000
 
-# Compression uses Hermes' auxiliary client rather than the main agent
-# request path, so it does not inherit providers.local.extra_body. Without
-# this duplicate configuration the reasoning channel stays on and the
-# compressor can receive an empty visible response.
+# Compression is a side call and must not run on the main model. The old
+# `extra_body.chat_template_kwargs.enable_thinking` below was a Bonsai /
+# Qwen-local knob; it is gone with the local default, and the Go
+# subscription's flash tier does the summarising.
 auxiliary:
   compression:
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: false
+    provider: opencode-go
+    model: glm-5.3-flash
 
 providers:
   local:
