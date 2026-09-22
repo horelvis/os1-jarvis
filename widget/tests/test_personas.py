@@ -111,16 +111,19 @@ def test_the_grammar_is_hermes_own_profile_grammar():
     # pattern: a copy only catches OUR drift, and the drift that
     # actually breaks routing in silence is HERMES changing its
     # grammar under us on a vendor update.
+    # Since 0.21.4 the canonical pattern lives in hermes_constants (imported
+    # as PROFILE_ID_RE); profiles.py keeps `_PROFILE_ID_RE` only as a legacy
+    # alias, so read the source of truth, not the alias.
     fuente = (
         pathlib.Path(__file__).resolve().parents[2]
-        / ".hermes/src/hermes_cli/profiles.py"
+        / ".hermes/src/hermes_constants.py"
     )
     if not fuente.is_file():
         pytest.skip("el árbol vendorizado de Hermes no está en esta caja")
     encontrado = re.search(
-        r"_PROFILE_ID_RE = re\.compile\(r\"(.+?)\"\)", fuente.read_text()
+        r"PROFILE_ID_RE = re\.compile\(r\"(.+?)\"\)", fuente.read_text()
     )
-    assert encontrado, "no se encuentra _PROFILE_ID_RE en profiles.py"
+    assert encontrado, "no se encuentra PROFILE_ID_RE en hermes_constants.py"
     hermes = re.compile(encontrado.group(1))
     for candidato in (
         "marta",
