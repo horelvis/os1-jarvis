@@ -49,5 +49,10 @@ Thumbs.db
 frontend/node_modules/
 frontend/dist/
 
+# Node dependencies. The Minecraft bridge is the first Node program that
+# ships with this repo (Hermes/plugins/jarvis_minecraft/bridge/); its
+# node_modules is installed by `npm ci` and never tracked.
+node_modules/
+
 # Hermes runtime pinned by Hermes/setup-runtime.sh (source, venv and HERMES_HOME)
 .hermes/
