@@ -104,8 +104,12 @@ export function snapshot(bot, { radar = RADAR, maxEntities = MAX_ENTITIES } = {}
     bot: {
       // `?? 20` and not `bot.health`: at spawn these are undefined and
       // the `health` event has not fired yet (probe, 2026-09-22).
-      vida: bot.health ?? 20,
-      comida: bot.food ?? 20,
+      //
+      // Rounded: Minecraft health is fractional (fall damage, poison),
+      // and `10.833333015441895` in the prompt is both ugly and a token
+      // sink for a distinction the model never uses.
+      vida: round(bot.health) ?? 20,
+      comida: round(bot.food) ?? 20,
       posicion: positionOf(bot.entity),
       dormido: bot.isSleeping ?? false,
       hora: Number.isFinite(timeOfDay) ? timeOfDay : null,

@@ -70,6 +70,12 @@ test("sin bot no hay snapshot, y no revienta", () => {
   assert.deepEqual(s.entorno.entidades, []);
 });
 
+test("la vida fraccionaria se redondea (un zombi pega y deja 10.833…)", () => {
+  const bot = fakeBot();
+  bot.health = 10.833333015441895;
+  assert.equal(snapshot(bot).bot.vida, 11);
+});
+
 test("es_de_dia distingue el mediodía de la medianoche", () => {
   const bot = fakeBot();
   bot.time.timeOfDay = 6000;

@@ -1,0 +1,23 @@
+[Unit]
+Description=JARVIS Minecraft bridge (Mineflayer) — the body
+# Nothing to do with the strip: the body must be reachable whether or not
+# anybody has logged in, so no PartOf=graphical-session. It does need the
+# Minecraft server, which is a Docker container, hence docker.service.
+After=network.target docker.service
+
+[Service]
+Type=simple
+# Node comes from nvm on this box, NOT /usr/bin/node. This path is the
+# resolved interpreter (`readlink -f "$(which node)"`) and it CHANGES when
+# the nvm version changes — a unit pointing at a gone version fails at
+# start with "No such file or directory" while everything else looks
+# healthy. Check it with `readlink -f "$(which node)"` before trusting it.
+ExecStart=%h/.nvm/versions/node/v22.18.0/bin/node %h/git/os1-jarvis/Hermes/plugins/jarvis_minecraft/bridge/index.js
+WorkingDirectory=%h/git/os1-jarvis/Hermes/plugins/jarvis_minecraft/bridge
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
