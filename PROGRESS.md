@@ -13,6 +13,8 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
+- 2026-09-22 — La mascota se va con Hermes: fuera el bóxer, fuera el bus; un pet de petdex en el desktop ✅
 - 2026-09-19 — La mascota: el bóxer en un overlay, con el estado que publica el adaptador ✅⏸
 - 2026-09-19 — La tira no lee el protocolo en voz alta; la compactación y el loop de tools se acotan ✅
 - 2026-09-19 — Bonsai 2 27B entra: ternario, y 4 GB de VRAM devueltos ✅
@@ -101,6 +103,69 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+---
+
+
+## 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
+
+El propietario trajo una spec de integración con Minecraft
+(`~/Downloads/hermes_minecraft_spec.md`) y pidió implementarla. El diseño
+y el plan de fases 0–1 viven en
+`docs/superpowers/specs/2026-09-22-minecraft-design.md` y
+`…/plans/2026-09-22-minecraft.md`. Una decisión de arquitectura por
+delante: la spec describía un bridge que compila un snapshot y **llama al
+LLM**; eso se descarta — Hermes ya es el cerebro, y un segundo bucle
+perdería la persona, la memoria y la sesión. El bridge es **solo el
+cuerpo**.
+
+**Lo construido.** Servidor Paper en Docker (`1.21.8`, loopback, Java 21
+dentro de la imagen); un bridge Node con Mineflayer (`state`/`do`/`events`
+en `:8095`, cola serial con deadline, reconexión propia, systemd); y el
+plugin `jarvis_minecraft` con las tools `estado_del_mundo` e `ir_a` en un
+toolset `mundo`. 24 tests Python + 23 Node, en verde, y verificados contra
+el servidor real: el bot camina, y `/state` cuenta lo que ve.
+
+**El par de versiones costó una vuelta.** Con el servidor en `1.21.1` la
+conexión llegaba a `spawn` y luego `PartialReadError` en el decodificador
+de componentes de item: medio mundo mal leído y un síntoma que parece
+otra cosa. El servidor subió a `1.21.8` y el par quedó pinneado
+(`docs/superpowers/specs/2026-09-22-minecraft-probe.md`).
+
+**Y entonces apareció lo importante, que no era Minecraft.** Las tools no
+llegaban al modelo. `toolsets=13` en el log, el plugin registrado, sin
+`check_fn` que fallara — y el modelo decía que `estado_del_mundo` no
+existía. Un proxy delante de `llama-server` capturó el payload real: **18
+tools, y ninguna de plugin**. Ni la nuestra, ni `mirar`, ni `ensename`.
+El proyecto creía que la visión y el profesor funcionaban porque en su día
+lo hicieron: `mirar` no se disparaba desde el 1-sep y `ensename` desde el
+7-sep.
+
+**La causa: `multiplex_profiles`.** Con la tira enrutada al perfil
+`orelvis`, Hermes resuelve los plugins **por perfil**, desde el
+`plugins/` de ese perfil. Los enlaces solo existían en el `HERMES_HOME`
+raíz, así que el perfil no conocía ningún plugin: las tools core
+(memoria, cron, web, terminal) son globales y seguían ahí, que es
+justo lo que hizo el fallo invisible durante semanas. `validate_toolset`
+devolvía `False` para `mundo`, `clases` y `camaras`, y el resolver los
+tiraba en silencio.
+
+**El arreglo** es un enlace por perfil, y ya está en `setup-runtime.sh` y
+documentado en `jarvis-config.yaml`: el payload pasó de **18 a 27 tools**,
+con la ruta intacta y sin tocar la máquina. Es un fallo preexistente, no
+de este trabajo, y merecía encontrarse.
+
+**La persona.** `Hermes/jarvis-soul.md` decía «una inteligencia sin
+cuerpo»; ahora reconoce el de Minecraft sin dejar de ser la presencia de
+la casa. El `platform_hint` se lee al arrancar el gateway, así que el
+cambio exige reinicio **y** sesión nueva (`/new` + `/approve`): el primer
+intento siguió diciendo «sin cuerpo» hasta que se cumplieron los dos.
+
+**Validado por sonda, no por voz todavía.** Preguntado dónde está, llama
+`estado_del_mundo` y responde con la posición real (`39,66,-67`, hierba,
+de noche); mandado a unas coordenadas, llama `ir_a` y el bot se mueve
+(medido: llegó a `45,66,-67`). **Falta la prueba con una persona
+hablando a la tira** — es la Task 10 del plan y no la puede hacer un
+test.
 
 ---
 
@@ -175,6 +240,37 @@ el verbo «coger» como en Madrid: «Cogeré el bus a las ocho, señor», y
 avisó de que fuera de España suena raro; el sofrito con aceite de
 oliva, cebolla, pimiento y tomate al final; registro natural y cálido,
 sin `<think>` filtrado, y llamada de herramienta en español correcta.
+
+---
+
+## 2026-09-22 — La mascota se va con Hermes: fuera el bóxer, fuera el bus; un pet de petdex en el desktop ✅
+
+El propietario vio que la mascota de Orca «funciona mejor» y preguntó si
+se podía traer a Hermes. La revisión dio la vuelta a la premisa: **Hermes
+ya tiene mascota**, y la de Orca es un port de esa misma línea (los
+«pets» de Codex / petdex, atlas 8×9 de celdas 192×208). Decisión: quitar
+la nuestra y usar la de Hermes.
+
+**Se quitó:** `mascota/` (overlay GTK4 y arte del bóxer), el plugin
+`jarvis_mascota` con su bus NDJSON en `:8094`,
+`systemd/jarvis-mascota.service` (y la unidad instalada, deshabilitada),
+la entrada `jarvis-mascota` de `plugins.enabled`, y las llamadas
+`_mascota(...)` del adaptador `jarvis`. El proyecto vuelve de tres
+superficies a dos.
+
+**Se puso:** `display.pet` en `Hermes/jarvis-config.yaml`
+(`enabled: true`, `slug: lulu-capybara-2`) y el pet instalado con
+`hermes pets install lulu-capybara-2 --select`, que vive en
+`.hermes/home/pets/lulu-capybara-2/`. `pets doctor` da `✓ ready`.
+
+**Lo que hay que saber:** Hermes pinta su pet en CLI/TUI y en la app
+Hermes Desktop, no en la tira. Para verlo hace falta
+`jarvis-hermes-serve.service` (`hermes serve --port 9119`), hoy
+**disabled** y sin `HERMES_DASHBOARD_SESSION_TOKEN` en un drop-in; y la
+app apuntada a `http://127.0.0.1:9119`. Se pierde el vocabulario propio
+—Hermes no tiene `speaking` ni `listening`— y el pet no reacciona al
+turno si solo se mira la tira. El «por qué» completo, en
+`docs/decision-log.md` (2026-09-22).
 
 ---
 

@@ -11,6 +11,103 @@
 
 ---
 
+## 2026-09-22 — El cuerpo entra en Minecraft, y un perfil enrutado apagaba todos los plugins
+
+**Decisión del propietario:** JARVIS tiene un cuerpo en Minecraft. El
+interés es entrar al mundo y verle jugar, e ir añadiendo juegos. El
+diseño y el plan de fases 0–1 están en
+`docs/superpowers/specs/2026-09-22-minecraft-design.md` y
+`…/plans/2026-09-22-minecraft.md`; la spec original que trajo el
+propietario (`~/Downloads/hermes_minecraft_spec.md`) queda como origen.
+
+**La spec describía un segundo cerebro, y no se implementó así.** Proponía
+un «Agent Bridge» que compila un snapshot del mundo y **llama al LLM** con
+`tool_calls`. Aquí Hermes ya es el bucle de tools y quien tiene la
+persona, la memoria y la sesión; un segundo bucle perdería las tres y
+contradiría §1. El bridge Node es **solo el cuerpo**: percibe, obedece y
+avisa. La percepción es una tool bajo demanda (`estado_del_mundo`) más
+inyección de eventos críticos, no un snapshot en cada turno.
+
+**El contrato del bridge se documenta como contrato de cuerpo**, no como
+contrato de Minecraft: `/state`, `/do`, `/events`. Minecraft es el primer
+adaptador porque es el único juego de la lista con cliente programático
+maduro (Mineflayer). Los siguientes candidatos son los que sí tienen API
+(Luanti, Factorio, OpenRA, ViZDoom); **Fortnite y los juegos cerrados no
+tienen API de bots** — anti-cheat, EULA, y solo la ruta *computer-use*,
+frágil y sensible a ToS. Queda fuera, y decirlo es parte del diseño.
+
+**El hallazgo que no era Minecraft, y que vale más que la feature.** Las
+tools del plugin no llegaban al modelo, y el motivo era **ajeno a este
+trabajo**: `gateway.multiplex_profiles` enruta la tira al perfil
+`orelvis`, y Hermes resuelve los plugins **por perfil**, desde el
+`plugins/` de ese perfil. Los enlaces a los plugins solo existían en el
+`HERMES_HOME` raíz, así que el perfil no conocía ninguno. Las tools core
+(memoria, cron, web, terminal) son globales y seguían ahí, y eso hizo el
+fallo **invisible**: la tira respondía con normalidad mientras `mirar`
+(desde el 1-sep) y `ensename` (desde el 7-sep) no se disparaban y ninguna
+tool de plugin aparecía en el prompt. Medido con un proxy delante de
+`llama-server`: el payload tenía **18 tools y ninguna de plugin**.
+`validate_toolset("mundo")` devolvía `False` en el turno enrutado y el
+resolver lo tiraba en silencio.
+
+**El arreglo es config, no código de Hermes:** enlazar los plugins también
+en `profiles/<perfil>/plugins/`. `setup-runtime.sh` lo hace para cada
+perfil y `jarvis-config.yaml` lo explica. El payload pasó de 18 a 27
+tools, con la ruta de identidad intacta. Es un fallo preexistente y
+silencioso, del mismo género que §7 describe.
+
+**La persona cambió de una línea, y cuesta dos pasos hacerla entrar.**
+`jarvis-soul.md` decía «una inteligencia sin cuerpo»; ahora reconoce el de
+Minecraft sin dejar de ser la presencia de la casa. El `platform_hint` se
+lee **una vez, al arrancar el gateway**, y el prompt de sistema se fija
+cuando nace la sesión: hace falta reiniciar **y** `/new` + `/approve`.
+
+**Verificado por sonda hasta donde llega una sonda.** Preguntado dónde
+está, llama `estado_del_mundo` y contesta con la posición real; mandado a
+unas coordenadas, llama `ir_a` y el bot se mueve (medido). Queda la prueba
+con una persona hablando a la tira (Task 10 del plan).
+
+---
+
+## 2026-09-22 — La mascota se va con Hermes, y deja de ser nuestra
+
+**Decisión del propietario:** fuera el overlay propio y el bóxer. La
+mascota es la de Hermes: un pet de **petdex** activado por `display.pet`
+en `jarvis-config.yaml`, instalado con `hermes pets install`, y pintado
+en la **app Hermes Desktop** —la que apunta a `:9119`—, no en la tira.
+El elegido es `lulu-capybara-2` (噜噜).
+
+**Por qué.** La mascota de 2026-09-19 era un «indicador de estado con
+cuerpo», exactamente la idea de los pets de Codex. Hermes ya tiene esa
+feature, y más completa: galería pública (petdex, 4.869 pets en la
+medición de hoy), atlas 8×9 de celdas 192×208, generación de arte con
+`/hatch`, y un bus hecho (`pet.info`, `pet.info.meta`, `pet.cells`,
+`pet.changed` en `hermes serve`). Lo de Orca que parecía «funcionar
+mejor» es un port de esa misma línea a Electron. Mantener un render
+propio era reimplementar lo de arriba para una sola superficie.
+
+**Qué se quita:** `mascota/` (overlay GTK4 y arte), el plugin
+`jarvis_mascota` y su bus NDJSON en `:8094`,
+`systemd/jarvis-mascota.service`, y las llamadas `_mascota(...)` del
+adaptador `jarvis` (`thinking` / `working` / `speaking` / `asking`). El
+proyecto vuelve de tres superficies a dos, que es el coste que la spec
+de 2026-09-19 aceptaba a regañadientes.
+
+**Qué se gana y qué se pierde.** Se gana la galería, la generación de
+arte y una superficie menos que sostener. Se pierde el vocabulario
+propio: Hermes no tiene `speaking` ni `listening` (los suyos son
+`idle`/`wave`/`run`/`failed`/`review`/`jump`/`waiting`), y el pet vive
+fuera de la tira, así que **no reacciona al turno si solo se mira la
+tira**. Hace falta `jarvis-hermes-serve.service` —hoy **disabled**, y
+sin `HERMES_DASHBOARD_SESSION_TOKEN` en un drop-in no autentica— y la
+app Hermes Desktop apuntada a `http://127.0.0.1:9119`.
+
+**A favor del trazo:** el bóxer a color era la primera cosa del proyecto
+que se saltaba §1.3 por decisión; ahora lo que se salta la paleta no vive
+en la tira, sino en otra app.
+
+---
+
 ## 2026-09-19 — La mascota: un bóxer fuera de la tira, y el plugin que es bus y no fuente
 
 **Decisión del propietario:** JARVIS tiene mascota. Es un **bóxer, de

@@ -725,22 +725,14 @@ os1-jarvis/
 │       ├── jarvis_voice/  ← CosyVoice, from inside the gateway
 │       ├── jarvis_vision/ ← the cameras: YOLO, the quiet rules, the
 │       │                      alert, and `mirar`. Its own README.
-│       ├── jarvis_teacher/  ← he teaches a subject: the course's state,
-│       │                      the sources and the domain gate, the card
-│       │                      on the strip. Its own README.
-│       └── jarvis_mascota/  ← the boxer's state, published on
-│                              loopback :8094 for the desktop overlay.
-│                              The adapter publishes; the plugin is the
-│                              bus. Spec:
-│                              docs/superpowers/specs/2026-09-19-mascota.md
+│       └── jarvis_teacher/  ← he teaches a subject: the course's state,
+│                             the sources and the domain gate, the card
+│                             on the strip. Its own README.
 │
-├── mascota/                ← el bóxer en el escritorio: overlay GTK4
-│                             aparte, alimentado por el plugin
-│                             jarvis_mascota. Su propio README.
 ├── tts-server/             ← CosyVoice 3 in Docker, on :8093
 ├── voices/                 ← the reference clip his voice is cloned from
 ├── systemd/                ← user units: widget, hermes, hermes-serve,
-│                             llamacpp, mascota
+│                             llamacpp
 ├── docs/
 │   ├── decision-log.md     ← §12: why things are the way they are
 │   ├── progress-2026-08.md ← the log, August: the widget era
@@ -869,6 +861,10 @@ by the widget — the LLM, TTS and Hermes work carried straight over.
   it, and `terminal` as the fallback path ✅
 - **2026-08-27** — the console shows milestones, and he asks: the three
   moments, and the answer routed by the adapter ✅
+- **2026-09-22** — the mascot becomes Hermes' own: the bóxer overlay,
+  the `jarvis_mascota` bus and the adapter's publishing are removed; a
+  petdex pet renders in Hermes Desktop. `display.pet` in
+  `jarvis-config.yaml`; §12 has the decision.
 
 ---
 
@@ -1227,6 +1223,8 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-22** — A Minecraft body, and a routed profile was hiding every plugin tool
+- **2026-09-22** — The mascot becomes Hermes' own pet, and the bóxer goes
 - **2026-09-19** — Bonsai 2 27B: a ternary 27B that gives back 4 GB of VRAM
 - **2026-09-08** — Gemma makes the turn fast enough to disappear
 - **2026-09-08** — Precision moves where it matters, and JARVIS gets VRAM back
