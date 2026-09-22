@@ -15,6 +15,11 @@ Type=simple
 ExecStart=%h/.nvm/versions/node/v22.18.0/bin/node %h/git/os1-jarvis/Hermes/plugins/jarvis_minecraft/bridge/index.js
 WorkingDirectory=%h/git/os1-jarvis/Hermes/plugins/jarvis_minecraft/bridge
 Environment=NODE_ENV=production
+# The same repo-root .env the gateway sources. It carries JARVIS_MC_HOST
+# when the server is opened to the LAN (the container then publishes only
+# on the LAN IP, so 127.0.0.1 no longer answers and the bot would be
+# bodiless). Optional: a missing file keeps the loopback default.
+EnvironmentFile=-%h/git/os1-jarvis/.env
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
