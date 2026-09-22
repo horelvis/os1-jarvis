@@ -20,14 +20,16 @@ false negative costs trust in the whole surface. So the comparison is a
 similarity ratio, and the threshold is set where those four spellings
 pass.
 
-**And the name counts at the start of a sentence, not just of the
-transcription.** Measured 2026-09-22: the VAD glued a previous sentence
-onto his name — "…la diferencia entre…  Jarvis, ¿me escuchas?" — and a
-scan that looked only at the first two words of the whole text dropped a
-sentence that was plainly addressed to him. Whisper writes the pause, so
-the transcription is split on it and the name is looked for sentence by
-sentence. What is unchanged is the rule underneath: a name buried
-mid-sentence is somebody talking *about* him.
+**And the name counts at the start OR the end of a sentence, not just of
+the transcription.** Measured 2026-09-22: the VAD glued a previous
+sentence onto his name — "…la diferencia entre…  Jarvis, ¿me escuchas?"
+— and a scan that looked only at the first two words of the whole text
+dropped a sentence that was plainly addressed to him. Whisper writes the
+pause, so the transcription is split on it and the name is looked for
+sentence by sentence. And Spanish puts the vocative at the end as readily
+as the start — "¿Qué tiempo hace, Jarvis?" — which was ignored twice in
+one minute before this. What is unchanged is the rule underneath: a name
+buried mid-sentence is somebody talking *about* him.
 """
 
 from __future__ import annotations
@@ -65,6 +67,13 @@ MAX_HOLD_SECONDS = 900.0
 # is how people talk; a name in the sixth word is somebody talking ABOUT
 # him, not to him.
 MAX_LEAD_WORDS = 2
+
+# How many words from the END of a sentence his name may be. Spanish puts
+# the vocative at the end as readily as the start — "¿Qué tiempo hace,
+# Jarvis?" — and measured 2026-09-22 the user did exactly that, twice,
+# and was ignored both times. Two covers a trailing "Jarvis" and a stray
+# word after it without swallowing the whole sentence.
+MAX_TRAIL_WORDS = 2
 
 # Word characters, for splitting and for stripping punctuation off a
 # word before it is compared to his name.
@@ -183,8 +192,11 @@ class WakeWord:
         # buried mid-sentence ("le dije a Jarvis que…") is somebody talking
         # ABOUT him, and still does not open a turn.
         tokens = [(m.group(), m.start(), m.end()) for m in _WORD.finditer(text)]
-        for start in _sentence_starts(tokens, text):
-            for lead in range(min(MAX_LEAD_WORDS, len(tokens) - start)):
+        starts = _sentence_starts(tokens, text)
+        bounds = list(zip(starts, starts[1:] + [len(tokens)]))
+        for start, end in bounds:
+            # His name at the start of the sentence: the command follows it.
+            for lead in range(min(MAX_LEAD_WORDS, end - start)):
                 word, _word_start, word_end = tokens[start + lead]
                 if _is_the_name(word, self.word):
                     rest = text[word_end:].lstrip(_SEPARATORS + " ").strip()
@@ -193,6 +205,18 @@ class WakeWord:
                     # attention, and he should answer that rather than
                     # receive an empty turn.
                     return rest or text.strip()
+            # His name at the END of the sentence: it is the vocative, and
+            # the command is what came before it. The head is this
+            # sentence's, not the whole transcription's, so a run-on does
+            # not send the previous sentence along with it.
+            for trail in range(1, min(MAX_TRAIL_WORDS, end - start) + 1):
+                word, word_start, _word_end = tokens[end - trail]
+                if _is_the_name(word, self.word):
+                    sentence_start = tokens[start][1]
+                    head = text[sentence_start:word_start]
+                    head = head.rstrip(_SEPARATORS + " ").strip()
+                    self.named = True
+                    return head or text.strip()
 
         # Inside the window a sentence needs no name — but it does not
         # extend the window on its own. Only an answer does, so a room

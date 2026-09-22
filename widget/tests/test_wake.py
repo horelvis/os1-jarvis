@@ -127,6 +127,30 @@ def test_a_name_buried_mid_sentence_is_still_not_for_him():
     assert w.named is False
 
 
+def test_the_name_at_the_end_is_the_spanish_vocative():
+    # Measured 2026-09-22, twice in one minute:
+    #   "¿Cómo está el tiempo hoy en Murcia, Jarvis?"
+    #   "El tiempo en Murcia, ¿cómo está Jarvis?"
+    # Spanish puts the name at the end as readily as the start, and the
+    # command is what came before it.
+    w = WakeWord()
+    assert w.heard("¿Cómo está el tiempo hoy en Murcia, Jarvis?", now=0.0) == (
+        "¿Cómo está el tiempo hoy en Murcia"
+    )
+    w2 = WakeWord()
+    assert w2.heard("El tiempo en Murcia, ¿cómo está Jarvis?", now=0.0) == (
+        "El tiempo en Murcia, ¿cómo está"
+    )
+    assert w2.named is True
+
+
+def test_a_trailing_name_in_a_later_sentence_does_not_drag_the_first_one_in():
+    w = WakeWord()
+    assert w.heard("Hace frío. ¿Qué tiempo hace, Jarvis?", now=0.0) == (
+        "¿Qué tiempo hace"
+    )
+
+
 def test_nothing_heard_is_never_a_turn():
     w = WakeWord()
     assert w.heard("", now=0.0) is None
