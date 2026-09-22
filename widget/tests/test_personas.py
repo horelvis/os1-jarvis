@@ -115,8 +115,7 @@ def test_the_grammar_is_hermes_own_profile_grammar():
     # as PROFILE_ID_RE); profiles.py keeps `_PROFILE_ID_RE` only as a legacy
     # alias, so read the source of truth, not the alias.
     fuente = (
-        pathlib.Path(__file__).resolve().parents[2]
-        / ".hermes/src/hermes_constants.py"
+        pathlib.Path(__file__).resolve().parents[2] / ".hermes/src/hermes_constants.py"
     )
     if not fuente.is_file():
         pytest.skip("el árbol vendorizado de Hermes no está en esta caja")
