@@ -41,11 +41,12 @@ def _reset_cooldown():
     jarvis_minecraft._last_event["at"] = 0.0
 
 
-def test_wire_declara_las_dos_tools_en_el_toolset_mundo() -> None:
+def test_wire_declara_las_tools_en_el_toolset_mundo() -> None:
     ctx = FakeCtx()
     nombres = jarvis_minecraft._wire(ctx, FakeClient())
-    assert nombres == [mundo.ESTADO, mundo.IR_A]
-    assert {t["name"] for t in ctx.tools} == {mundo.ESTADO, mundo.IR_A}
+    esperadas = [mundo.ESTADO, mundo.IR_A, mundo.BUSCAR, mundo.IR_AL_BLOQUE]
+    assert nombres == esperadas
+    assert {t["name"] for t in ctx.tools} == set(esperadas)
     assert {t["toolset"] for t in ctx.tools} == {"mundo"}
 
 

@@ -25,9 +25,64 @@ class FakeClient:
 
 
 def test_every_tool_has_a_description_and_a_schema() -> None:
-    for name in (mundo.ESTADO, mundo.IR_A):
+    for name in (mundo.ESTADO, mundo.IR_A, mundo.BUSCAR, mundo.IR_AL_BLOQUE):
         assert mundo.DESCRIPCIONES[name]
         assert mundo.ESQUEMAS[name]["type"] == "object"
+
+
+def test_block_id_traduce_el_espanol_y_deja_pasar_el_ingles() -> None:
+    assert mundo.block_id("agua") == "water"
+    assert mundo.block_id("Agua") == "water"
+    assert mundo.block_id("madera") == "oak_log"
+    assert mundo.block_id("oak_log") == "oak_log"
+    assert mundo.block_id("cobblestone") == "cobblestone"
+
+
+@pytest.mark.asyncio
+async def test_buscar_bloque_devuelve_json_con_coordenadas() -> None:
+    class Client:
+        def do(self, action, args):
+            assert action == "buscar_bloque"
+            assert args == {"bloque": "water"}
+            return {"ok": True, "data": {"x": 5, "y": 63, "z": -2}}
+
+    salida = await mundo.make_handler(Client(), mundo.BUSCAR)({"bloque": "agua"})
+    assert json.loads(salida) == {
+        "encontrado": True,
+        "bloque": "agua",
+        "x": 5,
+        "y": 63,
+        "z": -2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_buscar_bloque_sin_resultado_lo_dice_sin_romper() -> None:
+    class Client:
+        def do(self, action, args):
+            return {"ok": False, "error": "no_encontrado", "said": "No veo eso cerca."}
+
+    salida = await mundo.make_handler(Client(), mundo.BUSCAR)({"bloque": "agua"})
+    assert json.loads(salida) == {"encontrado": False, "bloque": "agua"}
+
+
+@pytest.mark.asyncio
+async def test_ir_al_bloque_traduce_y_devuelve_la_frase_del_bridge() -> None:
+    class Client:
+        def do(self, action, args):
+            assert action == "ir_al_bloque"
+            assert args == {"bloque": "water"}
+            return {"ok": True, "said": "He llegado."}
+
+    salida = await mundo.make_handler(Client(), mundo.IR_AL_BLOQUE)({"bloque": "agua"})
+    assert salida == "He llegado."
+
+
+@pytest.mark.asyncio
+async def test_sin_nombre_de_bloque_pide_uno() -> None:
+    handler = mundo.make_handler(FakeClient(), mundo.BUSCAR)
+    assert await handler({}) == mundo.FALTA_BLOQUE
+    assert await handler(None) == mundo.FALTA_BLOQUE
 
 
 def test_ir_a_exige_las_tres_coordenadas_numericas() -> None:

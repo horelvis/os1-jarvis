@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ActionQueue, deadline, ir_a, SAID } from "./actions.js";
+import {
+  ActionQueue,
+  buscar_bloque,
+  deadline,
+  ir_a,
+  ir_al_bloque,
+  SAID,
+} from "./actions.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -151,4 +158,80 @@ test("sin goals inyectados ir_a falla claro, no con sin_camino", async () => {
   });
   const answer = await queue.run("ir_a", { x: 1, y: 2, z: 3 });
   assert.equal(answer.error, "fallo");
+});
+
+test("buscar_bloque devuelve las coordenadas redondeadas del agua más cercana", async () => {
+  const bot = {
+    registry: { blocksByName: { water: { id: 34 } } },
+    findBlock: ({ matching }) => {
+      assert.equal(matching, 34);
+      return { position: { x: 12.6, y: 62.1, z: -8.4 } };
+    },
+  };
+  assert.deepEqual(buscar_bloque(bot, { bloque: "water" }), {
+    x: 13,
+    y: 62,
+    z: -8,
+  });
+});
+
+test("buscar_bloque no encuentra nada y no revienta", async () => {
+  const bot = {
+    registry: { blocksByName: { water: { id: 34 } } },
+    findBlock: () => null,
+  };
+  assert.equal(buscar_bloque(bot, { bloque: "water" }), null);
+  assert.throws(() => buscar_bloque(bot, { bloque: "chorizo" }), /bloque_desconocido/);
+});
+
+test("ir_al_bloque usa GoalNear, no GoalBlock: el agua es un fluido", async () => {
+  const calls = [];
+  const bot = {
+    registry: { blocksByName: { water: { id: 34 } } },
+    findBlock: () => ({ position: { x: 5, y: 63, z: 5 } }),
+    pathfinder: {
+      goto: async (goal) => {
+        calls.push(goal);
+      },
+    },
+  };
+  const goals = {
+    GoalNear: class {
+      constructor(x, y, z, range) {
+        Object.assign(this, { x, y, z, range });
+      }
+    },
+  };
+  await ir_al_bloque(bot, { bloque: "water" }, goals);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    { x: calls[0].x, y: calls[0].y, z: calls[0].z, range: calls[0].range },
+    { x: 5, y: 63, z: 5, range: 1 },
+  );
+});
+
+test("no_encontrado tiene su propia frase, no es un fallo", async () => {
+  const bot = {
+    registry: { blocksByName: { water: { id: 34 } } },
+    findBlock: () => null,
+    pathfinder: { goto: async () => {} },
+  };
+  const goals = { GoalNear: class {} };
+  const queue = new ActionQueue({
+    handlers: { ir_al_bloque: (args) => ir_al_bloque(bot, args, goals) },
+    timeoutMs: 200,
+  });
+  const answer = await queue.run("ir_al_bloque", { bloque: "water" });
+  assert.equal(answer.ok, false);
+  assert.equal(answer.error, "no_encontrado");
+  assert.equal(answer.said, SAID.no_encontrado);
+});
+
+test("los datos del handler llegan al modelo en answer.data", async () => {
+  const queue = new ActionQueue({
+    handlers: { buscar_bloque: () => ({ x: 1, y: 2, z: 3 }) },
+    timeoutMs: 200,
+  });
+  const answer = await queue.run("buscar_bloque", { bloque: "water" });
+  assert.deepEqual(answer.data, { x: 1, y: 2, z: 3 });
 });

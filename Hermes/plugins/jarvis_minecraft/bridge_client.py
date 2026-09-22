@@ -77,9 +77,7 @@ class BridgeClient:
         self._up = True
         return payload
 
-    def do(
-        self, action: str, args: dict, timeout: float = ACTION_TIMEOUT
-    ) -> dict:
+    def do(self, action: str, args: dict, timeout: float = ACTION_TIMEOUT) -> dict:
         """Run one action and return the bridge's answer.
 
         The answer is the bridge's `{ok, said, error?, state?}`, or an

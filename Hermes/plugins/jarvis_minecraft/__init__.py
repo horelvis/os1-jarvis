@@ -20,9 +20,17 @@ from typing import Any
 
 from loguru import logger
 
-from . import mundo
 from .bridge_client import BridgeClient, follow_events
-from .mundo import DESCRIPCIONES, ESQUEMAS, ESTADO, IR_A, TOOLSET, make_handler
+from .mundo import (
+    BUSCAR,
+    DESCRIPCIONES,
+    ESQUEMAS,
+    ESTADO,
+    IR_A,
+    IR_AL_BLOQUE,
+    TOOLSET,
+    make_handler,
+)
 
 # Where the strip's conversation lives. Same constant as
 # jarvis_vision/alert.py, and for the same reason: a `/new` mints a fresh
@@ -81,7 +89,9 @@ def register(ctx: Any) -> None:
         daemon=True,
     ).start()
 
-    logger.info(f"jarvis-minecraft: registered {len(nombres)} tools (toolset {TOOLSET})")
+    logger.info(
+        f"jarvis-minecraft: registered {len(nombres)} tools (toolset {TOOLSET})"
+    )
 
 
 def _wire(ctx: Any, client: Any) -> list[str]:
@@ -91,7 +101,7 @@ def _wire(ctx: Any, client: Any) -> list[str]:
     fake context and a fake client, and no bridge in the room.
     """
     nombres: list[str] = []
-    for name in (ESTADO, IR_A):
+    for name in (ESTADO, IR_A, BUSCAR, IR_AL_BLOQUE):
         ctx.register_tool(
             name=name,
             toolset=TOOLSET,
@@ -117,7 +127,7 @@ def _health_loop(client: Any, stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             client.state()
-        except Exception:  # noqa: BLE001 — a body that is down is not a crash
+        except Exception:  # a body that is down is not a crash
             pass
         stop.wait(HEALTH_INTERVAL)
 
@@ -127,7 +137,7 @@ def _events_loop(ctx: Any, url: str, stop: threading.Event) -> None:
     try:
         for payload in follow_events(url, stop.is_set):
             _inject(ctx, payload, delays=RETRY_DELAYS)
-    except Exception as exc:  # noqa: BLE001 — a dead follower must not cost the gateway
+    except Exception as exc:  # a dead follower must not cost the gateway
         logger.warning(f"jarvis-minecraft: el seguidor se detuvo — {exc}")
 
 
@@ -159,7 +169,7 @@ def _inject(
             accepted = ctx.inject_message(
                 prompt, role="user", session_key=JARVIS_SESSION_KEY
             )
-        except Exception as exc:  # noqa: BLE001 — the gateway is the brain
+        except Exception as exc:  # the gateway is the brain
             logger.warning(f"jarvis-minecraft: la inyección falló — {exc}")
             return False
         if accepted:

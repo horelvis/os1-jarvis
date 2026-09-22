@@ -23,7 +23,9 @@ import { ACTION_TIMEOUT_MS } from "./config.js";
 export const SAID = {
   llegado: "He llegado.",
   dicho: "Lo he dicho.",
+  encontrado: "Lo he encontrado.",
   sin_camino: "No encuentro por dónde ir.",
+  no_encontrado: "No veo eso cerca.",
   tardanza: "Me he quedado a medias.",
   fallo: "No he podido hacerlo.",
 };
@@ -59,10 +61,42 @@ export function decir(bot, { texto }) {
   bot.chat(String(texto));
 }
 
+// The nearest block of a named type, or null. `bot.registry` IS the
+// minecraft-data for this version, so no extra dependency is needed.
+export function findBlock(bot, name, maxDistance = 32) {
+  const block = bot?.registry?.blocksByName?.[String(name)];
+  if (!block) throw new Error("bloque_desconocido");
+  const found = bot.findBlock({ matching: block.id, maxDistance });
+  return found || null;
+}
+
+// Where the nearest one is, for the model to reason about. `ir_a` can
+// then walk to it — but a single `ir_al_bloque` is fewer calls for a
+// model that loses arguments, so both exist.
+export function buscar_bloque(bot, { bloque }, maxDistance = 32) {
+  const found = findBlock(bot, bloque, maxDistance);
+  if (!found) return null;
+  const p = found.position;
+  return { x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z) };
+}
+
+// Walk to the nearest one. GoalNear and not GoalBlock: a water block is
+// a fluid, and asking the pathfinder to stand IN it is a goal it
+// refuses; standing next to it, and then wading in, is not.
+export function ir_al_bloque(bot, { bloque }, goals, maxDistance = 32) {
+  if (!goals) throw new Error("no_goals");
+  const found = findBlock(bot, bloque, maxDistance);
+  if (!found) throw new Error("no_encontrado");
+  const p = found.position;
+  return bot.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 1));
+}
+
 export function makeHandlers(bot, goals) {
   return {
     ir_a: (args) => ir_a(bot, args, goals),
     decir: (args) => decir(bot, args),
+    buscar_bloque: (args) => buscar_bloque(bot, args),
+    ir_al_bloque: (args) => ir_al_bloque(bot, args, goals),
   };
 }
 
@@ -72,6 +106,8 @@ export function makeHandlers(bot, goals) {
 const SAID_OK = {
   ir_a: SAID.llegado,
   decir: SAID.dicho,
+  ir_al_bloque: SAID.llegado,
+  buscar_bloque: SAID.encontrado,
 };
 
 // Which failure becomes which sentence. A path the pathfinder cannot
@@ -84,8 +120,14 @@ const SAID_OK = {
 function saidFor(error) {
   const message = String(error?.message ?? error);
   if (message === "timeout") return { error: "tardanza", said: SAID.tardanza };
+  if (message === "no_encontrado") {
+    return { error: "no_encontrado", said: SAID.no_encontrado };
+  }
   if (/^no_(pathfinder|goals|chat)$/.test(message)) {
     return { error: "fallo", said: SAID.fallo };
+  }
+  if (message === "bloque_desconocido") {
+    return { error: "bloque_desconocido", said: SAID.fallo };
   }
   if (/No path|no_path|unreachable|Goal/i.test(message)) {
     return { error: "sin_camino", said: SAID.sin_camino };
@@ -119,8 +161,9 @@ export class ActionQueue {
     const handler = this.handlers[name];
     if (!handler) return { ok: false, error: "desconocida", said: SAID.fallo };
 
+    let data;
     try {
-      await deadline(
+      data = await deadline(
         Promise.resolve().then(() => handler(args)),
         this.timeoutMs,
         "timeout",
@@ -130,6 +173,9 @@ export class ActionQueue {
     }
 
     const answer = { ok: true, said: SAID_OK[name] ?? SAID.llegado };
+    // Whatever the handler returned, for tools whose result is data and
+    // not a sentence (`buscar_bloque` hands the model coordinates).
+    if (data !== undefined) answer.data = data;
     if (this.snapshot) {
       try {
         answer.state = this.snapshot();
