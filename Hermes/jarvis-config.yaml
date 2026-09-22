@@ -434,8 +434,21 @@ fallback_model:
 # and the loop goes away. It is deliberately the lowest value that works, to
 # keep the replay latency the paragraph above worries about. Raise it if
 # compaction ever latches again; do NOT drop it back toward the fixed cost.
+#
+# **24,000 was Bonsai's number and it does not survive the move to the
+# cloud (2026-09-22).** Everything above reasons about *replay latency*:
+# replaying 20K-42K tokens into a LOCAL model costs 8-16 s of prefill. On
+# OpenCode Go there is no local prefill — that is half the reason for the
+# switch — so a bigger window costs cloud tokens and network time, while a
+# SMALL one now costs the thing that hurts: compaction fires every few
+# turns, takes ~28 s, blocks the turn for that whole time, and after two
+# hits Hermes warns the session's accuracy has degraded. Measured
+# 2026-09-22: the third turn of a conversation stalled on a 28 s
+# compaction ("Session compressed 2 times"). 48,000 is a safe fraction of
+# the 64K window and roughly halves how often it fires; raise it further
+# if compaction is still audible.
 compression:
-  threshold_tokens: 24000
+  threshold_tokens: 48000
 
 # Compression is a side call and must not run on the main model. The old
 # `extra_body.chat_template_kwargs.enable_thinking` below was a Bonsai /
