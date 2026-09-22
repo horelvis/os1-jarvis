@@ -267,6 +267,20 @@ approvals:
 gateway:
   message_timestamps:
     enabled: true
+  # ── Multiplexing a platform to a profile hides that profile's plugins ──
+  #
+  # A routed turn resolves its plugins from the PROFILE's own `plugins/`
+  # directory: the tool registry scopes plugin tools to the profile they
+  # were loaded for. Without symlinks under
+  # `.hermes/home/profiles/<name>/plugins/` the profile still answers —
+  # core tools (memory, cron, web, terminal) are global — but every
+  # plugin tool is silently absent from the model's list.
+  #
+  # Measured 2026-09-22: the strip ran under profile `orelvis` with 18
+  # tools and no `ensename`, `mirar` or `estado_del_mundo`, while the
+  # journal showed all plugins registering normally. Adding the profile
+  # symlinks took the payload to 27 tools. `Hermes/setup-runtime.sh` now
+  # creates them for every profile; see its comment.
   multiplex_profiles: true
   multiplex_profile_allowlist: [orelvis]
   profile_routes:

@@ -108,12 +108,33 @@ else
 fi
 
 say "4/6  HERMES_HOME at $HERMES_HOME"
+PLUGIN_DIRS=(jarvis_voice jarvis jarvis_vision jarvis_code jarvis_teacher jarvis_minecraft)
 mkdir -p "$HERMES_HOME/plugins"
 # Symlinks, not copies: the plugins are versioned source in this repo and
 # must stay editable in place. Same pattern the plan documents use.
-for plugin in jarvis_voice jarvis jarvis_vision jarvis_code jarvis_teacher jarvis_minecraft; do
+for plugin in "${PLUGIN_DIRS[@]}"; do
   ln -sfn "$REPO_ROOT/Hermes/plugins/$plugin" "$HERMES_HOME/plugins/$plugin"
   echo "    plugins/$plugin -> Hermes/plugins/$plugin"
+done
+
+# Every PROFILE home needs the same symlinks, and this is not optional.
+#
+# `gateway.multiplex_profiles` routes a turn to a profile, and Hermes
+# resolves each profile's plugins from ITS OWN `plugins/` directory: the
+# registry scopes plugin tools to the profile they were loaded for. A
+# profile with no plugins/ dir still answers — through core tools, which
+# are global — so the failure is invisible where it matters most: on
+# 2026-09-22 the strip's routed profile had been running for weeks with
+# `ensename`, `mirar` and every plugin tool simply absent from the
+# model's list, while memory, cron and web looked perfectly healthy.
+# Measured: the tool payload went from 18 tools to 27 with these links.
+for profile_dir in "$HERMES_HOME"/profiles/*/; do
+  [ -d "$profile_dir" ] || continue
+  mkdir -p "$profile_dir/plugins"
+  for plugin in "${PLUGIN_DIRS[@]}"; do
+    ln -sfn "$REPO_ROOT/Hermes/plugins/$plugin" "$profile_dir/plugins/$plugin"
+  done
+  echo "    ${profile_dir#"$HERMES_HOME"/}plugins/* (${#PLUGIN_DIRS[@]} plugins)"
 done
 
 say "5/6  Enable them"
