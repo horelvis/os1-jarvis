@@ -1,0 +1,36 @@
+# El servidor de Minecraft de JARVIS. Java 21 viene dentro de la imagen:
+# el host solo tiene Java 8 y no se le instala nada.
+#
+# El puerto queda en LOOPBACK por defecto. Para que la gente de casa entre
+# a jugar y a verla jugar, pon MC_BIND_IP con la IP de la LAN en el .env
+# de la raíz (git-ignored) y recrea el contenedor:
+#
+#   MC_BIND_IP=192.168.0.20
+#
+# NUNCA 0.0.0.0. Y en cuanto el puerto se abre, ENFORCE_WHITELIST pasa a
+# ser obligatorio: el modelo de amenaza del proyecto es quien esté en el
+# wifi, invitados incluidos.
+services:
+  minecraft:
+    image: itzg/minecraft-server:java21
+    container_name: jarvis-minecraft
+    environment:
+      EULA: "TRUE"
+      TYPE: "PAPER"
+      VERSION: "1.21.1"
+      ONLINE_MODE: "FALSE"      # el bot es local; sin auth de Mojang
+      MEMORY: "3G"
+      DIFFICULTY: "normal"
+      MODE: "survival"
+      ENABLE_RCON: "false"
+      # La whitelist se enciende cuando el puerto se abre a la LAN.
+      # WHITELIST: "Ana,Orelvis"
+      # ENFORCE_WHITELIST: "TRUE"
+    ports:
+      - "${MC_BIND_IP:-127.0.0.1}:25565:25565"
+    volumes:
+      - minecraft-data:/data
+    restart: unless-stopped
+
+volumes:
+  minecraft-data:
