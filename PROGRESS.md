@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-23 — Hermes sale del repo, y la tira se retira: el Desktop es la superficie ✅
 - 2026-09-22 — La voz se oye más fluida: el workaround de auto-TTS era el problema ✅
 - 2026-09-22 — Hermes sube a 0.21.4: el refactor del gateway, y los parches que no trae upstream ✅
 - 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
@@ -108,7 +109,44 @@
 ---
 
 
-## 2026-09-22 — La voz se oye más fluida: el workaround de auto-TTS era el problema ✅
+## 2026-09-23 — Hermes sale del repo, y la tira se retira: el Desktop es la superficie ✅
+
+El propietario pidió deprecar el Hermes pinneado del repo e instalar la
+instancia estándar, **desde cero y sin parches**, y luego **quitar la tira**.
+Se hizo, y el resultado fue una sorpresa buena: el **Hermes Desktop** resultó
+mejor superficie que la tira.
+
+**La migración.** Instancia oficial `v0.21.4` en `~/.hermes` (el global viejo
+era 0.13.0). `run-gateway.sh` pasó a
+`~/.hermes/hermes-agent/venv/bin/hermes` con `HERMES_HOME=~/.hermes`; los
+plugins se enlazaron en `~/.hermes/plugins`; `jarvis-config.yaml` se mergeó en
+`~/.hermes/config.yaml`; las dependencias de los plugins se instalaron en el
+venv nuevo. Dos tropiezos con nombre: el **multiplexado por perfil** apuntaba
+a un `orelvis` que solo existía en el home viejo y **tiraba cada turno**
+("target profile 'orelvis' is not served"), así que se apagó; y al Desktop le
+faltaban las deps, por eso decía "No messaging platforms enabled".
+
+**La prueba.** Con la instancia nueva, la voz de la tira seguía funcionando
+(PCM en streaming, `pcm_start +2,63 s`), pero al abrir el Desktop y hablarle
+el propietario lo dejó claro: *"hay mucho mejor respuesta de voz que en
+local"*, *"el chat escribe todo lo que dice pero la experiencia es mucho
+mejor"*, *"hace la interrupción por voz genial"*. El modo de voz nativo de
+Hermes —streaming por frases, un solo reloj de audio, barge-in full-duplex—
+hace lo que la tira intentaba a mano y **escribe además** lo que dice.
+
+**La tira se retira** (`jarvis-widget.service` parado y deshabilitado), pero
+**no se borra**: de ella cuelgan las **fichas del modo teacher**, las
+**fotos** (`mirar`) y la **cámara en vivo**, y tiene piezas reutilizables (VAD
+de Silero, filtro de eco, vocativo del wake word). Queda deprecada.
+
+**Lo que se pierde, sin adornos:** los dos parches de runtime (el eco del
+streaming-TTS y el override de toolsets del móvil) y, de momento, una
+superficie para las fichas/fotos/cámara fuera del móvil. Y `CLAUDE.md`
+§0/§2.3/§3 todavía describen la tira como la superficie: **hay que
+reescribirlos**. El razonamiento completo está en `docs/decision-log.md`,
+entrada **2026-09-23**.
+
+
 
 El propietario cambió el modelo a OpenCode Go esperando respuestas de voz
 más fluidas, y no lo fueron. La conclusión, medida, es que **el modelo no

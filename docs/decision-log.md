@@ -11,6 +11,51 @@
 
 ---
 
+## 2026-09-23 — Hermes se desvincula del repo, y la tira se retira: el Desktop es la superficie
+
+**Decisión del propietario:** deprecar el runtime de Hermes pinneado dentro
+del repo (`.hermes/src`, `setup-runtime.sh`) e instalar la **instancia
+estándar** en `~/.hermes` — última oficial (`v0.21.4`), **desde cero** (sin
+migrar memoria ni sesiones) y **sin los dos parches de runtime**. Y **quitar
+la tira** (`jarvis-widget.service` parado y deshabilitado; el árbol
+`widget/` se conserva, deprecado).
+
+**Por qué.** El Hermes Desktop necesitaba un backend propio, y el pinneado
+lo era solo para este repo. Al probarlo, su **modo de voz nativo** resultó
+mejor que la tubería a mano de la tira: transcribe, y la respuesta se
+alimenta en vivo al consumidor de TTS por frases con un solo reloj de
+audio — y además **escribe** lo que dice y hace la **interrupción por voz**
+(full-duplex, suelo de ruido calibrado) sin cortarse con su propia voz, que
+era el problema duro de la tira (el eco, el parche `streaming-tts`). El
+propietario: *"hay mucho mejor respuesta de voz que en local"*, *"la
+experiencia es mucho mejor"*, *"hace la interrupción por voz genial"*.
+
+**Lo que se movió.** `run-gateway.sh` usa
+`~/.hermes/hermes-agent/venv/bin/hermes` y `HERMES_HOME=~/.hermes`; los
+plugins se enlazan en `~/.hermes/plugins`; `jarvis-config.yaml` se mergea en
+`~/.hermes/config.yaml`; las dependencias de los plugins (loguru, aiohttp,
+onnxruntime, faster-whisper, sounddevice…) se instalaron en el venv nuevo.
+El **multiplexado por perfil se apaga**: la tira se enrutaba a un perfil
+`orelvis` que solo existía en el home viejo, y la instancia nueva rechazaba
+la ruta y tiraba cada turno. El STT del Desktop se puso en **`es` +
+`large-v3-turbo`** (venía en `en` + `base`, y transcribía en inglés).
+
+**Lo que se pierde, dicho en voz alta.** Los dos parches cubrían dos cosas
+que ahora no están: el arreglo del eco del streaming-TTS (por eso un turno
+de **texto** con `auto_tts: true` intenta sintetizar un WAV whole-file que
+el adaptador de texto no puede entregar) y el override de toolsets del
+móvil. Y la tira era la **superficie** de las **fichas del modo teacher**,
+las **fotos** (`mirar`) y la **cámara en vivo**; sin ella, esas piezas no
+tienen dónde pintarse salvo el móvil. Por eso `widget/` **no se borra**: se
+queda deprecado, con piezas reutilizables (VAD de Silero, filtro de eco,
+vocativo del wake word) que el Desktop podría necesitar.
+
+**Estado:** la tira no arranca; el gateway (`:7777`) y el serve (`:9119`)
+siguen, así que Desktop y móvil funcionan. `CLAUDE.md` §0/§2.3/§3 aún
+describen la tira como la superficie y **hay que reescribirlos**.
+
+---
+
 ## 2026-09-22 — Hermes sube a 0.21.4, y el parche del core se muda con el refactor
 
 **Decisión:** mover el pin del runtime de `v2026.8.19` (0.20.5) a

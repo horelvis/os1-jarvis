@@ -1223,6 +1223,7 @@ grown to 60% of a file that is read whole at the start of every session.
 record the same idea being rejected twice, on numbers; §12 is where
 "why not Electron" and "why not an avatar" already have answers.
 
+- **2026-09-23** — Hermes leaves the repo, and the strip retires: the Desktop is the surface
 - **2026-09-22** — Hermes moves to 0.21.4, and the core patch moves with the refactor
 - **2026-09-22** — A Minecraft body, and a routed profile was hiding every plugin tool
 - **2026-09-22** — The mascot becomes Hermes' own pet, and the bóxer goes
