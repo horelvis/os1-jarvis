@@ -180,6 +180,13 @@ agent:
   # so JARVIS simply stays silent.
   disabled_toolsets:
     - tts
+    # `clarify` is a CORE tool (`_HERMES_CORE_TOOLS`), so removing it from
+    # `platform_toolsets.jarvis` above was not enough — measured 2026-09-23,
+    # it still fired at 13:12 after that edit. It lets the model ask the
+    # user a question and WAIT; in a room that is a hang (the owner's
+    # "second question was slow"). Disabled here, at the agent level, where
+    # a core toolset actually comes off.
+    - clarify
 
   # ── glm-5.3 thinks before it talks, and that kills voice ─────────────
   #
