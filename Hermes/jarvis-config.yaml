@@ -416,32 +416,28 @@ platform_toolsets:
 # why. Pin cron jobs themselves too (`--provider`/`--model`), or a later
 # change to this value makes Hermes skip them to avoid unintended spend.
 model:
-  # ── Cloud first since 2026-09-22, on the owner's instruction ──────────
+  # ── Local again since 2026-09-23, at the owner's call ────────────────
   #
-  # JARVIS runs on OpenCode Go (subscription; `OPENCODE_GO_API_KEY` in the
-  # repo `.env`, git-ignored). The reason is tool-calling: Bonsai 2 27B
-  # repeated tool calls until the turn budget ran out (~10 iterations), so
-  # anything multi-step — walking into water, building — was cut off.
-  # GLM-5.3 is picked for function calling and Spanish.
+  # The cloud excursion (2026-09-22, OpenCode Go / glm-5.3) fixed
+  # tool-calling but cost the thing the owner actually feels: voice.
+  # Measured with `widget/tools/voz_probe.py`: a cloud model's
+  # time-to-first-token is ~2.0-3.7 s against Bonsai's ~0.3 s locally, and
+  # every voice-agent architecture in the literature says the first token
+  # is what decides fluidity (Twilio, arXiv 2603.05413). The tool loop
+  # Bonsai showed is bounded by `agent.max_turns` and belongs to the prompt
+  # and the tool surface, not to the model — Qwen3.8-27B, DeepSeek and
+  # Bonsai all share the family, and none of them is the fix.
   #
-  # **This is the project's biggest privacy change since it went local.**
-  # §1.1: every turn — the conversation, and whatever a camera puts in the
-  # prompt — now leaves the house for OpenCode. Going back is two lines:
-  # `default: bonsai-2-27b`, `provider: custom:local`, and drop
-  # `fallback_model`.
-  default: glm-5.3
-  provider: opencode-go
-  # Hermes refuses any model whose window is under 64,000. GLM-5.3 lists
-  # 1.31M, but a spoken turn does not need it: this bounds cost and replay
-  # latency, and matches the compaction floor below.
-  context_length: 65536
-
-# The local body answers if the cloud does not. Same Bonsai the box ran
-# before, so a dead network or a bad key degrades to a slower, local
-# JARVIS instead of a silent one.
-fallback_model:
+  # Privacy is restored with it: §1.1, nothing leaves the house. To go back
+  # to the cloud it is two lines (`default`/`provider`) plus a
+  # `fallback_model:` block; the key and the measured model table are in
+  # docs/superpowers/specs/2026-09-22-voz-fluida.md.
+  default: bonsai-2-27b
   provider: custom:local
-  model: bonsai-2-27b
+  # Hermes refuses any model whose window is under 64,000 and kills the
+  # turn outright, so llama-server must be started with --ctx-size 65536 to
+  # match.
+  context_length: 65536
 
 # A 64K window is required by Hermes, but it is not a useful target for a
 # spoken conversation: replaying 20K-42K tokens adds 8-16 seconds before the
@@ -470,29 +466,25 @@ fallback_model:
 # keep the replay latency the paragraph above worries about. Raise it if
 # compaction ever latches again; do NOT drop it back toward the fixed cost.
 #
-# **24,000 was Bonsai's number and it does not survive the move to the
-# cloud (2026-09-22).** Everything above reasons about *replay latency*:
-# replaying 20K-42K tokens into a LOCAL model costs 8-16 s of prefill. On
-# OpenCode Go there is no local prefill — that is half the reason for the
-# switch — so a bigger window costs cloud tokens and network time, while a
-# SMALL one now costs the thing that hurts: compaction fires every few
-# turns, takes ~28 s, blocks the turn for that whole time, and after two
-# hits Hermes warns the session's accuracy has degraded. Measured
-# 2026-09-22: the third turn of a conversation stalled on a 28 s
-# compaction ("Session compressed 2 times"). 48,000 is a safe fraction of
-# the 64K window and roughly halves how often it fires; raise it further
-# if compaction is still audible.
+# **Back to 24,000 with the local model (2026-09-23).** 48,000 was raised
+# for OpenCode Go, where there is no local prefill and a small window made
+# compaction fire every few turns (~28 s each, blocking). Bonsai is local
+# again, so the trade reverts: a big transcript costs 8-16 s of local
+# prefill on every replay, and 24,000 is the value measured for Bonsai.
 compression:
-  threshold_tokens: 48000
+  threshold_tokens: 24000
 
-# Compression is a side call and must not run on the main model. The old
-# `extra_body.chat_template_kwargs.enable_thinking` below was a Bonsai /
-# Qwen-local knob; it is gone with the local default, and the Go
-# subscription's flash tier does the summarising.
+# Compression uses Hermes' auxiliary client rather than the main agent
+# request path, so it does not inherit providers.local.extra_body. Without
+# this duplicate configuration the reasoning channel stays on and the
+# compressor can receive an empty visible response. It stays LOCAL with the
+# local model: summarising the transcript in the cloud would send the whole
+# conversation out of the house (§1.1) for a side call.
 auxiliary:
   compression:
-    provider: opencode-go
-    model: glm-5.3-flash
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
 providers:
   local:

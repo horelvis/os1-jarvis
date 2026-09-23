@@ -142,6 +142,28 @@ streaming elimina eso. Con un modelo **local** el TTFT es de décimas, así
 que la decisión de fondo es si la **voz** corre en local (rápida) y lo
 remoto se reserva para turnos con herramientas.
 
+## 4.d Decisión: vuelta a local (2026-09-23)
+
+El propietario decide **volver a local con Bonsai** como principal. La
+investigación lo respalda: en toda arquitectura de voz en cascada el
+término que manda es el **TTFT del LLM**, y la nube no baja de ~2 s
+(`deepseek-v4-flash`, el más rápido medido) ni de ~3,7 s (glm-5.3) frente
+a ~0,3 s local. Se midió además que **Qwen3.8-27B es la misma base que
+Bonsai** (PrismML retiene el 98,2%), así que cambiar de modelo no arregla
+el bucle de tools — eso es prompt y superficie de herramientas.
+
+Config: `model.provider: custom:local`, `model.default: bonsai-2-27b`, sin
+`fallback_model`, `compression.threshold_tokens` de vuelta a 24.000 (el
+prefill local sí paga los reenvíos), y la compresión auxiliar otra vez
+local (`extra_body…enable_thinking: false`) para que el resumen no salga
+de casa.
+
+**Medido tras el cambio:** el turno 2 de una conversación caliente tarda
+**3,17 s**; el **turno 1 tras reiniciar, 43,79 s**, porque el modelo local
+preprocesa toda la transcripción de una sesión ya larga (el "replay
+latency" que la config avisa). De ahí que un `/new` sea la higiene
+esperada tras un reinicio. La voz de Bonsai se queda en local y privada.
+
 
 ## 5. Rediseño, según lo que salga
 
