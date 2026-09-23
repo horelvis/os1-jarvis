@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-22 — La voz se oye más fluida: el workaround de auto-TTS era el problema ✅
 - 2026-09-22 — Hermes sube a 0.21.4: el refactor del gateway, y los parches que no trae upstream ✅
 - 2026-09-22 — JARVIS tiene cuerpo: Minecraft, y todas las tools de plugin estaban apagadas ⏸
 - 2026-09-22 — La mascota se va con Hermes: fuera el bóxer, fuera el bus; un pet de petdex en el desktop ✅
@@ -106,6 +107,43 @@
 
 ---
 
+
+## 2026-09-22 — La voz se oye más fluida: el workaround de auto-TTS era el problema ✅
+
+El propietario cambió el modelo a OpenCode Go esperando respuestas de voz
+más fluidas, y no lo fueron. La conclusión, medida, es que **el modelo no
+era el problema**: la fluidez se decide en la tubería, y llevaba meses mal
+configurada por un apaño.
+
+**El apaño.** `voice.auto_tts: false`, con un comentario que decía
+«CosyVoice zero-shot can pause after its first PCM block… el adaptador
+sintetiza la respuesta completa». Con auto-TTS apagado, **Hermes no
+hablaba**: la tira esperaba la respuesta entera del modelo y la sintetizaba
+al final. El primer audio pagaba el turno completo **más** el TTFB de
+CosyVoice.
+
+**La medición.** Se construyó `widget/tools/voz_probe.py`, que manda un
+turno de voz real (`audio: pcm_s16le/24000`) y marca envío → primer token →
+`pcm.start` → primer `JPCM` → fin. Con el apaño, el primer PCM llegaba
+**2,3–2,7 s después del último token**. Con `auto_tts: true`, ese TTFB
+desaparece y **el propietario lo oye más fluido**; no reapareció la pausa
+de CosyVoice (que ahora es fp16 y hace streaming: su primer byte medido es
+1–3 s, no los ~9 s que decía el comentario), ni hay doble voz.
+
+**Lo que sigue sin arreglarse, y es el siguiente trozo:** la respuesta llega
+a la tira **en un solo frame**, así que no hay solape entre generación y voz
+(`primer_token == pcm_start == primer_pcm`). El término dominante sigue
+siendo la respuesta completa del modelo — 2–6 s en una frase, 5–13 s si usa
+una tool. El rediseño de verdad es conseguir que los deltas alimenten al
+consumidor de streaming de Hermes. Diseño, medidas y opciones:
+`docs/superpowers/specs/2026-09-22-voz-fluida.md`.
+
+**Una nota de método:** la sonda descarta el audio y, con respuestas cortas,
+el camino es inconsistente (a veces sin PCM) y captura un frame temprano que
+no es la respuesta (`+0.00s`). Hay que afinar la instrumentación antes de
+sacar más conclusiones de ella.
+
+---
 
 ## 2026-09-22 — Hermes sube a 0.21.4: el refactor del gateway, y los parches que no trae upstream ✅
 

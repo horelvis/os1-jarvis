@@ -80,6 +80,41 @@ fin de voz ──► transcripción ──► primer token ──► primer byte
 
 Instrumento: `tools/voz_probe.py` (por escribir) + el log de la tira.
 
+## 4.b Resultado de la primera pasada (2026-09-22)
+
+Sonda construida: `widget/tools/voz_probe.py` (manda un turno de voz real y
+marca envío → primer token → `pcm.start` → primer `JPCM` → fin).
+
+**Con `voice.auto_tts: false` (como estaba):**
+
+```
+turno 1:  primer_token +13.25s │ pcm_start +13.25s │ primer_pcm +15.93s │ fin +15.97s
+turno 2:  primer_token  +4.98s │ pcm_start  +4.98s │ primer_pcm  +7.24s │ fin  +7.27s
+```
+
+El primer PCM llegaba **2,3–2,7 s después del último token**: la tira
+sintetizaba la respuesta entera al terminar. Primer audio = respuesta
+completa del modelo + TTFB de TTS.
+
+**Con `voice.auto_tts: true`:**
+
+```
+tool:  primer_token +6.08s │ pcm_start +6.08s │ primer_pcm +6.08s │ fin +7.25s
+simple: primer_token +2.31s (sin PCM) / +0.00s (artefacto de la sonda)
+```
+
+- **El TTFB de TTS desaparece** (2,3–2,7 s → 0) y **el propietario lo oye
+  más fluido**. No reaparece la pausa de CosyVoice que motivó el workaround,
+  y no hay doble voz. **Decisión: `auto_tts: true`.**
+- **Sigue sin haber solape**: `primer_token == pcm_start == primer_pcm`. La
+  respuesta llega **en un solo frame**; los deltas del modelo **no** llegan
+  al consumidor de streaming. El término dominante sigue siendo la
+  respuesta completa del modelo (2–6 s; 5–13 s con una tool).
+- El camino es **inconsistente** con respuestas cortas (sin PCM) y la sonda
+  captura un frame temprano que no es la respuesta (`+0.00s`), señal de que
+  hay que afinar la instrumentación antes de sacar más conclusiones.
+
+
 ## 5. Rediseño, según lo que salga
 
 - **Si gana H1:** activar el camino de streaming (quitar el workaround

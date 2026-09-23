@@ -130,10 +130,24 @@ tts:
     finish_timeout_seconds: 30
 
 voice:
-  # CosyVoice zero-shot can pause after its first PCM block. Keep Hermes'
-  # delta-to-PCM path disabled until the backend sustains a full utterance;
-  # the adapter then synthesises the complete local reply without cutting it.
-  auto_tts: false
+  # `true` since 2026-09-22, and it is what made voice feel fluid.
+  #
+  # It was `false` for months as a workaround — "CosyVoice zero-shot can
+  # pause after its first PCM block" — and the workaround WAS the bug: with
+  # auto-TTS off Hermes did not speak, the strip synthesised the whole reply
+  # at the end, and the first audio paid the entire model reply plus
+  # CosyVoice's TTFB. Measured with `widget/tools/voz_probe.py`: off, the
+  # first PCM landed 2.3-2.7s after the last token; on, that TTS TTFB is
+  # gone and the owner hears it as more fluid. The pause it guarded against
+  # did not reappear — CosyVoice is fp16 and streams, and the old "~9s" TTFB
+  # is now 1-3s (measured 2026-09-22).
+  #
+  # What it does NOT fix, and is the next piece: the reply still arrives as
+  # ONE frame, so generation and speech do not overlap — `primer_token ==
+  # pcm_start == primer_pcm` — and the model's full reply (2-6s, 5-13s with
+  # a tool) is still paid before the first word. See
+  # docs/superpowers/specs/2026-09-22-voz-fluida.md.
+  auto_tts: true
 
 # No wake word by design (widget decision 4, 2026-08-23): the strip
 # listens always and a local VAD decides when someone is talking.
