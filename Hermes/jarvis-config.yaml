@@ -125,8 +125,15 @@ tts:
   provider: cosyvoice
   streaming:
     provider: cosyvoice
-    # CosyVoice zero-shot needs ~9 s before its first PCM block on this host;
-    # leave time for the remaining streamed audio after the LLM has finished.
+    # Speak the first fragment sooner. Measured 2026-09-22 (with the delta
+    # wiring instrumented): the model's content arrives in tiny deltas
+    # (2-9 chars) after a ~3.7 s TTFT, and the chunker's default min_len of
+    # 20 made the first clause wait for enough text to pile up. 8 emits the
+    # first speakable fragment as soon as it exists.
+    min_len: 8
+    # The old comment here said "~9 s before its first PCM block"; measured
+    # 2026-09-22 it is 1-3 s. The margin is for the tail still arriving
+    # after the LLM has finished.
     finish_timeout_seconds: 30
 
 voice:
@@ -173,6 +180,20 @@ agent:
   # so JARVIS simply stays silent.
   disabled_toolsets:
     - tts
+
+  # ── glm-5.3 thinks before it talks, and that kills voice ─────────────
+  #
+  # Measured 2026-09-22: glm-5.3 reasons ~300 tokens *before* it emits any
+  # `content`, so the streaming-TTS consumer has nothing to speak until the
+  # reasoning is over — the reply then arrives in one burst and there is no
+  # overlap of generation and speech (`primer_token == pcm_start ==
+  # primer_pcm`). Local knobs that worked for Bonsai are rejected by the Go
+  # relay (`chat_template_kwargs` → 400), but GLM-5.3 accepts a graded
+  # `reasoning_effort`, and **`low` turns thinking OFF** (measured: 3.70s /
+  # 868 reasoning chars by default, 1.47s / 0 reasoning chars at low).
+  # Per-model, so the local Bonsai fallback is untouched.
+  reasoning_overrides:
+    glm-5.3: low
 
   # A ceiling on one turn's tool-calling iterations. Absent, Hermes is
   # UNLIMITED by default (`resolve_turn_limit`: "max_turns is unlimited

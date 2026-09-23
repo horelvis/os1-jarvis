@@ -114,6 +114,34 @@ simple: primer_token +2.31s (sin PCM) / +0.00s (artefacto de la sonda)
   captura un frame temprano que no es la respuesta (`+0.00s`), señal de que
   hay que afinar la instrumentación antes de sacar más conclusiones.
 
+## 4.c Por qué los deltas no arrancaban (2026-09-23)
+
+Se instrumentó el cableado (`stream_delta_cb` en
+`gateway/run_turn_runner.py`, temporal) y se midió:
+
+- **El consumidor está activo y cableado**: `delta_sinks=1 stts=True`.
+- **Los deltas SÍ fluyen** — pero empiezan **~3,7 s después** de arrancar el
+  turno, y llegan **diminutos** (2-9 caracteres cada uno).
+- O sea: no era el cableado. Era que **glm-5.3 no emite `content` hasta
+  terminar de razonar**, y el primer token de contenido tarda ~3,7 s (TTFT
+  del modelo en la nube).
+
+**Arreglado, medido:**
+
+- `agent.reasoning_overrides: {glm-5.3: low}` — con `low`, GLM-5.3 deja
+  casi de razonar: el razonamiento por turno bajó de **800–17.000** a
+  **61–441** caracteres (medido en `messages.reasoning_content`). El relay
+  Go rechaza los knobs locales (`chat_template_kwargs` → 400) pero acepta
+  `reasoning_effort`.
+- `tts.streaming.min_len: 20 → 8` — el chunker ya no espera 20 caracteres
+  antes de emitir la primera cláusula.
+
+**Lo que queda, y es un suelo, no un cableado:** el **TTFT de ~3,7 s** del
+modelo remoto. No hay nada que hablar hasta el primer token, y ningún
+streaming elimina eso. Con un modelo **local** el TTFT es de décimas, así
+que la decisión de fondo es si la **voz** corre en local (rápida) y lo
+remoto se reserva para turnos con herramientas.
+
 
 ## 5. Rediseño, según lo que salga
 
