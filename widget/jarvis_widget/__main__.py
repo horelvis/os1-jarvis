@@ -30,6 +30,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .vad import FRAME_SAMPLES, INPUT_RATE  # noqa: E402
+from .filler import DELAY as FILLER_DELAY  # noqa: E402
+from .filler import Filler  # noqa: E402
 from .hotword import SENSITIVITY as HOTWORD_SENSITIVITY  # noqa: E402
 from .echo import EchoFilter  # noqa: E402
 from .hotword import Hotword  # noqa: E402
@@ -1229,6 +1231,9 @@ class JARVISApp(Gtk.Application):
         # him" of every version before that.
         wake = WakeWord(_WAKE_WORD, window=_WAKE_WINDOW)
         hotword = Hotword(_HOTWORD_MODEL, sensitivity=_HOTWORD_SENSITIVITY)
+        # A short word if a turn stays silent past `FILLER_DELAY`, so a tool
+        # round trip does not read as a hang. See `filler.py`.
+        filler = Filler()
         # His own voice, coming back through the room. See `echo.py`:
         # the canceller helps and does not clear, and the microphone has
         # to stay open or he cannot be interrupted.
@@ -1466,6 +1471,18 @@ class JARVISApp(Gtk.Application):
                     request_id=reply.request_id,
                 )
                 sent = True
+                # If the turn stays silent past `FILLER_DELAY`, say a short
+                # word so a tool round trip does not read as a hang. It is
+                # cancelled by the reply starting (`reply.spoke`), so a fast
+                # turn says nothing. `filler.py` has the why.
+                if FILLER_DELAY > 0:
+
+                    async def _filler_if_silent() -> None:
+                        await asyncio.sleep(FILLER_DELAY)
+                        if reply.accepts_content and not reply.spoke:
+                            say(filler.phrase(), reply.destination)
+
+                    self._spawn(_filler_if_silent())
             except Exception as exc:
                 print(f"turno fallido: {exc!r}", file=sys.stderr, flush=True)
                 machine.error("")
@@ -1555,6 +1572,9 @@ class JARVISApp(Gtk.Application):
                         file=sys.stderr,
                         flush=True,
                     )
+                if reply is not None:
+                    # The reply has begun to sound: no filler needed.
+                    reply.spoke = True
                 for clause in chunkers.for_chat(chat_id).push(spoken):
                     say(clause, destino)
 
@@ -1575,6 +1595,8 @@ class JARVISApp(Gtk.Application):
             wake.answered(time.monotonic())
             if (reply is None or reply.accepts_content) and request_id not in pcm_turns:
                 destino = reply.destination if reply is not None else None
+                if reply is not None:
+                    reply.spoke = True
                 for clause in chunkers.for_chat(chat_id).flush():
                     say(clause, destino)
             chunkers.drop(chat_id)

@@ -202,3 +202,14 @@ def test_muting_the_room_does_not_mute_a_private_phone(routes) -> None:
 
     assert reply_routes.write_pcm("turn-1", b"\x01\x02", None)
     assert phone.events == [("audio", b"\x01\x02")]
+
+
+def test_pcm_marks_the_reply_as_having_spoken(routes) -> None:
+    # The filler reads `spoke`: a reply that already started sounding must
+    # not also say "un momento". A fresh reply starts silent.
+    reply_routes, _released = routes
+    room: list[bytes] = []
+    reply = reply_routes.open("turn-1", "casa", None)
+    assert reply.spoke is False
+    assert reply_routes.write_pcm("turn-1", b"\x01\x02", room.append)
+    assert reply.spoke is True

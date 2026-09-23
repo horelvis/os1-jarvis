@@ -67,6 +67,10 @@ class Reply:
     phone: object | None
     destination: PhoneOutput | None = None
     settled: bool = False
+    # Whether the reply has begun to sound (PCM written, or a clause handed
+    # to the speaker). The filler reads it: a reply that already started
+    # needs no "un momento".
+    spoke: bool = False
 
     @property
     def accepts_content(self) -> bool:
@@ -119,6 +123,7 @@ class ReplyRoutes:
         if reply is None or not reply.accepts_content:
             logger.debug("Addressed PCM discarded: no active reply destination")
             return False
+        reply.spoke = True
         if reply.destination is not None:
             reply.destination.write(pcm)
         elif room_write is not None:
