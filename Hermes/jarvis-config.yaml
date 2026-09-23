@@ -323,13 +323,13 @@ gateway:
   # journal showed all plugins registering normally. Adding the profile
   # symlinks took the payload to 27 tools. `Hermes/setup-runtime.sh` now
   # creates them for every profile; see its comment.
-  multiplex_profiles: true
-  multiplex_profile_allowlist: [orelvis]
-  profile_routes:
-    - name: orelvis
-      platform: jarvis
-      chat_id: orelvis
-      profile: orelvis
+  # Off since 2026-09-23, with the fresh `~/.hermes` instance. The strip used
+  # to be routed to a profile `orelvis` that lived in the old repo home; the
+  # new install has no such profile, so the route was rejected and every turn
+  # dropped ("explicit profile route targets an unserved profile"). With one
+  # home and one user, the strip runs on the default profile — which is also
+  # where the plugins live, so the per-profile symlink trap does not return.
+  multiplex_profiles: false
 
 # ── The tools are offered directly, not through a search bridge ───────
 #

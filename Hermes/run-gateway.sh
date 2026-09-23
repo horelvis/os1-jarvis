@@ -26,7 +26,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HERMES_BIN="$REPO_ROOT/.hermes/src/.venv/bin/hermes"
+# The Hermes instance is now the standard install under ~/.hermes, not the
+# in-repo pinned checkout (`.hermes/src`, deprecated 2026-09-23). The venv
+# binary is used directly and NOT `~/.local/bin/hermes`, because that wrapper
+# unsets PYTHONPATH — which would strip the repo root the plugins need to
+# import the `Hermes` package.
+HERMES_BIN="$HOME/.hermes/hermes-agent/venv/bin/hermes"
 
 [ -x "$HERMES_BIN" ] || {
   echo "No Hermes runtime at $HERMES_BIN — run Hermes/setup-runtime.sh first." >&2
@@ -51,7 +56,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
   set +a
 fi
 
-export HERMES_HOME="$REPO_ROOT/.hermes/home"
+export HERMES_HOME="$HOME/.hermes"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 # `Hermes/bin` first, so the `claude` the assistant skills run is our
