@@ -385,7 +385,13 @@ platform_toolsets:
     - session_search
     - cronjob
     - todo
-    - clarify
+    # `clarify` is deliberately absent since 2026-09-23. It lets the model
+    # ask the user a question and WAIT for the answer, which is right in a
+    # terminal and wrong in a room: measured that day, "¿qué me recomiendas
+    # para un viaje?" made him call `clarify` instead of answering, and the
+    # turn simply hung until somebody spoke again — read by the owner as
+    # "the second question was slow". A spoken assistant answers, or offers
+    # two options in one breath; it does not open a form.
     - camaras
     - web
     - a2a
