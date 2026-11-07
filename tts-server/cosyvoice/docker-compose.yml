@@ -65,12 +65,9 @@ services:
     # (measured 2026-09-19). No memory contention.
     restart: unless-stopped
     healthcheck:
-      # The /inference_sft endpoint exists for any model that has
-      # speaker presets. CosyVoice 3 base has them via its
-      # speaker_manager so this 422 (no body) confirms the server
-      # is alive. A simpler /docs / / would be cleaner but the
-      # server doesn't expose one.
-      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:50000/docs || exit 1"]
+      # El contenedor no trae curl ni wget, así que se comprueba con Python
+      # (sí está). Un GET a /docs basta para confirmar que el servidor vive.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:50000/docs', timeout=4).status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
