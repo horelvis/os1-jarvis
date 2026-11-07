@@ -13,6 +13,7 @@
 
 **Septiembre de 2026 — aquí abajo, entero.**
 
+- 2026-09-08 — B1: destino privado y terminales, punto de pausa local
 - 2026-09-07 (noche) — La validación Realtime local entra al repo ✅
 - 2026-09-07 (mañana II) — El móvil habla, y el fallo era simétrico ✅
 - 2026-09-07 — El teléfono entra: el token estaba en el sitio equivocado ✅
@@ -69,6 +70,27 @@
 - 2026-05 — Phase 2: Mock Python backend ✅
 
 
+
+---
+
+## 2026-09-08 — B1: destino privado y terminales, punto de pausa local
+
+`replies.py` fija el destino al admitir una respuesta y conserva la reserva hasta
+el cierre de pasarela y entrega. `dispatch` termina también las transcripciones
+vacías, eco, bienvenida, errores y cancelación de tarea. El cierre privado es
+idempotente y pasa por la cola de Speaker detrás del audio. Una desconexión o
+interrupción cierra ese destino; las respuestas pendientes no saltan a otra
+conexión ni a la sala. RemoteDesk rechaza start/end repetidos mientras responde.
+
+Pruebas sobre los closures reales de dispatch/respuesta, con motores simulados:
+162 pruebas focalizadas pasan. Suite completa del widget: 737 pasan y 1 omitida
+en 17,56 s. Ruff, formato y comprobación de diff correctos.
+La ruta nueva `/voice/local`, correlación por request ID, cancelación de trabajo
+Hermes y límites de transporte siguen pendientes. No se desplegó ni reinició nada.
+
+El usuario pide continuar mañana. El estado y los límites se entregan al agente
+iOS en el plan compartido del checkout `/home/nexus/git/os1-jarvis`.
+Este cambio queda local y sin commit, pendiente de revisión final al retomar.
 
 ---
 

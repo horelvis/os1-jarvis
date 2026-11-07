@@ -385,6 +385,8 @@ class Speaker:
             destino, generation, clause = await self._queue.get()
             if generation != self._generation_for(destino):
                 continue  # queued before an interruption of THIS destino
+            if getattr(destino, "closed", False):
+                continue  # an admitted private turn already sent its terminal
             if clause is self._FIN_DE_TURNO:
                 self._decir_fin(destino)
                 continue
@@ -478,7 +480,9 @@ class Speaker:
 
         sink = self._player if destino is None else destino
         async for chunk, _backend in tts.stream(clause, client=self._client):
-            if generation != self._generation_for(destino):
+            if generation != self._generation_for(destino) or getattr(
+                sink, "closed", False
+            ):
                 return  # this destination was interrupted mid-synthesis
             sink.write(chunk)
             await asyncio.sleep(0)  # let the loop breathe between chunks
