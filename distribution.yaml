@@ -1,0 +1,20 @@
+# Hermes profile distribution: JARVIS.
+#
+# Install (creates the `jarvis` profile; memories, sessions and keys stay yours):
+#   hermes profile install github.com/horelvis/os1-jarvis --alias
+# Update:
+#   hermes profile update jarvis
+#
+# `distribution_owned` is an allowlist and it is load-bearing: without it the
+# installer copies EVERY top-level entry of this repository into the profile
+# (widget/, docs/, tts-server/...). Only the paths below are the agent.
+name: jarvis
+version: 0.1.0
+description: "JARVIS: una presencia en casa, en español de España, de usted y en dos frases."
+hermes_requires: ">=0.22.0"
+author: "horelvis"
+license: "Proprietary"
+
+distribution_owned:
+  - SOUL.md
+  - config.yaml

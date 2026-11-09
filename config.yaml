@@ -1,0 +1,29 @@
+# Profile config shipped by the JARVIS distribution (see distribution.yaml).
+#
+# Merged into a fresh profile on install. On `hermes profile update` the
+# installer KEEPS your local copy unless you pass --force-config, so tune the
+# model here freely after installing.
+#
+# Model: deliberately not set. Pick a LOCAL one in Hermes Desktop (managed
+# llama.cpp on Metal) or point a custom OpenAI-compatible endpoint at it.
+# Choosing a cloud provider sends the conversation out of the house.
+
+# Everything he says is Spanish (Spain); Whisper auto-detect misreads short
+# clips, so the language is forced.
+stt:
+  language: es
+  local:
+    model: turbo
+    language: es
+
+# Hermes' default TTS provider is `edge` — Microsoft's cloud. A profile without
+# this block speaks his words through Microsoft and it LOOKS like it works.
+# Piper is local; davefx is a peninsular Spanish voice.
+tts:
+  provider: piper
+  piper:
+    voice: es_ES-davefx-medium
+
+# Static UI messages (approval prompts, slash replies) in Spanish.
+display:
+  language: es

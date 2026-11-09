@@ -269,6 +269,9 @@ os1-jarvis/
 ├── AGENTS.md            ← points here
 ├── PROGRESS.md          ← the log, newest first; you append to it
 ├── README.md
+├── distribution.yaml    ← Hermes profile distribution manifest (§7)
+├── SOUL.md              ← the persona, as the `jarvis` profile's identity
+├── config.yaml          ← the profile's shipped config (local STT/TTS, Spanish)
 ├── Hermes/              ← what the repo adds to Hermes
 │   ├── jarvis-soul.md       ← the persona (§7)
 │   ├── jarvis-config.yaml   ← settings merged into ~/.hermes/config.yaml
@@ -377,8 +380,19 @@ ruff check . && ruff format --check .
 
 ## 7. The Personality
 
-The persona is **[`Hermes/jarvis-soul.md`](Hermes/jarvis-soul.md)**, the
-only one. Read it before writing anything he might say — replies, errors,
+**Since 2026-11-09 the repo root is a Hermes profile distribution.**
+`hermes profile install github.com/horelvis/os1-jarvis --alias` creates a
+`jarvis` profile from `distribution.yaml`, `SOUL.md` and `config.yaml` —
+nothing else, because `distribution_owned` is an allowlist (without it the
+installer copies every top-level entry). In that profile `SOUL.md` is the
+identity of every session (`agent/system_prompt.py` in Hermes). It is the
+persona without the strip: no CosyVoice sound markers, and no claims about
+cameras, Minecraft or teaching, which the profile does not have.
+`Hermes/jarvis-soul.md` below is the legacy version the `jarvis` platform
+plugin reads; change both until that plugin is retired.
+
+The legacy persona is **[`Hermes/jarvis-soul.md`](Hermes/jarvis-soul.md)**.
+Read it before writing anything he might say — replies, errors,
 loading text.
 
 **The trap:** it is delivered through the `jarvis` platform's
